@@ -259,7 +259,8 @@ if (Test-Path (Join-Path $irPilotGen "pilot_00.c")) {
     Add-Test "ir_equiv" ($liftCommon + @("-I`"$irPilotGen`"")) ($legacySources + @(
         "tests/ir_equiv.c", "tests/ir_aot_fixture.c",
         (Join-Path $irPilotGen "pilot_00.c"), (Join-Path $irPilotGen "pilot_01.c"),
-        (Join-Path $irPilotGen "pilot_02.c"), (Join-Path $irPilotGen "pilot_table.c"))) @()
+        (Join-Path $irPilotGen "pilot_02.c"), (Join-Path $irPilotGen "pilot_03.c"),
+        (Join-Path $irPilotGen "pilot_table.c"))) @()
 } else {
     Write-Log "IR equivalence test SKIPPED (pilot fixture missing)"
 }
@@ -293,6 +294,12 @@ if ((Test-Path (Join-Path $multransposeGen "pilot_config.h")) -and (Test-Path $P
     Add-Test "pilot_multranspose" ($liftCommon + @("-I`"$multransposeGen`"")) ($legacySources + @("source/guest_process.c", "source/n3ds_pilot.c", "tests/pilot_host.c") + $multransposeSrc) @($PilotDll)
     Write-Log "MultiplyTranspose pilot test uses $multransposeGen"
 }
+$planetransformGen = Join-Path $root "pilot_out_mult\D3DXPlaneTransform\gen"
+if ((Test-Path (Join-Path $planetransformGen "pilot_config.h")) -and (Test-Path $PilotDll)) {
+    $planetransformSrc = Get-ChildItem -Path $planetransformGen -Filter "*.c" | ForEach-Object { $_.FullName }
+    Add-Test "pilot_planetransform" ($liftCommon + @("-I`"$planetransformGen`"")) ($legacySources + @("source/guest_process.c", "source/n3ds_pilot.c", "tests/pilot_host.c") + $planetransformSrc) @($PilotDll)
+    Write-Log "PlaneTransform pilot test uses $planetransformGen"
+}
 
 if (Test-Path $TesvExe) {
     Add-Test "tesv_probe" $liftCommon ($legacySources + @("tests/tesv_probe.c")) @($TesvExe)
@@ -302,7 +309,7 @@ if (Test-Path $TesvExe) {
         $sliceD3dx = @()
         if ($PilotGen -and (Test-Path (Join-Path $PilotGen "pilot_table.c"))) {
             $sliceFlags += @("-I`"$PilotGen`"")
-            $sliceD3dx = @((Join-Path $PilotGen "pilot_00.c"), (Join-Path $PilotGen "pilot_01.c"), (Join-Path $PilotGen "pilot_02.c"), (Join-Path $PilotGen "pilot_table.c"))
+            $sliceD3dx = @((Join-Path $PilotGen "pilot_00.c"), (Join-Path $PilotGen "pilot_01.c"), (Join-Path $PilotGen "pilot_02.c"), (Join-Path $PilotGen "pilot_03.c"), (Join-Path $PilotGen "pilot_table.c"))
         } else {
             Write-Log "tesv_slice: no generated D3DX table; hotpatch bodies will fail explicitly"
         }

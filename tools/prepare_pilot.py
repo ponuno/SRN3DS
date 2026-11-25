@@ -16,7 +16,10 @@ import sys
 BASE = 0x08000000
 CANDIDATES = {"D3DXMatrixTranspose": 1, "D3DXMatrixScaling": 2,
               "D3DXMatrixTranslation": 3, "D3DXMatrixMultiply": 4,
-              "D3DXMatrixMultiplyTranspose": 5}
+              "D3DXMatrixMultiplyTranspose": 5,
+              "D3DXVec3TransformCoord": 6, "D3DXVec3TransformNormal": 7,
+              "D3DXVec3Normalize": 8, "D3DXMatrixInverse": 9,
+              "D3DXPlaneNormalize": 10, "D3DXPlaneTransform": 11}
 MAX_FUNCTIONS, MAX_INSNS = 32, 2048
 HOTPATCH_JMP = b"\xff\x25"
 HOTPATCH_PAD = b"\xcc" * 5

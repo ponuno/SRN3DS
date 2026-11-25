@@ -88,13 +88,13 @@ occurs before this gate.
    execution path exists.
 2. **Other D3DX hotpatch bodies.** The loader now binds every validated
    hotpatch export to its body. `D3DXMatrixMultiply` `0x0802fa80`,
-   `D3DXMatrixTranspose` `0x0802fce0` and `D3DXMatrixMultiplyTranspose`
-   `0x0802fd9d` are lifted, each has its own 3/3 pilot test, and the slice
-   registers all three. A later call to `D3DXVec3TransformCoord`
-   `0x0802f294`, `D3DXMatrixInverse` `0x0802fffd`, etc. would still fail
-   explicitly at the body address until those bodies are generated.
-   `D3DXLoadSurface*`/`D3DXCompileShader` are plain exports and still need
-   lifting. Generation, merge and per-body test details are in
+   `D3DXMatrixTranspose` `0x0802fce0`, `D3DXMatrixMultiplyTranspose`
+   `0x0802fd9d` and `D3DXPlaneTransform` `0x08032303` are lifted, each has its
+   own 3/3 pilot test, and the slice registers all four. A later call to
+   `D3DXVec3TransformCoord` `0x0802f294`, `D3DXMatrixInverse` `0x0802fffd`,
+   etc. would still fail explicitly at the body address until those bodies are
+   generated; the conservative pilot gate currently rejects them for indirect
+   branches/calls. Generation, merge and per-body test details are in
    `docs/D3DX_PILOT_TABLE.md`; `pilot_out*/` is generated locally and ignored.
 3. **HW T&L shipping gate (`0x00c6d8c6`).** Still deferred
    (`docs/HWTL_DECISION.md`); the probe is measurement-only.
