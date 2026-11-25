@@ -404,12 +404,16 @@ ELF and the runtime's own fault reports.
   "C:\Windows\SysWOW64\D3DX9_42.dll" staged pilot_out_new
 ```
 
-- Candidates: Transpose, Scaling, Translation, Multiply.
+- Candidates: Transpose, Scaling, Translation, Multiply, MultiplyTranspose,
+  Vec3TransformCoord, Vec3TransformNormal, Vec3Normalize, MatrixInverse,
+  PlaneNormalize, PlaneTransform (see `--help`).
 - Rejections per export in `pilot_out_new/rejections.json`, detailed lifter
   output in `<export>/lift.log`, manifest in `<export>/gen/pilot_manifest.json`.
 - D3DX9_42 exports are MSVC lazy-ILT thunks. The tool verifies the exact layout
-  (`FF 25 slot` + `CC*5`, guard wrapper, one-time initializer call, body at
-  `export+0xB`). If a DLL does not match, generation fails with a specific
-  message instead of guessing.
+  (`FF 25 slot` + `CC*5`, guard wrapper, one-time initializer call) and resolves
+  the real body from the initializer's copied table. It falls back to
+  `export+0xB` only when that address is a real body, not another wrapper. If a
+  DLL does not match, generation fails with a specific message instead of
+  guessing. The current generated table is in `docs/D3DX_PILOT_TABLE.md`.
 - A bypassed initializer is always printed and stored in the log/manifest.
   Never remove that note to make a run look cleaner.

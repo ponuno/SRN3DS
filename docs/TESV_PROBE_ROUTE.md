@@ -96,9 +96,10 @@ occurs before this gate.
    `0x0802e9db`; seven table entries). Each has its own 3/3 pilot test. A later
    call to `D3DXVec3Normalize` `0x08032cbf`, `D3DXMatrixInverse` `0x0802fffd`
    or `D3DXPlaneNormalize` `0x08032000` would still fail explicitly at its body
-   address; the conservative pilot gate rejects them for an indirect target
-   near `0x081a6xxx`. Generation, merge and per-body test details are in
-   `docs/D3DX_PILOT_TABLE.md`; `pilot_out*/` is generated locally and ignored.
+   address; the conservative pilot gate rejects the `_CIsqrt`/`_finite` CRT
+   thunk indirect jumps (`0x101a65ec`/`0x101a6694`). Generation, merge and
+   per-body test details are in `docs/D3DX_PILOT_TABLE.md`; `pilot_out*/` is
+   generated locally and ignored.
 3. **HW T&L shipping gate (`0x00c6d8c6`).** Still deferred
    (`docs/HWTL_DECISION.md`); the probe is measurement-only.
 4. **Two texture stages (honest).** Implemented: a backend with `draw_two`

@@ -116,7 +116,9 @@ Not lifted yet: `D3DXVec3Normalize` (real body `0x08032cbf`),
 plain-export `D3DXLoadSurfaceFromSurface` `0x080bcc2d` /
 `D3DXLoadSurfaceFromMemory` `0x080ba613` / `D3DXCompileShader` `0x080d95b3`.
 The conservative pilot gate currently rejects the three remaining hotpatch
-bodies: they branch or call through an indirect target near `0x081a6xxx`
-(`Vec3Normalize`/`PlaneNormalize` at `0x081a65ec`, `MatrixInverse` at
-`0x081a6694`). They need a bounded jump-table/call closure before they can be
-generated. A call to any of them still fails explicitly at its body address.
+bodies because they call CRT thunks: `Vec3Normalize` and `PlaneNormalize` call
+`_CIsqrt` through the thunk at `0x101a65ec` (`jmp [0x100012dc]`), while
+`MatrixInverse` calls `_finite` through `0x101a6694` (`jmp [0x100012a4]`). The
+thunk is a direct call target, but its `jmp [IAT]` is an indirect branch.
+Supporting them needs an x87 ST(0) sqrt shim and a finite predicate in the
+pilot runtime. A call to any of them still fails explicitly at its body address.
