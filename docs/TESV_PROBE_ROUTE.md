@@ -114,5 +114,8 @@ occurs before this gate.
 - With the probes on, the route reaches the multiply body, executes it, and
   continues to the SM3 gate with `CreateTexture`/`GetSurfaceLevel`/`LockRect`
   returning `S_OK`.
+- A final rerun on `d6f5bf3` (`E:\Skyrim_N3DS_build\analysis\trace4.err`,
+  copied to `F:\Skyrim\diag\20261126_hotpatch\`) reproduces the import binding
+  and the same SM3 message.
 - Shipping behaviour is unchanged: still gated at `0x00c6d8c6` until the
   `HW T&L` decision (`docs/HWTL_DECISION.md`).
