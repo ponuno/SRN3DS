@@ -27,3 +27,15 @@ tests/fixtures/menu_closure_real_shaders.h
 # Isolated test build products and archived runs
 tests/isolated/**/build/
 tests/isolated/**/results/
+# Stale one-off copies and test leftovers at the repository root (source/ is canonical)
+/adapter_smoke.c
+/com_smoke.c
+/d3d9_*.c
+/d3d9_*.h
+/up_draw_smoke.c
+/null_target_capture*.bin
+/null_target_capture*.txt
+/shim_*.bin
+/t_*.bsa
+/preview*.png
+/tesv_profile.csv
