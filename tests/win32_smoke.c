@@ -693,7 +693,8 @@ int win32_self_test(CPU *cpu,GuestMemory *m) {
     a[0]=buf+2620;a[1]=buf+2600;a[2]=8;CHECK(!K(GetEnvironmentVariableA,a,3) && r==0);
     CHECK(!K(GetLastError,NULL,0) && r==203);
     a[0]=buf+2300;a[1]=buf+2600;a[2]=1;CHECK(!K(GetEnvironmentVariableA,a,3) && r==2);
-    memcpy(n3ds_guest_ptr(buf+2640,16),"%TESTVAR%/x",16);
+    static const char envsrc[16] = "%TESTVAR%/x";
+    memcpy(n3ds_guest_ptr(buf+2640,16),envsrc,16);
     a[0]=buf+2640;a[1]=buf+2660;a[2]=32;
     CHECK(!K(ExpandEnvironmentStringsA,a,3) && r==4 && !strcmp(guest_cstr(m,buf+2660,32),"1/x"));
     a[0]=buf+2640;a[1]=0;a[2]=0;CHECK(!K(ExpandEnvironmentStringsA,a,3) && r==4);
@@ -708,7 +709,7 @@ int win32_self_test(CPU *cpu,GuestMemory *m) {
     a[0]=0;a[1]=4;CHECK(!K(IsBadReadPtr,a,2) && r==1);
     a[0]=buf;a[1]=4;CHECK(!K(IsBadReadPtr,a,2) && r==0);
     a[0]=0x7ffffff0u;a[1]=4;CHECK(!K(IsBadReadPtr,a,2) && r==1);
-    a[0]=0xf568a1;a[1]=0;CHECK(!K(IsBadCodePtr,a,1) && r==1);
+    a[0]=0xdeadbeefu;a[1]=0;CHECK(!K(IsBadCodePtr,a,1) && r==1);
     a[0]=16;a[1]=buf+2760;CHECK(!K(GetTempPathA,a,2) && r==5 && !strcmp(guest_cstr(m,buf+2760,16),"Temp\\"));
     a[0]=4;a[1]=buf+2760;CHECK(!K(GetTempPathA,a,2) && r==6);
     {
