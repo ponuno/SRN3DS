@@ -20,6 +20,12 @@
 
 extern const FnEntry g_fn_table_tesv[];
 extern const unsigned g_fn_count_tesv;
+/* Optional lifted D3DX bodies for hotpatch-resolved imports.  These are the
+ * real symbols of the generated pilot table.  Weak so a build without it still
+ * links; dispatch then fails explicitly on the body address instead of
+ * silently aliasing it. */
+extern const FnEntry g_fn_table_pilot[] __attribute__((weak));
+extern const unsigned g_fn_count_pilot __attribute__((weak));
 
 #ifndef TESV_ARM_STEPS
 #define TESV_ARM_STEPS 2000000u
@@ -69,13 +75,13 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
     add_dll(&b, "X3DAudio1_7.dll", 0x0a000000u, root, "C:/Windows/SysWOW64");
     add_dll(&b, "steam_api.dll", 0x0b000000u, root, "E:/SteamLibrary/steamapps/common/Skyrim");
 #endif
-    FnModule tables[2] = {{"tesv", g_fn_table_tesv, g_fn_count_tesv}, {"d3d9", NULL, 0}};
+    FnModule tables[3] = {{"tesv", g_fn_table_tesv, g_fn_count_tesv}, {"d3d9", NULL, 0},
+                          {"d3dx", NULL, 0}};
     unsigned table_count = 1;
     /* The D3D9 bridge answers the guest's renderer queries truthfully even in a
      * headless diagnostic build: one 400x240x32 adapter, SM2-only caps. */
     if (d9_com_init(&b.memory, NULL) == 0) {
-        tables[1] = d9_com_module();
-        table_count = 2;
+        tables[table_count++] = d9_com_module();
         /* Headless software backend on host; real PICA200 on 3DS when init
          * succeeded.  Registration happens before the guest CreateDevice. */
 #ifdef __3DS__
@@ -85,6 +91,13 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
         if (d9_null_register() != 0) printf("d3d9: null backend not installed\n");
     } else {
         printf("d3d9: COM bridge unavailable; D3D9 imports stay unresolved\n");
+    }
+    /* The import linker resolves a validated MSVC hotpatch export to its real
+     * body, so that body must be dispatchable.  Link the generated D3DX table
+     * when the build provides it; otherwise dispatch fails explicitly. */
+    if (&g_fn_table_pilot && g_fn_count_pilot) {
+        tables[table_count++] = (FnModule){"d3dx", g_fn_table_pilot, g_fn_count_pilot};
+        printf("d3dx: %u lifted function(s) registered\n", g_fn_count_pilot);
     }
     n3ds_boot_set_unresolved_traps(&b, 1);
     if (n3ds_boot_prepare(&b, tables, table_count, 0x80000, 0x200000, root)) {

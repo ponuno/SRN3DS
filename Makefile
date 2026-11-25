@@ -184,6 +184,15 @@ export VPATH += $(TESV_GEN)
 export INCLUDE += -I$(TESV_GEN)
 export OFILES := n3ds_boot.o tesv_slice_main.o n3ds_pilot.o guest.o guest_heap.o pe_image.o pe_imports.o guest_process.o n3ds_lift_runtime.o ir_core.o ir_decode.o ir_exec.o ir_container.o rt_prof.o fpu.o win32_shims.o win32_sync.o win32_user.o win32_locale.o win32_shell.o win32_audio.o win32_audio_3ds.o win32_thread.o win32_hostctx.o win32_input.o win32_steam.o win32_registry.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_pica_tev.o d3d9_pica_citro3d.o d3d9_menu_light.o d3d9_com.o d3d9_null.o d3d9_citro3d.o d3d9_color_tev.o d3d9_capture.o d9shader.shbin.o d9shader_color.shbin.o $(patsubst %.c,%.o,$(notdir $(wildcard $(TESV_GEN)/tesv_*.c)))
 export INCLUDE += -I$(CURDIR)/$(BUILD)
+# The import linker resolves a validated MSVC hotpatch export to its real
+# body, so the lifted D3DX bodies must be dispatchable on the device too.
+# Without them the guest traps at the body address instead of the export.
+D3DX_PILOT_GEN := $(CURDIR)/pilot_out_mult/D3DXMatrixMultiply/gen
+ifneq ($(wildcard $(D3DX_PILOT_GEN)/pilot_table.c),)
+export VPATH += $(D3DX_PILOT_GEN)
+export INCLUDE += -I$(D3DX_PILOT_GEN)
+export OFILES += pilot_00.o pilot_table.o
+endif
 endif
 .PHONY: all clean
 all: $(BUILD)

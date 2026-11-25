@@ -185,9 +185,11 @@ int d9_set_stream(D9Device *d,unsigned stream,D9Handle h,size_t offset,size_t st
 int d9_set_vertex_declaration(D9Device *d,const D9Decl *decl);
 /* Viewport size used to map POSITIONT (XYZRHW) pixels to PICA clip space. */
 int d9_set_viewport_size(D9Device *d,unsigned width,unsigned height);
-/* Closed D3D9 SetTextureStageState subset: stage 0 COLOROP/ALPHAOP/ARG1/ARG2/
- * TEXCOORDINDEX; stages 1..7 may only be DISABLE.  Unsupported values return
- * D9_UNSUPPORTED and name the rejection in d9_last_draw_diagnostic(). */
+/* Closed D3D9 SetTextureStageState subset.  Stage 0 accepts COLOROP/ALPHAOP/
+ * ARG1/ARG2 and TEXCOORDINDEX 0..7; a two-stage backend also accepts the same
+ * subset on stage 1 (TEXCOORDINDEX 0 only).  Remaining stages may only be
+ * DISABLE.  Unsupported values return D9_UNSUPPORTED and name the rejection in
+ * d9_last_draw_diagnostic(). */
 int d9_set_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned value);
 int d9_set_indices(D9Device *d,D9Handle h);
 unsigned d9_stage_count(const D9Device *d);

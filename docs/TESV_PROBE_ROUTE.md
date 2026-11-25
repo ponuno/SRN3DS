@@ -42,36 +42,77 @@ Each prints a one-shot `MEASUREMENT ONLY ... not shippable` line.
    texture it fills through a level surface.
 8. `SetTransform` VIEW (`0x00cd32d1`) and PROJECTION (`0x00cd34cc`), then
    `SetViewport` (`0x00cd3605`) -> `S_OK`.
-9. Immediately after, a guest indirect call to **`0x0802fa75`** faults with
-   `unknown indirect function`. That address is inside the `d3dx9_42.dll`
-   image (`0x08000000`), 11 bytes before the known `D3DXMatrixMultiply` body at
-   `0x0802fa80`; it is not a registered function start.
+9. The guest indirect call at `0x00f79dc2` targets `D3DXMatrixMultiply`.
+   TESV's IAT was bound to the DLL export entry `0x0802fa75`, an MSVC
+   lazy-ILT forwarder (`FF 25 <slot>` + five `CC` bytes). The slot holds the
+   wrapper `0x0802fa5d`; the real body is `0x0802fa80` (entry+11). The wrapper
+   and its one-time initializer are D3DX code, so binding the export entry
+   traps on an address that no tier contains. `pe_link_resolve` now validates
+   the exact hotpatch chain (export, five `CC`, wrapper `8B FF 55 8B EC / 6A 01
+   / E8 rel32 / 5D / FF 25 <same slot>`, body prologue) and binds the body.
+   The trace reads
+   `[import] d3dx9_42.dll!D3DXMatrixMultiply -> 0802fa80 (export 0802fa75 hotpatch body)`.
+   The slice registers the lifted `f_802FA80` (host and ARM); the multiply
+   returns to `0x00cd3613` and `SetTransform`/`SetViewport` continue normally.
 
 No explicit depth-stencil surface, no back-buffer `LockRect`, no draw and no
 `Present` were reached yet.
 
+## Next event after the hotpatch fix: the SM3 gate
+
+With the multiply body dispatchable, the route now reaches renderer
+initialization `0x00c6dbf0` and stops at the documented SM3 gate:
+
+- `0x00c6e21e -> 0x00c71080` computes a shader level from the device's
+  VS/PS version words. `0xc71080` returns 7 only when both major versions are
+  `>= 3`; both `>= 2` returns 2.
+- The honest caps are `VS_VERSION_2_0` / `PS_VERSION_2_0`
+  (`source/d3d9_adapter.c`), so the level is 2.
+- `0x00c6e22d: cmp dword ptr [0x01ba749c], 7` / `jge 0xc6e247`; otherwise
+  `0x00c6e23d` pushes `0x114e04c` and jumps to the renderer failure path
+  `0x00c6dfd3`.
+- String at `0x114e04c`: **"ShaderModel3 required but not supported by your
+  video card."** The guest then shows `Failed to initialize renderer.` and
+  exits via `ExitProcess(0)` from `0x0069107d`.
+
+This is an architectural gap, not a regression: the bridge reports VS/PS 2.0
+and does not claim SM3 (`docs/MENU_SHADER_CLOSURE.md`). No draw or `Present`
+occurs before this gate.
+
 ## Ordered next blockers
 
-1. **Guest indirect call `0x0802fa75`.** A D3DX internal target is called that
-   the generated function table does not contain. Either it must be discovered
-   and lifted, or the call site must resolve to the hotpatch body
-   `0x0802fa80`. This is a recompilation-coverage gap, not a D3D9 capability.
-2. **Two texture stages (honest).** Already implemented: a backend with
-   `draw_two` makes the COM caps report `2/2`; without it the renderer refuses
-   the device (step 5 is the historical failure).
-3. **Small textures.** Implemented: power-of-two sizes below 8 are stored in a
+1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
+   bridge honestly reports 2.0/2.0. Flipping the two version words would only
+   pass this branch; it would not make the device accept arbitrary `ps_3_0`
+   programs, so the documented decision is to keep 2.0/2.0 until a real SM3
+   execution path exists.
+2. **Other D3DX hotpatch bodies.** The loader now binds every validated
+   hotpatch export to its body. Only `D3DXMatrixMultiply` is lifted so far, so
+   a later call to `D3DXVec3TransformCoord` `0x0802f294`, `D3DXMatrixInverse`
+   `0x0802fffd`, etc. would fail explicitly at the body address until those
+   bodies are generated. `D3DXLoadSurface*`/`D3DXCompileShader` are plain
+   exports and still need lifting.
+3. **HW T&L shipping gate (`0x00c6d8c6`).** Still deferred
+   (`docs/HWTL_DECISION.md`); the probe is measurement-only.
+4. **Two texture stages (honest).** Implemented: a backend with `draw_two`
+   makes the COM caps report `2/2`; without it the renderer refuses the device
+   (step 5 is the historical failure).
+5. **Small textures.** Implemented: power-of-two sizes below 8 are stored in a
    minimum 8x8 allocation with replicated texels and point sampling at level 0;
    logical dimensions and row pitch stay honest.
-4. **Level surfaces.** Implemented: `GetSurfaceLevel` exposes a CPU-backed view
+6. **Level surfaces.** Implemented: `GetSurfaceLevel` exposes a CPU-backed view
    of the level; writing it re-uploads the parent texture. BC levels are
    refused by name.
 
-## Acceptance for the next patch
+## Status of this patch
 
-- Host tests for stage 1 state validation, two-texture draws, small-texture
-  creation and level-surface lock/unlock/upload.
-- With the probes on, the route reaches the `0x0802fa75` call with
-  `CreateTexture` and `GetSurfaceLevel` returning `S_OK` and no renderer error;
-  then record the next device call.
+- Hotpatch resolution has a host regression test (positive chain, a one-byte
+  padding negative and a `push 2` initializer-guard negative). The Windows
+  suite is **61 passed, 1 diagnostic, 0 failed**; the diagnostic is
+  `tesv_slice` hitting the harness's 200k-step budget, not a fault in the fixed
+  route (the CAPS+PP probe uses the larger budget and reaches the SM3 gate).
+- With the probes on, the route reaches the multiply body, executes it, and
+  continues to the SM3 gate with `CreateTexture`/`GetSurfaceLevel`/`LockRect`
+  returning `S_OK`.
 - Shipping behaviour is unchanged: still gated at `0x00c6d8c6` until the
   `HW T&L` decision (`docs/HWTL_DECISION.md`).

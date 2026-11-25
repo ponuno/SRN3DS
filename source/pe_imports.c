@@ -1,4 +1,5 @@
 #include "pe_imports.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -97,6 +98,40 @@ uint32_t pe_export_find(GuestMemory *m,const GuestImage *im,const char *name,uin
     return im->base+rva;
 }
 static unsigned lower(unsigned c){return c>='A'&&c<='Z'?c+32:c;}
+/* MSVC /hotpatch lazy-ILT export.  The exported entry is a forwarder
+ * (`FF 25 <slot>`) followed by five int3 padding bytes; the slot is
+ * initialised to a wrapper that calls a one-time initializer and forwards
+ * through the same slot; the real function starts 11 bytes after the export
+ * entry.  This is the exact shape prepare_pilot.py validates for a single
+ * import.  Return the body only when every byte matches; otherwise the caller
+ * keeps the raw export address, so an unknown layout still fails explicitly. */
+static uint32_t hotpatch_body(GuestMemory *m,const GuestImage *im,uint32_t entry){
+    if(!m||!im||entry<im->base||entry-im->base>im->size-11)return 0;
+    uint8_t e[11];
+    if(guest_read(m,entry,e,sizeof e))return 0;
+    if(e[0]!=0xff||e[1]!=0x25)return 0;
+    for(unsigned i=6;i<11;++i)if(e[i]!=0xcc)return 0;
+    uint32_t slot=(uint32_t)e[2]|((uint32_t)e[3]<<8)|((uint32_t)e[4]<<16)|((uint32_t)e[5]<<24);
+    if(slot<im->base||slot-im->base>im->size-4)return 0;
+    uint32_t wrapper;
+    if(guest_read32(m,slot,&wrapper))return 0;
+    if(wrapper<im->base||wrapper>=entry||wrapper-im->base>im->size-19)return 0;
+    uint8_t w[19];
+    if(guest_read(m,wrapper,w,sizeof w))return 0;
+    /* 8B FF 55 8B EC | 6A 01 | E8 rel32 | 5D | FF 25 <same slot> */
+    if(!(w[0]==0x8b&&w[1]==0xff&&w[2]==0x55&&w[3]==0x8b&&w[4]==0xec))return 0;
+    if(w[5]!=0x6a||w[6]!=0x01||w[7]!=0xe8||w[12]!=0x5d||w[13]!=0xff||w[14]!=0x25)return 0;
+    uint32_t rel=(uint32_t)w[8]|((uint32_t)w[9]<<8)|((uint32_t)w[10]<<16)|((uint32_t)w[11]<<24);
+    uint32_t init=(uint32_t)(wrapper+12+rel);
+    if(init<im->base||init-im->base>=im->size)return 0;
+    uint32_t wslot=(uint32_t)w[15]|((uint32_t)w[16]<<8)|((uint32_t)w[17]<<16)|((uint32_t)w[18]<<24);
+    if(wslot!=slot)return 0;
+    uint32_t body=entry+11;
+    uint8_t b[3];
+    if(guest_read(m,body,b,sizeof b))return 0;
+    if(!(b[0]==0x8b&&b[1]==0xff&&b[2]==0x55))return 0;
+    return body;
+}
 static int same_dll(const char *a,const char *b){
     while(*a && lower((unsigned char)*a)==lower((unsigned char)*b)){++a;++b;}
     return lower((unsigned char)*a)==lower((unsigned char)*b);
@@ -106,7 +141,23 @@ uint32_t pe_link_resolve(const PeImport *entry,void *ctx) {
     if(l->builtin){uint32_t addr=l->builtin(entry,l->builtin_ctx);if(addr)return addr;}
     for(size_t i=0;i<l->count;++i)if(l->modules[i].dll && same_dll(l->modules[i].dll,entry->dll)) {
         uint32_t addr=pe_export_find(l->memory,l->modules[i].image,entry->name,entry->ordinal);
-        if(addr)return addr;
+        if(addr){
+            uint32_t body=hotpatch_body(l->memory,l->modules[i].image,addr);
+            /* Diagnostic only: N3DS_IMPORT_TRACE=1 records every cross-module
+             * binding, which is the first source of a guest function pointer. */
+            static int trace_state;
+            if(!trace_state){
+                const char *v=getenv("N3DS_IMPORT_TRACE");
+                trace_state=(v&&v[0]&&strcmp(v,"0"))?2:1;
+            }
+            if(trace_state==2){
+                if(body)fprintf(stderr,"[import] %s!%s -> %08lx (export %08lx hotpatch body)\n",
+                    entry->dll,entry->name?entry->name:"#ordinal",(unsigned long)body,(unsigned long)addr);
+                else fprintf(stderr,"[import] %s!%s -> %08lx\n",
+                    entry->dll,entry->name?entry->name:"#ordinal",(unsigned long)addr);
+            }
+            return body?body:addr;
+        }
     }
     if(l->fallback)return l->fallback(entry,l->fallback_ctx);
     return 0;

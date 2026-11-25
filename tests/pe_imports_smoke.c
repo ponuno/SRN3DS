@@ -150,6 +150,65 @@ int main(void) {
     CHECK(guest_read32(&memory, image_base + 0x608u, &cell) == 0 && cell == 0xff000000u);
     CHECK(guest_read32(&memory, image_base + 0x60cu, &cell) == 0 && cell == 0xff000000u);
 
+    /* A validated MSVC /hotpatch export must bind to the real body, not to the
+     * forwarder thunk (the TESV D3DXMatrixMultiply case). */
+    const uint32_t hp_base = 0x00030000u;
+    CHECK(guest_map(&memory, hp_base, 0x1000u) == 0);
+    GuestImage hp = {.base = hp_base, .size = 0x1000u,
+                     .export_rva = 0x100u, .export_size = 0x100u};
+    put32(&memory, hp_base + 0x110u, 1);      /* ordinal base */
+    put32(&memory, hp_base + 0x114u, 1);      /* function count */
+    put32(&memory, hp_base + 0x118u, 1);      /* name count */
+    put32(&memory, hp_base + 0x11cu, 0x140u); /* address table */
+    put32(&memory, hp_base + 0x120u, 0x148u); /* name table */
+    put32(&memory, hp_base + 0x124u, 0x150u); /* ordinal table */
+    put32(&memory, hp_base + 0x140u, 0x400u); /* export entry rva */
+    put32(&memory, hp_base + 0x148u, 0x1a0u);
+    put16(&memory, hp_base + 0x150u, 0);
+    put_string(&memory, hp_base + 0x1a0u, "Gamma");
+    /* entry: FF 25 <slot 0x340> + 5x CC; wrapper at 0x3e0; init at 0x360;
+     * real body at entry+11 (0x40b). */
+    {
+        uint8_t entry[11] = {0xff, 0x25, 0x40, 0x03, 0x03, 0x00,
+                             0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
+        CHECK(guest_write(&memory, hp_base + 0x400u, entry, sizeof entry) == 0);
+    }
+    put32(&memory, hp_base + 0x340u, hp_base + 0x3e0u); /* slot -> wrapper */
+    {
+        uint8_t wrapper[19] = {0x8b, 0xff, 0x55, 0x8b, 0xec, 0x6a, 0x01, 0xe8,
+                               0x74, 0xff, 0xff, 0xff, /* call 0x360 */
+                               0x5d, 0xff, 0x25, 0x40, 0x03, 0x03, 0x00};
+        CHECK(guest_write(&memory, hp_base + 0x3e0u, wrapper, sizeof wrapper) == 0);
+    }
+    put32(&memory, hp_base + 0x360u, 0x000000c3u); /* one-time initializer */
+    {
+        uint8_t body[6] = {0x8b, 0xff, 0x55, 0x8b, 0xec, 0xc3};
+        CHECK(guest_write(&memory, hp_base + 0x40bu, body, sizeof body) == 0);
+    }
+    PeModule hp_module = {"HP.DLL", &hp};
+    PeLinker hp_link = {&memory, &hp_module, 1, NULL, NULL, NULL, NULL};
+    PeImport gamma = {.dll = "hp.dll", .name = "Gamma"};
+    CHECK(pe_export_find(&memory, &hp, "Gamma", 0) == hp_base + 0x400u);
+    CHECK(pe_link_resolve(&gamma, &hp_link) == hp_base + 0x40bu);
+    /* One differing padding byte must leave the raw export address. */
+    {
+        uint8_t pad = 0x90;
+        CHECK(guest_write(&memory, hp_base + 0x406u, &pad, 1) == 0);
+        CHECK(pe_link_resolve(&gamma, &hp_link) == hp_base + 0x400u);
+        pad = 0xcc;
+        CHECK(guest_write(&memory, hp_base + 0x406u, &pad, 1) == 0);
+        CHECK(pe_link_resolve(&gamma, &hp_link) == hp_base + 0x40bu);
+    }
+    /* The one-time initializer call is guarded by push 1, not any imm8. */
+    {
+        uint8_t imm = 0x02;
+        CHECK(guest_write(&memory, hp_base + 0x3e6u, &imm, 1) == 0);
+        CHECK(pe_link_resolve(&gamma, &hp_link) == hp_base + 0x400u);
+        imm = 0x01;
+        CHECK(guest_write(&memory, hp_base + 0x3e6u, &imm, 1) == 0);
+        CHECK(pe_link_resolve(&gamma, &hp_link) == hp_base + 0x40bu);
+    }
+
     guest_destroy(&memory);
     puts("PE import/export linker tests passed");
     return 0;

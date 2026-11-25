@@ -20,6 +20,7 @@ param(
     [string]$PilotDll = "C:\Windows\SysWOW64\D3DX9_42.dll",
     [string]$OutDir = "",
     [string]$TesvSliceGen = "",
+    [string]$TesvIrc = "",
     [string]$TesvExe = "E:\skyr\TESV.exe",
     [switch]$AllowDiagnosticFault,
     [int]$TestTimeoutSec = 300
@@ -28,6 +29,7 @@ param(
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+if (-not $TesvIrc) { $TesvIrc = $env:N3DS_IRC_PATH }
 
 $vsRoot = "C:\Program Files\Microsoft Visual Studio\18\Community"
 $vsVars = Join-Path $vsRoot "VC\Auxiliary\Build\vcvars64.bat"
@@ -283,7 +285,15 @@ if (Test-Path $TesvExe) {
     Add-Test "tesv_probe" $liftCommon ($legacySources + @("tests/tesv_probe.c")) @($TesvExe)
     if ($TesvSliceGen -and (Test-Path (Join-Path $TesvSliceGen "tesv_table.c"))) {
         $sliceSrc = Get-ChildItem -Path $TesvSliceGen -Filter "tesv_*.c" | ForEach-Object { $_.FullName }
-        Add-Test "tesv_slice" ($liftCommon + @("-O0", "-I`"$TesvSliceGen`"")) ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_capture.c", "source/d3d9_null.c") + $picaSources + $sliceSrc) @($TesvExe, ".", "200000", "167772160")
+        $sliceFlags = $liftCommon + @("-O0", "-I`"$TesvSliceGen`"")
+        $sliceD3dx = @()
+        if ($PilotGen -and (Test-Path (Join-Path $PilotGen "pilot_table.c"))) {
+            $sliceFlags += @("-I`"$PilotGen`"")
+            $sliceD3dx = @((Join-Path $PilotGen "pilot_00.c"), (Join-Path $PilotGen "pilot_table.c"))
+        } else {
+            Write-Log "tesv_slice: no generated D3DX table; hotpatch bodies will fail explicitly"
+        }
+        Add-Test "tesv_slice" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_capture.c", "source/d3d9_null.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160")
     }
 }
 
@@ -344,7 +354,15 @@ foreach ($name in $tests.Keys) {
         $failed += $name
         continue
     }
-    $run = Invoke-TestProcess $exe @($spec.Args) $runDir $TestTimeoutSec
+    $savedIrc = $env:N3DS_IRC_PATH
+    if ($name -eq "tesv_slice" -and $TesvIrc) { $env:N3DS_IRC_PATH = $TesvIrc }
+    else { Remove-Item Env:N3DS_IRC_PATH -ErrorAction SilentlyContinue }
+    try {
+        $run = Invoke-TestProcess $exe @($spec.Args) $runDir $TestTimeoutSec
+    } finally {
+        if ($savedIrc) { $env:N3DS_IRC_PATH = $savedIrc }
+        else { Remove-Item Env:N3DS_IRC_PATH -ErrorAction SilentlyContinue }
+    }
     $rc = $run.Code
     $runOut = $run.Output
     $runOut | ForEach-Object { Write-Log "  $($_)" }

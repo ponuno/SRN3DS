@@ -210,7 +210,11 @@ static int draw_color_stages(void *ctx,const D9ColorVertex *v,size_t n,const D9M
     }
     C3D_DrawArrays(GPU_TRIANGLES,(int)c->cursor_color,(int)n);
     d9_pica_citro3d_restore_tev();
-    if(second)C3D_TexBind(1,NULL);
+    /* citro3d 2023-10-28 has no public texture unbind: C3D_TexBind(1,NULL)
+     * dereferences tex->param through a NULL pointer (fault at offset 0x0C).
+     * restore_tev() has already removed every TEXTURE1 source, so the stale
+     * unit-1 binding is unreferenced and deterministic.  Keep it instead of
+     * crashing.  (Unit 0 is left bound the same way.) */
     c->cursor_color+=n;
     /* Leave the shared program/attribute state as begin() left it so a
      * following non-colour draw is unchanged. */

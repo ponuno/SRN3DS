@@ -7,6 +7,9 @@
 #include "ir_core.h"
 #include "guest.h"
 #include "n3ds_atomic.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #ifdef N3DS_WATCH_STORE_CHECKS
 #define IR_WATCH(s) guest_watch_check_active(s)
 #else
@@ -125,9 +128,37 @@ static void rep_movsd(uint32_t n, uint32_t dst, uint32_t src) {
     }
 }
 
-static void dispatch(CPU *c, uint32_t target, int indirect) {
-    if (n3ds_rt_dispatch(c, target))
+static void trace_indirect_ir(CPU *c,uint32_t target,uint32_t from){
+    static int trace_state;
+    if(!trace_state){
+        const char *v=getenv("N3DS_INDIRECT_TRACE");
+        trace_state=(v&&v[0]&&strcmp(v,"0"))?2:1;
+    }
+    if(trace_state!=2)return;
+    uint32_t ret=c?M32(c->r[4]):0;
+    fprintf(stderr,"[indirect] target=%08lx block=%08lx ret=%08lx esp=%08lx eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx esi=%08lx edi=%08lx ebp=%08lx\n",
+        (unsigned long)target,(unsigned long)from,(unsigned long)ret,
+        c?(unsigned long)c->r[4]:0,(unsigned long)(c?c->r[0]:0),(unsigned long)(c?c->r[3]:0),
+        (unsigned long)(c?c->r[1]:0),(unsigned long)(c?c->r[2]:0),
+        (unsigned long)(c?c->r[6]:0),(unsigned long)(c?c->r[7]:0),(unsigned long)(c?c->r[5]:0));
+    const uint8_t *p=n3ds_guest_ptr(from,48);
+    if(p){
+        fprintf(stderr,"[indirect] block bytes:");
+        for(unsigned i=0;i<48;++i)fprintf(stderr," %02x",p[i]);
+        fprintf(stderr,"\n");
+        if(p[0]==0xff&&p[1]==0x25){
+            uint32_t slot=(uint32_t)p[2]|((uint32_t)p[3]<<8)|((uint32_t)p[4]<<16)|((uint32_t)p[5]<<24);
+            const uint8_t *q=n3ds_guest_ptr(slot,4);uint32_t val=0;
+            if(q)val=(uint32_t)q[0]|((uint32_t)q[1]<<8)|((uint32_t)q[2]<<16)|((uint32_t)q[3]<<24);
+            fprintf(stderr,"[indirect] thunk-slot=%08lx value=%08lx\n",(unsigned long)slot,(unsigned long)val);
+        }
+    }
+}
+static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
+    if (n3ds_rt_dispatch(c, target)) {
+        trace_indirect_ir(c, target, from);
         rt_unimpl(c, target, indirect ? "unknown indirect function" : "unknown function/import");
+    }
 }
 
 /* ---------------------------------------------------------------- string */
@@ -823,7 +854,7 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
             uint32_t tgt = block_end + (int32_t)imm;
             uint32_t nxt = cc_true(op - IR_OP_JCC_BASE, f) ? tgt : block_end;
             if (nxt >= frame_start && nxt < func_end) { *nextp = nxt; return 0; }
-            dispatch(c, nxt, 0);
+            dispatch(c, nxt, 0, b->start);
             return 1;
         }
         if (op >= IR_OP_SETCC_BASE && op < IR_OP_SETCC_BASE + 16) {
@@ -1264,27 +1295,27 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
         case IR_OP_JMP: {
             uint32_t t = block_end + (int32_t)imm;
             if (t >= frame_start && t < func_end) { *nextp = t; return 0; }
-            dispatch(c, t, 0);
+            dispatch(c, t, 0, b->start);
             return 1;
         }
         case IR_OP_JMP_IND: {
             uint32_t t = rd(c, w, 1, IR_SIZE_32, memea);
             if (t >= frame_start && t < func_end) { *nextp = t; return 0; }
-            dispatch(c, t, 1);
+            dispatch(c, t, 1, b->start);
             return 1;
         }
         case IR_OP_CALL: {
             uint32_t ret = block_end;
             uint32_t t = block_end + (int32_t)imm;
             c->r[4] -= 4; M32(c->r[4]) = ret;
-            dispatch(c, t, 0);
+            dispatch(c, t, 0, b->start);
             *nextp = ret; return 0;
         }
         case IR_OP_CALL_IND: {
             uint32_t ret = block_end;
             uint32_t t = rd(c, w, 1, IR_SIZE_32, memea);
             c->r[4] -= 4; M32(c->r[4]) = ret;
-            dispatch(c, t, 1);
+            dispatch(c, t, 1, b->start);
             *nextp = ret; return 0;
         }
         case IR_OP_RET:
@@ -1299,13 +1330,13 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
             else if (op == IR_OP_LOOPNE) taken = taken && !f->zf;
             uint32_t nxt = taken ? block_end + (int32_t)imm : block_end;
             if (nxt >= frame_start && nxt < func_end) { *nextp = nxt; return 0; }
-            dispatch(c, nxt, 0);
+            dispatch(c, nxt, 0, b->start);
             return 1;
         }
         case IR_OP_JECXZ: {
             uint32_t nxt = c->r[1] == 0 ? block_end + (int32_t)imm : block_end;
             if (nxt >= frame_start && nxt < func_end) { *nextp = nxt; return 0; }
-            dispatch(c, nxt, 0);
+            dispatch(c, nxt, 0, b->start);
             return 1;
         }
         case IR_OP_STRING:

@@ -382,6 +382,35 @@ int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
 void rt_call(CPU *c,uint32_t addr) {
     if(n3ds_rt_dispatch(c,addr))rt_unimpl(c,addr,"unknown function/import");
 }
+/* Diagnostic only: N3DS_INDIRECT_TRACE=1 dumps the failing indirect target,
+ * the caller (return address on the guest stack), all registers and, for a
+ * `jmp [slot]` thunk, the slot address and its current value.  This never
+ * changes dispatch; it only describes the target that dispatch rejected. */
+static void trace_indirect_fault(CPU *c,uint32_t target){
+    static int trace_state;
+    if(!trace_state){
+        const char *v=getenv("N3DS_INDIRECT_TRACE");
+        trace_state=(v&&v[0]&&strcmp(v,"0"))?2:1;
+        if(trace_state==2)
+            fprintf(stderr,"[indirect] N3DS_INDIRECT_TRACE=1: reporting rejected indirect targets only\n");
+    }
+    if(trace_state!=2)return;
+    uint32_t caller=c?M32(c->r[4]):0;
+    fprintf(stderr,"[indirect] target=%08lx caller=%08lx esp=%08lx eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx esi=%08lx edi=%08lx ebp=%08lx\n",
+        (unsigned long)target,(unsigned long)caller,
+        c?(unsigned long)c->r[4]:0,(unsigned long)(c?c->r[0]:0),(unsigned long)(c?c->r[3]:0),
+        (unsigned long)(c?c->r[1]:0),(unsigned long)(c?c->r[2]:0),
+        (unsigned long)(c?c->r[6]:0),(unsigned long)(c?c->r[7]:0),(unsigned long)(c?c->r[5]:0));
+    const uint8_t *p=n3ds_guest_ptr(target,6);
+    if(!p)return;
+    fprintf(stderr,"[indirect] bytes=%02x %02x %02x %02x %02x %02x\n",p[0],p[1],p[2],p[3],p[4],p[5]);
+    if(p[0]==0xff&&p[1]==0x25){
+        uint32_t slot=(uint32_t)p[2]|((uint32_t)p[3]<<8)|((uint32_t)p[4]<<16)|((uint32_t)p[5]<<24);
+        const uint8_t *q=n3ds_guest_ptr(slot,4);uint32_t val=0;
+        if(q)val=(uint32_t)q[0]|((uint32_t)q[1]<<8)|((uint32_t)q[2]<<16)|((uint32_t)q[3]<<24);
+        fprintf(stderr,"[indirect] thunk-slot=%08lx value=%08lx\n",(unsigned long)slot,(unsigned long)val);
+    }
+}
 void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
     g_last_call=addr; g_last_cpu=c;
     const FnEntry *e=lookup(addr);
@@ -392,6 +421,7 @@ void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
         *cache=NULL;n3ds_ir_call(c,addr);return;
     }
     if(!container_dispatch(c,addr)){*cache=NULL;return;}
+    trace_indirect_fault(c,addr);
     rt_unimpl(c,addr,"unknown indirect function");
 }
 /* Nonlocal returns depend on the full Wine/Win32 shim semantics. Fail loudly. */
