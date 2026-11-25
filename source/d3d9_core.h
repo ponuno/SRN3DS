@@ -106,6 +106,9 @@ typedef struct {
      * source primary (vertex) colour.  When a draw needs COLOR0 and this is
      * NULL the core refuses with D9_UNSUPPORTED instead of dropping the tint. */
     int (*draw_colored)(void *ctx,const D9ColorVertex *vertices,size_t count,const D9Matrix *pica_clip,void *texture,const D9DrawState *state);
+    int (*draw_two)(void *ctx,const D9ColorVertex *vertices,size_t count,
+                    const D9Matrix *clip,void *tex0,const D9DrawState *stage0,
+                    void *tex1,const D9DrawState *stage1);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -132,6 +135,12 @@ int d9_create_texture_sktx(D9Device *d,const void *sktx,size_t bytes,
                            unsigned pool,unsigned usage,D9Handle *out);
 unsigned d9_texture_levels(D9Device *d,D9Handle h);
 int d9_texture_level_info(D9Device *d,D9Handle h,unsigned level,unsigned *w,unsigned *height,size_t *pitch,size_t *bytes);
+/* Level surface view: a pointer into the parent texture's CPU level store. */
+int d9_texture_level_view(D9Device *d,D9Handle h,unsigned level,void **pixels,
+                          unsigned *w,unsigned *height,size_t *pitch,size_t *bytes);
+/* Re-upload a level after a surface view was written.  Marks the level
+ * uploaded and commits the pending GPU copy. */
+int d9_texture_surface_unlocked(D9Device *d,D9Handle h,unsigned level);
 int d9_texture_lock(D9Device *d,D9Handle h,void **ptr,size_t *pitch);
 int d9_texture_unlock(D9Device *d,D9Handle h);
 int d9_texture_lock_level(D9Device *d,D9Handle h,unsigned level,void **ptr,size_t *pitch);
@@ -181,6 +190,10 @@ int d9_set_viewport_size(D9Device *d,unsigned width,unsigned height);
  * D9_UNSUPPORTED and name the rejection in d9_last_draw_diagnostic(). */
 int d9_set_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned value);
 int d9_set_indices(D9Device *d,D9Handle h);
+unsigned d9_stage_count(const D9Device *d);
+int d9_bind_texture(D9Device *d,unsigned stage,D9Handle texture);
+int d9_set_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned value);
+int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *value);
 int d9_set_texture(D9Device *d,D9Handle h);
 /* Borrowed ps_3_0 TEV program; NULL selects the fixed-function backend path. */
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program);

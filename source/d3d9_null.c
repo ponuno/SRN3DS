@@ -148,8 +148,16 @@ static int null_target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion
     s->last_blit_dst_back=dst->surface.native==NULL;
     return D9_BLIT_OK;
 }
+static int null_draw_two(void *ctx,const D9ColorVertex *vertices,size_t count,
+                         const D9Matrix *clip,void *tex0,const D9DrawState *stage0,
+                         void *tex1,const D9DrawState *stage1){
+    if(!tex0||!tex1||!stage1||stage1->stage_texcoordindex||
+       !stage_op_ok(stage1->stage_colorop)||!stage_op_ok(stage1->stage_alphaop))
+        return -1;
+    return null_draw_colored(ctx,vertices,count,clip,tex0,stage0);
+}
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
-    NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,NULL,null_target_blit,null_draw_colored};
+    NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,NULL,null_target_blit,null_draw_colored,null_draw_two};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

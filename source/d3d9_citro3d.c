@@ -151,20 +151,20 @@ static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *
  * No lighting is enabled by this path, so PICA primary colour is exactly the
  * shader's outclr = incolor.  Anything the stage-0 subset cannot express is
  * rejected before a draw is issued. */
-static GPU_TEVSRC color_tev_source(unsigned src){
+static GPU_TEVSRC color_tev_source(unsigned unit,unsigned src){
     switch(src){
-    case D9_CTEV_SRC_TEXTURE:return GPU_TEXTURE0;
-    case D9_CTEV_SRC_CURRENT:return GPU_PRIMARY_COLOR; /* stage 0 CURRENT == diffuse */
+    case D9_CTEV_SRC_TEXTURE:return unit?GPU_TEXTURE1:GPU_TEXTURE0;
+    case D9_CTEV_SRC_CURRENT:return unit?GPU_PREVIOUS:GPU_PRIMARY_COLOR;
     default:return GPU_PRIMARY_COLOR;
     }
 }
-static void apply_color_tev(const D9ColorTevStage *plan){
-    C3D_TexEnv *env=C3D_GetTexEnv(0);if(!env)return;
+static void apply_color_tev(unsigned unit,const D9ColorTevStage *plan){
+    C3D_TexEnv *env=C3D_GetTexEnv(unit);if(!env)return;
     C3D_TexEnvInit(env);
-    C3D_TexEnvSrc(env,C3D_RGB,color_tev_source(plan->color_src[0]),
-                  color_tev_source(plan->color_src[1]),color_tev_source(plan->color_src[2]));
-    C3D_TexEnvSrc(env,C3D_Alpha,color_tev_source(plan->alpha_src[0]),
-                  color_tev_source(plan->alpha_src[1]),color_tev_source(plan->alpha_src[2]));
+    C3D_TexEnvSrc(env,C3D_RGB,color_tev_source(unit,plan->color_src[0]),
+                  color_tev_source(unit,plan->color_src[1]),color_tev_source(unit,plan->color_src[2]));
+    C3D_TexEnvSrc(env,C3D_Alpha,color_tev_source(unit,plan->alpha_src[0]),
+                  color_tev_source(unit,plan->alpha_src[1]),color_tev_source(unit,plan->alpha_src[2]));
     C3D_TexEnvOpRgb(env,GPU_TEVOP_RGB_SRC_COLOR,GPU_TEVOP_RGB_SRC_COLOR,GPU_TEVOP_RGB_SRC_COLOR);
     C3D_TexEnvOpAlpha(env,GPU_TEVOP_A_SRC_ALPHA,GPU_TEVOP_A_SRC_ALPHA,GPU_TEVOP_A_SRC_ALPHA);
     C3D_TexEnvFunc(env,C3D_RGB,plan->color_func==D9_CTEV_MODULATE?GPU_MODULATE:GPU_REPLACE);
@@ -183,14 +183,15 @@ static void prepare_draw_color(D9Citro *c){
     C3D_BufInfo *buf=C3D_GetBufInfo();BufInfo_Init(buf);
     BufInfo_Add(buf,c->arena_color,sizeof(D9ColorVertex),3,0x210);
 }
-static int draw_colored(void *ctx,const D9ColorVertex *v,size_t n,const D9Matrix *clip,void *texture,const D9DrawState *state){
-    D9Citro *c=ctx;D9ColorTevStage plan;const char *why=NULL;
+static int draw_color_stages(void *ctx,const D9ColorVertex *v,size_t n,const D9Matrix *clip,void *texture,const D9DrawState *state,void *texture1,const D9DrawState *second){
+    D9Citro *c=ctx;D9ColorTevStage plan,second_plan;const char *why=NULL;
     if(!c||!c->scene||!c->program_color_ready||!v||!clip||!state||!n||n%3)return -1;
     if(n>FRAME_VERTICES-c->cursor_color)return -1;
     /* The colour path is fixed-function stage-0 state only; a ps_3_0 program
      * would own the TEV stages and the two would silently disagree. */
     if(state->pixel_shader)return -1;
     if(d9_color_tev_stage0(state,texture!=NULL,&plan,&why))return -1;
+    if(second&&d9_color_tev_stage0(second,texture1!=NULL,&second_plan,&why))return -1;
     memcpy(c->arena_color+c->cursor_color,v,n*sizeof *v);
     GSPGPU_FlushDataCache(c->arena_color+c->cursor_color,n*sizeof *v);
     prepare_draw_color(c);
@@ -200,14 +201,25 @@ static int draw_colored(void *ctx,const D9ColorVertex *v,size_t n,const D9Matrix
     if(texture)configure_native_texture(texture,state);
     d9_pica_citro3d_restore_tev();
     if(texture){NativeTex *native=texture;C3D_TexBind(0,&native->tex);}
-    apply_color_tev(&plan);
+    apply_color_tev(0,&plan);
+    if(second){
+        NativeTex *native=texture1;
+        configure_native_texture(native,second);
+        C3D_TexBind(1,&native->tex);
+        apply_color_tev(1,&second_plan);
+    }
     C3D_DrawArrays(GPU_TRIANGLES,(int)c->cursor_color,(int)n);
     d9_pica_citro3d_restore_tev();
+    if(second)C3D_TexBind(1,NULL);
     c->cursor_color+=n;
     /* Leave the shared program/attribute state as begin() left it so a
      * following non-colour draw is unchanged. */
     prepare_draw(c);
     return 0;
+}
+static int draw_colored(void *ctx,const D9ColorVertex *vertices,size_t count,
+                        const D9Matrix *clip,void *texture,const D9DrawState *state){
+    return draw_color_stages(ctx,vertices,count,clip,texture,state,NULL,NULL);
 }
 static void end(void *ctx){D9Citro *c=ctx;if(c->scene){C3D_FrameEnd(0);c->scene=0;}c->active_target=NULL;}
 static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
@@ -325,4 +337,4 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     return D9_BLIT_OK;
 }
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
-    target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored};return &ops;}
+    target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages};return &ops;}

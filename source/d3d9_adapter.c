@@ -1,5 +1,7 @@
 #include "d3d9_adapter.h"
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 _Static_assert(sizeof(D9AdapterIdentifier)==1100,"D3DADAPTER_IDENTIFIER9 x86 layout");
@@ -49,6 +51,21 @@ enum {DEVTYPE_HAL=1,RTYPE_SURFACE=1,RTYPE_TEXTURE=3};
 #define PS_VERSION_2_0 0xffff0200u
 
 static int display_format(unsigned format){return format==D9_X8R8G8B8;}
+/* Measurement-only caps probe.  It reports the HW T&L bit so the engine's
+ * post-gate call stream can be recorded before any honest implementation
+ * decision.  Off unless TESV_D3D9_CAPS_PROBE=1; never a shipping value. */
+static int devcaps_probe_state;
+static int devcaps_probe_enabled(void){
+    if(!devcaps_probe_state){
+        const char *v=getenv("TESV_D3D9_CAPS_PROBE");
+        int on=v&&v[0]&&strcmp(v,"0");
+        devcaps_probe_state=on?2:1;
+        if(on)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: GetDeviceCaps reports "
+            "D3DDEVCAPS_HWTRANSFORMANDLIGHT (0x10000) although fixed-function "
+            "lighting is absent. Not shippable and not a capability claim.\n");
+    }
+    return devcaps_probe_state==2;
+}
 static int texture_format(unsigned format){
     return format==D9_A8R8G8B8||format==D9_X8R8G8B8||format==D9_DXT1||format==D9_DXT3||format==D9_DXT5;
 }
@@ -98,6 +115,7 @@ int d9_adapter_caps(unsigned adapter,unsigned device_type,D9Caps9 *out){
      * vertex transform and no fixed-function lights, materials or normals.
      * See d9_adapter_devcaps_reason() for the per-bit contract. */
     c.dev_caps=DEV_DRAWPRIMITIVES2|DEV_HWRASTERIZATION;
+    if(devcaps_probe_enabled())c.dev_caps|=DEV_HWTRANSFORMANDLIGHT;
     c.primitive_misc_caps=MISC_MASKZ|MISC_CULLNONE|MISC_CULLCW|MISC_CULLCCW|MISC_COLORWRITEENABLE|MISC_BLENDOP;
     c.raster_caps=RASTER_ZTEST;
     c.z_cmp_caps=0xffu;   /* all eight D3DCMP_* map to PICA depth functions */

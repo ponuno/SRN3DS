@@ -218,6 +218,8 @@ Add-Test "gfxmesh_com" $liftCommon ($legacySources + @("source/d3d9_core.c", "so
 # Vertex-colour PICA half: stage-0 -> single TEV stage against a CPU reference,
 # exact null-backend RGBA capture, and the COM-level refusal HRESULT.
 Add-Test "color_tev" $common ($d3dSources + @("source/d3d9_color_tev.c", "tests/d3d9_color_tev_smoke.c")) @()
+Add-Test "two_stage" $common ($d3dSources + @("tests/two_stage_smoke.c")) @()
+Add-Test "texture_surface" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_demo_scene.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_capture.c", "source/d3d9_com_demo.c") + $picaSources + @("tests/texture_surface_smoke.c")) @()
 Add-Test "color_com" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_demo_scene.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_capture.c", "source/d3d9_com_demo.c") + $picaSources + @("source/d3d9_color_tev.c", "tests/d3d9_color_com_smoke.c")) @()
 $menuClosureFixture = Join-Path $root "tests/fixtures/menu_closure_real_shaders.h"
 if (Test-Path $menuClosureFixture) {

@@ -46,7 +46,7 @@ static void capture_present_event(void);
 #define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
 enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,KIND_COUNT};
 typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
-typedef struct {
+typedef struct Obj {
     unsigned kind,refs,deferred;uint32_t guest;D9Handle handle;
     unsigned bytes,width,height,format,usage,pool,fvf,pitch,lockable;
     uint32_t lock_guest;unsigned lock_bytes,readonly,lock_level,lock_rows,lock_pitch,lock_row_bytes;void *lock_host;
@@ -54,11 +54,13 @@ typedef struct {
     uint32_t *code;unsigned words;
     D9TevProgram tev;int has_tev;
     D9Decl *declaration;
+    /* Level surface view: pixels point into the parent texture's CPU store. */
+    struct Obj *view_parent;D9Handle view_texture;unsigned view_level;int is_view;
 } Obj;
 static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
     Obj o[MAX_OBJECTS];unsigned next;
-    Obj *factory,*dev,*back,*rt,*streams[D9_MAX_STREAMS],*ib,*tex,*vs,*ps,*declaration;
+    Obj *factory,*dev,*back,*rt,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*vs,*ps,*declaration;
     unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags;D9Handle clear_target;D9Matrix constants;
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
     uint16_t gamma[3][256];size_t surface_bytes;
@@ -71,6 +73,22 @@ static struct {
 } g;
 static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
 #define A(n) arg(c,n)
+/* Measurement-only presentation probe.  It accepts LOCKABLE_BACKBUFFER and
+ * gives the back buffer a zero-filled CPU shadow so the engine's post-device
+ * call stream can be recorded.  It is not a rendering path: the pixels are
+ * blank, so a frame produced under this probe is not evidence of rendering. */
+static int pp_state;
+static int pp_probe(void){
+    if(!pp_state){
+        const char *v=getenv("TESV_D3D9_PP_PROBE");
+        int on=v&&v[0]&&strcmp(v,"0");
+        pp_state=on?2:1;
+        if(on)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: accepting "
+            "D3DPRESENTFLAG_LOCKABLE_BACKBUFFER with a zero-filled shadow. "
+            "Blank pixels; not shippable.\n");
+    }
+    return pp_state==2;
+}
 static void trace_result(uint32_t value);
 static void trace_result_float(double value);
 static void capture_stop(void);
@@ -156,6 +174,12 @@ static void destroy_obj(Obj *o){
     else if(o->kind==DECL){free(o->declaration);o->declaration=NULL;parent=g.dev;}
     else if(o->kind==SURFACE){
         if(o==g.back){g.back=NULL;g.rt=NULL;}
+        else if(o->is_view){
+            /* A level view owns no pixels and no target; it only holds a
+             * reference to its parent texture. */
+            o->is_view=0;o->pixels=NULL;
+            parent=o->view_parent;o->view_parent=NULL;
+        }
         else if(o->handle){
             if(g.rt==o)g.rt=g.back;
             (void)d9_release_render_target(g.device,o->handle);
@@ -171,7 +195,7 @@ static void destroy_obj(Obj *o){
         }
         Obj *back=g.back;g.back=NULL;g.rt=NULL;
         memset(g.streams,0,sizeof g.streams);memset(g.offsets,0,sizeof g.offsets);memset(g.strides,0,sizeof g.strides);
-        g.ib=g.tex=g.vs=g.ps=g.declaration=NULL;
+        g.ib=g.tex=g.tex1=g.vs=g.ps=g.declaration=NULL;
         g.dev=NULL;release(back);parent=g.factory;
     }
     else if(o->kind==FACTORY)g.factory=NULL;
@@ -323,6 +347,11 @@ static void d3dperf_set_options(CPU *c){trace_enter("D3DPERF_SetOptions",0,UINT_
 static void d3dperf_begin(CPU *c){trace_enter("D3DPERF_BeginEvent",0,UINT_MAX,c);perf_note("D3DPERF_BeginEvent");RET(0,2);}
 static void d3dperf_end(CPU *c){trace_enter("D3DPERF_EndEvent",0,UINT_MAX,c);perf_note("D3DPERF_EndEvent");RET(0,0);}
 static void d3dperf_status(CPU *c){trace_enter("D3DPERF_GetStatus",0,UINT_MAX,c);perf_note("D3DPERF_GetStatus");RET(0,0);}
+static void backend_stage_caps(D9Caps9 *caps){
+    unsigned count=g.device?d9_stage_count(g.device):(g.backend&&g.backend->draw_two?2u:1u);
+    caps->max_texture_blend_stages=count;
+    caps->max_simultaneous_textures=count;
+}
 static void factory_caps(CPU *c){
     uint32_t out=A(3);
     if(!obj(A(0),FACTORY)||!ptr(out,sizeof(D9Caps9))){d3d_log("GetDeviceCaps","invalid factory or caps buffer");RET(INVALID,4);}
@@ -331,6 +360,7 @@ static void factory_caps(CPU *c){
         d3d_log("GetDeviceCaps",A(1)>=D9_ADAPTER_COUNT?"adapter does not exist":"device type is not D3DDEVTYPE_HAL");
         RET(INVALID,4);
     }
+    backend_stage_caps(&caps);
     memcpy(ptr(out,sizeof caps),&caps,sizeof caps);RET(OK,4);
 }
 static void device_caps(CPU *c){
@@ -338,6 +368,7 @@ static void device_caps(CPU *c){
     if(!obj(A(0),DEVICE)||!ptr(out,sizeof(D9Caps9))){d3d_log("GetDeviceCaps","invalid device or caps buffer");RET(INVALID,2);}
     D9Caps9 caps;
     if(d9_adapter_caps(0,1,&caps)){d3d_log("GetDeviceCaps","adapter caps are unavailable");RET(INVALID,2);}
+    backend_stage_caps(&caps);
     memcpy(ptr(out,sizeof caps),&caps,sizeof caps);RET(OK,2);
 }
 static const char *presentation_reason(const uint32_t *pp){
@@ -352,7 +383,8 @@ static const char *presentation_reason(const uint32_t *pp){
     /* Windowed guests in the existing slice carry a legacy refresh value. It
      * does not select a display mode here, so accept and ignore it. */
     if(pp[9])return "automatic depth-stencil surfaces are not implemented";
-    if(pp[11])return "presentation flags other than none are not implemented";
+    if(pp[11]&~1u)return "presentation flags other than LOCKABLE_BACKBUFFER are not implemented";
+    if((pp[11]&1u)&&!pp_probe())return "presentation flags other than none are not implemented";
     if(pp[13]>1)return "only immediate or one-frame presentation intervals are implemented";
     return NULL;
 }
@@ -416,6 +448,17 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
         release(g.dev);d3d_log("CreateDevice","COM object table is full");RET(OUTMEM,7);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];g.back->usage=1;g.back->pool=0;
+    if(pp_probe()){
+        size_t shadow=(size_t)g.back->width*g.back->height*4;
+        g.back->pixels=calloc(1,shadow);
+        if(!g.back->pixels){
+            release(g.dev);d3d_log("CreateDevice","back-buffer shadow allocation failed");RET(OUTMEM,7);
+        }
+        g.back->pitch=g.back->width*4;g.back->bytes=(unsigned)shadow;g.back->lockable=1;
+        trace_detail("MEASUREMENT-ONLY back-buffer shadow %lux%lu pitch=%lu bytes=%lu",
+            (unsigned long)g.back->width,(unsigned long)g.back->height,
+            (unsigned long)g.back->pitch,(unsigned long)g.back->bytes);
+    }
     g.rt=g.back;g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;
     (void)d9_set_render_target(g.device,0);
     /* A new device starts with an unarmed, empty menu closure observation. */
@@ -747,6 +790,47 @@ static void level_count(CPU *c){Obj *o=obj(A(0),TEX);RET(o?d9_texture_levels(g.d
 static void texture_desc(CPU *c){Obj *o=obj(A(0),TEX);uint32_t p=A(2);unsigned w,h;if(!o||!ptr(p,32)||d9_texture_level_info(g.device,o->handle,A(1),&w,&h,NULL,NULL))RET(INVALID,3);
     M32(p)=o->format;M32(p+4)=1;M32(p+8)=o->usage;M32(p+12)=o->pool;M32(p+16)=M32(p+20)=0;M32(p+24)=w;M32(p+28)=h;RET(OK,3);}
 static void resource_type(CPU *c){Obj *o=obj(A(0),0);RET(!o?0:o->kind==VB?6:o->kind==IB?7:o->kind==TEX?3:o->kind==SURFACE?1:0,1);}
+/* IDirect3DTexture9::GetSurfaceLevel.  The returned surface is a view into the
+ * parent texture's CPU level store.  Only uncompressed 32-bit levels are
+ * exposed; BC levels have no 4-byte-per-pixel lock layout here. */
+static void texture_get_surface_level(CPU *c){
+    Obj *t=obj(A(0),TEX);uint32_t level=A(1),out=A(2);
+    if(!t||!ptr(out,4))RET(INVALID,3);
+    M32(out)=0;
+    void *pixels=NULL;unsigned w=0,h=0;size_t pitch=0,bytes=0;
+    int rc=d9_texture_level_view(g.device,t->handle,level,&pixels,&w,&h,&pitch,&bytes);
+    if(rc){
+        d3d_log("GetSurfaceLevel",rc==D9_UNSUPPORTED?
+            "only uncompressed RGBA8/XRGB8 levels expose a CPU-backed surface view":
+            "invalid texture level");
+        RET(rc==D9_UNSUPPORTED?UNAVAILABLE:INVALID,3);
+    }
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+    Obj *o=new_obj(SURFACE);if(!o)RET(OUTMEM,3);
+    o->width=w;o->height=h;o->format=t->format;o->usage=t->usage;o->pool=t->pool;
+    o->pitch=(unsigned)pitch;o->bytes=(unsigned)bytes;o->pixels=pixels;
+    o->is_view=1;o->view_parent=t;o->view_texture=t->handle;o->view_level=level;
+    retain(t);M32(out)=o->guest;
+    trace_detail("Level surface=0x%08lx texture=0x%08lx level=%lu %lux%lu pitch=%lu",
+        (unsigned long)o->guest,(unsigned long)t->guest,(unsigned long)level,
+        (unsigned long)w,(unsigned long)h,(unsigned long)pitch);
+    RET(OK,3);
+}
+/* IDirect3DTexture9::AddDirtyRect is an advisory hint.  Uploads are explicit
+ * (texture or level-surface unlock), so there is nothing to dirty-track; the
+ * rectangle is still validated against the level-0 dimensions. */
+static void texture_add_dirty_rect(CPU *c){
+    Obj *t=obj(A(0),TEX);uint32_t r=A(1);
+    if(!t)RET(INVALID,2);
+    if(r){
+        if(!ptr(r,16))RET(INVALID,2);
+        int32_t v[4];memcpy(v,ptr(r,16),16);
+        if(v[0]<0||v[1]<0||v[2]<=v[0]||v[3]<=v[1]||
+           (uint32_t)v[2]>t->width||(uint32_t)v[3]>t->height)RET(INVALID,2);
+    }
+    trace_detail("AddDirtyRect%s",r?"":"(NULL)");
+    RET(OK,2);
+}
 static void surface_desc(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t p=A(1);
     if(!o||!ptr(p,32))RET(INVALID,2);
     M32(p)=o->format;M32(p+4)=1;M32(p+8)=o->usage;M32(p+12)=o->pool;
@@ -755,12 +839,17 @@ static void surface_desc(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t p=A(1);
 static void surface_container(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(2);
     if(!o||!ptr(A(1),16)||!ptr(out,4))RET(INVALID,3);M32(out)=0;
     if(o==g.back){d3d_log("GetContainer","the implicit swap-chain container is not implemented");RET(UNAVAILABLE,3);}
-    if(memcmp(ptr(A(1),16),guids[0],16)&&memcmp(ptr(A(1),16),guids[DEVICE],16))RET(NOINTERFACE,3);
-    retain(g.dev);M32(out)=g.dev->guest;RET(OK,3);
+    if(!memcmp(ptr(A(1),16),guids[0],16)||!memcmp(ptr(A(1),16),guids[DEVICE],16)){
+        retain(g.dev);M32(out)=g.dev->guest;RET(OK,3);
+    }
+    if(o->is_view&&o->view_parent&&!memcmp(ptr(A(1),16),guids[TEX],16)){
+        retain(o->view_parent);M32(out)=o->view_parent->guest;RET(OK,3);
+    }
+    RET(NOINTERFACE,3);
 }
 static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
     if(!o||o->kind!=SURFACE||!ptr(locked,8))return D9_INVALID;
-    if(o==g.back)return D9_BACKEND;
+    if(o==g.back&&(!pp_probe()||!o->pixels))return D9_BACKEND;
     if(o->lock_guest||g.phase||(rect&&(flags&0x2000)))return D9_INVALID;
     if(o->handle&&(!o->lockable||!(flags&0x10u)||(flags&~0x8010u)))return D9_INVALID; /* explicit targets are read-only */
     if(!o->handle&&(flags&~0xc810u))return D9_INVALID;
@@ -788,7 +877,15 @@ static int unlock_surface(Obj *o){
     if(!o||o->kind!=SURFACE||!o->lock_guest)return D9_INVALID;
     if(!o->readonly){uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);
         for(unsigned i=0;i<o->lock_rows;++i)memcpy(host+(size_t)i*o->lock_pitch,src+(size_t)i*o->lock_pitch,o->lock_row_bytes);}
-    guest_unmap(g.mem,o->lock_guest);o->lock_guest=0;o->lock_host=NULL;o->lock_bytes=0;o->lock_rows=0;o->lock_pitch=o->lock_row_bytes=0;return D9_OK;
+    int is_view=o->is_view;D9Handle view_texture=o->view_texture;unsigned view_level=o->view_level;int readonly=o->readonly;
+    guest_unmap(g.mem,o->lock_guest);o->lock_guest=0;o->lock_host=NULL;o->lock_bytes=0;o->lock_rows=0;o->lock_pitch=o->lock_row_bytes=0;
+    /* Writing a level view updates the parent texture's CPU store; the GPU copy
+     * is re-uploaded here so a following SetTexture sees the new pixels. */
+    if(is_view&&!readonly){
+        int rc=d9_texture_surface_unlocked(g.device,view_texture,view_level);
+        if(rc)return rc;
+    }
+    return D9_OK;
 }
 static void surface_lock(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
     if(!o||!ptr(out,8))RET(INVALID,4);M32(out)=M32(out+4)=0;
@@ -841,7 +938,7 @@ static void set_fvf(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,2);
 static void get_fvf(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);M32(A(1))=g.fvf;RET(OK,2);}
 static void set_render(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(hr(d9_set_render_state(g.device,A(1),A(2))),3);}
 static void get_render(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(2),4)||d9_get_render_state(g.device,A(1),&v))RET(INVALID,3);M32(A(2))=v;RET(OK,3);}
-static void set_sampler(CPU *c){if(!obj(A(0),DEVICE)||A(1)||g.phase==2)RET(INVALID,4);RET(hr(d9_set_sampler_state(g.device,A(2),A(3))),4);}
+static void set_sampler(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,4);RET(hr(d9_set_unit_sampler(g.device,A(1),A(2),A(3))),4);}
 /* D3D9 IDirect3DDevice9 slot 67.  The GFx UI batch uses stage 0
  * MODULATE(TEXTURE,DIFFUSE); the value is stored even when the current
  * backend has no vertex-colour shader, so the draw gate is the only failure. */
@@ -852,7 +949,7 @@ static void set_texture_stage_state(CPU *c){
     g.last_diagnostic[0]=0;
     RET(OK,4);
 }
-static void get_sampler(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||A(1)||!ptr(A(3),4)||d9_get_sampler_state(g.device,A(2),&v))RET(INVALID,4);M32(A(3))=v;RET(OK,4);}
+static void get_sampler(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(3),4)||d9_get_unit_sampler(g.device,A(1),A(2),&v))RET(INVALID,4);M32(A(3))=v;RET(OK,4);}
 static void stream(CPU *c){Obj *o=obj(A(2),VB);unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||(A(2)&&!o)||g.phase==2)RET(INVALID,5);
     int rc=d9_set_stream(g.device,s,o?o->handle:0,A(3),A(4));if(!rc){bind(&g.streams[s],o);g.offsets[s]=A(3);g.strides[s]=A(4);}RET(hr(rc),5);}
 static void get_stream(CPU *c){unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||!ptr(A(2),4)||!ptr(A(3),4)||!ptr(A(4),4))RET(INVALID,5);
@@ -862,8 +959,11 @@ static void get_stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||
 static void indices(CPU *c){Obj *o=obj(A(1),IB);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     int rc=d9_set_indices(g.device,o?o->handle:0);if(!rc)bind(&g.ib,o);RET(hr(rc),2);}
 static void get_indices(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ib);M32(A(1))=g.ib?g.ib->guest:0;RET(OK,2);}
-static void texture(CPU *c){Obj *o=obj(A(2),TEX);if(!obj(A(0),DEVICE)||A(1)||(A(2)&&!o)||g.phase==2)RET(INVALID,3);
-    int rc=d9_set_texture(g.device,o?o->handle:0);if(!rc)bind(&g.tex,o);RET(hr(rc),3);}
+static void texture(CPU *c){Obj *o=obj(A(2),TEX);if(!obj(A(0),DEVICE)||(A(2)&&!o)||g.phase==2)RET(INVALID,3);
+    int rc=d9_bind_texture(g.device,A(1),o?o->handle:0);
+    if(rc==D9_UNSUPPORTED)d3d_log("SetTexture","unsupported texture unit");
+    if(!rc)bind(A(1)?&g.tex1:&g.tex,o);
+    RET(hr(rc),3);}
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     if(!address||(address&3)||!ptr(out,4)||g.next>=MAX_OBJECTS)return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
@@ -1074,25 +1174,26 @@ static void capture_draw(unsigned type,unsigned start,unsigned primitives,int in
         }
     }
 
-    /* The bridge exposes one bound texture stage. */
-    if(g.tex){
+    for(unsigned stage=0; stage<2 && s.texture_count<D9_CAPTURE_MAX_TEXTURES; ++stage){
+        Obj *bound=stage?g.tex1:g.tex;
+        if(!bound)continue;
         const void *pixels;size_t pitch,bytes;unsigned w,h,format;
-        if(!d9_get_texture_capture(g.device,g.tex->handle,0,&pixels,&pitch,&bytes,
+        if(!d9_get_texture_capture(g.device,bound->handle,0,&pixels,&pitch,&bytes,
                                    &w,&h,&format)){
-            D9CaptureTexture *t=&s.textures[0];
-            t->stage=0;t->handle=g.tex->guest;t->width=w;t->height=h;t->format=format;
-            t->levels=d9_texture_levels(g.device,g.tex->handle);
-            t->pool=g.tex->pool;t->usage=g.tex->usage;
+            D9CaptureTexture *t=&s.textures[s.texture_count];
+            t->stage=stage;t->handle=bound->guest;t->width=w;t->height=h;t->format=format;
+            t->levels=d9_texture_levels(g.device,bound->handle);
+            t->pool=bound->pool;t->usage=bound->usage;
             t->level=0;t->row_pitch=pitch;t->pixels.host=pixels;t->pixels.bytes=bytes;
-            s.texture_count=1;
+            ++s.texture_count;
         }else{
             /* GPU-only SKTX textures have no CPU pixels. Record the bound
              * texture truthfully with an empty payload instead of omitting it. */
-            D9CaptureTexture *t=&s.textures[0];
-            t->stage=0;t->handle=g.tex->guest;t->width=g.tex->width;t->height=g.tex->height;
-            t->format=g.tex->format;t->levels=d9_texture_levels(g.device,g.tex->handle);
-            t->pool=g.tex->pool;t->usage=g.tex->usage;t->level=0;t->row_pitch=g.tex->pitch;
-            t->pixels.host=NULL;t->pixels.bytes=0;s.texture_count=1;
+            D9CaptureTexture *t=&s.textures[s.texture_count];
+            t->stage=stage;t->handle=bound->guest;t->width=bound->width;t->height=bound->height;
+            t->format=bound->format;t->levels=d9_texture_levels(g.device,bound->handle);
+            t->pool=bound->pool;t->usage=bound->usage;t->level=0;t->row_pitch=bound->pitch;
+            t->pixels.host=NULL;t->pixels.bytes=0;++s.texture_count;
         }
     }
 
@@ -1170,7 +1271,7 @@ static void draw_indexed_up(CPU *c){
  X(cooperative) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
  X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
  X(stream) X(indices) X(texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
- X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(set_texture_stage_state) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
+ X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
  X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
  X(set_scissor_rect) X(get_scissor_rect) X(set_gamma_ramp) X(get_gamma_ramp) X(set_npatch_mode) X(get_npatch_mode) \
@@ -1299,7 +1400,8 @@ static void init_tables(void){
     SLOT(DEVICE,106,create_ps);SLOT(DEVICE,107,set_ps);SLOT(DEVICE,108,get_ps);
     for(unsigned k=VB;k<=TEX;++k){SLOT(k,3,resource_device);SLOT(k,10,resource_type);}
     for(unsigned k=VB;k<=IB;++k){SLOT(k,11,buffer_lock);SLOT(k,12,buffer_unlock);SLOT(k,13,buffer_desc);}
-    SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,19,texture_lock);SLOT(TEX,20,texture_unlock);
+    SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,18,texture_get_surface_level);
+    SLOT(TEX,19,texture_lock);SLOT(TEX,20,texture_unlock);SLOT(TEX,21,texture_add_dirty_rect);
     for(unsigned k=VS;k<=PS;++k){SLOT(k,3,resource_device);SLOT(k,4,shader_function);}
     SLOT(DECL,3,resource_device);SLOT(DECL,4,declaration_data);
     SLOT(SURFACE,3,resource_device);SLOT(SURFACE,10,resource_type);SLOT(SURFACE,11,surface_container);SLOT(SURFACE,12,surface_desc);

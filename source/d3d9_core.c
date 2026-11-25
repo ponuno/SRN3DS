@@ -28,7 +28,8 @@ struct D9Device {
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEXTURES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
-    D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state;
+    D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
+    D9Handle texture1;
     D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
     D9ColorVertex color_scratch[MAX_DRAW_VERTICES];unsigned color_scratch_count;
     unsigned view_w,view_h;
@@ -53,6 +54,7 @@ void d9_pica_transform(D9Matrix *out,const D9Matrix *w,const D9Matrix *v,const D
     /* D3D row-vector -> GPU column-vector, rotated top LCD, clip z [0,w] -> [-w,0]. */
     for(unsigned i=0;i<4;++i){out->m[0][i]=b.m[i][1];out->m[1][i]=-b.m[i][0];out->m[2][i]=b.m[i][2]-b.m[i][3];out->m[3][i]=b.m[i][3];}
 }
+static void set_diagnosis(D9Device *d,const char *why){if(!d)return;if(!why)why="";snprintf(d->diagnosis,sizeof d->diagnosis,"%s",why);}
 static int pow2(unsigned n){return n&&n<=1024&&!(n&(n-1));}
 static int dim(unsigned n){return n>=8&&pow2(n);}
 int d9_texture_layout(unsigned w,unsigned h,unsigned f,size_t *pitch,size_t *bytes){
@@ -61,16 +63,18 @@ int d9_texture_layout(unsigned w,unsigned h,unsigned f,size_t *pitch,size_t *byt
     if(bb){*pitch=(size_t)((w+3)/4)*bb;*bytes=*pitch*((h+3)/4);return D9_OK;}
     if(f!=D9_A8R8G8B8&&f!=D9_X8R8G8B8)return D9_INVALID;*pitch=(size_t)w*4;*bytes=*pitch*h;return D9_OK;
 }
+static unsigned native_dim(unsigned n){return n<8?8:n;}
 int d9_swizzle_rgba8(void *dst,size_t bytes,const void *src,size_t pitch,unsigned w,unsigned h,unsigned fmt){
-    if(!dst||!src||!dim(w)||!dim(h)||pitch<(size_t)w*4||pitch>(SIZE_MAX-(size_t)w*4)/(h-1)||bytes<(size_t)w*h*4||
+    if(!dst||!src||!pow2(w)||!pow2(h)||pitch<(size_t)w*4||(h>1&&pitch>(SIZE_MAX-(size_t)w*4)/(h-1))||bytes<(size_t)native_dim(w)*native_dim(h)*4||
        (fmt!=D9_A8R8G8B8&&fmt!=D9_X8R8G8B8))return D9_INVALID;
     uint8_t *out=dst;const uint8_t *in=src;
-    for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
+    unsigned pw=native_dim(w),ph=native_dim(h);
+    for(unsigned y=0;y<ph;++y)for(unsigned x=0;x<pw;++x){
         /* PICA texture origin is bottom-left; D3D surface rows are top-first. */
-        unsigned ty=h-1-y,morton=0;
+        unsigned ty=ph-1-y,morton=0;
         for(unsigned b=0;b<3;++b){morton|=((x>>b)&1)<<(2*b);morton|=((ty>>b)&1)<<(2*b+1);}
-        size_t i=((size_t)(ty/8)*(w/8)+x/8)*64+morton;
-        const uint8_t *s=in+(size_t)y*pitch+x*4;uint8_t *d=out+i*4;
+        size_t i=((size_t)(ty/8)*(pw/8)+x/8)*64+morton;
+        const uint8_t *s=in+(size_t)(y/(ph/h))*pitch+(x/(pw/w))*4;uint8_t *d=out+i*4;
         d[0]=fmt==D9_X8R8G8B8?255:s[3];d[1]=s[0];d[2]=s[1];d[3]=s[2];
     }return D9_OK;
 }
@@ -101,6 +105,9 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
         .stage_colorop=D9_TOP_SELECTARG1,.stage_colorarg1=D9_TA_TEXTURE,.stage_colorarg2=D9_TA_CURRENT,
         .stage_alphaop=D9_TOP_SELECTARG1,.stage_alphaarg1=D9_TA_TEXTURE,.stage_alphaarg2=D9_TA_CURRENT,
         .stage_texcoordindex=0};
+    d->second=d->state;
+    d->second.stage_colorop=d->second.stage_alphaop=D9_TOP_DISABLE;
+    d->second.stage_texcoordindex=1;
     for(unsigned i=0;i<3;++i)d9_matrix_identity(&d->transforms[i]);return d;
 }
 static Buffer *buffer(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_BUFFERS;++i)if(d->buffers[i].id==id)return &d->buffers[i];return NULL;}
@@ -139,13 +146,17 @@ int d9_release_buffer(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(!b
 static void delete_unowned_native(D9Device *d,void *native){if(native)d->ops.texture_delete(d->ctx,native);}
 int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned levels,
                          unsigned pool,unsigned usage,int disposable,D9Handle *out){
-    if(!d||d->scene||d->teardown||!out||!d->next||!dim(w)||!dim(h)||pool>D9_POOL_SYSTEMMEM)return D9_INVALID;
+    if(!d||d->scene||d->teardown||!out||!d->next||!pow2(w)||!pow2(h)||pool>D9_POOL_SYSTEMMEM)return D9_INVALID;
+    int padded=w<8||h<8;
+    if(padded&&fmt!=D9_A8R8G8B8&&fmt!=D9_X8R8G8B8){
+        set_diagnosis(d,"Small textures require uncompressed RGBA8 or XRGB8");return D9_UNSUPPORTED;
+    }
     Texture t={.w=w,.h=h,.format=fmt,.pool=pool,.usage=usage,.disposable=disposable?1:0,
                .cpu_only=pool==D9_POOL_SYSTEMMEM};size_t cpu=0,gpu=0;unsigned max=1,a=w,b=h;
     while(a>1||b>1){if(a>1)a>>=1;if(b>1)b>>=1;++max;}
     if(!levels)levels=max;if(levels>max||levels>MAX_LEVELS)return D9_INVALID;t.levels=levels;a=w;b=h;
     for(unsigned i=0;i<levels;++i){Level *l=&t.level[i];l->w=a;l->h=b;l->offset=cpu;if(d9_texture_layout(a,b,fmt,&l->pitch,&l->bytes))return D9_INVALID;
-        cpu+=l->bytes;if(a>=8&&b>=8){++t.gpu_levels;gpu+=(size_t)a*b*4;}if(a>1)a>>=1;if(b>1)b>>=1;}
+        cpu+=l->bytes;if((a>=8&&b>=8)||(padded&&i==0)){++t.gpu_levels;gpu+=(size_t)native_dim(a)*native_dim(b)*4;}if(a>1)a>>=1;if(b>1)b>>=1;}
     if(t.cpu_only)t.gpu_levels=0;
     t.cpu_bytes=cpu;t.gpu_bytes=t.cpu_only?0:gpu;t.cost=cpu+t.gpu_bytes;
     if(budget_has_room(d,t.cost))return D9_MEMORY;
@@ -153,7 +164,7 @@ int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned
     if(!slot)return D9_MEMORY;
     t.pixels=calloc(1,cpu);if(!t.pixels)return D9_MEMORY;
     if(!t.cpu_only){
-        if(d->ops.texture_create(d->ctx,w,h,t.gpu_levels,&t.native)||!t.native){delete_unowned_native(d,t.native);free(t.pixels);return D9_BACKEND;}
+        if(d->ops.texture_create(d->ctx,native_dim(w),native_dim(h),t.gpu_levels,&t.native)||!t.native){delete_unowned_native(d,t.native);free(t.pixels);return D9_BACKEND;}
     }
     D9Handle key=d->next;
     if(d9_texcache_add_guest(&d->tex_cache,key,t.pixels,cpu,1)!=D9TEXCACHE_OK){
@@ -206,6 +217,36 @@ int d9_create_texture_sktx(D9Device *d,const void *sktx_data,size_t bytes,
 unsigned d9_texture_levels(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;return t?t->levels:0;}
 int d9_texture_level_info(D9Device *d,D9Handle h,unsigned level,unsigned *w,unsigned *height,size_t *pitch,size_t *bytes){Texture *t=d?texture(d,h):NULL;
     if(!t||level>=t->levels)return D9_INVALID;Level *l=&t->level[level];if(w)*w=l->w;if(height)*height=l->h;if(pitch)*pitch=l->pitch;if(bytes)*bytes=l->bytes;return D9_OK;}
+int d9_texture_level_view(D9Device *d,D9Handle h,unsigned level,void **pixels,
+                          unsigned *w,unsigned *height,size_t *pitch,size_t *bytes){
+    Texture *t=d?texture(d,h):NULL;
+    if(!t||level>=t->levels)return D9_INVALID;
+    if(!t->pixels||t->gpu_only)return D9_UNSUPPORTED;
+    if(d9_bc_block_bytes(t->format))return D9_UNSUPPORTED;
+    Level *l=&t->level[level];
+    if(pixels)*pixels=t->pixels+l->offset;
+    if(w)*w=l->w;if(height)*height=l->h;if(pitch)*pitch=l->pitch;if(bytes)*bytes=l->bytes;
+    return D9_OK;
+}
+int d9_texture_surface_unlocked(D9Device *d,D9Handle h,unsigned level){
+    Texture *t=d?texture(d,h):NULL;
+    if(!t||level>=t->levels||d->scene||d->teardown)return D9_INVALID;
+    Level *l=&t->level[level];
+    if(!t->cpu_only&&!t->gpu_only&&level<t->gpu_levels){
+        size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;
+        const void *src=t->pixels+l->offset;
+        int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):
+            d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
+        if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
+        free(tmp);if(rc)return rc;
+    }
+    l->uploaded=1;
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,t->id);
+    if(e&&e->has_gpu&&!e->gpu_ready&&
+       d9_texcache_commit_upload(&d->tex_cache,t->id,t->native,t->gpu_bytes,0)!=D9TEXCACHE_OK)
+        return D9_BACKEND;
+    return D9_OK;
+}
 int d9_texture_resource_info(D9Device *d,D9Handle h,unsigned *pool,
                              unsigned *usage,unsigned *format,
                              unsigned *levels,size_t *guest_bytes,
@@ -231,7 +272,7 @@ static int finish_texture_unlock(D9Device *d,Texture *t,unsigned level,int reado
     if(!t||level>=t->levels||t->locked!=level+1||d->scene||d->teardown)return D9_INVALID;
     Level *l=&t->level[level];
     if(!readonly&&!t->cpu_only&&level<t->gpu_levels){
-        size_t bytes=(size_t)l->w*l->h*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;const void *src=t->pixels+l->offset;
+        size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;const void *src=t->pixels+l->offset;
         int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):
             d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
         if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
@@ -256,12 +297,12 @@ int d9_release_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if
         if(rc==D9TEXCACHE_RELEASE_FAILED){
             D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
             if(e&&!e->has_guest){t->pixels=NULL;t->cpu_bytes=0;}
-            if(e&&!e->has_gpu){t->native=NULL;t->gpu_bytes=0;if(d->texture==h)d->texture=0;}
+            if(e&&!e->has_gpu){t->native=NULL;t->gpu_bytes=0;if(d->texture == h)d->texture=0;if(d->texture1 == h)d->texture1=0;}
             return D9_RELEASE_FAILED;
         }
         return D9_BACKEND;
     }
-    if(d->texture==h)d->texture=0;memset(t,0,sizeof *t);return D9_OK;}
+    if(d->texture == h)d->texture=0;if(d->texture1 == h)d->texture1=0;memset(t,0,sizeof *t);return D9_OK;}
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
     if(out)*out=0;
@@ -362,7 +403,6 @@ int d9_set_stream(D9Device *d,unsigned stream,D9Handle h,size_t offset,size_t st
 int d9_set_stream_source(D9Device *d,D9Handle h,size_t offset,size_t stride){return h&&stride<sizeof(D9Vertex)?D9_INVALID:d9_set_stream(d,0,h,offset,stride);}
 int d9_set_vertex_declaration(D9Device *d,const D9Decl *decl){if(!d)return D9_INVALID;if(!decl){d->decl_active=0;return D9_OK;}
     if(d9_decl_init(&d->declaration,decl->elements,decl->count))return D9_INVALID;d->decl_active=1;return D9_OK;}
-static void set_diagnosis(D9Device *d,const char *why){if(!d)return;if(!why)why="";snprintf(d->diagnosis,sizeof d->diagnosis,"%s",why);}
 const char *d9_last_draw_diagnostic(const D9Device *d){return d?d->diagnosis:"";}
 int d9_set_viewport_size(D9Device *d,unsigned width,unsigned height){
     if(!d||!width||!height||width>4096||height>4096)return D9_INVALID;
@@ -376,33 +416,34 @@ static int stage_arg_ok(unsigned arg,unsigned allow_current){
 int d9_set_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned value){
     if(!d)return D9_INVALID;
     if(stage>7){set_diagnosis(d,"SetTextureStageState: only stages 0..7 exist");return D9_UNSUPPORTED;}
-    if(stage){
+    if(stage>=d9_stage_count(d)){
         if(type!=D9_TSS_COLOROP&&type!=D9_TSS_ALPHAOP){
             set_diagnosis(d,"SetTextureStageState: only COLOROP/ALPHAOP are accepted on stages 1..7");return D9_UNSUPPORTED;}
         if(value!=D9_TOP_DISABLE){set_diagnosis(d,"SetTextureStageState: stage 1..7 must be DISABLE");return D9_UNSUPPORTED;}
         set_diagnosis(d,"");return D9_OK;
     }
+    D9DrawState *state=stage?&d->second:&d->state;
     switch(type){
     case D9_TSS_COLOROP:
     case D9_TSS_ALPHAOP:
         if(value!=D9_TOP_DISABLE&&value!=D9_TOP_SELECTARG1&&value!=D9_TOP_SELECTARG2&&value!=D9_TOP_MODULATE){
             set_diagnosis(d,"SetTextureStageState: only DISABLE/SELECTARG1/SELECTARG2/MODULATE are implemented");return D9_UNSUPPORTED;}
-        if(type==D9_TSS_COLOROP)d->state.stage_colorop=value;else d->state.stage_alphaop=value;
+        if(type==D9_TSS_COLOROP)state->stage_colorop=value;else state->stage_alphaop=value;
         break;
     case D9_TSS_COLORARG1:
     case D9_TSS_COLORARG2:
     case D9_TSS_ALPHAARG1:
     case D9_TSS_ALPHAARG2:
-        if(!stage_arg_ok(value,type==D9_TSS_COLORARG2||type==D9_TSS_ALPHAARG2)){
+        if(!stage_arg_ok(value,stage==1||type==D9_TSS_COLORARG2||type==D9_TSS_ALPHAARG2)){
             set_diagnosis(d,"SetTextureStageState: only DIFFUSE/TEXTURE (and CURRENT in ARG2) are implemented");return D9_UNSUPPORTED;}
-        if(type==D9_TSS_COLORARG1)d->state.stage_colorarg1=value;
-        else if(type==D9_TSS_COLORARG2)d->state.stage_colorarg2=value;
-        else if(type==D9_TSS_ALPHAARG1)d->state.stage_alphaarg1=value;
-        else d->state.stage_alphaarg2=value;
+        if(type==D9_TSS_COLORARG1)state->stage_colorarg1=value;
+        else if(type==D9_TSS_COLORARG2)state->stage_colorarg2=value;
+        else if(type==D9_TSS_ALPHAARG1)state->stage_alphaarg1=value;
+        else state->stage_alphaarg2=value;
         break;
     case D9_TSS_TEXCOORDINDEX:
-        if(value>7){set_diagnosis(d,"SetTextureStageState: TEXCOORDINDEX is limited to a plain index 0..7");return D9_UNSUPPORTED;}
-        d->state.stage_texcoordindex=value;break;
+        if((stage==1&&value!=0)||value>7){set_diagnosis(d,"SetTextureStageState: stage 1 supports only explicit TEXCOORDINDEX 0; stage 0 accepts indices 0..7");return D9_UNSUPPORTED;}
+        state->stage_texcoordindex=value;break;
     default:
         set_diagnosis(d,"SetTextureStageState: only COLOROP/COLORARG1/COLORARG2/ALPHAOP/ALPHAARG1/ALPHAARG2/TEXCOORDINDEX are implemented");
         return D9_UNSUPPORTED;
@@ -410,9 +451,13 @@ int d9_set_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned
     set_diagnosis(d,"");return D9_OK;
 }
 int d9_set_indices(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(d&&!h){d->index=0;return D9_OK;}if(!b||!b->kind||b->locked)return D9_INVALID;d->index=h;return D9_OK;}
-int d9_set_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if(!d||d->teardown||(h&&(!t||t->locked||!t->native||!t->level[0].uploaded)))return D9_INVALID;
+unsigned d9_stage_count(const D9Device *d){return d&&d->ops.draw_two?2:1;}
+int d9_set_texture(D9Device *d,D9Handle h){return d9_bind_texture(d,0,h);}
+int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
+    if(stage>=d9_stage_count(d)){if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");return D9_UNSUPPORTED;}
+    Texture *t=d?texture(d,h):NULL;if(!d||d->teardown||(h&&(!t||t->locked||!t->native||!t->level[0].uploaded)))return D9_INVALID;
     if(h){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
-    d->texture=h;return D9_OK;}
+    if(stage)d->texture1=h;else d->texture=h;return D9_OK;}
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;d->transforms[which]=*m;return D9_OK;}
@@ -432,8 +477,14 @@ static unsigned *sampler_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned 
     case 9:*min=0;*max=10;return &s->max_mip;default:return NULL;}}
 int d9_set_render_state(D9Device *d,unsigned id,unsigned v){unsigned lo,hi,*p=d?render_slot(&d->state,id,&lo,&hi):NULL;if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;}
 int d9_get_render_state(D9Device *d,unsigned id,unsigned *v){unsigned lo,hi,*p=d?render_slot(&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
-int d9_set_sampler_state(D9Device *d,unsigned id,unsigned v){unsigned lo,hi,*p=d?sampler_slot(&d->state,id,&lo,&hi):NULL;if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;}
-int d9_get_sampler_state(D9Device *d,unsigned id,unsigned *v){unsigned lo,hi,*p=d?sampler_slot(&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
+int d9_set_sampler_state(D9Device *d,unsigned id,unsigned v){return d9_set_unit_sampler(d,0,id,v);}
+int d9_set_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned v){
+    if(stage>=d9_stage_count(d))return D9_UNSUPPORTED;
+    unsigned lo,hi,*p=d?sampler_slot(stage?&d->second:&d->state,id,&lo,&hi):NULL;if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;}
+int d9_get_sampler_state(D9Device *d,unsigned id,unsigned *v){return d9_get_unit_sampler(d,0,id,v);}
+int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *v){
+    if(stage>=d9_stage_count(d))return D9_UNSUPPORTED;
+    unsigned lo,hi,*p=d?sampler_slot(stage?&d->second:&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
 int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){if(!d||d->teardown||d->scene)return D9_INVALID;if(d->ops.begin(d->ctx,argb))return D9_BACKEND;d->scene=1;
     Target *t=d->target?target(d,d->target):NULL;
     if((d->target&&!t)||(d->ops.target_bind&&d->ops.target_bind(d->ctx,t?t->native:NULL))||
@@ -497,6 +548,11 @@ static size_t triangle_index(unsigned type,size_t i){size_t t=i/3,c=i%3;
     if(type==D9_TRIANGLELIST)return i;
     if(type==D9_TRIANGLEFAN)return c?t+c:0;
     return t+((t&1)&&c<2?1-c:c);}
+/* Replicated texels preserve normalized point sampling, including wrap/clamp.
+ * A linear sample or mip transition would use a different physical footprint. */
+static int padded_filter_supported(const Texture *t,const D9DrawState *s){
+    return !t||(t->w>=8&&t->h>=8)||(s->min_filter==1&&s->mag_filter==1&&!s->mip_filter&&!s->max_mip);
+}
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
     if(up&&(!up->vertices||!up->stride||(up->indices&&up->index_size!=2&&up->index_size!=4)))return D9_INVALID;
@@ -507,6 +563,9 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
             ixdata=ix->data;ixbytes=ix->bytes;step=ix->kind==2?4:2;}
     }
     Texture *t=texture(d,d->texture);
+    if(!padded_filter_supported(t,&d->state)){
+        set_diagnosis(d,"Padded textures support point sampling at level zero");return D9_UNSUPPORTED;
+    }
     if(t&&(t->locked||!t->level[0].uploaded))return D9_INVALID;
     if(t&&d->decl_active&&d->declaration.uv==UINT32_MAX)return D9_INVALID;
     DrawStream streams[D9_MAX_STREAMS]={0};size_t max_index;if(prepare_streams(d,streams,&max_index,up))return D9_INVALID;
@@ -539,6 +598,29 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     }else if(d->shader_active)clip=d->shader_clip;
     else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
     D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
+    if(!state.pixel_shader && state.stage_colorop!=D9_TOP_DISABLE && d->second.stage_colorop!=D9_TOP_DISABLE){
+        Texture *second=texture(d,d->texture1);
+        if(!t||!second||!second->native||second->locked||!second->level[0].uploaded||
+           !d->ops.draw_two||d->second.stage_texcoordindex||state.stage_texcoordindex||
+           state.stage_alphaop==D9_TOP_DISABLE||d->second.stage_alphaop==D9_TOP_DISABLE){
+            set_diagnosis(d,"Two-stage FFP requires two ready textures, UV0 and active RGB/alpha operations");
+            return D9_UNSUPPORTED;
+        }
+        if(!padded_filter_supported(second,&d->second)){
+            set_diagnosis(d,"Padded stage-1 texture requires point sampling at level zero");return D9_UNSUPPORTED;
+        }
+        D9DrawState unit1=d->second;
+        while(unit1.resident_mips<second->gpu_levels&&second->level[unit1.resident_mips].uploaded)++unit1.resident_mips;
+        if(t==second && (state.address_u!=unit1.address_u||state.address_v!=unit1.address_v||
+            state.min_filter!=unit1.min_filter||state.mag_filter!=unit1.mag_filter||
+            state.mip_filter!=unit1.mip_filter||state.max_mip!=unit1.max_mip)){
+            set_diagnosis(d,"Shared texture with conflicting sampler settings is unsupported");return D9_UNSUPPORTED;
+        }
+        if(d->ops.draw_two(d->ctx,d->color_scratch,n,&clip,t->native,&state,second->native,&unit1)){
+            set_diagnosis(d,"Backend rejected two-stage fixed-function draw");return D9_BACKEND;
+        }
+        set_diagnosis(d,"");return D9_OK;
+    }
     int has_color=d->decl_active&&d->declaration.color!=UINT32_MAX;
     if(has_color){
         if(!d->ops.draw_colored){

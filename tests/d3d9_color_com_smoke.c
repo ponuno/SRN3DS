@@ -45,10 +45,17 @@ static int draw_colored(void *ctx,const D9ColorVertex *v,size_t n,const D9Matrix
     Mock *m=ctx;const char *why=NULL;assert(m->active&&v&&clip&&s&&n<=8);
     if(d9_color_tev_stage0(s,t!=NULL,&m->plan,&why))return -1;
     m->n=n;m->clip=*clip;m->state=*s;memcpy(m->cv,v,n*sizeof *v);++m->color_draws;return 0;}
+static unsigned two_draws;
+static int draw_two(void *ctx,const D9ColorVertex *v,size_t n,const D9Matrix *clip,
+                    void *t0,const D9DrawState *a,void *t1,const D9DrawState *b){
+    assert(t0 && t1 && t0!=t1 && b->stage_colorarg2==D9_TA_CURRENT);
+    ++two_draws;
+    return draw_colored(ctx,v,n,clip,t0,a);
+}
 static void end(void *ctx){Mock *m=ctx;assert(m->active);m->active=0;}
 static const D9Backend ops={
     .texture_create=tex_create,.texture_upload=tex_upload,.texture_delete=tex_delete,
-    .begin=begin,.draw=draw,.end=end,.draw_colored=draw_colored};
+    .begin=begin,.draw=draw,.end=end,.draw_colored=draw_colored,.draw_two=draw_two};
 
 typedef struct {uint32_t hr;} R;
 static R call(D9ComDemo *s,uint32_t obj,unsigned slot,const uint32_t *a,unsigned n){
@@ -61,6 +68,17 @@ int main(void){
     D9ComDemo s;
     if(d9_com_demo_init(&s,d)){fprintf(stderr,"init: %s\n",s.message);return 1;}
     const uint32_t OUT=0x10010400u;
+
+    const uint32_t CAPS=0x10010a00u;
+    assert(!call(&s,s.factory,14,(uint32_t[]){0,1,CAPS},3).hr);
+    assert(rd(&s,CAPS+148)==2 && rd(&s,CAPS+152)==2);
+    assert(!call(&s,s.device,7,&CAPS,1).hr);
+    assert(rd(&s,CAPS+28)==0x82000 && rd(&s,CAPS+148)==2 && rd(&s,CAPS+152)==2);
+    assert(!call(&s,s.device,23,(uint32_t[]){2,1,1,0,D9_A8R8G8B8,D9_POOL_MANAGED,OUT,0},8).hr);
+    uint32_t tiny=rd(&s,OUT);
+    assert(!call(&s,tiny,19,(uint32_t[]){0,OUT,0,0},4).hr);
+    assert(rd(&s,OUT)==8);
+    assert(!call(&s,tiny,20,(uint32_t[]){0},1).hr);
 
     typedef struct {float x,y,z,w;uint32_t color;float u,v;} RhwColorVertex;
     RhwColorVertex cv[4]={
@@ -130,6 +148,13 @@ int main(void){
     assert(m.color_draws==before+1);
     assert(m.plan.color_func==D9_CTEV_REPLACE&&m.plan.color_src[0]==D9_CTEV_SRC_CURRENT);
 
+    assert(!call(&s,s.device,65,(uint32_t[]){1,tiny},2).hr);
+    assert(!call(&s,s.device,67,(uint32_t[]){1,11,0},3).hr);
+    assert(!call(&s,s.device,67,(uint32_t[]){1,1,D9_TOP_MODULATE},3).hr);
+    assert(!call(&s,s.device,67,(uint32_t[]){1,4,D9_TOP_SELECTARG2},3).hr);
+    assert(!call(&s,s.device,82,drawargs,6).hr && two_draws==1);
+    assert(!call(&s,s.device,65,(uint32_t[]){1,0},2).hr);
+    assert(!call(&s,tiny,2,NULL,0).hr);
     assert(call(&s,s.device,42,NULL,0).hr==0);
     assert(call(&s,s.device,17,(uint32_t[]){0,0,0,0},4).hr==0);
 

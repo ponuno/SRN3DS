@@ -14,6 +14,7 @@
 .out outpos position
 .out outtc texcoord0
 .out outclr color
+.out outtc1 texcoord1
 
 .proc main
     mov r0.xyz, inpos
@@ -24,6 +25,8 @@
     dp4 outpos.w, clip[3], r0
     mov outtc.x, intex.x
     add outtc.y, ones, -intex.y
+    mov outtc1.x, intex.x
+    add outtc1.y, ones, -intex.y
     mov outclr, incolor
     end
 .end
