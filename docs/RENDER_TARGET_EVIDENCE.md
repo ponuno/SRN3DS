@@ -99,6 +99,18 @@ Full before/after table: `E:\Skyrim_N3DS_build\analysis\D3D9_RENDER_TARGET_TRACE
 - Built with `TESV_ARM_STEPS=2000000000` and the measurement-only memory probe.
   CIA packaging is not physical-device validation.
 
+### Two-stage texturing build (2026-11-25, supersedes the above for D3D9 work)
+
+- `.3dsx`: 2,047,804 bytes, SHA-256
+  `b9cbecfd241f6a1086175fdde0c8d7494ddfa62fdf3b7ae8084b2f49c8f66aa8`.
+- Both vertex shaders (`d9shader`, `d9shader_color`) are compiled by picasso and
+  linked; `GRAPHICS_COM` and `TESV_SLICE` link both.
+- Built with `TESV_ARM_STEPS=2000000000`. `-ForceMemProbe` is required on device:
+  without it the engine exits at `0x00f5894a` with "Not enough memory" before
+  reaching the renderer, which is the early memory check, not a regression.
+- The old `rtup` artifact remains the last one packaged as a 178 MiB CIA; the
+  two-stage build has no CIA yet.
+
 ## Azahar TESV 2B parity
 
 The final UP/GetViewport ARM binary with the same 2B budget completed the route
