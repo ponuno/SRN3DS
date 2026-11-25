@@ -110,6 +110,12 @@ Full before/after table: `E:\Skyrim_N3DS_build\analysis\D3D9_RENDER_TARGET_TRACE
   reaching the renderer, which is the early memory check, not a regression.
 - The old `rtup` artifact remains the last one packaged as a 178 MiB CIA; the
   two-stage build has no CIA yet.
+- Azahar 2B regression (`build_azahar/20261125-234906-tesv_twostage_memprobe_2b`):
+  `run rc=0`, `guest_used=52578496`, `steps=2000000000`,
+  `ExitProcess(0)` from `0x0069107d`, 22 functions, 3,724,518 calls,
+  IR cache 48,568 blocks. This is the same caps-gate exit as the previous
+  artifacts; the two-stage renderer adds no behaviour before the gate. The
+  runner labels it FAIL only because there is no PASS marker.
 
 ## Azahar TESV 2B parity
 
