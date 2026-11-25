@@ -17,11 +17,12 @@ slice expects the combined table in:
 | `pilot_05.c` | `f_803306A` | `D3DXVec3TransformNormal` (real body) | `pilot_vec3normal` |
 | `pilot_06.c` | `f_8032CBF` | `D3DXVec3Normalize` (real body) | `pilot_vec3normalize` |
 | `pilot_07.c` | `f_802FFFD` | `D3DXMatrixInverse` (real body) | `pilot_matrixinverse` |
-| `pilot_shims.c` | `f_081A65EC` | `_CIsqrt` CRT thunk for Vec3Normalize | part of `pilot_vec3normalize` |
+| `pilot_08.c` | `f_8032000` | `D3DXPlaneNormalize` (real body) | `pilot_planenormalize` |
+| `pilot_shims.c` | `f_081A65EC` | `_CIsqrt` CRT thunk for Vec3/Plane normalize | part of `pilot_vec3normalize`/`pilot_planenormalize` |
 | `pilot_shims.c` | `f_081A6694` | `_finite` CRT thunk for MatrixInverse | part of `pilot_matrixinverse` |
 
-`pilot_table.c` has eleven entries (eight imported exports plus the internal
-helper and the two CRT shims) and `g_fn_count_pilot = 11`. The
+`pilot_table.c` has twelve entries (nine imported exports plus the internal
+helper and the two CRT shims) and `g_fn_count_pilot = 12`. The
 `pilot_config.h` in that directory is the `D3DXMatrixMultiply` configuration
 used by `pilot_real`; the other tests have their own directories:
 
@@ -32,6 +33,7 @@ used by `pilot_real`; the other tests have their own directories:
 - `pilot_out_mult/D3DXVec3TransformNormal/gen`
 - `pilot_out_mult/D3DXVec3Normalize/gen`
 - `pilot_out_mult/D3DXMatrixInverse/gen`
+- `pilot_out_mult/D3DXPlaneNormalize/gen`
 
 ## Generate from the exact DLL
 
@@ -56,6 +58,8 @@ Use the DLL whose SHA-256 is
   C:\Windows\SysWOW64\D3DX9_42.dll staged <scratch-vec3normalize> --export D3DXVec3Normalize
 .venv\Scripts\python.exe tools\prepare_pilot.py `
   C:\Windows\SysWOW64\D3DX9_42.dll staged <scratch-matrixinverse> --export D3DXMatrixInverse
+.venv\Scripts\python.exe tools\prepare_pilot.py `
+  C:\Windows\SysWOW64\D3DX9_42.dll staged <scratch-planenormalize> --export D3DXPlaneNormalize
 ```
 
 Each run prints the generated directory as `Use PILOT_GEN=...`. The tool
@@ -63,8 +67,13 @@ resolves the lazy-ILT export through the initializer's real-body table and
 falls back to `entry+11` only when that address is a real body, not another
 wrapper. It also recognises direct calls to `jmp [IAT]` CRT thunks and emits
 `pilot_shims.c` for `_CIsqrt` (x87 ST(0) sqrt) and `_finite` (an 8-byte guest
-double at `[esp+4]`). `D3DXVec3TransformCoord` has two generated functions:
-the entry plus its internal helper `f_802E9DB`.
+double at `[esp+4]`). **Every generated host shim must pop the guest return
+address** (`c->r[4] += 4`) because `call_direct` pushes it before the call;
+the Win32 shims do the same. Bodies that restore `esp` from `ebp` hide a
+missing pop, but a frameless epilogue such as `D3DXPlaneNormalize`
+(`pop esi; pop ebp; ret 8`) returns 4 bytes short and `n3ds_lift_invoke`
+reports status -1 with final ESP `base+8`. `D3DXVec3TransformCoord` has two
+generated functions: the entry plus its internal helper `f_802E9DB`.
 
 ## Merge the combined table
 
@@ -75,20 +84,23 @@ the entry plus its internal helper `f_802E9DB`.
    plane-transform `pilot_00.c` there as `pilot_03.c`; copy the
    Vec3TransformCoord and Vec3TransformNormal sources as `pilot_04.c` and
    `pilot_05.c`; copy the Vec3Normalize source as `pilot_06.c`; copy the
-   MatrixInverse source as `pilot_07.c`; merge `pilot_shims.c` so it contains
-   both `_CIsqrt` and `_finite`.
+   MatrixInverse source as `pilot_07.c`; copy the PlaneNormalize source as
+   `pilot_08.c`; merge `pilot_shims.c` so it contains both `_CIsqrt` and
+   `_finite` **with the return-address pop**.
 3. Merge the `funcs_pilot.h` declarations and the `pilot_table.c` entries; set
-   `g_fn_count_pilot = 11`. Keep the table sorted by address: `0x802E9DB`,
-   `0x802FA80`, `0x802FCE0`, `0x802FD9D`, `0x802FFFD`, `0x8032303`,
-   `0x8032CBF`, `0x8032EAD`, `0x803306A`, `0x81A65EC`, `0x81A6694`.
+   `g_fn_count_pilot = 12`. Keep the table sorted by address: `0x802E9DB`,
+   `0x802FA80`, `0x802FCE0`, `0x802FD9D`, `0x802FFFD`, `0x8032000`,
+   `0x8032303`, `0x8032CBF`, `0x8032EAD`, `0x803306A`, `0x81A65EC`,
+   `0x81A6694`.
 4. Copy the generated directories to
    `pilot_out_mult/D3DXMatrixTranspose/gen`,
    `pilot_out_mult/D3DXMatrixMultiplyTranspose/gen`,
    `pilot_out_mult/D3DXPlaneTransform/gen`,
    `pilot_out_mult/D3DXVec3TransformCoord/gen`,
    `pilot_out_mult/D3DXVec3TransformNormal/gen`,
-   `pilot_out_mult/D3DXVec3Normalize/gen` and
-   `pilot_out_mult/D3DXMatrixInverse/gen` so their individual `pilot_*` tests
+   `pilot_out_mult/D3DXVec3Normalize/gen`,
+   `pilot_out_mult/D3DXMatrixInverse/gen` and
+   `pilot_out_mult/D3DXPlaneNormalize/gen` so their individual `pilot_*` tests
    can find the matching `pilot_config.h`.
 5. Do **not** run a single-export `prepare_pilot.py` directly into
    `pilot_out_mult/D3DXMatrixMultiply/gen`: it would replace the combined
@@ -102,19 +114,20 @@ directory is ignored; this tracked file is the durable reference.
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\run_host_tests.ps1 `
   -Only pilot_real,pilot_transpose,pilot_multranspose,pilot_planetransform,`
-        pilot_vec3coord,pilot_vec3normal,pilot_vec3normalize,pilot_matrixinverse
+        pilot_vec3coord,pilot_vec3normal,pilot_vec3normalize,pilot_planenormalize,`
+        pilot_matrixinverse
 ```
 
 Each test must print `PASS (3/3)`. A TESV slice built with the combined table
-logs `d3dx: 11 lifted function(s) registered` (eight exports plus the internal
+logs `d3dx: 12 lifted function(s) registered` (nine exports plus the internal
 Vec3TransformCoord helper and the two CRT shims).
 
 `pilot_vec3coord`/`pilot_vec3normal`/`pilot_vec3normalize` use a three-float
 output; the shared pilot runner selects that by case 6/7/8.
-`pilot_planetransform` uses four floats (case 11). `pilot_matrixinverse` uses a
-fixed invertible source matrix, compares all 16 output floats and checks the
-determinant written through the second argument. The surrounding canaries are
-still checked.
+`pilot_planenormalize` and `pilot_planetransform` use four floats (case
+10/11). `pilot_matrixinverse` uses a fixed invertible source matrix, compares
+all 16 output floats and checks the determinant written through the second
+argument. The surrounding canaries are still checked.
 
 ## Loader resolution
 
@@ -130,13 +143,18 @@ table entry negative case.
 
 ## Remaining imported bodies
 
-Not lifted yet: `D3DXMatrixInverse` `0x0802fffd`,
-`D3DXPlaneNormalize` `0x08032000`, and the plain-export
-`D3DXLoadSurfaceFromSurface` `0x080bcc2d` /
-`D3DXLoadSurfaceFromMemory` `0x080ba613` / `D3DXCompileShader` `0x080d95b3`.
-The `_CIsqrt` shim is integrated for `Vec3Normalize`. `PlaneNormalize` uses the
-same shim but its generated early-copy path/helper interaction misbalances the
-guest stack in the pilot (`status -1`, final ESP `base+8`); it is generated but
-not shipped. `MatrixInverse` needs the `_finite` shim and a determinant-output
-test before it can be integrated. The plain exports still need lifting or
-shims. A call to any of them still fails explicitly at its body address.
+The lazy-ILT/hotpatch layer is **complete**: all nine imported bodies are
+lifted and pass 3/3 (`MatrixMultiply`, `MatrixTranspose`,
+`MatrixMultiplyTranspose`, `PlaneTransform`, `Vec3TransformCoord`,
+`Vec3TransformNormal`, `Vec3Normalize`, `PlaneNormalize`, `MatrixInverse`),
+plus the internal helper and the two CRT shims. The PlaneNormalize stack bug
+was the missing guest-return-address pop in the pilot shims; the fixed shims
+are in the combined table.
+
+Remaining D3DX work is only the nine plain exports:
+`D3DXGetImageInfoFromFileInMemory`, `D3DXCreateTextureFromFileInMemory`,
+`D3DXCreateCubeTextureFromFileInMemory`, `D3DXCreateVolumeTextureFromFileInMemory`,
+`D3DXCompileShader`, `D3DXGetImageInfoFromFileA`, `D3DXCreateTextureFromFileExA`,
+`D3DXLoadSurfaceFromSurface`, `D3DXLoadSurfaceFromMemory`. They are not
+lazy-ILT thunks; they need host shims over the D3D9 COM/texture/surface layers
+or a lifted closure. A call to any of them still fails explicitly.

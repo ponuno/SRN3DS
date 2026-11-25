@@ -312,7 +312,12 @@ def prepare(dll, staged, out, requested):
                 raise ValueError("no generated block labels for execution guard")
             host = analysis.get("host_thunks", [])
             if host:
-                shim_lines = ['#include "x86.h"', '#include "guest.h"', '#include <math.h>', '#include <string.h>', '']
+                shim_lines = ['#include "x86.h"', '#include "guest.h"', '#include <math.h>', '#include <string.h>', '',
+                              '/* Every generated call site pushes a guest return address (call_direct),',
+                              ' * so a host shim is entered with it at [esp] and must consume it like the',
+                              ' * source/win32_*.c shims do.  A function that restores esp from its own',
+                              ' * frame hides a missing pop; a frameless epilogue such as',
+                              ' * D3DXPlaneNormalize (pop esi/pop ebp/ret 8) returns 4 bytes short. */']
                 extra = []
                 for a in host:
                     imp_name = iat.get(a)
@@ -321,9 +326,9 @@ def prepare(dll, staged, out, requested):
                         imp_name = iat.get(slot)
                     fn = f"f_{a:08X}"
                     if imp_name == "msvcrt.dll!_CIsqrt":
-                        shim_lines.append(f"void {fn}(CPU *c){{ (void)c; ST(0) = sqrt(ST(0)); }}")
+                        shim_lines.append(f"void {fn}(CPU *c){{ (void)c; ST(0) = sqrt(ST(0)); c->r[4] += 4; }}")
                     elif imp_name == "msvcrt.dll!_finite":
-                        shim_lines.append(f"void {fn}(CPU *c){{ double x=0; memcpy(&x, n3ds_guest_ptr(c->r[4] + 4, 8), 8); c->r[0] = isfinite(x) ? 1u : 0u; }}")
+                        shim_lines.append(f"void {fn}(CPU *c){{ double x=0; memcpy(&x, n3ds_guest_ptr(c->r[4] + 4, 8), 8); c->r[0] = isfinite(x) ? 1u : 0u; c->r[4] += 4; }}")
                     else:
                         raise ValueError(f"unsupported host import thunk {a:#x} ({imp_name})")
                     extra.append((a, fn))
