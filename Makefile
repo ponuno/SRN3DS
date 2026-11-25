@@ -191,7 +191,7 @@ D3DX_PILOT_GEN := $(CURDIR)/pilot_out_mult/D3DXMatrixMultiply/gen
 ifneq ($(wildcard $(D3DX_PILOT_GEN)/pilot_table.c),)
 export VPATH += $(D3DX_PILOT_GEN)
 export INCLUDE += -I$(D3DX_PILOT_GEN)
-export OFILES += pilot_00.o pilot_table.o
+export OFILES += pilot_00.o pilot_01.o pilot_02.o pilot_table.o
 endif
 endif
 .PHONY: all clean

@@ -30,12 +30,13 @@ static void expected(unsigned type,unsigned variant,float a[16],float b[16],floa
     args[0]=OUTPUT;args[1]=INPUT_A;args[2]=INPUT_B;*argc=2;
     if(type==1){for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)out[i*4+j]=a[j*4+i];}
     else if(type==4){*argc=3;for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)out[i*4+j]+=a[i*4+k]*b[k*4+j];}
+    else if(type==5){*argc=3;for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)out[i*4+j]+=a[j*4+k]*b[k*4+i];}
     else{float x=variant+0.5f,y=-(float)variant-2,z=3.25f;args[1]=fbits(x);args[2]=fbits(y);args[3]=fbits(z);*argc=4;
         out[15]=1;if(type==2){out[0]=x;out[5]=y;out[10]=z;}else{out[0]=out[5]=out[10]=1;out[12]=x;out[13]=y;out[14]=z;}}
 }
 int n3ds_pilot_run(const char *path,const PilotSpec *spec,const FnEntry *table,unsigned count,size_t budget,PilotResult *r){
     memset(r,0,sizeof *r);r->limit=budget;
-    if(!path||!spec||!spec->name||spec->test_case<1||spec->test_case>4||!table||!count)return fail(r,"Invalid pilot configuration");
+    if(!path||!spec||!spec->name||spec->test_case<1||spec->test_case>5||!table||!count)return fail(r,"Invalid pilot configuration");
     uint64_t bytes,hash;if(n3ds_pilot_identity(path,&bytes,&hash))return fail(r,"DLL missing or unreadable: %s",path);
     if(bytes!=spec->file_bytes||hash!=spec->fnv64)return fail(r,"DLL differs from the one used to generate C code");
     GuestMemory m;GuestProcess process={0};GuestImage image;int bound=0,rc=-1;guest_init(&m,budget);
