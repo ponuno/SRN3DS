@@ -91,7 +91,9 @@ occurs before this gate.
    a later call to `D3DXVec3TransformCoord` `0x0802f294`, `D3DXMatrixInverse`
    `0x0802fffd`, etc. would fail explicitly at the body address until those
    bodies are generated. `D3DXLoadSurface*`/`D3DXCompileShader` are plain
-   exports and still need lifting.
+   exports and still need lifting. A scratch pilot for `D3DXMatrixTranspose`
+   `0x0802fce0` (53 instructions) passes the 3/3 reference cases; it is not yet
+   in the shipped table.
 3. **HW T&L shipping gate (`0x00c6d8c6`).** Still deferred
    (`docs/HWTL_DECISION.md`); the probe is measurement-only.
 4. **Two texture stages (honest).** Implemented: a backend with `draw_two`
