@@ -1,0 +1,621 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-24T16:45:36.943511+00:00",
+  "dataset": {
+    "archive": "Skyrim - Shaders.bsa",
+    "include_update": false,
+    "packages_read": 122,
+    "packages_effective": 122,
+    "dump_chunks": 10475,
+    "dump_note": "temporary local bytecode; not committed"
+  },
+  "inventory_totals": {
+    "packages_effective": 122,
+    "chunks": 10475,
+    "ps": 9621,
+    "vs": 854,
+    "distinct_instruction_streams": 6655,
+    "distinct_opcode_sequences": 6455
+  },
+  "source_families": {
+    "ui/interface": {
+      "chunks": 314,
+      "ps": 195,
+      "vs": 119,
+      "distinct_instruction_streams": 113,
+      "distinct_opcode_sequences": 112,
+      "packages": 1
+    },
+    "sky": {
+      "chunks": 10,
+      "ps": 10,
+      "vs": 0,
+      "distinct_instruction_streams": 7,
+      "distinct_opcode_sequences": 7,
+      "packages": 1
+    },
+    "water": {
+      "chunks": 72,
+      "ps": 72,
+      "vs": 0,
+      "distinct_instruction_streams": 38,
+      "distinct_opcode_sequences": 38,
+      "packages": 1
+    },
+    "terrain/landscape": {
+      "chunks": 327,
+      "ps": 327,
+      "vs": 0,
+      "distinct_instruction_streams": 247,
+      "distinct_opcode_sequences": 247,
+      "packages": 11
+    },
+    "lighting/deferred/shadows": {
+      "chunks": 7175,
+      "ps": 6902,
+      "vs": 273,
+      "distinct_instruction_streams": 4824,
+      "distinct_opcode_sequences": 4700,
+      "packages": 91
+    },
+    "skinning/characters": {
+      "chunks": 2162,
+      "ps": 1872,
+      "vs": 290,
+      "distinct_instruction_streams": 1194,
+      "distinct_opcode_sequences": 1127,
+      "packages": 18
+    },
+    "particles/effects": {
+      "chunks": 284,
+      "ps": 172,
+      "vs": 112,
+      "distinct_instruction_streams": 167,
+      "distinct_opcode_sequences": 167,
+      "packages": 3
+    },
+    "grass/trees": {
+      "chunks": 0,
+      "ps": 0,
+      "vs": 0,
+      "distinct_instruction_streams": 0,
+      "distinct_opcode_sequences": 0,
+      "packages": 0
+    },
+    "post-process/imagespace": {
+      "chunks": 120,
+      "ps": 60,
+      "vs": 60,
+      "distinct_instruction_streams": 61,
+      "distinct_opcode_sequences": 58,
+      "packages": 1
+    },
+    "blit/copy": {
+      "chunks": 11,
+      "ps": 11,
+      "vs": 0,
+      "distinct_instruction_streams": 5,
+      "distinct_opcode_sequences": 3,
+      "packages": 1
+    }
+  },
+  "pipeline_families": {
+    "interface_text": {
+      "title": "Interface / text",
+      "inventory_note": "ui/interface is 314 chunks (195 PS, 119 VS); blit/copy is 11 PS. Scaleform text itself has no shipped .fxp and needs an explicit fixed glyph contract.",
+      "inventory_scope_note": "The .fxp utility inventory is ui/interface plus blit/copy; the three imagespace copies are cross-family structural reuse. Scaleform glyphs have no .fxp and therefore contribute zero inventory matches.",
+      "reference_source_families": [
+        "ui/interface",
+        "blit/copy",
+        "post-process/imagespace"
+      ],
+      "reference_inventory": {
+        "ui/interface": {
+          "chunks": 314,
+          "ps": 195,
+          "vs": 119,
+          "distinct_instruction_streams": 113,
+          "packages": 1
+        },
+        "blit/copy": {
+          "chunks": 11,
+          "ps": 11,
+          "vs": 0,
+          "distinct_instruction_streams": 5,
+          "packages": 1
+        },
+        "post-process/imagespace": {
+          "chunks": 120,
+          "ps": 60,
+          "vs": 60,
+          "distinct_instruction_streams": 61,
+          "packages": 1
+        }
+      },
+      "registered_descriptors": [
+        "ui.copy",
+        "ui.simple_fxp",
+        "ui.scaleform_glyph"
+      ],
+      "registered_support": {
+        "ui.copy": "structural",
+        "ui.simple_fxp": "structural",
+        "ui.scaleform_glyph": "structural"
+      },
+      "selected_chunks": 17,
+      "selected_ps": 17,
+      "selected_distinct_instruction_streams": 6,
+      "selected_by_source_family": {
+        "blit/copy": 8,
+        "particles/effects": 5,
+        "post-process/imagespace": 4
+      },
+      "descriptors": {
+        "ui.copy": {
+          "support": "structural",
+          "selected_chunks": 7,
+          "selected_ps": 7,
+          "selected_distinct_instruction_streams": 1,
+          "host_plan_builds_with_all_contracts": 7,
+          "host_plan_builds_without_preconditions": 7,
+          "selected_by_source_family": {
+            "post-process/imagespace": 3,
+            "blit/copy": 4
+          },
+          "examples": [
+            {
+              "package": "shadersfx\\imagespace002.fxp",
+              "meta": "0x00000000",
+              "offset": 4534,
+              "bytecode_bytes": 184,
+              "reflection_trailer_bytes": 78,
+              "instructions": 3,
+              "texture_samples": 1,
+              "ctab_names": 1
+            },
+            {
+              "package": "shadersfx\\imagespace002.fxp",
+              "meta": "0x00000000",
+              "offset": 5176,
+              "bytecode_bytes": 184,
+              "reflection_trailer_bytes": 78,
+              "instructions": 3,
+              "texture_samples": 1,
+              "ctab_names": 1
+            },
+            {
+              "package": "shadersfx\\imagespace002.fxp",
+              "meta": "0x00000000",
+              "offset": 69782,
+              "bytecode_bytes": 188,
+              "reflection_trailer_bytes": 78,
+              "instructions": 3,
+              "texture_samples": 1,
+              "ctab_names": 1
+            }
+          ]
+        },
+        "ui.simple_fxp": {
+          "support": "structural",
+          "selected_chunks": 10,
+          "selected_ps": 10,
+          "selected_distinct_instruction_streams": 5,
+          "host_plan_builds_with_all_contracts": 10,
+          "host_plan_builds_without_preconditions": 10,
+          "selected_by_source_family": {
+            "post-process/imagespace": 1,
+            "blit/copy": 4,
+            "particles/effects": 5
+          },
+          "examples": [
+            {
+              "package": "shadersfx\\imagespace002.fxp",
+              "meta": "0x00000000",
+              "offset": 63884,
+              "bytecode_bytes": 136,
+              "reflection_trailer_bytes": 78,
+              "instructions": 2,
+              "texture_samples": 0,
+              "ctab_names": 0
+            },
+            {
+              "package": "shadersfx\\shaders001.fxp",
+              "meta": "0x00000000",
+              "offset": 41458,
+              "bytecode_bytes": 136,
+              "reflection_trailer_bytes": 78,
+              "instructions": 2,
+              "texture_samples": 0,
+              "ctab_names": 0
+            },
+            {
+              "package": "shadersfx\\shaders001.fxp",
+              "meta": "0x00040002",
+              "offset": 1552190,
+              "bytecode_bytes": 204,
+              "reflection_trailer_bytes": 78,
+              "instructions": 3,
+              "texture_samples": 0,
+              "ctab_names": 1
+            }
+          ]
+        },
+        "ui.scaleform_glyph": {
+          "support": "structural",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    },
+    "sky": {
+      "title": "Sky",
+      "inventory_note": "10 PS, 7 distinct instruction streams, one package, 1-2 texture samples per chunk.",
+      "inventory_scope_note": "Only sky-classified PS chunks are referenced; no implementation is claimed.",
+      "reference_source_families": [
+        "sky"
+      ],
+      "reference_inventory": {
+        "sky": {
+          "chunks": 10,
+          "ps": 10,
+          "vs": 0,
+          "distinct_instruction_streams": 7,
+          "packages": 1
+        }
+      },
+      "registered_descriptors": [
+        "sky.atmosphere"
+      ],
+      "registered_support": {
+        "sky.atmosphere": "planned"
+      },
+      "selected_chunks": 0,
+      "selected_ps": 0,
+      "selected_distinct_instruction_streams": 0,
+      "selected_by_source_family": {},
+      "descriptors": {
+        "sky.atmosphere": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    },
+    "landscape": {
+      "title": "Landscape",
+      "inventory_note": "terrain/landscape is 327 PS, 247 distinct instruction streams, 11 packages, 3-15 texture samples per chunk.",
+      "inventory_scope_note": "All terrain/landscape PS chunks are referenced; multi-pass planning is not implementation.",
+      "reference_source_families": [
+        "terrain/landscape"
+      ],
+      "reference_inventory": {
+        "terrain/landscape": {
+          "chunks": 327,
+          "ps": 327,
+          "vs": 0,
+          "distinct_instruction_streams": 247,
+          "packages": 11
+        }
+      },
+      "registered_descriptors": [
+        "landscape.multitexture"
+      ],
+      "registered_support": {
+        "landscape.multitexture": "planned"
+      },
+      "selected_chunks": 0,
+      "selected_ps": 0,
+      "selected_distinct_instruction_streams": 0,
+      "selected_by_source_family": {},
+      "descriptors": {
+        "landscape.multitexture": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    },
+    "static_geometry": {
+      "title": "Static geometry",
+      "inventory_note": "No classifier family named static exists. The first accepted subset is six measured base-lit PS chunks inside lighting/deferred/shadows; this is not coverage of all 7,175 lighting chunks.",
+      "inventory_scope_note": "Semantic subset of lighting/deferred/shadows, not a classifier family. Only structurally matched base-lit chunks count as static coverage.",
+      "reference_source_families": [
+        "lighting/deferred/shadows"
+      ],
+      "reference_inventory": {
+        "lighting/deferred/shadows": {
+          "chunks": 7175,
+          "ps": 6902,
+          "vs": 273,
+          "distinct_instruction_streams": 4824,
+          "packages": 91
+        }
+      },
+      "registered_descriptors": [
+        "static.p5_mad_normal",
+        "static.p1200005_add_normal",
+        "static.diffuse_fallback"
+      ],
+      "registered_support": {
+        "static.p5_mad_normal": "preprocess",
+        "static.p1200005_add_normal": "preprocess",
+        "static.diffuse_fallback": "planned"
+      },
+      "selected_chunks": 6,
+      "selected_ps": 6,
+      "selected_distinct_instruction_streams": 2,
+      "selected_by_source_family": {
+        "lighting/deferred/shadows": 6
+      },
+      "descriptors": {
+        "static.p5_mad_normal": {
+          "support": "preprocess",
+          "selected_chunks": 5,
+          "selected_ps": 5,
+          "selected_distinct_instruction_streams": 1,
+          "host_plan_builds_with_all_contracts": 5,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {
+            "lighting/deferred/shadows": 5
+          },
+          "examples": [
+            {
+              "package": "shadersfx\\lighting\\059\\p5.fxp",
+              "meta": "0x00000005",
+              "offset": 12,
+              "bytecode_bytes": 840,
+              "reflection_trailer_bytes": 78,
+              "instructions": 24,
+              "texture_samples": 2,
+              "ctab_names": 8
+            },
+            {
+              "package": "shadersfx\\lighting\\059\\p5.fxp",
+              "meta": "0x00008085",
+              "offset": 13192,
+              "bytecode_bytes": 840,
+              "reflection_trailer_bytes": 78,
+              "instructions": 24,
+              "texture_samples": 2,
+              "ctab_names": 8
+            },
+            {
+              "package": "shadersfx\\lighting\\059\\p5.fxp",
+              "meta": "0x00008105",
+              "offset": 28416,
+              "bytecode_bytes": 840,
+              "reflection_trailer_bytes": 78,
+              "instructions": 24,
+              "texture_samples": 2,
+              "ctab_names": 8
+            }
+          ]
+        },
+        "static.p1200005_add_normal": {
+          "support": "preprocess",
+          "selected_chunks": 1,
+          "selected_ps": 1,
+          "selected_distinct_instruction_streams": 1,
+          "host_plan_builds_with_all_contracts": 1,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {
+            "lighting/deferred/shadows": 1
+          },
+          "examples": [
+            {
+              "package": "shadersfx\\lighting\\059\\p1200005.fxp",
+              "meta": "0x01200005",
+              "offset": 12,
+              "bytecode_bytes": 852,
+              "reflection_trailer_bytes": 78,
+              "instructions": 25,
+              "texture_samples": 2,
+              "ctab_names": 8
+            }
+          ]
+        },
+        "static.diffuse_fallback": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    },
+    "characters_animation": {
+      "title": "Characters / animation",
+      "inventory_note": "skinning/characters is 2,162 chunks (1,872 PS, 290 VS), 1,194 distinct instruction streams, 18 packages.",
+      "inventory_scope_note": "All skinning/characters chunks are referenced; no character plan is implemented.",
+      "reference_source_families": [
+        "skinning/characters"
+      ],
+      "reference_inventory": {
+        "skinning/characters": {
+          "chunks": 2162,
+          "ps": 1872,
+          "vs": 290,
+          "distinct_instruction_streams": 1194,
+          "packages": 18
+        }
+      },
+      "registered_descriptors": [
+        "characters.skinned_lit"
+      ],
+      "registered_support": {
+        "characters.skinned_lit": "planned"
+      },
+      "selected_chunks": 0,
+      "selected_ps": 0,
+      "selected_distinct_instruction_streams": 0,
+      "selected_by_source_family": {},
+      "descriptors": {
+        "characters.skinned_lit": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    },
+    "vegetation": {
+      "title": "Vegetation",
+      "inventory_note": "grass/trees has zero shipped chunks. Foliage rides lighting/059 with alpha test and vertex colour; selection must come from material/mesh metadata, not a fabricated bytecode family.",
+      "inventory_scope_note": "grass/trees is genuinely zero shipped chunks. Vegetation selection must come from material/mesh metadata; no bytecode coverage is invented.",
+      "reference_source_families": [
+        "grass/trees"
+      ],
+      "reference_inventory": {
+        "grass/trees": {
+          "chunks": 0,
+          "ps": 0,
+          "vs": 0,
+          "distinct_instruction_streams": 0,
+          "packages": 0
+        }
+      },
+      "registered_descriptors": [
+        "vegetation.material"
+      ],
+      "registered_support": {
+        "vegetation.material": "planned"
+      },
+      "selected_chunks": 0,
+      "selected_ps": 0,
+      "selected_distinct_instruction_streams": 0,
+      "selected_by_source_family": {},
+      "descriptors": {
+        "vegetation.material": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    },
+    "water": {
+      "title": "Water",
+      "inventory_note": "72 PS, 38 distinct instruction streams, one package, 24 branch-bearing chunks, 4-7 texture samples for most chunks.",
+      "inventory_scope_note": "All water PS chunks are referenced; reflection/refraction plans are not implemented.",
+      "reference_source_families": [
+        "water"
+      ],
+      "reference_inventory": {
+        "water": {
+          "chunks": 72,
+          "ps": 72,
+          "vs": 0,
+          "distinct_instruction_streams": 38,
+          "packages": 1
+        }
+      },
+      "registered_descriptors": [
+        "water.surface"
+      ],
+      "registered_support": {
+        "water.surface": "planned"
+      },
+      "selected_chunks": 0,
+      "selected_ps": 0,
+      "selected_distinct_instruction_streams": 0,
+      "selected_by_source_family": {},
+      "descriptors": {
+        "water.surface": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    },
+    "particles": {
+      "title": "Particles",
+      "inventory_note": "particles/effects is 284 chunks (172 PS, 112 VS), 167 distinct instruction streams. Most effect PS need 6-7 samples; BSEffectShaderProperty has no .fxp.",
+      "inventory_scope_note": "particles/effects is referenced. BSEffectShaderProperty has no .fxp; fixed billboard coverage cannot be measured from this archive.",
+      "reference_source_families": [
+        "particles/effects"
+      ],
+      "reference_inventory": {
+        "particles/effects": {
+          "chunks": 284,
+          "ps": 172,
+          "vs": 112,
+          "distinct_instruction_streams": 167,
+          "packages": 3
+        }
+      },
+      "registered_descriptors": [
+        "particles.billboard",
+        "particles.fxp_effect"
+      ],
+      "registered_support": {
+        "particles.billboard": "planned",
+        "particles.fxp_effect": "planned"
+      },
+      "selected_chunks": 0,
+      "selected_ps": 0,
+      "selected_distinct_instruction_streams": 0,
+      "selected_by_source_family": {},
+      "descriptors": {
+        "particles.billboard": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        },
+        "particles.fxp_effect": {
+          "support": "planned",
+          "selected_chunks": 0,
+          "selected_ps": 0,
+          "selected_distinct_instruction_streams": 0,
+          "host_plan_builds_with_all_contracts": 0,
+          "host_plan_builds_without_preconditions": 0,
+          "selected_by_source_family": {},
+          "examples": []
+        }
+      }
+    }
+  },
+  "measurement": {
+    "selection": "highest-priority implemented structural match across the registry",
+    "plan_contracts": "all preprocessing bits supplied for host-plan capability",
+    "hashes_used_for": "distinct instruction-stream counting only; never acceptance",
+    "parse_failures": 0,
+    "parse_failure_examples": []
+  },
+  "status_note": "Descriptor/plan coverage only. No D3D9 COM hook, GPU upload, asset preprocessing implementation or complete menu/world frame is claimed."
+}

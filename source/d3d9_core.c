@@ -1,0 +1,639 @@
+#include "d3d9_core.h"
+#include "d3d9_bc.h"
+#include "d3d9_texcache.h"
+#include "d3d9_texture_data.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+
+enum {MAX_BUFFERS=32,MAX_TEXTURES=16,MAX_TARGETS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
+typedef struct {
+    D9Handle id;size_t offset,stride;
+} Stream;
+typedef struct {
+    D9Handle id;unsigned w,h,format,lockable;size_t bytes;void *native;
+} Target;
+typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
+typedef struct {
+    D9Handle id;unsigned w,h,format,levels,gpu_levels,locked,pool,usage;
+    int cpu_only,gpu_only,disposable,cache_pinned;
+    size_t cost,cpu_bytes,gpu_bytes;uint8_t *pixels;void *native;Level level[MAX_LEVELS];
+} Texture;
+struct D9Device {
+    D9Backend ops;void *ctx;size_t used,limit;D9Handle next;int teardown;
+    Buffer buffers[MAX_BUFFERS];Texture textures[MAX_TEXTURES];
+    Target targets[MAX_TARGETS];D9Handle target;size_t target_used;
+    unsigned back_w,back_h,back_format;int back_valid;int blit_error;
+    D9TexEntry tex_entries[MAX_TEXTURES];D9TexCache tex_cache;
+    Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
+    D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state;
+    D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
+    D9ColorVertex color_scratch[MAX_DRAW_VERTICES];unsigned color_scratch_count;
+    unsigned view_w,view_h;
+    char diagnosis[224];
+};
+static int cache_release_guest(void *ctx,void *guest,size_t bytes){(void)ctx;(void)bytes;free(guest);return 0;}
+static int cache_release_gpu(void *ctx,void *gpu,size_t bytes){
+    D9Device *d=ctx;(void)bytes;
+    if(d->ops.texture_release)return d->ops.texture_release(d->ctx,gpu);
+    d->ops.texture_delete(d->ctx,gpu);return 0;
+}
+static size_t memory_sum(size_t a,size_t b){return b>SIZE_MAX-a?SIZE_MAX:a+b;}
+static int budget_has_room(const D9Device *d,size_t bytes){
+    size_t used=d9_memory_used(d);return used>d->limit||bytes>d->limit-used?D9_MEMORY:D9_OK;
+}
+void d9_matrix_identity(D9Matrix *m){memset(m,0,sizeof *m);for(unsigned i=0;i<4;++i)m->m[i][i]=1.0f;}
+void d9_matrix_multiply(D9Matrix *out,const D9Matrix *a,const D9Matrix *b){
+    D9Matrix t={0};for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)t.m[i][j]+=a->m[i][k]*b->m[k][j];*out=t;
+}
+void d9_pica_transform(D9Matrix *out,const D9Matrix *w,const D9Matrix *v,const D9Matrix *p){
+    D9Matrix a,b;d9_matrix_multiply(&a,w,v);d9_matrix_multiply(&b,&a,p);
+    /* D3D row-vector -> GPU column-vector, rotated top LCD, clip z [0,w] -> [-w,0]. */
+    for(unsigned i=0;i<4;++i){out->m[0][i]=b.m[i][1];out->m[1][i]=-b.m[i][0];out->m[2][i]=b.m[i][2]-b.m[i][3];out->m[3][i]=b.m[i][3];}
+}
+static int pow2(unsigned n){return n&&n<=1024&&!(n&(n-1));}
+static int dim(unsigned n){return n>=8&&pow2(n);}
+int d9_texture_layout(unsigned w,unsigned h,unsigned f,size_t *pitch,size_t *bytes){
+    if(!pitch||!bytes||!pow2(w)||!pow2(h))return D9_INVALID;
+    unsigned bb=d9_bc_block_bytes(f);
+    if(bb){*pitch=(size_t)((w+3)/4)*bb;*bytes=*pitch*((h+3)/4);return D9_OK;}
+    if(f!=D9_A8R8G8B8&&f!=D9_X8R8G8B8)return D9_INVALID;*pitch=(size_t)w*4;*bytes=*pitch*h;return D9_OK;
+}
+int d9_swizzle_rgba8(void *dst,size_t bytes,const void *src,size_t pitch,unsigned w,unsigned h,unsigned fmt){
+    if(!dst||!src||!dim(w)||!dim(h)||pitch<(size_t)w*4||pitch>(SIZE_MAX-(size_t)w*4)/(h-1)||bytes<(size_t)w*h*4||
+       (fmt!=D9_A8R8G8B8&&fmt!=D9_X8R8G8B8))return D9_INVALID;
+    uint8_t *out=dst;const uint8_t *in=src;
+    for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
+        /* PICA texture origin is bottom-left; D3D surface rows are top-first. */
+        unsigned ty=h-1-y,morton=0;
+        for(unsigned b=0;b<3;++b){morton|=((x>>b)&1)<<(2*b);morton|=((ty>>b)&1)<<(2*b+1);}
+        size_t i=((size_t)(ty/8)*(w/8)+x/8)*64+morton;
+        const uint8_t *s=in+(size_t)y*pitch+x*4;uint8_t *d=out+i*4;
+        d[0]=fmt==D9_X8R8G8B8?255:s[3];d[1]=s[0];d[2]=s[1];d[3]=s[2];
+    }return D9_OK;
+}
+int d9_unswizzle_rgba8(void *dst,size_t dst_pitch,const void *src,
+                       unsigned w,unsigned h,unsigned format,
+                       unsigned x,unsigned y,unsigned rw,unsigned rh){
+    if(!dst||!src||!dim(w)||!dim(h)||x>w||y>h||rw>w-x||rh>h-y||
+       dst_pitch<(size_t)w*4||dst_pitch>(SIZE_MAX-(size_t)w*4)/(h-1)||
+       (format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))return D9_INVALID;
+    uint8_t *out=dst;const uint8_t *in=src;
+    for(unsigned yy=0;yy<rh;++yy)for(unsigned xx=0;xx<rw;++xx){
+        unsigned px=x+xx,py=y+yy,ty=h-1-py,morton=0;
+        for(unsigned b=0;b<3;++b){morton|=((px>>b)&1)<<(2*b);morton|=((ty>>b)&1)<<(2*b+1);}
+        size_t i=((size_t)(ty/8)*(w/8)+px/8)*64+morton;
+        const uint8_t *s=in+i*4;uint8_t *d=out+(size_t)py*dst_pitch+(size_t)px*4;
+        d[0]=s[1];d[1]=s[2];d[2]=s[3];d[3]=format==D9_X8R8G8B8?255:s[0];
+    }return D9_OK;
+}
+D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
+    if(!ops||!ops->texture_create||!ops->texture_upload||!ops->texture_delete||!ops->begin||!ops->draw||!ops->end||!limit)return NULL;
+    D9Device *d=calloc(1,sizeof *d);if(!d)return NULL;d->ops=*ops;d->ctx=ctx;d->limit=limit;d->next=1;
+    D9TexCacheOps cache_ops={d,cache_release_guest,cache_release_gpu};
+    if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEXTURES,&cache_ops,0,0)){
+        free(d);return NULL;
+    }
+    d->state=(D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
+        .address_u=1,.address_v=1,.mag_filter=1,.min_filter=1,.mip_filter=0,
+        .stage_colorop=D9_TOP_SELECTARG1,.stage_colorarg1=D9_TA_TEXTURE,.stage_colorarg2=D9_TA_CURRENT,
+        .stage_alphaop=D9_TOP_SELECTARG1,.stage_alphaarg1=D9_TA_TEXTURE,.stage_alphaarg2=D9_TA_CURRENT,
+        .stage_texcoordindex=0};
+    for(unsigned i=0;i<3;++i)d9_matrix_identity(&d->transforms[i]);return d;
+}
+static Buffer *buffer(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_BUFFERS;++i)if(d->buffers[i].id==id)return &d->buffers[i];return NULL;}
+static Texture *texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_TEXTURES;++i)if(d->textures[i].id==id)return &d->textures[i];return NULL;}
+int d9_destroy_device_ex(D9Device *d){
+    if(!d)return D9_INVALID;d->teardown=1;
+    if(d->scene){d->ops.end(d->ctx);d->scene=0;}
+    int rc=d9_texcache_destroy_ex(&d->tex_cache);
+    if(rc!=D9TEXCACHE_OK)return D9_RELEASE_FAILED;
+    for(unsigned i=0;i<MAX_BUFFERS;++i)free(d->buffers[i].data);
+    for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id){
+        if(d->ops.target_delete)d->ops.target_delete(d->ctx,d->targets[i].native);
+    }
+    d->target_used=0;
+    free(d);return D9_OK;
+}
+void d9_destroy_device(D9Device *d){if(d)(void)d9_destroy_device_ex(d);}
+static int create_buffer(D9Device *d,size_t bytes,unsigned kind,D9Handle *out){
+    if(!d||d->scene||d->teardown||!bytes||!out||!d->next)return D9_INVALID;
+    if(budget_has_room(d,bytes))return D9_MEMORY;
+    for(unsigned i=0;i<MAX_BUFFERS;++i)if(!d->buffers[i].id){uint8_t *data=calloc(1,bytes);if(!data)return D9_MEMORY;
+        D9Handle id=d->next++;d->buffers[i]=(Buffer){id,kind,data,bytes,0};d->used+=bytes;*out=id;return D9_OK;}
+    return D9_MEMORY;
+}
+int d9_create_vertex_buffer(D9Device *d,size_t bytes,D9Handle *out){return create_buffer(d,bytes,0,out);}
+int d9_create_index_buffer(D9Device *d,size_t bytes,unsigned fmt,D9Handle *out){if(fmt==D9_INDEX16&&!(bytes&1))return create_buffer(d,bytes,1,out);
+    if(fmt==D9_INDEX32&&!(bytes&3))return create_buffer(d,bytes,2,out);return D9_INVALID;}
+int d9_buffer_lock(D9Device *d,D9Handle h,size_t off,size_t bytes,void **ptr){
+    if(!d||d->scene||!ptr)return D9_INVALID;Buffer *b=buffer(d,h);
+    if(!b||b->locked||off>=b->bytes||bytes>b->bytes-off)return D9_INVALID;b->locked=1;*ptr=b->data+off;return D9_OK;
+}
+int d9_buffer_unlock(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(!b||!b->locked)return D9_INVALID;b->locked=0;return D9_OK;}
+int d9_release_buffer(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(!b||b->locked||d->scene)return D9_INVALID;
+    for(unsigned i=0;i<D9_MAX_STREAMS;++i)if(d->streams[i].id==h)d->streams[i]=(Stream){0};
+    if(d->index==h)d->index=0;d->used-=b->bytes;free(b->data);memset(b,0,sizeof *b);return D9_OK;}
+static void delete_unowned_native(D9Device *d,void *native){if(native)d->ops.texture_delete(d->ctx,native);}
+int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned levels,
+                         unsigned pool,unsigned usage,int disposable,D9Handle *out){
+    if(!d||d->scene||d->teardown||!out||!d->next||!dim(w)||!dim(h)||pool>D9_POOL_SYSTEMMEM)return D9_INVALID;
+    Texture t={.w=w,.h=h,.format=fmt,.pool=pool,.usage=usage,.disposable=disposable?1:0,
+               .cpu_only=pool==D9_POOL_SYSTEMMEM};size_t cpu=0,gpu=0;unsigned max=1,a=w,b=h;
+    while(a>1||b>1){if(a>1)a>>=1;if(b>1)b>>=1;++max;}
+    if(!levels)levels=max;if(levels>max||levels>MAX_LEVELS)return D9_INVALID;t.levels=levels;a=w;b=h;
+    for(unsigned i=0;i<levels;++i){Level *l=&t.level[i];l->w=a;l->h=b;l->offset=cpu;if(d9_texture_layout(a,b,fmt,&l->pitch,&l->bytes))return D9_INVALID;
+        cpu+=l->bytes;if(a>=8&&b>=8){++t.gpu_levels;gpu+=(size_t)a*b*4;}if(a>1)a>>=1;if(b>1)b>>=1;}
+    if(t.cpu_only)t.gpu_levels=0;
+    t.cpu_bytes=cpu;t.gpu_bytes=t.cpu_only?0:gpu;t.cost=cpu+t.gpu_bytes;
+    if(budget_has_room(d,t.cost))return D9_MEMORY;
+    Texture *slot=NULL;for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
+    if(!slot)return D9_MEMORY;
+    t.pixels=calloc(1,cpu);if(!t.pixels)return D9_MEMORY;
+    if(!t.cpu_only){
+        if(d->ops.texture_create(d->ctx,w,h,t.gpu_levels,&t.native)||!t.native){delete_unowned_native(d,t.native);free(t.pixels);return D9_BACKEND;}
+    }
+    D9Handle key=d->next;
+    if(d9_texcache_add_guest(&d->tex_cache,key,t.pixels,cpu,1)!=D9TEXCACHE_OK){
+        delete_unowned_native(d,t.native);free(t.pixels);return D9_BACKEND;
+    }
+    if(!t.cpu_only){
+        D9TexGpuRegistration reg={t.native,t.gpu_bytes,1,cache_release_gpu,d,D9TEXCACHE_NO_REHYDRATE_TOKEN};
+        if(d9_texcache_attach_gpu(&d->tex_cache,key,&reg)!=D9TEXCACHE_OK){
+            (void)d9_texcache_remove(&d->tex_cache,key);delete_unowned_native(d,t.native);return D9_BACKEND;
+        }
+    }
+    t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
+}
+int d9_create_texture_levels(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned levels,D9Handle *out){
+    return d9_create_texture_ex(d,w,h,fmt,levels,D9_POOL_DEFAULT,0,0,out);
+}
+int d9_create_texture(D9Device *d,unsigned w,unsigned h,unsigned f,D9Handle *out){return d9_create_texture_levels(d,w,h,f,1,out);}
+int d9_create_texture_sktx(D9Device *d,const void *sktx_data,size_t bytes,
+                           unsigned pool,unsigned usage,D9Handle *out){
+    if(!d||d->scene||d->teardown||!sktx_data||!out||!d->next||pool>D9_POOL_MANAGED||
+       !d->ops.texture_create_encoded||!d->ops.texture_upload_encoded)return D9_INVALID;
+    D9Sktx sktx;if(d9_sktx_parse(sktx_data,bytes,&sktx))return D9_INVALID;
+    if(!dim(sktx.width)||!dim(sktx.height)||sktx.levels>MAX_LEVELS)return D9_INVALID;
+    unsigned pw=sktx.width,ph=sktx.height;
+    for(unsigned i=0;i<sktx.levels;++i){
+        if(sktx.level[i].width!=pw||sktx.level[i].height!=ph||pw<8||ph<8)return D9_INVALID;
+        if(pw>1)pw>>=1;if(ph>1)ph>>=1;
+    }
+    if(budget_has_room(d,sktx.data_bytes))return D9_MEMORY;
+    Texture *slot=NULL;for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
+    if(!slot)return D9_MEMORY;
+    Texture t={.w=sktx.width,.h=sktx.height,.format=sktx.format,.levels=sktx.levels,
+               .gpu_levels=sktx.levels,.pool=pool,.usage=usage,.gpu_only=1,
+               .gpu_bytes=sktx.data_bytes,.cost=sktx.data_bytes};
+    if(d->ops.texture_create_encoded(d->ctx,t.w,t.h,t.levels,t.format,&t.native)||!t.native){delete_unowned_native(d,t.native);return D9_BACKEND;}
+    for(unsigned i=0;i<t.levels;++i){
+        if(d->ops.texture_upload_encoded(d->ctx,t.native,i,sktx.level[i].data,sktx.level[i].bytes)){
+            delete_unowned_native(d,t.native);return D9_BACKEND;
+        }
+    }
+    D9TexGpuRegistration reg={t.native,t.gpu_bytes,1,cache_release_gpu,d,D9TEXCACHE_NO_REHYDRATE_TOKEN};
+    if(d9_texcache_add_gpu(&d->tex_cache,d->next,&reg)!=D9TEXCACHE_OK){
+        delete_unowned_native(d,t.native);return D9_BACKEND;
+    }
+    size_t offset=0;
+    for(unsigned i=0;i<t.levels;++i){Level *l=&t.level[i];l->w=sktx.level[i].width;l->h=sktx.level[i].height;
+        l->offset=offset;l->bytes=sktx.level[i].bytes;l->uploaded=1;offset+=l->bytes;}
+    t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
+}
+unsigned d9_texture_levels(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;return t?t->levels:0;}
+int d9_texture_level_info(D9Device *d,D9Handle h,unsigned level,unsigned *w,unsigned *height,size_t *pitch,size_t *bytes){Texture *t=d?texture(d,h):NULL;
+    if(!t||level>=t->levels)return D9_INVALID;Level *l=&t->level[level];if(w)*w=l->w;if(height)*height=l->h;if(pitch)*pitch=l->pitch;if(bytes)*bytes=l->bytes;return D9_OK;}
+int d9_texture_resource_info(D9Device *d,D9Handle h,unsigned *pool,
+                             unsigned *usage,unsigned *format,
+                             unsigned *levels,size_t *guest_bytes,
+                             size_t *gpu_bytes,int *cpu_only,int *gpu_only){
+    Texture *t=d?texture(d,h):NULL;if(!t)return D9_INVALID;
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+    if(pool)*pool=t->pool;if(usage)*usage=t->usage;if(format)*format=t->format;if(levels)*levels=t->levels;
+    if(guest_bytes)*guest_bytes=e&&e->has_guest?e->guest_bytes:0;
+    if(gpu_bytes)*gpu_bytes=e&&e->has_gpu?e->gpu_bytes:0;
+    if(cpu_only)*cpu_only=t->cpu_only;if(gpu_only)*gpu_only=t->gpu_only;return D9_OK;
+}
+int d9_texture_lock_level_ex(D9Device *d,D9Handle h,unsigned level,void **ptr,size_t *pitch,int readonly){
+    Texture *t=d?texture(d,h):NULL;
+    if(!t||d->scene||d->teardown||t->locked||!t->pixels||!ptr||!pitch||level>=t->levels)return D9_INVALID;
+    if(d9_texcache_pin(&d->tex_cache,h)!=D9TEXCACHE_OK)return D9_INVALID;
+    Level *l=&t->level[level];t->locked=level+1;t->cache_pinned=1;*ptr=t->pixels+l->offset;*pitch=l->pitch;
+    (void)readonly;return D9_OK;
+}
+int d9_texture_lock_level(D9Device *d,D9Handle h,unsigned level,void **ptr,size_t *pitch){
+    return d9_texture_lock_level_ex(d,h,level,ptr,pitch,0);
+}
+static int finish_texture_unlock(D9Device *d,Texture *t,unsigned level,int readonly){
+    if(!t||level>=t->levels||t->locked!=level+1||d->scene||d->teardown)return D9_INVALID;
+    Level *l=&t->level[level];
+    if(!readonly&&!t->cpu_only&&level<t->gpu_levels){
+        size_t bytes=(size_t)l->w*l->h*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;const void *src=t->pixels+l->offset;
+        int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):
+            d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
+        if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
+        free(tmp);if(rc)return rc;
+    }
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,t->id);
+    int rc=D9TEXCACHE_OK;
+    if(!readonly&&!t->cpu_only&&e&&e->has_gpu&&!e->gpu_ready)
+        rc=d9_texcache_commit_upload(&d->tex_cache,t->id,t->native,t->gpu_bytes,0);
+    else
+        rc=d9_texcache_abort_upload(&d->tex_cache,t->id);
+    if(rc!=D9TEXCACHE_OK)return D9_BACKEND;
+    t->locked=0;t->cache_pinned=0;if(!readonly)l->uploaded=1;return D9_OK;
+}
+int d9_texture_unlock_level(D9Device *d,D9Handle h,unsigned level){Texture *t=d?texture(d,h):NULL;return finish_texture_unlock(d,t,level,0);}
+int d9_texture_lock(D9Device *d,D9Handle h,void **ptr,size_t *pitch){return d9_texture_lock_level(d,h,0,ptr,pitch);}
+int d9_texture_unlock(D9Device *d,D9Handle h){return d9_texture_unlock_level(d,h,0);}
+int d9_texture_unlock_readonly(D9Device *d,D9Handle h,unsigned level){Texture *t=d?texture(d,h):NULL;return finish_texture_unlock(d,t,level,1);}
+int d9_release_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if(!t||d->scene||d->teardown||t->locked)return D9_INVALID;
+    int rc=d9_texcache_remove(&d->tex_cache,h);
+    if(rc!=D9TEXCACHE_OK){
+        if(rc==D9TEXCACHE_RELEASE_FAILED){
+            D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+            if(e&&!e->has_guest){t->pixels=NULL;t->cpu_bytes=0;}
+            if(e&&!e->has_gpu){t->native=NULL;t->gpu_bytes=0;if(d->texture==h)d->texture=0;}
+            return D9_RELEASE_FAILED;
+        }
+        return D9_BACKEND;
+    }
+    if(d->texture==h)d->texture=0;memset(t,0,sizeof *t);return D9_OK;}
+static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
+int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
+    if(out)*out=0;
+    if(!d||d->scene||d->teardown||!out||!d->next||w<8||h<8||w>1024||h>1024||
+       (w&(w-1))||(h&(h-1))||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
+       !d->ops.target_create||!d->ops.target_delete||!d->ops.target_bind||!d->ops.target_clear||
+       (lockable&&!d->ops.target_read))return D9_INVALID;
+    size_t bytes=(size_t)w*h*4;if(budget_has_room(d,bytes))return D9_MEMORY;
+    Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
+    if(!slot)return D9_MEMORY;void *native=NULL;
+    if(d->ops.target_create(d->ctx,w,h,format,&native)||!native){
+        if(native)d->ops.target_delete(d->ctx,native);
+        return D9_BACKEND;
+    }
+    D9Handle id=d->next++;*slot=(Target){id,w,h,format,lockable?1:0,bytes,native};
+    d->target_used+=bytes;*out=id;return D9_OK;
+}
+int d9_set_render_target(D9Device *d,D9Handle h){
+    if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
+    Target *t=target(d,h);void *native=t?t->native:NULL;
+    if(d->scene&&d->ops.target_bind(d->ctx,native))return D9_BACKEND;
+    d->target=h;return D9_OK;
+}
+D9Handle d9_get_render_target(const D9Device *d){return d?d->target:0;}
+int d9_render_target_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height,
+                          unsigned *format,unsigned *lockable,size_t *bytes){
+    Target *t=target(d,h);if(!t)return D9_INVALID;
+    if(w)*w=t->w;if(height)*height=t->h;if(format)*format=t->format;
+    if(lockable)*lockable=t->lockable;if(bytes)*bytes=t->bytes;return D9_OK;
+}
+int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
+                          unsigned x,unsigned y,unsigned w,unsigned height){
+    Target *t=target(d,h);if(!t||!d||!dst||!dst_pitch||d->scene)return D9_INVALID;
+    if(!d->ops.target_read)return D9_BACKEND;
+    if(x>t->w||y>t->h||w>t->w-x||height>t->h-y)return D9_INVALID;
+    return d->ops.target_read(d->ctx,t->native,dst,dst_pitch,x,y,w,height)?D9_BACKEND:D9_OK;
+}
+int d9_release_render_target(D9Device *d,D9Handle h){Target *t=target(d,h);if(!t||!d||d->scene||d->teardown)return D9_INVALID;
+    if(d->target==h)d->target=0;
+    if(d->ops.target_delete)d->ops.target_delete(d->ctx,t->native);
+    d->target_used-=t->bytes;memset(t,0,sizeof *t);return D9_OK;}
+int d9_set_back_buffer_info(D9Device *d,unsigned w,unsigned h,unsigned format){
+    if(!d||d->teardown||!w||!h||w>16384||h>16384||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))return D9_INVALID;
+    d->back_w=w;d->back_h=h;d->back_format=format;d->back_valid=1;return D9_OK;
+}
+int d9_get_back_buffer_info(const D9Device *d,unsigned *w,unsigned *h,unsigned *format){
+    if(!d||!d->back_valid)return D9_INVALID;
+    if(w)*w=d->back_w;if(h)*h=d->back_h;if(format)*format=d->back_format;return D9_OK;
+}
+static int blit_rect(const D9Rect *r,unsigned w,unsigned h,D9BlitRegion *out){
+    int left=0,top=0,right=(int)w,bottom=(int)h;
+    if(r){left=r->left;top=r->top;right=r->right;bottom=r->bottom;}
+    if(left<0||top<0||right<=left||bottom<=top)return D9_INVALID;
+    if((uint64_t)right>w||(uint64_t)bottom>h)return D9_INVALID;
+    out->x=(unsigned)left;out->y=(unsigned)top;
+    out->width=(unsigned)(right-left);out->height=(unsigned)(bottom-top);
+    return D9_OK;
+}
+int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
+            D9Handle src,const D9Rect *src_rect,unsigned filter){
+    if(!d){return D9_INVALID;}
+    d->blit_error=D9_BLIT_ARGUMENT;
+    if(d->teardown||filter>D9_FILTER_LINEAR)return D9_INVALID;
+    Target *st=target(d,src),*dt=target(d,dst);
+    if((src&&!st)||(dst&&!dt))return D9_INVALID;
+    if(src==dst){d->blit_error=D9_BLIT_SAME_SURFACE;return D9_INVALID;}
+    D9BlitRegion sreg={{0}},dreg={{0}};
+    if(src)sreg.surface=(D9BlitSurface){st->native,st->w,st->h,st->format};
+    else{
+        if(!d->back_valid)return D9_INVALID;
+        sreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format};
+    }
+    if(dst)dreg.surface=(D9BlitSurface){dt->native,dt->w,dt->h,dt->format};
+    else{
+        if(!d->back_valid)return D9_INVALID;
+        dreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format};
+    }
+    if(sreg.surface.format!=dreg.surface.format){d->blit_error=D9_BLIT_FORMAT;return D9_INVALID;}
+    if(blit_rect(src_rect,sreg.surface.width,sreg.surface.height,&sreg)||
+       blit_rect(dst_rect,dreg.surface.width,dreg.surface.height,&dreg)){
+        d->blit_error=D9_BLIT_RECT;return D9_INVALID;
+    }
+    if(!d->ops.target_blit){d->blit_error=D9_BLIT_UNSUPPORTED;return D9_BACKEND;}
+    int rc=d->ops.target_blit(d->ctx,&dreg,&sreg,filter);
+    d->blit_error=rc==D9_BLIT_OK?D9_BLIT_OK:rc<0?rc:D9_BLIT_BACKEND;
+    /* The backend is allowed to switch its native target, and the caller's
+     * selected target must survive even a rejected copy. */
+    if(d->scene&&d->ops.target_bind){
+        Target *cur=d->target?target(d,d->target):NULL;
+        if(d->ops.target_bind(d->ctx,cur?cur->native:NULL)){d->blit_error=D9_BLIT_BACKEND;return D9_BACKEND;}
+    }
+    return rc==D9_BLIT_OK?D9_OK:D9_BACKEND;
+}
+int d9_blit_last_error(const D9Device *d){return d?d->blit_error:D9_BLIT_ARGUMENT;}
+int d9_set_stream(D9Device *d,unsigned stream,D9Handle h,size_t offset,size_t stride){if(!d||stream>=D9_MAX_STREAMS)return D9_INVALID;
+    Buffer *b=buffer(d,h);if(!h&&!offset&&!stride){d->streams[stream]=(Stream){0};return D9_OK;}
+    if(!b||b->kind||b->locked||!stride||stride>4096||offset>=b->bytes)return D9_INVALID;d->streams[stream]=(Stream){h,offset,stride};return D9_OK;}
+int d9_set_stream_source(D9Device *d,D9Handle h,size_t offset,size_t stride){return h&&stride<sizeof(D9Vertex)?D9_INVALID:d9_set_stream(d,0,h,offset,stride);}
+int d9_set_vertex_declaration(D9Device *d,const D9Decl *decl){if(!d)return D9_INVALID;if(!decl){d->decl_active=0;return D9_OK;}
+    if(d9_decl_init(&d->declaration,decl->elements,decl->count))return D9_INVALID;d->decl_active=1;return D9_OK;}
+static void set_diagnosis(D9Device *d,const char *why){if(!d)return;if(!why)why="";snprintf(d->diagnosis,sizeof d->diagnosis,"%s",why);}
+const char *d9_last_draw_diagnostic(const D9Device *d){return d?d->diagnosis:"";}
+int d9_set_viewport_size(D9Device *d,unsigned width,unsigned height){
+    if(!d||!width||!height||width>4096||height>4096)return D9_INVALID;
+    d->view_w=width;d->view_h=height;set_diagnosis(d,"");return D9_OK;
+}
+static int stage_arg_ok(unsigned arg,unsigned allow_current){
+    if(arg==D9_TA_DIFFUSE||arg==D9_TA_TEXTURE)return 1;
+    if(arg==D9_TA_CURRENT&&allow_current)return 1;
+    return 0;
+}
+int d9_set_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned value){
+    if(!d)return D9_INVALID;
+    if(stage>7){set_diagnosis(d,"SetTextureStageState: only stages 0..7 exist");return D9_UNSUPPORTED;}
+    if(stage){
+        if(type!=D9_TSS_COLOROP&&type!=D9_TSS_ALPHAOP){
+            set_diagnosis(d,"SetTextureStageState: only COLOROP/ALPHAOP are accepted on stages 1..7");return D9_UNSUPPORTED;}
+        if(value!=D9_TOP_DISABLE){set_diagnosis(d,"SetTextureStageState: stage 1..7 must be DISABLE");return D9_UNSUPPORTED;}
+        set_diagnosis(d,"");return D9_OK;
+    }
+    switch(type){
+    case D9_TSS_COLOROP:
+    case D9_TSS_ALPHAOP:
+        if(value!=D9_TOP_DISABLE&&value!=D9_TOP_SELECTARG1&&value!=D9_TOP_SELECTARG2&&value!=D9_TOP_MODULATE){
+            set_diagnosis(d,"SetTextureStageState: only DISABLE/SELECTARG1/SELECTARG2/MODULATE are implemented");return D9_UNSUPPORTED;}
+        if(type==D9_TSS_COLOROP)d->state.stage_colorop=value;else d->state.stage_alphaop=value;
+        break;
+    case D9_TSS_COLORARG1:
+    case D9_TSS_COLORARG2:
+    case D9_TSS_ALPHAARG1:
+    case D9_TSS_ALPHAARG2:
+        if(!stage_arg_ok(value,type==D9_TSS_COLORARG2||type==D9_TSS_ALPHAARG2)){
+            set_diagnosis(d,"SetTextureStageState: only DIFFUSE/TEXTURE (and CURRENT in ARG2) are implemented");return D9_UNSUPPORTED;}
+        if(type==D9_TSS_COLORARG1)d->state.stage_colorarg1=value;
+        else if(type==D9_TSS_COLORARG2)d->state.stage_colorarg2=value;
+        else if(type==D9_TSS_ALPHAARG1)d->state.stage_alphaarg1=value;
+        else d->state.stage_alphaarg2=value;
+        break;
+    case D9_TSS_TEXCOORDINDEX:
+        if(value>7){set_diagnosis(d,"SetTextureStageState: TEXCOORDINDEX is limited to a plain index 0..7");return D9_UNSUPPORTED;}
+        d->state.stage_texcoordindex=value;break;
+    default:
+        set_diagnosis(d,"SetTextureStageState: only COLOROP/COLORARG1/COLORARG2/ALPHAOP/ALPHAARG1/ALPHAARG2/TEXCOORDINDEX are implemented");
+        return D9_UNSUPPORTED;
+    }
+    set_diagnosis(d,"");return D9_OK;
+}
+int d9_set_indices(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(d&&!h){d->index=0;return D9_OK;}if(!b||!b->kind||b->locked)return D9_INVALID;d->index=h;return D9_OK;}
+int d9_set_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if(!d||d->teardown||(h&&(!t||t->locked||!t->native||!t->level[0].uploaded)))return D9_INVALID;
+    if(h){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
+    d->texture=h;return D9_OK;}
+int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
+int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;
+    for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;d->transforms[which]=*m;return D9_OK;}
+int d9_set_shader_clip(D9Device *d,const D9Matrix *m){if(!d)return D9_INVALID;if(!m){d->shader_active=0;return D9_OK;}
+    for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;
+    for(unsigned i=0;i<4;++i){d->shader_clip.m[0][i]=m->m[1][i];d->shader_clip.m[1][i]=-m->m[0][i];
+        d->shader_clip.m[2][i]=m->m[2][i]-m->m[3][i];d->shader_clip.m[3][i]=m->m[3][i];}d->shader_active=1;return D9_OK;}
+static unsigned *render_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned *max){*min=0;*max=1;switch(id){
+    case 7:return &s->z_enable;case 14:return &s->z_write;case 15:return &s->alpha_test;case 27:return &s->blend;
+    case 19:*min=1;*max=11;return &s->src_blend;case 20:*min=1;*max=11;return &s->dst_blend;
+    case 22:*min=1;*max=3;return &s->cull;case 23:*min=1;*max=8;return &s->z_func;
+    case 24:*max=255;return &s->alpha_ref;case 25:*min=1;*max=8;return &s->alpha_func;
+    case 168:*max=15;return &s->color_write;case 171:*min=1;*max=5;return &s->blend_op;default:return NULL;}}
+static unsigned *sampler_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned *max){*min=1;*max=2;switch(id){
+    case 1:*max=3;return &s->address_u;case 2:*max=3;return &s->address_v;
+    case 5:return &s->mag_filter;case 6:return &s->min_filter;case 7:*min=0;return &s->mip_filter;
+    case 9:*min=0;*max=10;return &s->max_mip;default:return NULL;}}
+int d9_set_render_state(D9Device *d,unsigned id,unsigned v){unsigned lo,hi,*p=d?render_slot(&d->state,id,&lo,&hi):NULL;if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;}
+int d9_get_render_state(D9Device *d,unsigned id,unsigned *v){unsigned lo,hi,*p=d?render_slot(&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
+int d9_set_sampler_state(D9Device *d,unsigned id,unsigned v){unsigned lo,hi,*p=d?sampler_slot(&d->state,id,&lo,&hi):NULL;if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;}
+int d9_get_sampler_state(D9Device *d,unsigned id,unsigned *v){unsigned lo,hi,*p=d?sampler_slot(&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
+int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){if(!d||d->teardown||d->scene)return D9_INVALID;if(d->ops.begin(d->ctx,argb))return D9_BACKEND;d->scene=1;
+    Target *t=d->target?target(d,d->target):NULL;
+    if((d->target&&!t)||(d->ops.target_bind&&d->ops.target_bind(d->ctx,t?t->native:NULL))||
+       (t&&clear_target&&d->ops.target_clear(d->ctx,t->native,argb))){d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;}
+    return D9_OK;}
+int d9_begin_scene(D9Device *d,uint32_t argb){return d9_begin_scene_ex(d,argb,1);}
+typedef struct {const uint8_t *data;size_t stride,max_index;} DrawStream;
+/* Optional stream-zero/index override for D3D9 UP draws.  vertices/indices are
+ * borrowed guest buffers; count is the number of valid vertices in the UP
+ * stream (not bytes). */
+typedef struct {
+    const uint8_t *vertices;size_t stride,count;
+    const uint8_t *indices;unsigned index_size;
+} UpSource;
+static int prepare_streams(D9Device *d,DrawStream out[D9_MAX_STREAMS],size_t *max_index,
+                           const UpSource *up){
+    unsigned mask=d->decl_active?d->declaration.stream_mask:1;
+    *max_index=SIZE_MAX;
+    for(unsigned i=0;i<D9_MAX_STREAMS;++i)if(mask&(1u<<i)){
+        size_t need=d->decl_active?d->declaration.required[i]:sizeof(D9Vertex);
+        if(i==0&&up&&up->vertices){
+            if(up->stride<need||up->stride>4096||!up->count)return D9_INVALID;
+            out[0]=(DrawStream){up->vertices,up->stride,up->count-1};
+        }else{
+            Stream *s=&d->streams[i];Buffer *b=buffer(d,s->id);
+            if(!b||b->kind||b->locked||s->stride<need||s->offset>b->bytes||need>b->bytes-s->offset)return D9_INVALID;
+            out[i]=(DrawStream){b->data+s->offset,s->stride,(b->bytes-s->offset-need)/s->stride};
+        }
+        if(out[i].max_index<*max_index)*max_index=out[i].max_index;
+    }return D9_OK;
+}
+/* POSITIONT (XYZRHW) maps D3D9 screen pixels to the rotated PICA clip space.
+ * For a WxH viewport, D3D9 NDC is x'=2x/W-1, y'=1-2y/H, z'=z_d3d (w=1).
+ * d9_pica_transform's convention is pica_x=y', pica_y=-x', pica_z=z_d3d-w. */
+static void positiont_matrix(D9Matrix *m,unsigned w,unsigned h){
+    d9_matrix_identity(m);
+    m->m[0][1]=-2.0f/(float)h;m->m[0][3]=1.0f;   /* out x = 1 - 2y/h */
+    m->m[1][0]=-2.0f/(float)w;m->m[1][3]=1.0f;   /* out y = 1 - 2x/w */
+    m->m[2][2]=1.0f;m->m[2][3]=-1.0f;            /* out z = z - 1 */
+    m->m[3][0]=m->m[3][1]=m->m[3][2]=0.0f;m->m[3][3]=1.0f;
+}
+static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9ColorVertex *col){
+    if(!d->decl_active){
+        memcpy(out,s[0].data+(size_t)index*s[0].stride,sizeof *out);
+        *col=(D9ColorVertex){out->x,out->y,out->z,out->u,out->v,1.0f,1.0f,1.0f,1.0f};
+    }else{const D9Decl *decl=&d->declaration;float pos[4],uv[4]={0,0,0,1},rgba[4]={1,1,1,1};
+        const D9VertexElement *p=&decl->elements[decl->position];
+        if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),pos))return D9_INVALID;
+        if(decl->position_t){
+            if(pos[3]!=1.0f)return D9_UNSUPPORTED; /* shader has fixed w=1 today */
+        }else if(pos[3]!=1.0f)return D9_INVALID;
+        if(decl->uv!=UINT32_MAX){p=&decl->elements[decl->uv];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),uv))return D9_INVALID;}
+        if(decl->color!=UINT32_MAX){p=&decl->elements[decl->color];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),rgba))return D9_INVALID;}
+        *out=(D9Vertex){pos[0],pos[1],pos[2],uv[0],uv[1]};
+        *col=(D9ColorVertex){pos[0],pos[1],pos[2],uv[0],uv[1],rgba[0],rgba[1],rgba[2],rgba[3]};
+    }
+    return isfinite(out->x)&&isfinite(out->y)&&isfinite(out->z)&&isfinite(out->u)&&isfinite(out->v)&&
+           isfinite(col->r)&&isfinite(col->g)&&isfinite(col->b)&&isfinite(col->a)?D9_OK:D9_INVALID;
+}
+static size_t triangle_index(unsigned type,size_t i){size_t t=i/3,c=i%3;
+    if(type==D9_TRIANGLELIST)return i;
+    if(type==D9_TRIANGLEFAN)return c?t+c:0;
+    return t+((t&1)&&c<2?1-c:c);}
+static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
+    if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
+    if(up&&(!up->vertices||!up->stride||(up->indices&&up->index_size!=2&&up->index_size!=4)))return D9_INVALID;
+    const uint8_t *ixdata=NULL;size_t ixbytes=0;unsigned step=2;
+    if(indexed){
+        if(up&&up->indices){ixdata=up->indices;step=up->index_size;}
+        else{Buffer *ix=buffer(d,d->index);if(!ix||!ix->kind||ix->locked)return D9_INVALID;
+            ixdata=ix->data;ixbytes=ix->bytes;step=ix->kind==2?4:2;}
+    }
+    Texture *t=texture(d,d->texture);
+    if(t&&(t->locked||!t->level[0].uploaded))return D9_INVALID;
+    if(t&&d->decl_active&&d->declaration.uv==UINT32_MAX)return D9_INVALID;
+    DrawStream streams[D9_MAX_STREAMS]={0};size_t max_index;if(prepare_streams(d,streams,&max_index,up))return D9_INVALID;
+    /* Repeated indexed vertices often share UV/position. Cache decoded values per draw only. */
+    struct Cached {uint64_t index;D9Vertex vertex;D9ColorVertex color;int valid;} cache[64]={0};
+    size_t n=(size_t)primitives*3,in=type==D9_TRIANGLELIST?n:(size_t)primitives+2;
+    if(indexed&&!(up&&up->indices)&&((size_t)start>ixbytes/step||in>ixbytes/step-(size_t)start))return D9_INVALID;
+    for(size_t i=0;i<n;++i){size_t rel=triangle_index(type,i);int64_t index=(int64_t)start+(int64_t)rel;
+        if(indexed){const uint8_t *p=ixdata+((size_t)start+rel)*step;uint32_t raw=(uint32_t)p[0]|(uint32_t)p[1]<<8;
+            if(step==4)raw|=(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
+            if(limited&&(raw<min||(uint64_t)raw>=((uint64_t)min+count)))return D9_INVALID;index=(int64_t)base+raw;}
+        if(index<0||(uint64_t)index>max_index)return D9_INVALID;
+        struct Cached *entry=&cache[(unsigned)index&63];if(!entry->valid||entry->index!=(uint64_t)index){
+            int rc=fetch(d,streams,(uint64_t)index,&entry->vertex,&entry->color);
+            if(rc){set_diagnosis(d,rc==D9_UNSUPPORTED?
+                "POSITIONT vertex has w != 1; the current fixed-w PICA shader cannot represent it":
+                "vertex decode failed");return rc;}
+            entry->index=(uint64_t)index;entry->valid=1;}
+        d->scratch[i]=entry->vertex;d->color_scratch[i]=entry->color;
+    }
+    d->scratch_count=(unsigned)n;d->color_scratch_count=(unsigned)n;
+    D9Matrix clip;
+    if(d->decl_active&&d->declaration.position_t){
+        if(d->shader_active)
+            clip=d->shader_clip; /* an explicit shader owns its own transform */
+        else if(!d->view_w||!d->view_h){
+            set_diagnosis(d,"POSITIONT/XYZRHW draw needs a viewport size; call d9_set_viewport_size first");
+            return D9_UNSUPPORTED;
+        }else positiont_matrix(&clip,d->view_w,d->view_h);
+    }else if(d->shader_active)clip=d->shader_clip;
+    else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
+    D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
+    int has_color=d->decl_active&&d->declaration.color!=UINT32_MAX;
+    if(has_color){
+        if(!d->ops.draw_colored){
+            set_diagnosis(d,"draw requires per-vertex COLOR0 (DIFFUSE/COLOR0); backend has no color-capable PICA vertex shader, refusing draw instead of dropping the tint");
+            return D9_UNSUPPORTED;
+        }
+        set_diagnosis(d,"");
+        if(d->ops.draw_colored(d->ctx,d->color_scratch,n,&clip,t?t->native:NULL,&state)){
+            set_diagnosis(d,"colour draw rejected by the backend (unsupported stage-0 TEV combination, vertex-colour program unavailable, or arena exhausted)");
+            return D9_BACKEND;
+        }
+        return D9_OK;
+    }
+    set_diagnosis(d,"");
+    return d->ops.draw(d->ctx,d->scratch,n,&clip,t?t->native:NULL,&state)?D9_BACKEND:D9_OK;
+}
+int d9_draw_primitive(D9Device *d,unsigned type,unsigned start,unsigned primitives){return draw(d,type,0,start,primitives,0,0,0,0,NULL);}
+int d9_draw_indexed_primitive(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives){return draw(d,type,base,start,primitives,1,0,0,0,NULL);}
+int d9_draw_indexed_range(D9Device *d,unsigned type,int32_t base,unsigned min,unsigned count,unsigned start,unsigned primitives){return draw(d,type,base,start,primitives,1,1,min,count,NULL);}
+int d9_draw_primitive_up(D9Device *d,unsigned type,unsigned primitives,const void *vertex_data,unsigned vertex_stride){
+    if(!vertex_data||!vertex_stride||!primitives||primitives>MAX_DRAW_VERTICES/3)return D9_INVALID;
+    size_t n=type==D9_TRIANGLELIST?(size_t)primitives*3:(size_t)primitives+2;
+    UpSource up={vertex_data,vertex_stride,n,NULL,0};
+    return draw(d,type,0,0,primitives,0,0,0,0,&up);
+}
+int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,unsigned vertex_count,unsigned primitives,const void *index_data,unsigned index_format,const void *vertex_data,unsigned vertex_stride){
+    if(!vertex_data||!vertex_stride||!index_data||(index_format!=D9_INDEX16&&index_format!=D9_INDEX32)||
+       !primitives||primitives>MAX_DRAW_VERTICES/3||!vertex_count||min_vertex>UINT32_MAX-vertex_count)return D9_INVALID;
+    UpSource up={vertex_data,vertex_stride,(size_t)min_vertex+vertex_count,index_data,index_format==D9_INDEX32?4u:2u};
+    return draw(d,type,0,0,primitives,1,1,min_vertex,vertex_count,&up);
+}
+int d9_present(D9Device *d){if(!d||d->teardown||!d->scene)return D9_INVALID;d->ops.end(d->ctx);d->scene=0;return D9_OK;}
+size_t d9_memory_used(const D9Device *d){if(!d)return 0;D9TexCacheStats st;d9_texcache_stats(&d->tex_cache,&st);
+    return memory_sum(d->used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used)));}
+int d9_get_draw_state(const D9Device *d,D9DrawState *out){
+    if(!d||!out)return D9_INVALID;
+    *out=d->state;
+    return D9_OK;
+}
+int d9_get_transform(const D9Device *d,unsigned which,D9Matrix *out){
+    if(!d||!out||which>2)return D9_INVALID;
+    *out=d->transforms[which];
+    return D9_OK;
+}
+int d9_get_stream_info(const D9Device *d,unsigned stream,D9Handle *buffer,
+                       size_t *offset,size_t *stride){
+    if(!d||stream>=D9_MAX_STREAMS||!buffer||!offset||!stride)return D9_INVALID;
+    const Stream *s=&d->streams[stream];
+    *buffer=s->id;
+    *offset=s->offset;
+    *stride=s->stride;
+    return D9_OK;
+}
+int d9_get_index_info(const D9Device *d,D9Handle *buffer,unsigned *format){
+    if(!d||!buffer||!format)return D9_INVALID;
+    const Buffer *b=NULL;
+    if(d->index)for(unsigned i=0;i<MAX_BUFFERS;++i)if(d->buffers[i].id==d->index){b=&d->buffers[i];break;}
+    *buffer=d->index;
+    *format=b?(b->kind==2?D9_INDEX32:D9_INDEX16):0u;
+    return D9_OK;
+}
+int d9_get_buffer_data(const D9Device *d,D9Handle h,const void **data,size_t *bytes){
+    if(!d||!data||!bytes)return D9_INVALID;
+    const Buffer *b=NULL;
+    if(h)for(unsigned i=0;i<MAX_BUFFERS;++i)if(d->buffers[i].id==h){b=&d->buffers[i];break;}
+    if(!b)return D9_INVALID;
+    *data=b->data;
+    *bytes=b->bytes;
+    return D9_OK;
+}
+int d9_get_texture_capture(const D9Device *d,D9Handle h,unsigned level,
+                           const void **pixels,size_t *pitch,size_t *bytes,
+                           unsigned *width,unsigned *height,unsigned *format){
+    if(!d||!pixels||!pitch||!bytes)return D9_INVALID;
+    const Texture *t=NULL;
+    if(h)for(unsigned i=0;i<MAX_TEXTURES;++i)if(d->textures[i].id==h){t=&d->textures[i];break;}
+    if(!t||level>=t->levels||!t->pixels)return D9_INVALID;
+    const Level *l=&t->level[level];
+    *pixels=t->pixels+l->offset;
+    *pitch=l->pitch;
+    *bytes=l->bytes;
+    if(width)*width=l->w;
+    if(height)*height=l->h;
+    if(format)*format=t->format;
+    return D9_OK;
+}
+int d9_get_last_draw_vertices(const D9Device *d,const D9Vertex **vertices,size_t *count){
+    if(!d||!vertices||!count)return D9_INVALID;
+    *vertices=d->scratch;
+    *count=d->scratch_count;
+    return D9_OK;
+}
+int d9_get_last_draw_color_vertices(const D9Device *d,const D9ColorVertex **vertices,size_t *count){
+    if(!d||!vertices||!count)return D9_INVALID;
+    *vertices=d->color_scratch;
+    *count=d->color_scratch_count;
+    return D9_OK;
+}

@@ -1,0 +1,21 @@
+.fvec clip[4]
+.constf k(0.0, 1.0, 0.0, 0.0)
+.alias ones k.yyyy
+.alias inpos v0
+.alias intex v1
+.out outpos position
+.out outtc texcoord0
+.out outclr color
+
+.proc main
+    mov r0.xyz, inpos
+    mov r0.w, ones
+    dp4 outpos.x, clip[0], r0
+    dp4 outpos.y, clip[1], r0
+    dp4 outpos.z, clip[2], r0
+    dp4 outpos.w, clip[3], r0
+    mov outtc.x, intex.x
+    add outtc.y, ones, -intex.y
+    mov outclr, ones
+    end
+.end

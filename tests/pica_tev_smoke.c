@@ -1,0 +1,513 @@
+/* Host tests for the honest PICA200 backend gate and descriptor.
+ * All shader tokens below are assembled test data; no game bytes are used.
+ *
+ * Standalone build (from the repository root, in a VS developer command prompt):
+ *   clang -std=gnu11 -O2 -Wall -Wextra -Isource \
+ *       source/d3d9_tev.c source/d3d9_pica_tev.c tests/pica_tev_smoke.c \
+ *       -o pica_tev_smoke.exe
+ */
+
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "d3d9_pica_tev.h"
+
+#define DI(op, operands) ((uint32_t)(op) | ((uint32_t)(operands) << 24))
+#define SW_ID 0xE4u
+
+typedef struct {
+    uint32_t word[128];
+    size_t count;
+} Asm;
+
+static int checks;
+static int failures;
+
+static void check(int condition, const char *what) {
+    ++checks;
+    if (!condition) {
+        ++failures;
+        printf("FAIL: %s\n", what);
+    }
+}
+
+static uint32_t dr(unsigned type, unsigned reg, unsigned mask) {
+    return 0x80000000u | ((type & 7u) << 28) | ((type & 0x18u) << 8) |
+           (reg & 0x7FFu) | ((mask & 0xFu) << 16);
+}
+
+static uint32_t sr(unsigned type, unsigned reg, unsigned swizzle) {
+    return 0x80000000u | ((type & 7u) << 28) | ((type & 0x18u) << 8) |
+           (reg & 0x7FFu) | ((swizzle & 0xFFu) << 16);
+}
+
+static uint32_t fbits(float value) {
+    union { float f; uint32_t u; } bits;
+    bits.f = value;
+    return bits.u;
+}
+
+static void emit(Asm *a, uint32_t word) {
+    if (a->count < sizeof a->word / sizeof a->word[0]) a->word[a->count++] = word;
+}
+
+static void begin(Asm *a) {
+    memset(a, 0, sizeof *a);
+    emit(a, 0xFFFF0300u);
+}
+
+static void end(Asm *a) { emit(a, 0xFFFFu); }
+
+static void dcl(Asm *a, unsigned usage, unsigned usage_index,
+                unsigned texture_type, unsigned type, unsigned reg) {
+    emit(a, DI(0x1Fu, 2u));
+    emit(a, 0x80000000u | (usage & 0x1Fu) | ((usage_index & 0xFu) << 16) |
+             ((texture_type & 0xFu) << 27));
+    emit(a, dr(type, reg, 0xFu));
+}
+
+static void def(Asm *a, unsigned reg, float r, float g, float b, float alpha) {
+    emit(a, DI(0x51u, 5u));
+    emit(a, dr(2u, reg, 0xFu));
+    emit(a, fbits(r)); emit(a, fbits(g)); emit(a, fbits(b)); emit(a, fbits(alpha));
+}
+
+static void texld(Asm *a, unsigned dst_reg, unsigned sampler) {
+    emit(a, DI(0x42u, 3u));
+    emit(a, dr(0u, dst_reg, 0xFu));
+    emit(a, sr(1u, 0u, SW_ID));
+    emit(a, sr(10u, sampler, SW_ID));
+}
+
+static void alu(Asm *a, unsigned op, uint32_t dst,
+                uint32_t src0, uint32_t src1, uint32_t src2, unsigned sources) {
+    emit(a, DI(op, 1u + sources));
+    emit(a, dst);
+    emit(a, src0);
+    if (sources > 1) emit(a, src1);
+    if (sources > 2) emit(a, src2);
+}
+
+static void mov(Asm *a, uint32_t dst, uint32_t src) {
+    alu(a, 0x01u, dst, src, 0, 0, 1);
+}
+
+static void textured_decls(Asm *a, unsigned sampler) {
+    dcl(a, 5u, 0u, 0u, 1u, 0u); /* dcl_texcoord v0 */
+    dcl(a, 0u, 0u, 2u, 10u, sampler); /* dcl_2d s# */
+}
+
+static int validate_asm(const Asm *a, D9TevProgram *translated,
+                        D9PicaTevProgram *descriptor, D9PicaTevReject *reason,
+                        char *why, size_t why_size) {
+    return d9_pica_tev_validate_pixel(a->word, a->count, translated, descriptor,
+                                      reason, why, why_size);
+}
+
+static void expect_reject(const char *name, const Asm *a, D9PicaTevReject expected,
+                          const char *needle) {
+    D9TevProgram translated;
+    D9PicaTevProgram descriptor;
+    D9PicaTevReject reason = D9_PICA_TEV_REJECT_COUNT;
+    char why[256];
+    memset(&translated, 0xA5, sizeof translated);
+    memset(&descriptor, 0xA5, sizeof descriptor);
+    int rc = validate_asm(a, &translated, &descriptor, &reason, why, sizeof why);
+    if (rc >= 0) printf("  accepted unexpectedly: %s\n", name);
+    if (reason != expected)
+        printf("  %s: reason %s, expected %s (%s)\n", name,
+               d9_pica_tev_reject_name(reason), d9_pica_tev_reject_name(expected), why);
+    check(rc < 0, name);
+    check(reason == expected, name);
+    check(strstr(why, needle) != NULL, name);
+    if (!strstr(why, needle)) printf("  %s: missing '%s' in: %s\n", name, needle, why);
+    if (rc < 0) {
+        const uint8_t *bytes = (const uint8_t *)&translated;
+        size_t nonzero = 0;
+        for (size_t i = 0; i < sizeof translated; ++i) nonzero |= bytes[i];
+        check(nonzero == 0, "rejection zeroes translated output");
+    }
+}
+
+static void test_constant_blit(void) {
+    Asm a;
+    begin(&a);
+    def(&a, 0u, 0.25f, 0.5f, 0.75f, 1.0f);
+    mov(&a, dr(8u, 0u, 0xFu), sr(2u, 0u, SW_ID));
+    end(&a);
+
+    D9TevProgram translated;
+    D9PicaTevProgram descriptor;
+    D9PicaTevReject reason;
+    char why[256];
+    check(validate_asm(&a, &translated, &descriptor, &reason, why, sizeof why) == 0,
+          why);
+    check(descriptor.stage_count == 1, "constant blit: one stage");
+    check(descriptor.texture_count == 0, "constant blit: no texture");
+    check(descriptor.sampler_reg == D9_PICA_TEV_NO_SAMPLER,
+          "constant blit: absent sampler marker");
+    check(descriptor.texcoord_reg == D9_PICA_TEV_NO_SAMPLER,
+          "constant blit: absent texcoord marker");
+    check(descriptor.stage[0].func_rgb == D9TEV_FUNC_REPLACE,
+          "constant blit: REPLACE");
+    check(descriptor.stage[0].src_rgb[0] == D9TEV_SRC_CONST,
+          "constant blit: constant source");
+    check(descriptor.stage[0].uses_constant == 1,
+          "constant blit: literal constant");
+    check(descriptor.stage[0].constant_abgr == 0x4080BFFFu,
+          "constant blit: RGBA8 to ABGR8888");
+}
+
+static void make_textured_blit(Asm *a) {
+    begin(a);
+    textured_decls(a, 0u);
+    texld(a, 0u, 0u);
+    mov(a, dr(8u, 0u, 0xFu), sr(0u, 0u, SW_ID));
+    end(a);
+}
+
+static void test_textured_blit(void) {
+    Asm a;
+    make_textured_blit(&a);
+    D9TevProgram translated;
+    D9PicaTevProgram descriptor;
+    D9PicaTevReject reason;
+    char why[256];
+    check(validate_asm(&a, &translated, &descriptor, &reason, why, sizeof why) == 0,
+          why);
+    check(translated.stages == 1, "textured blit: one translated stage");
+    check(descriptor.stage_count == 1, "textured blit: one descriptor stage");
+    check(descriptor.texture_count == 1, "textured blit: one texture");
+    check(descriptor.sampler_reg == 0 && descriptor.texcoord_reg == 0,
+          "textured blit: sampler/texcoord 0");
+    check(descriptor.stage[0].src_rgb[0] == D9TEV_SRC_TEX0,
+          "textured blit: TEXTURE0");
+    check(descriptor.stage[0].func_rgb == D9TEV_FUNC_REPLACE,
+          "textured blit: REPLACE");
+    check(descriptor.stage[0].uses_constant == 0,
+          "textured blit: no constant");
+}
+
+static void make_tint(Asm *a) {
+    begin(a);
+    textured_decls(a, 0u);
+    def(a, 0u, 0.5f, 0.25f, 1.0f, 1.0f);
+    texld(a, 0u, 0u);
+    alu(a, 0x05u, dr(8u, 0u, 0xFu), sr(0u, 0u, SW_ID), sr(2u, 0u, SW_ID), 0, 2u);
+    end(a);
+}
+
+static void test_tint(void) {
+    Asm a;
+    make_tint(&a);
+    D9TevProgram translated;
+    D9PicaTevProgram descriptor;
+    D9PicaTevReject reason;
+    char why[256];
+    check(validate_asm(&a, &translated, &descriptor, &reason, why, sizeof why) == 0,
+          why);
+    check(descriptor.stage_count == 1, "tint: one stage");
+    check(descriptor.stage[0].func_rgb == D9TEV_FUNC_MODULATE &&
+          descriptor.stage[0].func_a == D9TEV_FUNC_MODULATE,
+          "tint: MODULATE RGB and alpha");
+    check(descriptor.stage[0].src_rgb[0] == D9TEV_SRC_TEX0 &&
+          descriptor.stage[0].src_rgb[1] == D9TEV_SRC_CONST,
+          "tint: texture * constant");
+    check(descriptor.stage[0].uses_constant == 1,
+          "tint: literal constant");
+}
+
+static void make_textured_chain(Asm *a, unsigned multiplies) {
+    begin(a);
+    textured_decls(a, 0u);
+    for (unsigned i = 0; i < multiplies; ++i)
+        def(a, i, 0.5f, 0.5f, 0.5f, 1.0f);
+    texld(a, 0u, 0u);
+    for (unsigned i = 0; i < multiplies; ++i)
+        alu(a, 0x05u, dr(0u, 0u, 0xFu), sr(0u, 0u, SW_ID), sr(2u, i, SW_ID), 0, 2u);
+    mov(a, dr(8u, 0u, 0xFu), sr(0u, 0u, SW_ID));
+    end(a);
+}
+
+static void test_textured_chain(void) {
+    Asm a;
+    D9TevProgram translated;
+    D9PicaTevProgram descriptor;
+    D9PicaTevReject reason;
+    char why[256];
+
+    make_textured_chain(&a, 2u);
+    check(validate_asm(&a, &translated, &descriptor, &reason, why, sizeof why) == 0,
+          why);
+    check(descriptor.stage_count == 3, "textured chain: three stages");
+    check(descriptor.stage[0].func_rgb == D9TEV_FUNC_MODULATE &&
+          descriptor.stage[1].func_rgb == D9TEV_FUNC_MODULATE &&
+          descriptor.stage[2].func_rgb == D9TEV_FUNC_REPLACE,
+          "textured chain: PREVIOUS chain");
+    check(descriptor.stage[1].src_rgb[0] == D9TEV_SRC_PREV &&
+          descriptor.stage[2].src_rgb[0] == D9TEV_SRC_PREV,
+          "textured chain: stage 0 seeds PREVIOUS");
+    D9PicaTevStage zero;
+    memset(&zero, 0, sizeof zero);
+    for (unsigned i = descriptor.stage_count; i < D9_PICA_TEV_MAX_STAGES; ++i)
+        check(memcmp(&descriptor.stage[i], &zero, sizeof zero) == 0,
+              "descriptor tail is zero");
+
+    make_textured_chain(&a, 5u);
+    check(validate_asm(&a, &translated, &descriptor, &reason, why, sizeof why) == 0,
+          why);
+    check(descriptor.stage_count == 6, "textured chain: exactly six stages accepted");
+}
+
+static D9TevProgram accepted_blit_program(void) {
+    Asm a;
+    make_textured_blit(&a);
+    D9TevProgram program;
+    D9PicaTevReject reason;
+    char why[256];
+    if (validate_asm(&a, &program, NULL, &reason, why, sizeof why)) {
+        fprintf(stderr, "test setup failed: %s\n", why);
+        failures++;
+        memset(&program, 0, sizeof program);
+    }
+    return program;
+}
+
+static void expect_descriptor_reject(const char *name, const D9TevProgram *program,
+                                     D9PicaTevReject expected, const char *needle) {
+    D9PicaTevProgram descriptor;
+    D9PicaTevReject reason = D9_PICA_TEV_REJECT_COUNT;
+    char why[256];
+    memset(&descriptor, 0xA5, sizeof descriptor);
+    int rc = d9_pica_tev_validate(program, &descriptor, &reason, why, sizeof why);
+    check(rc < 0, name);
+    check(reason == expected, name);
+    check(strstr(why, needle) != NULL, name);
+}
+
+static void test_descriptor_rejections(void) {
+    D9TevProgram p = accepted_blit_program();
+
+    p.textures = 2;
+    p.texture[1] = p.texture[0];
+    p.texture[1].sampler_reg = 1;
+    expect_descriptor_reject("reject multiple textures", &p,
+                             D9_PICA_TEV_TEXTURE_COUNT, "multiple textures");
+    p = accepted_blit_program();
+
+    p.constants = 1;
+    p.constant_reg[0] = 7;
+    expect_descriptor_reject("reject external constants", &p,
+                             D9_PICA_TEV_EXTERNAL_CONSTANT, "external constant c7");
+    p = accepted_blit_program();
+
+    p.uses_vertex_color = 1;
+    expect_descriptor_reject("reject vertex colour flag", &p,
+                             D9_PICA_TEV_VERTEX_COLOR, "vertex colour");
+    p = accepted_blit_program();
+
+    p.inputs = 1;
+    p.input[0].usage = D9TEV_USAGE_POSITION;
+    expect_descriptor_reject("reject VPOS metadata", &p,
+                             D9_PICA_TEV_VPOS, "VPOS");
+    p = accepted_blit_program();
+
+    p.stage[0].src_rgb[0] = D9TEV_SRC_FRAG_PRIMARY;
+    p.stage[0].src_a[0] = D9TEV_SRC_FRAG_SECONDARY;
+    expect_descriptor_reject("reject fragment varyings", &p,
+                             D9_PICA_TEV_FRAGMENT_VARYING, "fragment varying");
+    p = accepted_blit_program();
+
+    p.stage[0].src_rgb[0] = D9TEV_SRC_PRIMARY;
+    expect_descriptor_reject("reject PRIMARY source", &p,
+                             D9_PICA_TEV_VERTEX_COLOR, "PRIMARY");
+    p = accepted_blit_program();
+
+    p.stages = 7;
+    expect_descriptor_reject("reject >6 descriptor stages", &p,
+                             D9_PICA_TEV_STAGE_COUNT, "7 TEV stages");
+    p = accepted_blit_program();
+
+    p.texture[0].sampler_reg = 1;
+    expect_descriptor_reject("reject sampler 1", &p,
+                             D9_PICA_TEV_SAMPLER, "sampler s1");
+    p = accepted_blit_program();
+
+    p.texture[0].sampler_type = 3;
+    expect_descriptor_reject("reject cube sampler", &p,
+                             D9_PICA_TEV_SAMPLER_TYPE, "2D");
+    p = accepted_blit_program();
+
+    p.textures = 0;
+    expect_descriptor_reject("reject texture source without texture", &p,
+                             D9_PICA_TEV_TEXTURE_SOURCE, "no texture");
+    p = accepted_blit_program();
+
+    p.stage[0].src_rgb[0] = D9TEV_SRC_TEX1;
+    expect_descriptor_reject("reject texture unit 1 source", &p,
+                             D9_PICA_TEV_TEXTURE_SOURCE, "texture unit 1");
+    p = accepted_blit_program();
+
+    p.stage[0].src_rgb[0] = 0x0D; /* GPU_PREVIOUS_BUFFER */
+    expect_descriptor_reject("reject PREVIOUS_BUFFER source", &p,
+                             D9_PICA_TEV_TEV_SOURCE, "PREVIOUS_BUFFER");
+    p = accepted_blit_program();
+
+    p.stage[0].func_rgb = 10;
+    expect_descriptor_reject("reject invalid combine function", &p,
+                             D9_PICA_TEV_TEV_FUNCTION, "combine function");
+    p = accepted_blit_program();
+
+    p.stage[0].scale_rgb = 3;
+    expect_descriptor_reject("reject invalid scale", &p,
+                             D9_PICA_TEV_TEV_SCALE, "scale");
+    p = accepted_blit_program();
+
+    p.stage[0].op_rgb[0] = 6;
+    expect_descriptor_reject("reject invalid RGB operand", &p,
+                             D9_PICA_TEV_TEV_OPERAND, "RGB selector");
+    p = accepted_blit_program();
+
+    p.stage[0].func_rgb = D9TEV_FUNC_MODULATE;
+    p.stage[0].func_a = D9TEV_FUNC_MODULATE;
+    p.stage[0].src_rgb[0] = D9TEV_SRC_PREV;
+    expect_descriptor_reject("reject meaningful stage-0 PREVIOUS", &p,
+                             D9_PICA_TEV_TEV_SOURCE, "PREVIOUS");
+    p = accepted_blit_program();
+
+    p.textures = UINT32_MAX;
+    expect_descriptor_reject("reject malformed texture count", &p,
+                             D9_PICA_TEV_TEXTURE_COUNT, "invalid texture count");
+}
+
+static void test_raw_rejections(void) {
+    Asm a;
+
+    { /* Two sampled units. */
+        begin(&a);
+        dcl(&a, 5u, 0u, 0u, 1u, 0u);
+        dcl(&a, 0u, 0u, 2u, 10u, 0u);
+        dcl(&a, 0u, 0u, 2u, 10u, 1u);
+        texld(&a, 0u, 0u); texld(&a, 1u, 1u);
+        alu(&a, 0x02u, dr(8u, 0u, 0xFu), sr(0u, 0u, SW_ID), sr(0u, 1u, SW_ID), 0, 2u);
+        end(&a);
+        expect_reject("reject raw sampler 1 before multi-texture gate", &a,
+                      D9_PICA_TEV_SAMPLER, "sampler s1");
+        D9TevProgram translated;
+        char translate_why[256];
+        check(d9_tev_translate_pixel(a.word, a.count, &translated,
+                                     translate_why, sizeof translate_why) == 0,
+              "two-texture program reaches backend gate");
+        expect_descriptor_reject("reject translated multiple textures", &translated,
+                                 D9_PICA_TEV_TEXTURE_COUNT, "multiple textures");
+    }
+    { /* c0 without def. */
+        begin(&a);
+        mov(&a, dr(8u, 0u, 0xFu), sr(2u, 0u, SW_ID));
+        end(&a);
+        expect_reject("reject raw external constant", &a,
+                      D9_PICA_TEV_EXTERNAL_CONSTANT, "external constant c0");
+    }
+    { /* Vertex colour declaration, even before translation. */
+        begin(&a);
+        dcl(&a, 10u, 0u, 0u, 1u, 0u);
+        mov(&a, dr(8u, 0u, 0xFu), sr(1u, 0u, SW_ID));
+        end(&a);
+        expect_reject("reject raw vertex colour", &a,
+                      D9_PICA_TEV_VERTEX_COLOR, "dcl_color");
+    }
+    { /* ps_3_0 VPOS misc register. */
+        begin(&a);
+        dcl(&a, 0u, 0u, 0u, 17u, 0u);
+        mov(&a, dr(8u, 0u, 0xFu), sr(17u, 0u, SW_ID));
+        end(&a);
+        expect_reject("reject raw VPOS", &a, D9_PICA_TEV_VPOS, "VPOS");
+    }
+    { /* Even an unused VPOS declaration is outside the backend contract. */
+        begin(&a);
+        def(&a, 0u, 1.0f, 1.0f, 1.0f, 1.0f);
+        dcl(&a, 0u, 0u, 0u, 17u, 0u);
+        mov(&a, dr(8u, 0u, 0xFu), sr(2u, 0u, SW_ID));
+        end(&a);
+        expect_reject("reject unused VPOS declaration", &a,
+                      D9_PICA_TEV_VPOS, "VPOS");
+    }
+    { /* Seven translated stages. */
+        make_textured_chain(&a, 6u);
+        expect_reject("reject raw >6 stages", &a,
+                      D9_PICA_TEV_TRANSLATION, "TEV stages");
+    }
+    { /* Sampler 1, even though it is the only sampled unit. */
+        begin(&a);
+        textured_decls(&a, 1u);
+        texld(&a, 0u, 1u);
+        mov(&a, dr(8u, 0u, 0xFu), sr(0u, 0u, SW_ID));
+        end(&a);
+        expect_reject("reject raw sampler 1", &a,
+                      D9_PICA_TEV_SAMPLER, "sampler s1");
+    }
+    { /* Cube sampler. */
+        begin(&a);
+        dcl(&a, 5u, 0u, 0u, 1u, 0u);
+        dcl(&a, 0u, 0u, 3u, 10u, 0u);
+        texld(&a, 0u, 0u);
+        mov(&a, dr(8u, 0u, 0xFu), sr(0u, 0u, SW_ID));
+        end(&a);
+        expect_reject("reject raw cube sampler", &a,
+                      D9_PICA_TEV_SAMPLER_TYPE, "2D");
+    }
+    { /* A generic PS input would need a fragment-colour varying. */
+        begin(&a);
+        dcl(&a, 3u, 0u, 0u, 1u, 0u);
+        mov(&a, dr(8u, 0u, 0xFu), sr(1u, 0u, SW_ID));
+        end(&a);
+        expect_reject("reject raw non-texcoord input", &a,
+                      D9_PICA_TEV_INPUT_USAGE, "NORMAL");
+    }
+    { /* Missing END is rejected by the preflight. */
+        begin(&a);
+        def(&a, 0u, 1.0f, 1.0f, 1.0f, 1.0f);
+        mov(&a, dr(8u, 0u, 0xFu), sr(2u, 0u, SW_ID));
+        expect_reject("reject missing end token", &a,
+                      D9_PICA_TEV_MALFORMED, "end token");
+    }
+}
+
+static void test_literal_only_stage(void) {
+    Asm a;
+    make_tint(&a);
+    D9TevProgram translated;
+    D9PicaTevReject reason;
+    char why[256];
+    check(validate_asm(&a, &translated, NULL, &reason, why, sizeof why) == 0, why);
+    translated.stage[0].const_is_literal = 0;
+    expect_descriptor_reject("reject non-literal stage constant", &translated,
+                             D9_PICA_TEV_EXTERNAL_CONSTANT, "external constant");
+}
+
+static void test_helpers(void) {
+    check(d9_pica_tev_color_abgr(0x11223344u) == 0x44332211u,
+          "ABGR conversion");
+    check(strcmp(d9_pica_tev_reject_name(D9_PICA_TEV_VPOS), "vpos") == 0,
+          "rejection name");
+    D9PicaTevReject reason = D9_PICA_TEV_REJECT_COUNT;
+    char why[256];
+    check(d9_pica_tev_validate(NULL, NULL, &reason, why, sizeof why) < 0,
+          "reject null program");
+    check(reason == D9_PICA_TEV_NULL_PROGRAM && strstr(why, "null"),
+          "null rejection named");
+}
+
+int main(void) {
+    test_constant_blit();
+    test_textured_blit();
+    test_tint();
+    test_textured_chain();
+    test_descriptor_rejections();
+    test_raw_rejections();
+    test_literal_only_stage();
+    test_helpers();
+    printf("pica TEV backend: %d checks, %d failures\n", checks, failures);
+    return failures ? 1 : 0;
+}

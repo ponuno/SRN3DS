@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "benchmark": "armtime-fixture-v1",
+  "guest_image": "tests/ir_corpus.h",
+  "aot_fixture": "tests/ir_aot_fixture.c",
+  "canonical_profile": "armtime_profile.csv",
+  "canonical_tier": "aot_warm",
+  "clock_source": "svcGetSystemTick",
+  "tick_hz": 268111856,
+  "cold_reps": 16,
+  "functions": [
+    {"addr": "0x00501000", "end": "0x0050105e", "name": "arith",     "workload": "integer", "hits": 4096},
+    {"addr": "0x00501060", "end": "0x005010c7", "name": "logic",     "workload": "integer", "hits": 4096},
+    {"addr": "0x005010d0", "end": "0x0050112b", "name": "shifts",    "workload": "integer", "hits": 4096},
+    {"addr": "0x00501130", "end": "0x0050119a", "name": "muldiv",    "workload": "integer", "hits": 2048},
+    {"addr": "0x005011a0", "end": "0x00501207", "name": "byteops",   "workload": "integer", "hits": 4096},
+    {"addr": "0x00501210", "end": "0x00501277", "name": "memops",    "workload": "memory",  "hits": 2048},
+    {"addr": "0x00501280", "end": "0x005012f0", "name": "strings",   "workload": "memory",  "hits": 2048},
+    {"addr": "0x005012f0", "end": "0x00501346", "name": "flags",     "workload": "integer", "hits": 4096},
+    {"addr": "0x005013a0", "end": "0x005013fb", "name": "loopback",  "workload": "control", "hits": 2048},
+    {"addr": "0x00501510", "end": "0x00501560", "name": "increment", "workload": "memory",  "hits": 8192},
+    {"addr": "0x005015b0", "end": "0x0050161e", "name": "x87ops",    "workload": "x87",     "hits": 2048},
+    {"addr": "0x00501670", "end": "0x0050172f", "name": "sseops",    "workload": "sse",     "hits": 1024},
+    {"addr": "0x00501730", "end": "0x00501780", "name": "bench",     "workload": "sustained", "hits": 256},
+    {"addr": "0x00501780", "end": "0x005017d4", "name": "bench87",   "workload": "x87",     "hits": 128},
+    {"addr": "0x005017e0", "end": "0x0050183b", "name": "bench128",  "workload": "sse",     "hits": 128}
+  ],
+  "excluded": [
+    {"name": "cmc", "reason": "known AOT flag-lowering divergence documented by tests/ir_equiv.c"},
+    {"name": "pilotcall", "reason": "requires the separate pilot AOT/import fixture"},
+    {"name": "direct", "reason": "IR top-level execution calls an AOT callee; not a pure single-tier sample"},
+    {"name": "indirect", "reason": "IR top-level execution calls an AOT callee; not a pure single-tier sample"}
+  ]
+}

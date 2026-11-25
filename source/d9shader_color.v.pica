@@ -1,0 +1,29 @@
+; GFx UI vertex-colour shader for the PICA backend.
+; Attribute plan (matches D9ColorVertex, stride 36 bytes):
+;   v0 position  GPU_FLOAT x3  offset  0
+;   v1 texcoord  GPU_FLOAT x2  offset 12
+;   v2 color     GPU_FLOAT x4  offset 20  (normalized RGBA, direct copy)
+; outtc.y is flipped the same way as d9shader.v.pica so texture row 0 stays
+; at the bottom of the PICA texture.
+.fvec clip[4]
+.constf k(0.0, 1.0, 0.0, 0.0)
+.alias ones k.yyyy
+.alias inpos v0
+.alias intex v1
+.alias incolor v2
+.out outpos position
+.out outtc texcoord0
+.out outclr color
+
+.proc main
+    mov r0.xyz, inpos
+    mov r0.w, ones
+    dp4 outpos.x, clip[0], r0
+    dp4 outpos.y, clip[1], r0
+    dp4 outpos.z, clip[2], r0
+    dp4 outpos.w, clip[3], r0
+    mov outtc.x, intex.x
+    add outtc.y, ones, -intex.y
+    mov outclr, incolor
+    end
+.end

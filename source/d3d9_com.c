@@ -1,0 +1,1354 @@
+#include "d3d9_com.h"
+#include "d3d9_adapter.h"
+#include "d3d9_null.h"
+#include "d3d9_bc.h"
+#include "d3d9_shader.h"
+#include "d3d9_pica_tev.h"
+#include "d3d9_menu_closure.h"
+/* First-draw capture is an optional diagnostic.  It is compiled by default,
+ * can be removed entirely with -DD9_CAPTURE_HOOK=0, and stays inert at run
+ * time unless TESV_D3D9_CAPTURE_DRAWS requests one or more records. */
+#ifndef D9_CAPTURE_HOOK
+#define D9_CAPTURE_HOOK 1
+#endif
+#if D9_CAPTURE_HOOK
+#include "d3d9_capture.h"
+static void capture_present_event(void);
+#endif
+#include "win32_shims.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdarg.h>
+#include <limits.h>
+
+#define BASE 0x50000000u
+#define THUNK 0xfe000000u
+#define OBJ_BASE (BASE+0x2000)
+#define LOCK_BASE 0x31000000u
+#define LOCK_STRIDE 0x00400000u
+#define MAX_OBJECTS 128u
+#define MAX_SLOTS 119u
+#define SURFACE_BUDGET (8u<<20)
+#define OK 0u
+#define INVALID 0x8876086cu
+#define UNAVAILABLE 0x8876086au
+#define NOTFOUND 0x88760866u
+#define OUTMEM 0x8876017cu
+#define NOINTERFACE 0x80004002u
+#define NOAUTOGEN 0x0876086fu /* D3DOK_NOAUTOGEN: adapter is not WHQL certified */
+#define FVF_XYZ_TEX1 0x102u
+#define GFX_FVF_MASK 0x1ffu
+#define USAGE_WRITEONLY 0x0008u
+#define USAGE_DYNAMIC 0x0200u
+#define USAGE_VB_MASK (USAGE_WRITEONLY|USAGE_DYNAMIC)
+#define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
+enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,KIND_COUNT};
+typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
+typedef struct {
+    unsigned kind,refs,deferred;uint32_t guest;D9Handle handle;
+    unsigned bytes,width,height,format,usage,pool,fvf,pitch,lockable;
+    uint32_t lock_guest;unsigned lock_bytes,readonly,lock_level,lock_rows,lock_pitch,lock_row_bytes;void *lock_host;
+    uint8_t *pixels;
+    uint32_t *code;unsigned words;
+    D9TevProgram tev;int has_tev;
+    D9Decl *declaration;
+} Obj;
+static struct {
+    GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
+    Obj o[MAX_OBJECTS];unsigned next;
+    Obj *factory,*dev,*back,*rt,*streams[D9_MAX_STREAMS],*ib,*tex,*vs,*ps,*declaration;
+    unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags;D9Handle clear_target;D9Matrix constants;
+    uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
+    uint16_t gamma[3][256];size_t surface_bytes;
+    unsigned frame_index,draw_index,capture_present;uint32_t capture_present_flags;
+    char last_shader_rejection[320];
+    char last_diagnostic[224];
+    char last_stretch_rejection[192];
+    void (*handlers[KIND_COUNT][MAX_SLOTS])(CPU *c);
+    int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;
+} g;
+static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
+#define A(n) arg(c,n)
+static void trace_result(uint32_t value);
+static void trace_result_float(double value);
+static void capture_stop(void);
+#define RET(v,n) do{uint32_t retval=(uint32_t)(v);trace_result(retval);c->r[0]=retval;c->r[4]+=4+4*(n);return;}while(0)
+static void d3d_log(const char *method,const char *reason);
+static uint32_t hr(int rc){return rc==D9_OK?OK:rc==D9_MEMORY?OUTMEM:rc==D9_UNSUPPORTED?UNAVAILABLE:rc==D9_BACKEND||rc==D9_RELEASE_FAILED?UNAVAILABLE:INVALID;}
+static void d3d_fail(const char *method,const char *why,uint32_t result){
+    snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s%s%s",method?method:"D3D9",why?": ":"",why?why:"");
+    d3d_log(method?method:"D3D9",why?why:"rejected");(void)result;
+}
+const char *d9_com_last_diagnostic(void){return g.last_diagnostic;}
+/* IDirect3DDevice9 methods that return a float (GetNPatchMode) place it in
+ * ST(0), not EAX; the guest pops it with FSTP.  Keep the return trace honest. */
+#define RETF(v,n) do{double retval_f=(double)(v);fpush(c,retval_f);trace_result_float(retval_f);c->r[0]=0;c->r[4]+=4+4*(n);return;}while(0)
+static void *ptr(uint32_t address,size_t n){return address&&g.mem?guest_ptr(g.mem,address,n):NULL;}
+static void trace_detail(const char *fmt,...);
+static void d3d_log(const char *method,const char *reason){fprintf(stderr,"[d3d9] %s: %s\n",method,reason);if(g.trace)trace_detail("diagnostic: %s",reason);}
+static uint32_t stretch_reject(uint32_t result,const char *reason){
+    snprintf(g.last_stretch_rejection,sizeof g.last_stretch_rejection,"%s",reason);
+    d3d_log("StretchRect",reason);return result;
+}
+static const char *surface_format_name(unsigned format){
+    return format==D9_X8R8G8B8?"X8R8G8B8":format==D9_A8R8G8B8?"A8R8G8B8":"unsupported";
+}
+static const char *interface_name(unsigned kind);
+static uint32_t trace_arg(CPU *c,unsigned n){
+    uint64_t address=(uint64_t)c->r[4]+4+(uint64_t)n*4;
+    return address<=UINT32_MAX&&guest_ptr(g.mem,(uint32_t)address,4)?M32((uint32_t)address):0;
+}
+static void trace_detail(const char *fmt,...){
+    if(!g.trace)return;
+    va_list ap;va_start(ap,fmt);fprintf(stderr,"[d3d9-trace]   ");vfprintf(stderr,fmt,ap);fputc('\n',stderr);va_end(ap);
+}
+static void trace_enter(const char *method,unsigned kind,unsigned slot,CPU *c){
+    g.trace_method=method;g.trace_kind=kind;g.trace_slot=slot;g.trace_this=g.trace?trace_arg(c,0):0;
+    if(!g.trace)return;
+    uint32_t caller=M32(c->r[4]);
+    fprintf(stderr,"[d3d9-trace] %s::%s slot=%u this=0x%08lx caller=%08lx args=[0x%08lx 0x%08lx 0x%08lx 0x%08lx 0x%08lx 0x%08lx 0x%08lx]\n",
+        kind?interface_name(kind):"export",method,slot,(unsigned long)trace_arg(c,0),(unsigned long)caller,(unsigned long)trace_arg(c,1),(unsigned long)trace_arg(c,2),(unsigned long)trace_arg(c,3),
+        (unsigned long)trace_arg(c,4),(unsigned long)trace_arg(c,5),(unsigned long)trace_arg(c,6));
+}
+static void trace_result(uint32_t value){
+    if(!g.trace)return;
+    fprintf(stderr,"[d3d9-trace] %s::%s slot=%u this=0x%08lx -> 0x%08lx\n",
+        g.trace_kind?interface_name(g.trace_kind):"export",g.trace_method?g.trace_method:"D3D9 export",g.trace_slot,
+        (unsigned long)g.trace_this,(unsigned long)value);
+}
+static void trace_result_float(double value){
+    if(!g.trace)return;
+    fprintf(stderr,"[d3d9-trace] %s::%s slot=%u this=0x%08lx -> float %g (ST0)\n",
+        g.trace_kind?interface_name(g.trace_kind):"export",g.trace_method?g.trace_method:"D3D9 export",g.trace_slot,
+        (unsigned long)g.trace_this,value);
+}
+static uint32_t adapter_result(int rc){return rc==D9_ADAPTER_OK?OK:rc==D9_ADAPTER_INVALID?INVALID:UNAVAILABLE;}
+static const char *interface_name(unsigned kind){
+    static const char *names[]={"unknown object","IDirect3D9","IDirect3DDevice9","IDirect3DVertexBuffer9",
+        "IDirect3DIndexBuffer9","IDirect3DTexture9","IDirect3DVertexShader9","IDirect3DPixelShader9",
+        "IDirect3DVertexDeclaration9","IDirect3DSurface9"};
+    return kind<sizeof names/sizeof *names?names[kind]:"D3D9 object";
+}
+static Obj *obj(uint32_t addr,unsigned kind){
+    if(addr<OBJ_BASE||(addr-OBJ_BASE)%16)return NULL;
+    unsigned i=(addr-OBJ_BASE)/16;if(i>=g.next)return NULL;Obj *o=&g.o[i];
+    return o->refs&&(!kind||o->kind==kind)?o:NULL;
+}
+static uint32_t table_addr(unsigned kind){return BASE+kind*0x200;}
+static Obj *new_obj(unsigned kind){
+    if(g.next>=MAX_OBJECTS)return NULL;
+    unsigned i=g.next++;Obj *o=&g.o[i];memset(o,0,sizeof *o);o->kind=kind;o->refs=1;o->guest=OBJ_BASE+i*16;
+    guest_write32(g.mem,o->guest,table_addr(kind));return o;
+}
+static void retain(Obj *o){if(o)++o->refs;}
+static void release(Obj *o);
+static void destroy_obj(Obj *o){
+    Obj *parent=NULL;
+    if(o->kind==VB||o->kind==IB){d9_release_buffer(g.device,o->handle);parent=g.dev;}
+    else if(o->kind==TEX){
+        int rc=d9_release_texture(g.device,o->handle);
+        if(rc==D9_RELEASE_FAILED){o->refs=1;o->deferred=1;return;}
+        parent=g.dev;
+    }
+    else if(o->kind==VS||o->kind==PS){free(o->code);o->code=NULL;parent=g.dev;}
+    else if(o->kind==DECL){free(o->declaration);o->declaration=NULL;parent=g.dev;}
+    else if(o->kind==SURFACE){
+        if(o==g.back){g.back=NULL;g.rt=NULL;}
+        else if(o->handle){
+            if(g.rt==o)g.rt=g.back;
+            (void)d9_release_render_target(g.device,o->handle);
+            parent=g.dev;
+        }else{free(o->pixels);o->pixels=NULL;g.surface_bytes-=o->bytes;parent=g.dev;}
+    }
+    else if(o->kind==DEVICE){
+        capture_stop();
+        if(g.device)d9_set_pixel_shader(g.device,NULL);
+        if(g.owns_device&&g.device){
+            if(d9_destroy_device_ex(g.device)==D9_RELEASE_FAILED){o->refs=1;o->deferred=1;return;}
+            g.device=NULL;g.owns_device=0;
+        }
+        Obj *back=g.back;g.back=NULL;g.rt=NULL;
+        memset(g.streams,0,sizeof g.streams);memset(g.offsets,0,sizeof g.offsets);memset(g.strides,0,sizeof g.strides);
+        g.ib=g.tex=g.vs=g.ps=g.declaration=NULL;
+        g.dev=NULL;release(back);parent=g.factory;
+    }
+    else if(o->kind==FACTORY)g.factory=NULL;
+    o->deferred=0;guest_write32(g.mem,o->guest,0);if(parent)release(parent);
+}
+static void release(Obj *o){if(!o||!o->refs)return;if(--o->refs)return;if(g.phase){o->deferred=1;return;}destroy_obj(o);}
+static void collect(void){for(unsigned i=0;i<g.next;++i)if(g.o[i].deferred)destroy_obj(&g.o[i]);}
+static void bind(Obj **slot,Obj *o){if(*slot==o)return;retain(o);Obj *old=*slot;*slot=o;release(old);}
+static void unsupported(CPU *c){Obj *o=obj(A(0),0);
+    trace_detail("unsupported: %s COM method is not implemented by this bridge",interface_name(o?o->kind:0));
+    fprintf(stderr,"[d3d9] %s@0x%08lx: unsupported COM method\n",interface_name(o?o->kind:0),(unsigned long)A(0));
+    rt_unimpl(c,A(0),"unsupported D3D9 COM method");}
+static void direct_create(CPU *c){trace_enter("Direct3DCreate9",0,UINT_MAX,c);trace_detail("SDKVersion=%lu",(unsigned long)A(0));
+    if(!g.mem||A(0)!=32)RET(0,1);
+    if(g.factory){retain(g.factory);RET(g.factory->guest,1);}g.factory=new_obj(FACTORY);RET(g.factory?g.factory->guest:0,1);}
+static void addref(CPU *c){Obj *o=obj(A(0),0);if(!o)RET(0,1);retain(o);RET(o->refs,1);}
+static void release_fn(CPU *c){Obj *o=obj(A(0),0);if(!o)RET(0,1);
+    if(o->refs==1&&o->lock_guest)rt_unimpl(c,A(0),"last Release while resource locked");
+    unsigned n=o->refs-1;release(o);RET(n,1);}
+/* IUnknown, requested concrete interface, plus resource/base-texture ancestors. */
+static const uint8_t guids[][16]={
+    {0,0,0,0,0,0,0,0,0xc0,0,0,0,0,0,0,0x46},
+    {0xca,0xcb,0xbd,0x81,0xd4,0x64,0x6d,0x42,0xae,0x8d,0xad,1,0x47,0xf4,0x27,0x5c},
+    {0x96,0x3b,0x22,0xd0,0x7a,0xbf,0xfd,0x43,0x92,0xbd,0xa4,0x3b,0x0d,0x82,0xb9,0xeb},
+    {0xb5,0xb1,0x4b,0xb6,0x70,0xfd,0xf6,0x4d,0xbf,0x91,0x19,0xd0,0xa1,0x24,0x55,0xe3},
+    {0x5e,0xd6,0x9d,0x7c,0xf7,0xd3,0x29,0x45,0xac,0xee,0x78,0x58,0x30,0xac,0xde,0x35},
+    {0x27,0x12,0xc3,0x85,0xe5,0x3d,0x00,0x4f,0x9b,0x3a,0xf1,0x1a,0xc3,0x8c,0x18,0xb5},
+    {0x7e,0x55,0xc5,0xef,0x65,0x62,0x13,0x46,0x8a,0x94,0x43,0x85,0x78,0x89,0xeb,0x36},
+    {0xdc,0xdb,0x3b,0x6d,0x02,0x5b,0x15,0x44,0xb8,0x52,0xce,0x5e,0x8b,0xcc,0xb2,0x89},
+    {0x9c,0xc5,0x13,0xdd,0xfa,0x36,0x98,0x40,0xa8,0xfb,0xc7,0xed,0x39,0xdc,0x85,0x46},
+    {0x3a,0xaf,0xfb,0x0c,0xf6,0x99,0x4a,0x29,0x99,0xb3,0xa2,0x79,0x6a,0xf8,0xb8,0x9b},
+    {0x5d,0x05,0xec,0x5e,0x7d,0x8f,0x62,0x43,0xb9,0x99,0xd1,0xba,0xf3,0x57,0xc7,4},
+    {0x7e,0xa8,0x0c,0x58,0x3c,0x1d,0x54,0x4d,0x99,0x1d,0xb7,0xd3,0xe3,0xc2,0x98,0xce}};
+static void query(CPU *c){Obj *o=obj(A(0),0);const void *iid=ptr(A(1),16);uint32_t out=A(2);if(!o||!iid||!ptr(out,4))RET(INVALID,3);
+    M32(out)=0;if(memcmp(iid,guids[0],16)&&memcmp(iid,guids[o->kind],16)&&
+        !((o->kind>=VB&&o->kind<=TEX||o->kind==SURFACE)&&!memcmp(iid,guids[10],16))&&!(o->kind==TEX&&!memcmp(iid,guids[11],16)))RET(NOINTERFACE,3);
+    retain(o);M32(out)=o->guest;RET(OK,3);}
+static void adapter_count(CPU *c){
+    if(!obj(A(0),FACTORY)){d3d_log("GetAdapterCount","invalid factory object");RET(0,1);}
+    RET(D9_ADAPTER_COUNT,1);
+}
+static void display_mode(CPU *c){
+    uint32_t out=A(2);
+    if(!obj(A(0),FACTORY)||!ptr(out,sizeof(D9DisplayMode))){d3d_log("GetAdapterDisplayMode","invalid factory or output buffer");RET(INVALID,3);}
+    D9DisplayMode mode;
+    if(d9_adapter_display_mode(A(1),D9_X8R8G8B8,0,&mode)){
+        d3d_log("GetAdapterDisplayMode",A(1)>=D9_ADAPTER_COUNT?"adapter does not exist":"display mode is unavailable");RET(INVALID,3);}
+    memcpy(ptr(out,sizeof mode),&mode,sizeof mode);RET(OK,3);
+}
+static void adapter_identifier(CPU *c){
+    uint32_t flags=A(2),out=A(3);
+    if(!obj(A(0),FACTORY)||!ptr(out,sizeof(D9AdapterIdentifier))){d3d_log("GetAdapterIdentifier","invalid factory or output buffer");RET(INVALID,4);}
+    if(flags&~2u){d3d_log("GetAdapterIdentifier","only D3DENUM_WHQL_LEVEL is recognized");RET(INVALID,4);}
+    D9AdapterIdentifier id;
+    if(d9_adapter_identifier(A(1),&id)){
+        d3d_log("GetAdapterIdentifier",A(1)>=D9_ADAPTER_COUNT?"adapter does not exist":"adapter identifier is unavailable");RET(INVALID,4);}
+    memcpy(ptr(out,sizeof id),&id,sizeof id);
+    RET(flags&2u?NOAUTOGEN:OK,4);
+}
+static void adapter_mode_count(CPU *c){
+    if(!obj(A(0),FACTORY)){d3d_log("GetAdapterModeCount","invalid factory object");RET(0,3);}
+    unsigned count=d9_adapter_mode_count(A(1),A(2));
+    if(!count)d3d_log("GetAdapterModeCount",A(1)>=D9_ADAPTER_COUNT?"adapter does not exist":"only X8R8G8B8 has a display mode");
+    RET(count,3);
+}
+static void enum_modes(CPU *c){
+    uint32_t out=A(4);
+    if(!obj(A(0),FACTORY)||!ptr(out,sizeof(D9DisplayMode))){d3d_log("EnumAdapterModes","invalid factory or output buffer");RET(INVALID,5);}
+    D9DisplayMode mode;
+    if(d9_adapter_display_mode(A(1),A(2),A(3),&mode)){
+        const char *why=A(1)>=D9_ADAPTER_COUNT?"adapter does not exist":
+            A(2)!=D9_X8R8G8B8?"format is not the X8R8G8B8 display format":"mode index is out of range";
+        d3d_log("EnumAdapterModes",why);RET(INVALID,5);
+    }
+    memcpy(ptr(out,sizeof mode),&mode,sizeof mode);RET(OK,5);
+}
+static void check_device_type(CPU *c){
+    int rc=d9_adapter_check_device_type(A(1),A(2),A(3),A(4),A(5)!=0);
+    if(rc){
+        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
+            !A(5)?"exclusive fullscreen/display-mode ownership is not implemented":
+            A(3)!=D9_X8R8G8B8?"display format is not the single 400x240 X8R8G8B8 mode":
+            "back-buffer format is not X8R8G8B8, A8R8G8B8 or UNKNOWN";
+        d3d_log("CheckDeviceType",why);RET(adapter_result(rc),6);
+    }
+    RET(OK,6);
+}
+static void check_format(CPU *c){
+    int rc=d9_adapter_check_device_format(A(1),A(2),A(3),A(4),A(5),A(6));
+    if(rc){
+        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
+            A(3)!=D9_X8R8G8B8?"adapter format is not X8R8G8B8":
+            A(4)&~0x00220001u?"usage flags other than RENDERTARGET or QUERY_FILTER/QUERY_WRAPANDMIP are not implemented":
+            (A(5)!=3&&A(5)!=1)?"only D3DRTYPE_TEXTURE and plain D3DRTYPE_SURFACE are implemented":
+            A(5)==1&&A(4)&&A(4)!=1?"only usage zero or D3DUSAGE_RENDERTARGET is implemented for surfaces":
+            A(5)==1?"plain/render-target surfaces require a 32-bit X8R8G8B8/A8R8G8B8 format":
+            A(4)==1?"render-target textures are not implemented":
+            "format is not A8R8G8B8, X8R8G8B8, DXT1, DXT3 or DXT5";
+        d3d_log("CheckDeviceFormat",why);RET(adapter_result(rc),7);
+    }
+    RET(OK,7);
+}
+static void check_multisample(CPU *c){
+    uint32_t out=A(6);
+    if(!obj(A(0),FACTORY)||(out&&!ptr(out,4))){d3d_log("CheckDeviceMultiSampleType","invalid factory or quality-levels pointer");RET(INVALID,7);}
+    int rc=d9_adapter_check_multisample(A(1),A(2),A(3),A(4)!=0,A(5));
+    if(rc){
+        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
+            !A(4)?"exclusive fullscreen/display-mode ownership is not implemented":
+            A(5)?"only D3DMULTISAMPLE_NONE is implemented":
+            "surface format is not a supported back-buffer format";
+        d3d_log("CheckDeviceMultiSampleType",why);RET(adapter_result(rc),7);
+    }
+    if(out)M32(out)=1;
+    RET(OK,7);
+}
+static void check_depth_stencil(CPU *c){
+    int rc=d9_adapter_check_depth_stencil(A(1),A(2),A(3),A(4),A(5));
+    if(rc){
+        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
+            "D3D9 depth-stencil surfaces are not implemented";
+        d3d_log("CheckDepthStencilMatch",why);RET(adapter_result(rc),6);
+    }
+    RET(OK,6);
+}
+static void check_format_conversion(CPU *c){
+    int rc=d9_adapter_check_format_conversion(A(1),A(2),A(3),A(4));
+    if(rc){
+        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
+            "surface format conversion is not implemented";
+        d3d_log("CheckDeviceFormatConversion",why);RET(adapter_result(rc),5);
+    }
+    RET(OK,5);
+}
+static void register_software(CPU *c){
+    if(!obj(A(0),FACTORY)){d3d_log("RegisterSoftwareDevice","invalid factory object");RET(INVALID,2);}
+    d3d_log("RegisterSoftwareDevice","software rasterizer plugins are not implemented");RET(UNAVAILABLE,2);
+}
+static void adapter_monitor(CPU *c){
+    d3d_log("GetAdapterMonitor","the 3DS has no desktop monitor; returning NULL");
+    RET(0,2);
+}
+static int perf_logged;
+static void perf_note(const char *method){
+    (void)method;if(perf_logged)return;perf_logged=1;
+    trace_detail("no profiler is attached; performance marker accepted as a no-op");
+}
+static void d3dperf_set_options(CPU *c){trace_enter("D3DPERF_SetOptions",0,UINT_MAX,c);perf_note("D3DPERF_SetOptions");RET(0,1);}
+static void d3dperf_begin(CPU *c){trace_enter("D3DPERF_BeginEvent",0,UINT_MAX,c);perf_note("D3DPERF_BeginEvent");RET(0,2);}
+static void d3dperf_end(CPU *c){trace_enter("D3DPERF_EndEvent",0,UINT_MAX,c);perf_note("D3DPERF_EndEvent");RET(0,0);}
+static void d3dperf_status(CPU *c){trace_enter("D3DPERF_GetStatus",0,UINT_MAX,c);perf_note("D3DPERF_GetStatus");RET(0,0);}
+static void factory_caps(CPU *c){
+    uint32_t out=A(3);
+    if(!obj(A(0),FACTORY)||!ptr(out,sizeof(D9Caps9))){d3d_log("GetDeviceCaps","invalid factory or caps buffer");RET(INVALID,4);}
+    D9Caps9 caps;
+    if(d9_adapter_caps(A(1),A(2),&caps)){
+        d3d_log("GetDeviceCaps",A(1)>=D9_ADAPTER_COUNT?"adapter does not exist":"device type is not D3DDEVTYPE_HAL");
+        RET(INVALID,4);
+    }
+    memcpy(ptr(out,sizeof caps),&caps,sizeof caps);RET(OK,4);
+}
+static void device_caps(CPU *c){
+    uint32_t out=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(out,sizeof(D9Caps9))){d3d_log("GetDeviceCaps","invalid device or caps buffer");RET(INVALID,2);}
+    D9Caps9 caps;
+    if(d9_adapter_caps(0,1,&caps)){d3d_log("GetDeviceCaps","adapter caps are unavailable");RET(INVALID,2);}
+    memcpy(ptr(out,sizeof caps),&caps,sizeof caps);RET(OK,2);
+}
+static const char *presentation_reason(const uint32_t *pp){
+    unsigned w=pp[0],h=pp[1],fmt=pp[2],count=pp[3],ms=pp[4],quality=pp[5],swap=pp[6];
+    if(!((w==D9_DISPLAY_WIDTH&&h==D9_DISPLAY_HEIGHT)||(w==0&&h==0)))return "back buffer is not the 400x240 display mode";
+    if(fmt&&!SURFACE_FORMAT(fmt))return "back-buffer format is not 32-bit X8R8G8B8/A8R8G8B8";
+    if(count>1)return "more than one back buffer is not implemented";
+    if(ms)return "multisampling is not implemented";
+    if(quality)return "non-zero multisample quality is not implemented";
+    if(swap!=1)return "only D3DSWAPEFFECT_DISCARD is implemented";
+    if(!pp[8])return "only the single windowed display mode is implemented";
+    /* Windowed guests in the existing slice carry a legacy refresh value. It
+     * does not select a display mode here, so accept and ignore it. */
+    if(pp[9])return "automatic depth-stencil surfaces are not implemented";
+    if(pp[11])return "presentation flags other than none are not implemented";
+    if(pp[13]>1)return "only immediate or one-frame presentation intervals are implemented";
+    return NULL;
+}
+static void presentation_store(const uint32_t *pp){
+    memcpy(g.pp,pp,14*sizeof *pp);
+    if(!g.pp[0])g.pp[0]=D9_DISPLAY_WIDTH;
+    if(!g.pp[1])g.pp[1]=D9_DISPLAY_HEIGHT;
+    if(!g.pp[2])g.pp[2]=D9_X8R8G8B8;
+    if(!g.pp[3])g.pp[3]=1;
+}
+static void default_gamma(void){
+    /* D3DGAMMARAMP is 3 x 256 WORD; i * 0x0101 is the identity ramp. */
+    for(unsigned c=0;c<3;++c)for(unsigned i=0;i<256;++i)
+        g.gamma[c][i]=(uint16_t)(i*0x0101u);
+}
+static int gamma_identity(const uint16_t *ramp){
+    for(unsigned c=0;c<3;++c)for(unsigned i=0;i<256;++i)
+        if(ramp[c*256+i]!=(uint16_t)(i*0x0101u))return 0;
+    return 1;
+}
+static void default_viewport(void){
+    unsigned width=g.rt?g.rt->width:g.pp[0],height=g.rt?g.rt->height:g.pp[1];
+    g.viewport[0]=g.viewport[1]=0;g.viewport[2]=width;g.viewport[3]=height;
+    g.viewport[4]=0;g.viewport[5]=0x3f800000u;
+    if(g.device)(void)d9_set_viewport_size(g.device,width,height);
+    /* D3D9 resets the scissor rectangle to the whole render target whenever the
+     * device or the bound target changes.  The scissor test stays off. */
+    g.scissor[0]=g.scissor[1]=0;g.scissor[2]=width;g.scissor[3]=height;
+}
+static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
+    if(!obj(A(0),FACTORY)||!ptr(out,4)||!ptr(pp,56)){d3d_log("CreateDevice","invalid factory, presentation parameters or output pointer");RET(INVALID,7);}
+    M32(out)=0;
+    if(A(1)>=D9_ADAPTER_COUNT||A(2)!=1){d3d_log("CreateDevice","invalid adapter or device type");RET(INVALID,7);}
+    trace_detail("Adapter=%lu DeviceType=%lu FocusWindow=0x%08lx BehaviorFlags=0x%08lx BackBuffer=%lux%lu Format=%lu",
+        (unsigned long)A(1),(unsigned long)A(2),(unsigned long)A(3),(unsigned long)A(4),
+        (unsigned long)M32(pp),(unsigned long)M32(pp+4),(unsigned long)M32(pp+8));
+    const char *why=g.dev?"a device already exists":presentation_reason(ptr(pp,56));
+    if(why){d3d_log("CreateDevice",why);RET(UNAVAILABLE,7);}
+    if(!g.device){
+        if(!g.backend){d3d_log("CreateDevice","no GPU backend is registered; this is an enumeration-only session");RET(UNAVAILABLE,7);}
+        if(!g.backend_limit){d3d_log("CreateDevice","no d3d9_core resource budget is configured for the backend");RET(UNAVAILABLE,7);}
+        g.device=d9_create_device(g.backend,g.backend_ctx,g.backend_limit);
+        if(!g.device){d3d_log("CreateDevice","d3d9_core could not create the device from the backend");RET(UNAVAILABLE,7);}
+        g.owns_device=1;
+    }
+    presentation_store(ptr(pp,56));
+    if(d9_set_back_buffer_info(g.device,g.pp[0],g.pp[1],g.pp[2])){
+        if(g.owns_device){d9_destroy_device(g.device);g.device=NULL;g.owns_device=0;}
+        d3d_log("CreateDevice","back-buffer presentation metadata was rejected");RET(UNAVAILABLE,7);
+    }
+    g.dev=new_obj(DEVICE);
+    if(!g.dev){
+        if(g.owns_device){d9_destroy_device(g.device);g.device=NULL;g.owns_device=0;}
+        d3d_log("CreateDevice","COM object table is full");RET(OUTMEM,7);
+    }
+    retain(g.factory);
+    default_viewport();default_gamma();
+    g.creation[0]=A(1);g.creation[1]=A(2);g.creation[2]=A(3);g.creation[3]=A(4);
+    g.back=new_obj(SURFACE);
+    if(!g.back){
+        release(g.dev);d3d_log("CreateDevice","COM object table is full");RET(OUTMEM,7);
+    }
+    g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];g.back->usage=1;g.back->pool=0;
+    g.rt=g.back;g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;
+    (void)d9_set_render_target(g.device,0);
+    /* A new device starts with an unarmed, empty menu closure observation. */
+    d9_menu_closure_reset();
+    M32(out)=g.dev->guest;RET(OK,7);}
+static int explicit_resources(void){
+    for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->refs&&o->kind!=FACTORY&&o->kind!=DEVICE&&!(o->kind==SURFACE&&o==g.back))return 1;}
+    return 0;
+}
+static void reset_device(CPU *c){uint32_t pp=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(pp,56)){d3d_log("Reset","invalid device or presentation parameters");RET(INVALID,2);}
+    if(g.phase){d3d_log("Reset","Present must complete the active scene before Reset");RET(INVALID,2);}
+    if(!g.owns_device){d3d_log("Reset","state reset is unavailable for a caller-adopted D9Device");RET(UNAVAILABLE,2);}
+    const char *why=presentation_reason(ptr(pp,56));
+    if(why){d3d_log("Reset",why);RET(UNAVAILABLE,2);}
+    if(explicit_resources()){d3d_log("Reset","release all explicit resources before Reset");RET(INVALID,2);}
+    trace_detail("BackBuffer=%lux%lu Format=%lu",(unsigned long)M32(pp),(unsigned long)M32(pp+4),(unsigned long)M32(pp+8));
+    D9Device *replacement=d9_create_device(g.backend,g.backend_ctx,g.backend_limit);
+    if(!replacement){d3d_log("Reset","could not allocate replacement device state");RET(OUTMEM,2);}
+    d9_destroy_device(g.device);g.device=replacement;
+    presentation_store(ptr(pp,56));
+    if(d9_set_back_buffer_info(g.device,g.pp[0],g.pp[1],g.pp[2])){
+        d3d_log("Reset","back-buffer presentation metadata was rejected");RET(UNAVAILABLE,2);
+    }
+    g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
+    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;memset(&g.constants,0,sizeof g.constants);
+    g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
+    /* Reset also discards every closure observation. */
+    d9_menu_closure_reset();
+#if D9_CAPTURE_HOOK
+    g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
+#endif
+    M32(pp)=M32(pp+4)=M32(pp+12)=0;M32(pp+8)=0; /* D3D9 Reset writes back UNKNOWN/zero dimensions. */
+    RET(OK,2);
+}
+static void device_display_mode(CPU *c){uint32_t out=A(2);
+    if(!obj(A(0),DEVICE)||A(1)||!ptr(out,sizeof(D9DisplayMode))){d3d_log("GetDisplayMode","invalid device, swap chain or output buffer");RET(INVALID,3);}
+    D9DisplayMode mode;if(d9_adapter_display_mode(0,D9_X8R8G8B8,0,&mode))RET(UNAVAILABLE,3);
+    memcpy(ptr(out,sizeof mode),&mode,sizeof mode);RET(OK,3);
+}
+static void creation_parameters(CPU *c){uint32_t out=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(out,16))RET(INVALID,2);
+    memcpy(ptr(out,16),g.creation,sizeof g.creation);RET(OK,2);
+}
+static void get_back_buffer(CPU *c){uint32_t out=A(4);if(!ptr(out,4))RET(INVALID,5);M32(out)=0;
+    if(!obj(A(0),DEVICE)||A(1)||A(2)||A(3))RET(INVALID,5);
+    retain(g.back);M32(out)=g.back->guest;RET(OK,5);
+}
+static void number_swap_chains(CPU *c){RET(obj(A(0),DEVICE)?1:0,1);}
+static void create_render_target(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(INVALID,9);M32(out)=0;
+    if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,9);
+    if(A(8)){d3d_log("CreateRenderTarget","shared handles are not supported");RET(INVALID,9);}
+    if(A(4)||A(5)){d3d_log("CreateRenderTarget","only D3DMULTISAMPLE_NONE with quality zero is implemented");RET(UNAVAILABLE,9);}
+    if(A(1)<8||A(2)<8||A(1)>1024||A(2)>1024||(A(1)&(A(1)-1))||(A(2)&(A(2)-1))){
+        d3d_log("CreateRenderTarget","only power-of-two dimensions from 8 through 1024 are implemented");RET(INVALID,9);}
+    if(!SURFACE_FORMAT(A(3))){d3d_log("CreateRenderTarget","only 32-bit X8R8G8B8/A8R8G8B8 targets are implemented");RET(UNAVAILABLE,9);}
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);
+    D9Handle h=0;int rc=d9_create_render_target(g.device,A(1),A(2),A(3),A(6)!=0,&h);
+    if(rc){d3d_log("CreateRenderTarget",rc==D9_MEMORY?"render-target memory budget exceeded":rc==D9_BACKEND?"backend render-target allocation failed":"backend cannot create the requested target (including lockable without readback)");RET(rc==D9_INVALID?UNAVAILABLE:hr(rc),9);}
+    Obj *o=new_obj(SURFACE);if(!o){d9_release_render_target(g.device,h);RET(OUTMEM,9);}
+    o->handle=h;o->width=A(1);o->height=A(2);o->format=A(3);o->usage=1;o->pool=0;o->pitch=A(1)*4;o->bytes=A(1)*A(2)*4;o->lockable=A(6)!=0;
+    retain(g.dev);M32(out)=o->guest;
+    trace_detail("RenderTarget=0x%08lx %lux%lu Format=%lu Lockable=%lu",(unsigned long)o->guest,
+        (unsigned long)o->width,(unsigned long)o->height,(unsigned long)o->format,(unsigned long)A(6));
+    RET(OK,9);
+}
+static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(INVALID,9);M32(out)=0;
+    if(!obj(A(0),DEVICE))RET(INVALID,9);
+    d3d_log("CreateDepthStencilSurface","depth-stencil surfaces are not implemented");RET(UNAVAILABLE,9);
+}
+static void create_offscreen(CPU *c){uint32_t out=A(5);if(!ptr(out,4))RET(INVALID,7);M32(out)=0;
+    if(!obj(A(0),DEVICE))RET(INVALID,7);
+    if(A(6)){d3d_log("CreateOffscreenPlainSurface","shared handles are not supported");RET(INVALID,7);}
+    if(A(4)==1){d3d_log("CreateOffscreenPlainSurface","D3DPOOL_MANAGED is invalid for an off-screen plain surface");RET(INVALID,7);}
+    if(A(4)==0){d3d_log("CreateOffscreenPlainSurface","D3DPOOL_DEFAULT off-screen surfaces require GPU operations that are not implemented");RET(UNAVAILABLE,7);}
+    if(A(4)!=2&&A(4)!=3){d3d_log("CreateOffscreenPlainSurface","invalid pool");RET(INVALID,7);}
+    if(!A(1)||!A(2)||A(1)>INT32_MAX/4||A(2)>INT32_MAX/4){d3d_log("CreateOffscreenPlainSurface","invalid dimensions");RET(INVALID,7);}
+    if(!SURFACE_FORMAT(A(3))){d3d_log("CreateOffscreenPlainSurface","only 32-bit X8R8G8B8/A8R8G8B8 CPU surfaces are implemented");RET(UNAVAILABLE,7);}
+    uint64_t bytes=(uint64_t)A(1)*A(2)*4;
+    if(bytes>LOCK_STRIDE||bytes>SURFACE_BUDGET-g.surface_bytes){d3d_log("CreateOffscreenPlainSurface","surface memory budget exceeded");RET(OUTMEM,7);}
+    if(g.next>=MAX_OBJECTS){d3d_log("CreateOffscreenPlainSurface","COM object table is full");RET(OUTMEM,7);}
+    uint8_t *pixels=calloc(1,(size_t)bytes);if(!pixels){d3d_log("CreateOffscreenPlainSurface","out of memory");RET(OUTMEM,7);}
+    Obj *o=new_obj(SURFACE);if(!o){free(pixels);RET(OUTMEM,7);}
+    o->pixels=pixels;o->bytes=(unsigned)bytes;o->width=A(1);o->height=A(2);o->format=A(3);o->pool=A(4);o->pitch=A(1)*4;
+    g.surface_bytes+=o->bytes;retain(g.dev);M32(out)=o->guest;
+    trace_detail("CPU surface=%lux%lu Format=%lu Pool=%lu Bytes=%lu",(unsigned long)o->width,(unsigned long)o->height,
+        (unsigned long)o->format,(unsigned long)o->pool,(unsigned long)o->bytes);
+    RET(OK,7);
+}
+static void bind_render_target(Obj *o){
+    if(g.rt==o)return;
+    Obj *old=g.rt;if(o&&o!=g.back)retain(o);g.rt=o;
+    /* The back buffer is owned by the device, not by the binding slot. */
+    if(old&&old!=g.back)release(old);
+}
+static void set_render_target(CPU *c){Obj *o=obj(A(2),SURFACE);
+    if(!obj(A(0),DEVICE)||A(1)||(A(2)&&(!o||(o!=g.back&&!o->handle)))||(o&&o->lock_guest))RET(INVALID,3);
+    D9Handle h=(!o||o==g.back)?0:o->handle;
+    if(g.clear_pending&&g.clear_target!=h){d3d_log("SetRenderTarget","queued Clear belongs to the previous render target");RET(INVALID,3);}
+    int rc=d9_set_render_target(g.device,h);
+    if(rc)RET(hr(rc),3);
+    bind_render_target(o?o:g.back);
+    default_viewport();
+    trace_detail("RenderTarget=0x%08lx Implicit=%u",(unsigned long)(o?o->guest:0),(unsigned)(!o||o==g.back));
+    RET(OK,3);
+}
+static void get_render_target(CPU *c){uint32_t out=A(2);if(!ptr(out,4))RET(INVALID,3);M32(out)=0;
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    if(!g.rt)RET(NOTFOUND,3);
+    if(A(1))RET(NOTFOUND,3);
+    retain(g.rt);M32(out)=g.rt->guest;RET(OK,3);
+}
+/* 0 = ok, 1 = pointer outside guest memory, 2 = empty/out-of-bounds. */
+static int stretch_read_rect(uint32_t address,unsigned w,unsigned h,D9Rect *out){
+    if(!address){*out=(D9Rect){0,0,(int)w,(int)h};return 0;}
+    const int32_t *p=ptr(address,16);if(!p)return 1;
+    int32_t v[4];memcpy(v,p,sizeof v);
+    if(v[0]<0||v[1]<0||v[2]<=v[0]||v[3]<=v[1]||(uint64_t)v[2]>w||(uint64_t)v[3]>h)return 2;
+    *out=(D9Rect){v[0],v[1],v[2],v[3]};return 0;
+}
+static uint32_t stretch_backend_failure(int rc){
+    if(rc==D9_MEMORY)return stretch_reject(OUTMEM,"the copy exceeded the device memory budget");
+    if(rc==D9_INVALID)return stretch_reject(INVALID,"d3d9_core rejected the copy arguments");
+    switch(d9_blit_last_error(g.device)){
+    case D9_BLIT_UNSUPPORTED:return stretch_reject(UNAVAILABLE,"the backend has no StretchRect path for this source/destination/filter combination");
+    case D9_BLIT_BACK_BUFFER_SRC:return stretch_reject(UNAVAILABLE,"the PICA backend cannot sample the implicit back buffer as a source");
+    case D9_BLIT_NO_SCENE:return stretch_reject(UNAVAILABLE,"this PICA copy requires an active BeginScene/EndScene pair");
+    case D9_BLIT_UNALIGNED:return stretch_reject(UNAVAILABLE,"this no-stretch copy needs 8-pixel aligned rectangles on the PICA texture-copy path");
+    case D9_BLIT_SAME_SURFACE:return stretch_reject(INVALID,"source and destination must be different surfaces");
+    case D9_BLIT_FORMAT:return stretch_reject(INVALID,"source and destination formats must match");
+    case D9_BLIT_RECT:return stretch_reject(INVALID,"a rectangle is empty or outside its surface");
+    case D9_BLIT_ARGUMENT:return stretch_reject(INVALID,"the copy arguments are invalid");
+    default:return stretch_reject(UNAVAILABLE,"the backend rejected or failed to submit the copy");
+    }
+}
+static void stretch_rect(CPU *c){
+    char why[192];
+    if(!obj(A(0),DEVICE)){RET(INVALID,6);}
+    Obj *s=obj(A(1),SURFACE),*d=obj(A(3),SURFACE);
+    if(!s||!d)RET(stretch_reject(INVALID,"source and destination must both be valid IDirect3DSurface9 objects"),6);
+    if(s!=g.back&&!s->handle)
+        RET(stretch_reject(INVALID,"source surface must be a render target or the back buffer; CPU off-screen plain surfaces are not in the default memory pool"),6);
+    if(d!=g.back&&!d->handle)
+        RET(stretch_reject(INVALID,"destination surface must be a render target or the back buffer"),6);
+    if(s==d)RET(stretch_reject(INVALID,"source and destination must be different surfaces"),6);
+    if(s->lock_guest||d->lock_guest)
+        RET(stretch_reject(INVALID,"a locked surface cannot participate in StretchRect"),6);
+    if(s->format!=d->format){
+        snprintf(why,sizeof why,"source format %s and destination format %s differ; StretchRect does not convert formats",
+            surface_format_name(s->format),surface_format_name(d->format));
+        RET(stretch_reject(INVALID,why),6);
+    }
+    if(A(5)>D9_FILTER_LINEAR)
+        RET(stretch_reject(INVALID,"filter must be D3DTEXF_NONE, D3DTEXF_POINT or D3DTEXF_LINEAR"),6);
+    D9Rect srect,drect;
+    int srr=stretch_read_rect(A(2),s->width,s->height,&srect);
+    if(srr){
+        snprintf(why,sizeof why,"source rectangle %s (surface is %ux%u)",srr==1?"is outside guest memory":"must be non-empty and inside the surface",
+            s->width,s->height);
+        RET(stretch_reject(INVALID,why),6);
+    }
+    int drr=stretch_read_rect(A(4),d->width,d->height,&drect);
+    if(drr){
+        snprintf(why,sizeof why,"destination rectangle %s (surface is %ux%u)",drr==1?"is outside guest memory":"must be non-empty and inside the surface",
+            d->width,d->height);
+        RET(stretch_reject(INVALID,why),6);
+    }
+    int rc=d9_blit(g.device,d==g.back?0:d->handle,&drect,s==g.back?0:s->handle,&srect,A(5));
+    if(rc)RET(stretch_backend_failure(rc),6);
+    g.last_stretch_rejection[0]=0;
+    trace_detail("Source=0x%08lx Rect=%d,%d..%d,%d Destination=0x%08lx Rect=%d,%d..%d,%d Filter=%lu",
+        (unsigned long)(s==g.back?0:s->guest),srect.left,srect.top,srect.right,srect.bottom,
+        (unsigned long)(d==g.back?0:d->guest),drect.left,drect.top,drect.right,drect.bottom,(unsigned long)A(5));
+    RET(OK,6);
+}
+static void set_depth_stencil(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,2);
+    if(!A(1))RET(OK,2);
+    d3d_log("SetDepthStencilSurface","depth-stencil surfaces are not implemented");RET(INVALID,2);
+}
+static void get_depth_stencil(CPU *c){uint32_t out=A(1);if(!ptr(out,4))RET(INVALID,2);M32(out)=0;
+    if(!obj(A(0),DEVICE))RET(INVALID,2);
+    RET(NOTFOUND,2);
+}
+static void set_viewport(CPU *c){uint32_t p=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(p,24))RET(INVALID,2);
+    uint32_t v[6];memcpy(v,ptr(p,24),24);float minz,maxz;memcpy(&minz,v+4,4);memcpy(&maxz,v+5,4);
+    if(!v[2]||!v[3]||(uint64_t)v[0]+v[2]>g.rt->width||(uint64_t)v[1]+v[3]>g.rt->height||
+        !isfinite(minz)||!isfinite(maxz)||minz<0.0f||maxz>1.0f||minz>maxz)RET(INVALID,2);
+    if(v[0]||v[1]||v[2]!=g.rt->width||v[3]!=g.rt->height||minz!=0.0f||maxz!=1.0f){
+        d3d_log("SetViewport","only the full render-target viewport is implemented");RET(UNAVAILABLE,2);
+    }
+    memcpy(g.viewport,v,sizeof g.viewport);(void)d9_set_viewport_size(g.device,v[2],v[3]);RET(OK,2);
+}
+static void get_viewport(CPU *c){uint32_t p=A(1);if(!obj(A(0),DEVICE)||!ptr(p,24))RET(INVALID,2);
+    memcpy(ptr(p,24),g.viewport,sizeof g.viewport);RET(OK,2);
+}
+static void set_scissor_rect(CPU *c){uint32_t p=A(1);
+    if(!obj(A(0),DEVICE)||g.phase==2||!ptr(p,16)){
+        d3d_log("SetScissorRect","invalid device, scene phase or RECT pointer");RET(INVALID,2);}
+    uint32_t r[4];memcpy(r,ptr(p,16),sizeof r);
+    unsigned width=g.rt?g.rt->width:g.pp[0],height=g.rt?g.rt->height:g.pp[1];
+    if(r[0]>=r[2]||r[1]>=r[3]||r[2]>width||r[3]>height){
+        d3d_log("SetScissorRect","rectangle must satisfy left < right <= width and top < bottom <= height");
+        RET(INVALID,2);}
+    if((r[0]||r[1]||r[2]!=width||r[3]!=height)&&!g.scissor_warned){
+        g.scissor_warned=1;
+        d3d_log("SetScissorRect","rectangle recorded; the renderer has no scissor stage, so draws are not clipped to it");
+    }
+    memcpy(g.scissor,r,sizeof g.scissor);
+    trace_detail("left=%lu top=%lu right=%lu bottom=%lu",(unsigned long)r[0],(unsigned long)r[1],
+        (unsigned long)r[2],(unsigned long)r[3]);
+    RET(OK,2);
+}
+static void get_scissor_rect(CPU *c){uint32_t p=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(p,16)){d3d_log("GetScissorRect","invalid device or RECT pointer");RET(INVALID,2);}
+    memcpy(ptr(p,16),g.scissor,sizeof g.scissor);RET(OK,2);
+}
+static void set_gamma_ramp(CPU *c){uint32_t p=A(3);
+    if(!obj(A(0),DEVICE)||A(1)||(A(2)&~1u)||!ptr(p,3*256*2)){
+        d3d_log("SetGammaRamp","only swap chain 0, a valid flags word and a 3x256 WORD ramp are implemented");
+        RET(INVALID,4);}
+    const uint16_t *r=ptr(p,3*256*2);
+    memcpy(g.gamma,r,sizeof g.gamma);
+    if(!g.gamma_warned&&!gamma_identity(r)){
+        g.gamma_warned=1;
+        d3d_log("SetGammaRamp","non-identity ramp recorded; the renderer applies no output gamma correction");
+    }
+    trace_detail("gamma ramp recorded");
+    RET(OK,4);
+}
+static void get_gamma_ramp(CPU *c){uint32_t p=A(2);
+    if(!obj(A(0),DEVICE)||A(1)||!ptr(p,3*256*2)){
+        d3d_log("GetGammaRamp","invalid device, swap chain or ramp pointer");RET(INVALID,3);}
+    memcpy(ptr(p,3*256*2),g.gamma,sizeof g.gamma);RET(OK,3);
+}
+static void set_npatch_mode(CPU *c){uint32_t bits=A(1);float f;memcpy(&f,&bits,4);
+    if(!obj(A(0),DEVICE)||g.phase==2||!isfinite(f)||f<0.0f||f>64.0f){
+        d3d_log("SetNPatchMode","segments must be a finite value in [0,64]");RET(INVALID,2);}
+    g.npatch_segments=f;
+    trace_detail("Segments=%g",(double)f);
+    RET(OK,2);
+}
+static void get_npatch_mode(CPU *c){
+    if(!obj(A(0),DEVICE)){d3d_log("GetNPatchMode","invalid device object");RETF(0.0f,1);}
+    RETF(g.npatch_segments,1);
+}
+static void cooperative(CPU *c){RET(obj(A(0),DEVICE)?OK:INVALID,1);}
+static void direct3d(CPU *c){if(!obj(A(0),DEVICE)||!g.factory||!ptr(A(1),4))RET(INVALID,2);retain(g.factory);M32(A(1))=g.factory->guest;RET(OK,2);}
+static void resource_device(CPU *c){Obj *o=obj(A(0),0);if(!o||o->kind<VB||!g.dev||!ptr(A(1),4))RET(INVALID,2);retain(g.dev);M32(A(1))=g.dev->guest;RET(OK,2);}
+static int fvf_admitted(unsigned fvf){
+    return !fvf||fvf==0x102u||fvf==0x104u||fvf==0x142u||fvf==0x144u;
+}
+static void create_vb(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,7);M32(out)=0;
+    if(A(6))RET(INVALID,7);
+    if(!A(1)||A(1)>LOCK_STRIDE||!fvf_admitted(A(3))||(A(2)&~USAGE_VB_MASK)||A(4)>2){
+        d3d_fail("CreateVertexBuffer",(A(2)&~USAGE_VB_MASK)?"only WRITEONLY|DYNAMIC usage is implemented":
+            !fvf_admitted(A(3))?"FVF is not XYZ(XYZRHW)|DIFFUSE|TEX1":"invalid length, pool or shared handle",UNAVAILABLE);
+        RET(UNAVAILABLE,7);
+    }
+    if(A(4)==1)d3d_log("CreateVertexBuffer","MANAGED accepted as CPU-backed bridge storage; device-loss restoration is not implemented");
+    if(A(2)&USAGE_DYNAMIC)d3d_log("CreateVertexBuffer","DYNAMIC accepted as CPU-staged storage; every Lock/Unlock is copied and upload is deferred to the draw");
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,7);D9Handle h;int rc=d9_create_vertex_buffer(g.device,A(1),&h);if(rc)RET(hr(rc),7);
+    Obj *o=new_obj(VB);if(!o){d9_release_buffer(g.device,h);RET(OUTMEM,7);}
+    o->handle=h;o->bytes=A(1);o->usage=A(2);o->fvf=A(3);o->pool=A(4);retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,7);}
+static void create_ib(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,7);M32(out)=0;
+    if(A(6))RET(INVALID,7);
+    if(!A(1)||A(1)>LOCK_STRIDE||(A(3)!=D9_INDEX16&&A(3)!=D9_INDEX32)||(A(2)&~USAGE_VB_MASK)||A(4)>2){
+        d3d_fail("CreateIndexBuffer",(A(2)&~USAGE_VB_MASK)?"only WRITEONLY|DYNAMIC usage is implemented":"invalid length, index format, pool or shared handle",UNAVAILABLE);
+        RET(UNAVAILABLE,7);
+    }
+    if(A(4)==1)d3d_log("CreateIndexBuffer","MANAGED accepted as CPU-backed bridge storage; device-loss restoration is not implemented");
+    if(A(2)&USAGE_DYNAMIC)d3d_log("CreateIndexBuffer","DYNAMIC accepted as CPU-staged storage; every Lock/Unlock is copied");
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,7);D9Handle h;int rc=d9_create_index_buffer(g.device,A(1),A(3),&h);if(rc)RET(hr(rc),7);
+    Obj *o=new_obj(IB);if(!o){d9_release_buffer(g.device,h);RET(OUTMEM,7);}
+    o->handle=h;o->bytes=A(1);o->usage=A(2);o->format=A(3);o->pool=A(4);retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,7);}
+static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,9);M32(out)=0;
+    if(A(8))RET(INVALID,9);
+    if(A(4)&~0x00220200u){d3d_fail("CreateTexture","autogen, render-target, depth-stencil and non-DYNAMIC texture usages are not implemented",UNAVAILABLE);RET(UNAVAILABLE,9);}
+    if(A(6)>2)RET(UNAVAILABLE,9);
+    if(A(6)==1)d3d_log("CreateTexture","MANAGED keeps a guest-backed restoration source; device-loss restoration is pending");
+    if(A(6)==2)d3d_log("CreateTexture","SYSTEMMEM is CPU-only and cannot be bound as a GPU texture");
+    if(A(4)&USAGE_DYNAMIC)d3d_log("CreateTexture","DYNAMIC accepted; LockRect/UnlockRect re-upload the level like MANAGED");
+    size_t pitch,bytes;if(d9_texture_layout(A(1),A(2),A(5),&pitch,&bytes))RET(INVALID,9);
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_texture_ex(g.device,A(1),A(2),A(5),A(3),A(6),A(4),0,&h);if(rc)RET(hr(rc),9);
+    Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
+    o->handle=h;o->width=A(1);o->height=A(2);o->bytes=(unsigned)bytes;o->pitch=(unsigned)pitch;o->format=A(5);o->usage=A(4);o->pool=A(6);retain(g.dev);M32(out)=o->guest;RET(OK,9);}
+static uint32_t lock_addr(Obj *o){return LOCK_BASE+(unsigned)(o-g.o)*LOCK_STRIDE;}
+static int lock_buffer(Obj *o,unsigned offset,unsigned bytes,unsigned flags){
+    if(!o||(o->kind!=VB&&o->kind!=IB)||o->lock_guest||g.phase||offset>=o->bytes||flags&~0x3010u)return D9_INVALID;
+    if(!bytes)bytes=o->bytes-offset;if(bytes>o->bytes-offset)return D9_INVALID;
+    uint32_t address=lock_addr(o);if(guest_map(g.mem,address,bytes))return D9_MEMORY;
+    void *host;int rc=d9_buffer_lock(g.device,o->handle,offset,bytes,&host);
+    if(rc){guest_unmap(g.mem,address);return rc;}
+    if(!(flags&0x2000))memcpy(ptr(address,bytes),host,bytes);
+    o->lock_guest=address;o->lock_host=host;o->lock_bytes=bytes;o->readonly=!!(flags&0x10);o->lock_rows=1;o->lock_pitch=o->lock_row_bytes=bytes;return D9_OK;
+}
+static int lock_texture(Obj *o,unsigned level,uint32_t rect,unsigned flags){
+    if(!o||o->kind!=TEX||o->lock_guest||g.phase||flags&~0x3010u||(rect&&(flags&0x2000)))return D9_INVALID;
+    unsigned w,h;size_t pitch,bytes;if(d9_texture_level_info(g.device,o->handle,level,&w,&h,&pitch,&bytes))return D9_INVALID;
+    unsigned x=0,y=0,r=w,b=h;if(rect){if(!ptr(rect,16))return D9_INVALID;x=M32(rect);y=M32(rect+4);r=M32(rect+8);b=M32(rect+12);if(x>=r||y>=b||r>w||b>h)return D9_INVALID;}
+    unsigned bb=d9_bc_block_bytes(o->format);size_t offset,row_bytes,rows;
+    if(bb){if((x&3)||(y&3)||((r&3)&&r!=w)||((b&3)&&b!=h))return D9_INVALID;
+        offset=(size_t)(y/4)*pitch+(x/4)*bb;row_bytes=(size_t)((r+3)/4-x/4)*bb;rows=(b+3)/4-y/4;}
+    else{offset=(size_t)y*pitch+x*4;row_bytes=(size_t)(r-x)*4;rows=b-y;}
+    size_t span=(rows-1)*pitch+row_bytes;if(offset>bytes||span>bytes-offset||span>LOCK_STRIDE)return D9_INVALID;
+    uint32_t address=lock_addr(o);if(guest_map(g.mem,address,(uint32_t)span))return D9_MEMORY;
+    void *host;size_t actual;int rc=d9_texture_lock_level_ex(g.device,o->handle,level,&host,&actual,!!(flags&0x10));
+    if(rc){guest_unmap(g.mem,address);return rc;}
+    uint8_t *src=(uint8_t *)host+offset,*dst=ptr(address,span);
+    if(!(flags&0x2000))for(size_t i=0;i<rows;++i)memcpy(dst+i*pitch,src+i*pitch,row_bytes);
+    o->lock_guest=address;o->lock_host=src;o->lock_bytes=(unsigned)span;o->readonly=!!(flags&0x10);o->lock_level=level;
+    o->lock_rows=(unsigned)rows;o->lock_pitch=(unsigned)pitch;o->lock_row_bytes=(unsigned)row_bytes;return D9_OK;
+}
+static int unlock(Obj *o){if(!o||!o->lock_guest||g.phase)return D9_INVALID;
+    if(!o->readonly){uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);for(unsigned i=0;i<o->lock_rows;++i)
+        memcpy(host+(size_t)i*o->lock_pitch,src+(size_t)i*o->lock_pitch,o->lock_row_bytes);}
+    int rc=o->kind==TEX?(o->readonly?d9_texture_unlock_readonly(g.device,o->handle,o->lock_level):d9_texture_unlock_level(g.device,o->handle,o->lock_level)):d9_buffer_unlock(g.device,o->handle);
+    if(!rc){guest_unmap(g.mem,o->lock_guest);o->lock_guest=0;o->lock_host=NULL;o->lock_bytes=0;}return rc;}
+static void buffer_lock(CPU *c){Obj *o=obj(A(0),0);if(!o||(o->kind!=VB&&o->kind!=IB)||!ptr(A(3),4))RET(INVALID,5);
+    M32(A(3))=0;int rc=lock_buffer(o,A(1),A(2),A(4));if(!rc)M32(A(3))=o->lock_guest;RET(hr(rc),5);}
+static void buffer_unlock(CPU *c){Obj *o=obj(A(0),0);if(!o||(o->kind!=VB&&o->kind!=IB))RET(INVALID,1);RET(hr(unlock(o)),1);}
+static void texture_lock(CPU *c){Obj *o=obj(A(0),TEX);uint32_t out=A(2);if(!o||!ptr(out,8))RET(INVALID,5);
+    M32(out)=M32(out+4)=0;int rc=lock_texture(o,A(1),A(3),A(4));if(!rc){M32(out)=o->lock_pitch;M32(out+4)=o->lock_guest;}RET(hr(rc),5);}
+static void texture_unlock(CPU *c){Obj *o=obj(A(0),TEX);if(!o||A(1)!=o->lock_level)RET(INVALID,2);RET(hr(unlock(o)),2);}
+static void buffer_desc(CPU *c){Obj *o=obj(A(0),0);uint32_t p=A(1);if(!o||(o->kind!=VB&&o->kind!=IB)||!ptr(p,o->kind==VB?24:20))RET(INVALID,2);
+    M32(p)=o->kind==VB?100:o->format;M32(p+4)=o->kind==VB?6:7;M32(p+8)=o->usage;M32(p+12)=o->pool;M32(p+16)=o->bytes;if(o->kind==VB)M32(p+20)=o->fvf;RET(OK,2);}
+static void level_count(CPU *c){Obj *o=obj(A(0),TEX);RET(o?d9_texture_levels(g.device,o->handle):0,1);}
+static void texture_desc(CPU *c){Obj *o=obj(A(0),TEX);uint32_t p=A(2);unsigned w,h;if(!o||!ptr(p,32)||d9_texture_level_info(g.device,o->handle,A(1),&w,&h,NULL,NULL))RET(INVALID,3);
+    M32(p)=o->format;M32(p+4)=1;M32(p+8)=o->usage;M32(p+12)=o->pool;M32(p+16)=M32(p+20)=0;M32(p+24)=w;M32(p+28)=h;RET(OK,3);}
+static void resource_type(CPU *c){Obj *o=obj(A(0),0);RET(!o?0:o->kind==VB?6:o->kind==IB?7:o->kind==TEX?3:o->kind==SURFACE?1:0,1);}
+static void surface_desc(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t p=A(1);
+    if(!o||!ptr(p,32))RET(INVALID,2);
+    M32(p)=o->format;M32(p+4)=1;M32(p+8)=o->usage;M32(p+12)=o->pool;
+    M32(p+16)=M32(p+20)=0;M32(p+24)=o->width;M32(p+28)=o->height;RET(OK,2);
+}
+static void surface_container(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(2);
+    if(!o||!ptr(A(1),16)||!ptr(out,4))RET(INVALID,3);M32(out)=0;
+    if(o==g.back){d3d_log("GetContainer","the implicit swap-chain container is not implemented");RET(UNAVAILABLE,3);}
+    if(memcmp(ptr(A(1),16),guids[0],16)&&memcmp(ptr(A(1),16),guids[DEVICE],16))RET(NOINTERFACE,3);
+    retain(g.dev);M32(out)=g.dev->guest;RET(OK,3);
+}
+static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
+    if(!o||o->kind!=SURFACE||!ptr(locked,8))return D9_INVALID;
+    if(o==g.back)return D9_BACKEND;
+    if(o->lock_guest||g.phase||(rect&&(flags&0x2000)))return D9_INVALID;
+    if(o->handle&&(!o->lockable||!(flags&0x10u)||(flags&~0x8010u)))return D9_INVALID; /* explicit targets are read-only */
+    if(!o->handle&&(flags&~0xc810u))return D9_INVALID;
+    int32_t r[4]={0,0,(int32_t)o->width,(int32_t)o->height};
+    if(rect){if(!ptr(rect,16))return D9_INVALID;memcpy(r,ptr(rect,16),16);}
+    if(r[0]<0||r[1]<0||r[2]<=r[0]||r[3]<=r[1]||(uint64_t)r[2]>o->width||(uint64_t)r[3]>o->height)return D9_INVALID;
+    unsigned x=(unsigned)r[0],y=(unsigned)r[1],row_bytes=((unsigned)r[2]-x)*4,rows=(unsigned)r[3]-y;
+    size_t offset=(size_t)y*o->pitch+x*4,span=(size_t)(rows-1)*o->pitch+row_bytes;
+    if(offset>o->bytes||span>o->bytes-offset||span>LOCK_STRIDE)return D9_INVALID;
+    uint32_t address=lock_addr(o);if(guest_map(g.mem,address,(uint32_t)span))return D9_MEMORY;
+    if(o->handle){
+        int rc=d9_render_target_read(g.device,o->handle,ptr(address,(uint32_t)span),o->pitch,x,y,r[2]-x,r[3]-y);
+        if(rc){guest_unmap(g.mem,address);return rc;}
+        o->lock_host=NULL;
+    }else{
+        uint8_t *src=o->pixels+offset,*dst=ptr(address,(uint32_t)span);
+        for(unsigned i=0;i<rows;++i)memcpy(dst+(size_t)i*o->pitch,src+(size_t)i*o->pitch,row_bytes);
+        o->lock_host=src;
+    }
+    o->lock_guest=address;o->lock_bytes=(unsigned)span;o->readonly=!!(flags&0x10);
+    o->lock_rows=rows;o->lock_pitch=o->pitch;o->lock_row_bytes=row_bytes;
+    M32(locked)=o->pitch;M32(locked+4)=address;return D9_OK;
+}
+static int unlock_surface(Obj *o){
+    if(!o||o->kind!=SURFACE||!o->lock_guest)return D9_INVALID;
+    if(!o->readonly){uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);
+        for(unsigned i=0;i<o->lock_rows;++i)memcpy(host+(size_t)i*o->lock_pitch,src+(size_t)i*o->lock_pitch,o->lock_row_bytes);}
+    guest_unmap(g.mem,o->lock_guest);o->lock_guest=0;o->lock_host=NULL;o->lock_bytes=0;o->lock_rows=0;o->lock_pitch=o->lock_row_bytes=0;return D9_OK;
+}
+static void surface_lock(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
+    if(!o||!ptr(out,8))RET(INVALID,4);M32(out)=M32(out+4)=0;
+    int rc=lock_surface(o,out,A(2),A(3));if(rc==D9_BACKEND)d3d_log("LockRect",o->handle?"the backend has no readable render-target pixels":"the back buffer has no readable or writable pixels");
+    RET(hr(rc),4);
+}
+static void surface_unlock(CPU *c){Obj *o=obj(A(0),SURFACE);if(!o)RET(INVALID,1);RET(hr(unlock_surface(o)),1);}
+static void surface_dc(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
+    if(!o||!ptr(out,4))RET(INVALID,2);M32(out)=0;
+    d3d_log("GetDC","GDI device contexts are not implemented for D3D9 surfaces");RET(UNAVAILABLE,2);
+}
+static void surface_release_dc(CPU *c){if(!obj(A(0),SURFACE))RET(INVALID,2);RET(INVALID,2);}
+static void clear(CPU *c){if(!obj(A(0),DEVICE)||g.phase){d3d_log("Clear","Clear is only valid outside BeginScene/EndScene");RET(INVALID,7);}
+    unsigned flags=A(3),count=A(1);uint32_t rects=A(2);
+    if(!flags||flags&~7u){d3d_log("Clear","invalid clear flags");RET(INVALID,7);}
+    if(flags&6u){d3d_log("Clear","depth/stencil clear requested but no depth-stencil surface is attached");RET(INVALID,7);}
+    if((count==0)!=(rects==0)||(count&&(count>(UINT32_MAX-rects)/16||!ptr(rects,(size_t)count*16)))){
+        d3d_log("Clear","invalid rectangle count or pointer");RET(INVALID,7);}
+    if(count){d3d_log("Clear","rectangle clears are not implemented; use a full-target clear");RET(UNAVAILABLE,7);}
+    if(g.clear_pending){d3d_log("Clear","multiple Clear calls before BeginScene are not implemented");RET(UNAVAILABLE,7);}
+    g.clear=A(4);g.clear_flags=flags;g.clear_pending=1;g.frame_clear=1;g.clear_target=d9_get_render_target(g.device);
+    if(g.backend==d9_null_backend())d9_null_note_clear(flags);
+    trace_detail("Flags=0x%lx Color=0x%08lx Rects=%lu",(unsigned long)flags,(unsigned long)g.clear,(unsigned long)count);
+    RET(OK,7);
+}
+static void begin_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,1);if(!g.clear_pending)g.frame_clear=0;int rc=d9_begin_scene_ex(g.device,g.clear,g.clear_pending);if(!rc){g.phase=1;g.clear_pending=0;g.clear_target=0;
+#if D9_CAPTURE_HOOK
+        /* The Present latch survives BeginScene: the first captured draw of the
+         * next frame reports the previous frame's Present, then clears it. */
+        ++g.frame_index;g.draw_index=0;
+#endif
+    }RET(hr(rc),1);}
+static void end_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1)RET(INVALID,1);g.phase=2;RET(OK,1);}
+static void present(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=2||A(1)||A(2)||A(3)||A(4))RET(INVALID,5);int rc=d9_present(g.device);if(!rc){g.phase=0;
+#if D9_CAPTURE_HOOK
+        g.capture_present=1;g.capture_present_flags=A(4);
+        capture_present_event();
+#endif
+        collect();
+    }RET(hr(rc),5);}
+static void transform(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(2),sizeof(D9Matrix)))RET(INVALID,3);
+    unsigned t=A(1)==256?D9_WORLD:A(1)==2?D9_VIEW:A(1)==3?D9_PROJECTION:99;D9Matrix m;memcpy(&m,ptr(A(2),sizeof m),sizeof m);RET(hr(d9_set_transform(g.device,t,&m)),3);}
+static void set_fvf(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,2);
+    unsigned fvf=A(1);const char *why=NULL;D9Decl decl;
+    if(d9_decl_from_fvf(fvf,&decl,&why)){
+        d3d_fail("SetFVF",why?why:"FVF is not an admitted XYZ|TEX1/DIFFUSE variant",UNAVAILABLE);RET(UNAVAILABLE,2);
+    }
+    if(d9_set_vertex_declaration(g.device,&decl)){d3d_fail("SetFVF","declaration rejected by the core",INVALID);RET(INVALID,2);}
+    bind(&g.declaration,NULL);g.fvf=fvf;g.last_diagnostic[0]=0;RET(OK,2);}
+static void get_fvf(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);M32(A(1))=g.fvf;RET(OK,2);}
+static void set_render(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(hr(d9_set_render_state(g.device,A(1),A(2))),3);}
+static void get_render(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(2),4)||d9_get_render_state(g.device,A(1),&v))RET(INVALID,3);M32(A(2))=v;RET(OK,3);}
+static void set_sampler(CPU *c){if(!obj(A(0),DEVICE)||A(1)||g.phase==2)RET(INVALID,4);RET(hr(d9_set_sampler_state(g.device,A(2),A(3))),4);}
+/* D3D9 IDirect3DDevice9 slot 67.  The GFx UI batch uses stage 0
+ * MODULATE(TEXTURE,DIFFUSE); the value is stored even when the current
+ * backend has no vertex-colour shader, so the draw gate is the only failure. */
+static void set_texture_stage_state(CPU *c){
+    if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,4);
+    int rc=d9_set_texture_stage_state(g.device,A(1),A(2),A(3));
+    if(rc){d3d_fail("SetTextureStageState",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),4);}
+    g.last_diagnostic[0]=0;
+    RET(OK,4);
+}
+static void get_sampler(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||A(1)||!ptr(A(3),4)||d9_get_sampler_state(g.device,A(2),&v))RET(INVALID,4);M32(A(3))=v;RET(OK,4);}
+static void stream(CPU *c){Obj *o=obj(A(2),VB);unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||(A(2)&&!o)||g.phase==2)RET(INVALID,5);
+    int rc=d9_set_stream(g.device,s,o?o->handle:0,A(3),A(4));if(!rc){bind(&g.streams[s],o);g.offsets[s]=A(3);g.strides[s]=A(4);}RET(hr(rc),5);}
+static void get_stream(CPU *c){unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||!ptr(A(2),4)||!ptr(A(3),4)||!ptr(A(4),4))RET(INVALID,5);
+    Obj *o=g.streams[s];retain(o);M32(A(2))=o?o->guest:0;M32(A(3))=g.offsets[s];M32(A(4))=g.strides[s];RET(OK,5);}
+static void stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||A(2)!=1||g.phase==2)RET(UNAVAILABLE,3);RET(OK,3);}
+static void get_stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||!ptr(A(2),4))RET(INVALID,3);M32(A(2))=1;RET(OK,3);}
+static void indices(CPU *c){Obj *o=obj(A(1),IB);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
+    int rc=d9_set_indices(g.device,o?o->handle:0);if(!rc)bind(&g.ib,o);RET(hr(rc),2);}
+static void get_indices(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ib);M32(A(1))=g.ib?g.ib->guest:0;RET(OK,2);}
+static void texture(CPU *c){Obj *o=obj(A(2),TEX);if(!obj(A(0),DEVICE)||A(1)||(A(2)&&!o)||g.phase==2)RET(INVALID,3);
+    int rc=d9_set_texture(g.device,o?o->handle:0);if(!rc)bind(&g.tex,o);RET(hr(rc),3);}
+static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
+    if(!address||(address&3)||!ptr(out,4)||g.next>=MAX_OBJECTS)return INVALID;M32(out)=0;
+    size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
+    if(!count)return INVALID;if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
+    uint32_t *code=malloc(count*4);if(!code)return OUTMEM;for(size_t i=0;i<count;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
+    /* Named first-menu closure.  While the TESV menu path has armed this
+     * contract, the only shaders that may be created are the certified
+     * menu.logo.ps / menu.composite.ps / menu.generic.vs set.  Anything else
+     * invalidates the predicate permanently and is rejected here, before the
+     * generic SM2/TEV paths can turn it into a fallback success. */
+    D9MenuClosureVerdict closure;
+    if(d9_menu_closure_precreate(kind==PS?D9_MENU_STAGE_PS:D9_MENU_STAGE_VS,
+                                 code,count,&closure)){
+        snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                 "menu shader closure: %s",closure.reason);
+        fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+        free(code);
+        return closure.match==D9_MENU_BAD_ARGUMENT?INVALID:UNAVAILABLE;
+    }
+    if(kind==PS&&count&&code[0]==0xFFFF0300u){
+        D9PicaTevReject reason;char backend_why[256];
+        if(d9_pica_tev_preflight_pixel(code,count,&reason,backend_why,sizeof backend_why)){
+            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+            d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+            free(code);return (reason==D9_PICA_TEV_MALFORMED||reason==D9_PICA_TEV_PROGRAM_VERSION)?INVALID:UNAVAILABLE;}
+    }
+    D9ShaderInfo info;D9TevProgram tev;int result=d9_shader_analyze_tev(code,count,&info,&tev);int wanted=kind==VS?D9_SHADER_VS_MATRIX_UV:D9_SHADER_PS_TEXTURE;
+    if(result!=wanted&&!(kind==PS&&result==D9_SHADER_TEV)){
+        char diagnostic[320];d9_shader_diagnostic(&info,diagnostic,sizeof diagnostic);
+        snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"%s",diagnostic);
+        fprintf(stderr,"D3D9 shader rejected: %s (hash %08lx, mismatch %u)\n",diagnostic,(unsigned long)info.signature,info.first_mismatch);
+        d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+        free(code);return result==D9_SHADER_INVALID?INVALID:UNAVAILABLE;}
+    if(kind==PS&&result==D9_SHADER_TEV){
+        D9PicaTevReject reason;char backend_why[256];
+        if(d9_pica_tev_validate(&tev,NULL,&reason,backend_why,sizeof backend_why)){
+            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+            d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+            free(code);return UNAVAILABLE;}
+    }
+    g.last_shader_rejection[0]=0;
+    /* Retain original bytecode for GetFunction, including comments. */
+    uint32_t *exact=realloc(code,(size_t)info.words*4);if(exact)code=exact;
+    Obj *o=new_obj(kind);o->code=code;o->words=info.words;
+    if(kind==PS&&result==D9_SHADER_TEV){o->tev=tev;o->has_tev=1;}
+    retain(g.dev);M32(out)=o->guest;
+    /* Observation, not a D3D9 capability: the closure becomes READY only when
+     * every required entry has really been created. */
+    d9_menu_closure_commit(&closure);
+    return OK;
+}
+static void create_vs(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(shader_new(VS,A(1),A(2)),3);}
+static void create_ps(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(shader_new(PS,A(1),A(2)),3);}
+static void set_vs(CPU *c){Obj *o=obj(A(1),VS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);bind(&g.vs,o);if(!o)d9_set_shader_clip(g.device,NULL);RET(OK,2);}
+static void set_ps(CPU *c){Obj *o=obj(A(1),PS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
+    const D9TevProgram *program=o&&o->has_tev?&o->tev:NULL;
+    if(d9_set_pixel_shader(g.device,program))RET(INVALID,2);
+    bind(&g.ps,o);RET(OK,2);}
+static void get_vs(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.vs);M32(A(1))=g.vs?g.vs->guest:0;RET(OK,2);}
+static void get_ps(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ps);M32(A(1))=g.ps?g.ps->guest:0;RET(OK,2);}
+static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!obj(A(0),DEVICE)||start>=4||n>4-start||g.phase==2||(n&&!ptr(p,n*16)))RET(INVALID,4);
+    float values[4][4];if(n)memcpy(values,ptr(p,n*16),n*16);for(unsigned i=0;i<n;++i)for(unsigned j=0;j<4;++j)if(!isfinite(values[i][j]))RET(INVALID,4);
+    for(unsigned i=0;i<n;++i){memcpy(g.constants.m[start+i],values[i],16);g.constants_mask|=1u<<(start+i);}RET(OK,4);}
+static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=4||n>4-start||(n&&!ptr(A(2),n*16)))RET(INVALID,4);
+    if(n)memcpy(ptr(A(2),n*16),g.constants.m[start],n*16);RET(OK,4);}
+static void shader_function(CPU *c){Obj *o=obj(A(0),0);uint32_t size_ptr=A(2);if(!o||(o->kind!=VS&&o->kind!=PS)||!ptr(size_ptr,4))RET(INVALID,3);
+    uint32_t need=o->words*4,provided=M32(size_ptr);M32(size_ptr)=need;if(!A(1))RET(OK,3);
+    if(provided<need||!ptr(A(1),need))RET(INVALID,3);memcpy(ptr(A(1),need),o->code,need);RET(OK,3);}
+static void create_decl(CPU *c){uint32_t p=A(1),out=A(2);if(!obj(A(0),DEVICE)||!p||!ptr(out,4)||g.phase==2)RET(INVALID,3);M32(out)=0;
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);D9VertexElement elements[D9_MAX_DECL];unsigned n;
+    for(n=0;n<=D9_MAX_DECL;++n){uint64_t at=(uint64_t)p+(uint64_t)n*8;if(at>UINT32_MAX||!ptr((uint32_t)at,8))RET(INVALID,3);
+        D9VertexElement e;memcpy(&e,ptr((uint32_t)at,8),8);if(e.stream==0xff){if(e.offset||e.type!=D9_DECL_UNUSED||e.method||e.usage||e.usage_index)RET(INVALID,3);break;}
+        if(n==D9_MAX_DECL)RET(INVALID,3);elements[n]=e;}
+    D9Decl *decl=malloc(sizeof *decl);if(!decl)RET(OUTMEM,3);if(d9_decl_init(decl,elements,n)){free(decl);RET(INVALID,3);}
+    Obj *o=new_obj(DECL);o->declaration=decl;retain(g.dev);M32(out)=o->guest;RET(OK,3);}
+static void set_decl(CPU *c){Obj *o=obj(A(1),DECL);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
+    int rc=d9_set_vertex_declaration(g.device,o?o->declaration:NULL);if(!rc){bind(&g.declaration,o);g.fvf=0;}RET(hr(rc),2);}
+static void get_decl(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.declaration);M32(A(1))=g.declaration?g.declaration->guest:0;RET(OK,2);}
+static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2);if(!o||!ptr(n,4))RET(INVALID,3);
+    unsigned need=o->declaration->count+1,provided=M32(n);M32(n)=need;if(!p)RET(OK,3);
+    if(provided<need||!ptr(p,(size_t)need*8))RET(INVALID,3);memcpy(ptr(p,(size_t)need*8),o->declaration->elements,(need-1)*8);
+    D9VertexElement end={0xff,0,D9_DECL_UNUSED,0,0,0};memcpy(ptr(p+(need-1)*8,8),&end,8);RET(OK,3);}
+static int shader_state(void){int needs_texture=g.ps&&(!g.ps->has_tev||g.ps->tev.textures!=0);if(needs_texture&&!g.tex)return D9_INVALID;if(!g.vs)return d9_set_shader_clip(g.device,NULL);
+    if(g.constants_mask!=15)return D9_INVALID;return d9_set_shader_clip(g.device,&g.constants);}
+#if D9_CAPTURE_HOOK
+/* ---- first-draw capture -------------------------------------------------- */
+/* Enabled only when TESV_D3D9_CAPTURE_DRAWS is a positive integer.  The
+ * module clamps the record count to D9_CAPTURE_MAX_RECORDS.  Normal runs pay
+ * one d9_capture_active() branch per successful draw and write no files. */
+static void capture_start(void){
+    const char *requested=getenv("TESV_D3D9_CAPTURE_DRAWS");
+#ifdef __3DS__
+    /* The 3DS has no environment: diagnostic builds capture the first draw. */
+    if(!requested||!*requested)requested="1";
+#endif
+    if(!requested||!*requested)return;
+    char *end=NULL;unsigned long n=strtoul(requested,&end,10);
+    if(end==requested||!n)return;
+    if(n>D9_CAPTURE_MAX_RECORDS)n=D9_CAPTURE_MAX_RECORDS;
+    D9CaptureOptions options;d9_capture_options_init(&options);
+    options.max_records=(unsigned)n;options.flags|=D9_CAPTURE_OPT_UNIQUE_ONLY;
+    if(d9_capture_init(&options)!=D9_CAPTURE_OK){
+        fprintf(stderr,"[d3d9-capture] init: %s\n",d9_capture_last_error());
+        return;
+    }
+    fprintf(stderr,"[d3d9-capture] first-draw capture enabled (max %u records, max %u presents)\n",
+            (unsigned)options.max_records,(unsigned)options.max_presents);
+}
+static void capture_stop(void){d9_capture_shutdown();}
+static void capture_target(D9CaptureRenderTarget *out){
+    if(!out)return;memset(out,0,sizeof *out);
+    if(!g.rt){out->implicit=1;return;}
+    out->handle=g.rt==g.back?0:g.rt->guest;
+    out->width=g.rt->width;out->height=g.rt->height;out->format=g.rt->format;out->usage=g.rt->usage;
+    out->implicit=g.rt==g.back?1u:0u;
+}
+static void capture_present_event(void){
+    if(!d9_capture_present_active())return;
+    D9CapturePresentEvent event;memset(&event,0,sizeof event);
+    event.frame_index=g.frame_index;
+    if(g.back){
+        event.target.width=g.back->width;event.target.height=g.back->height;
+        event.target.format=g.back->format;event.target.usage=g.back->usage;event.target.implicit=1;
+    }else event.target.implicit=1;
+    event.flags=g.capture_present_flags;event.swap_chain=0;
+    int rc=d9_capture_offer_present(&event);
+    if(rc<0)fprintf(stderr,"[d3d9-capture] present offer %d: %s\n",rc,d9_capture_last_error());
+}
+static void capture_draw(unsigned type,unsigned start,unsigned primitives,int indexed,
+                         int32_t base,unsigned min_vertex,unsigned vertex_count,
+                         unsigned start_index){
+    if(!d9_capture_active())return;
+    ++g.draw_index;
+    D9CaptureSnapshot s;memset(&s,0,sizeof s);
+    s.frame_index=g.frame_index;s.draw_index=g.draw_index;
+    capture_target(&s.target);
+    s.draw.type=type;s.draw.start=start;s.draw.primitives=primitives;
+    s.draw.indexed=indexed?1u:0u;s.draw.base_vertex=base;
+    s.draw.min_vertex=min_vertex;s.draw.vertex_count=vertex_count;s.draw.start_index=start_index;
+
+    s.viewport.x=g.viewport[0];s.viewport.y=g.viewport[1];
+    s.viewport.width=g.viewport[2];s.viewport.height=g.viewport[3];
+    memcpy(&s.viewport.minz,&g.viewport[4],sizeof s.viewport.minz);
+    memcpy(&s.viewport.maxz,&g.viewport[5],sizeof s.viewport.maxz);
+
+    /* pixel_shader stays a borrowed presence flag; the module never dereferences it. */
+    (void)d9_get_draw_state(g.device,&s.state);
+    (void)d9_get_transform(g.device,D9_WORLD,&s.world);
+    (void)d9_get_transform(g.device,D9_VIEW,&s.view);
+    (void)d9_get_transform(g.device,D9_PROJECTION,&s.projection);
+
+    if(g.vs){s.vs.object=g.vs->guest;s.vs.code.host=g.vs->code;
+        s.vs.code.bytes=(size_t)g.vs->words*4u;}
+    if(g.ps){s.ps.object=g.ps->guest;s.ps.code.host=g.ps->code;
+        s.ps.code.bytes=(size_t)g.ps->words*4u;}
+
+    if(g.declaration&&g.declaration->declaration){
+        const D9Decl *d=g.declaration->declaration;
+        s.declaration.active=1;s.declaration.count=d->count;
+        s.declaration.position=d->position;s.declaration.uv=d->uv;
+        s.declaration.stream_mask=d->stream_mask;
+        memcpy(s.declaration.required,d->required,sizeof s.declaration.required);
+        memcpy(s.declaration.elements,d->elements,(size_t)d->count*sizeof d->elements[0]);
+    }
+
+    for(unsigned i=0;i<D9_MAX_STREAMS&&s.stream_count<D9_CAPTURE_MAX_STREAMS;++i){
+        if(!g.streams[i])continue;
+        D9Handle buffer;size_t offset,stride;
+        if(d9_get_stream_info(g.device,i,&buffer,&offset,&stride))continue;
+        const void *data;size_t bytes;
+        if(d9_get_buffer_data(g.device,buffer,&data,&bytes))continue;
+        D9CaptureStream *st=&s.streams[s.stream_count++];
+        st->index=i;st->handle=g.streams[i]->guest;st->stride=(unsigned)stride;
+        st->offset=offset;st->bytes=bytes;st->guest=g.streams[i]->guest;
+    }
+
+    /* Decoded XYZ+UV stream of the draw the core just accepted. */
+    const D9Vertex *vertices;size_t vertex_n;
+    if(!d9_get_last_draw_vertices(g.device,&vertices,&vertex_n)&&vertex_n&&
+       vertex_n<=SIZE_MAX/sizeof *vertices){
+        s.draw.vertices.data.host=vertices;
+        s.draw.vertices.data.bytes=vertex_n*sizeof *vertices;
+        s.draw.vertices.stride=(unsigned)sizeof *vertices;
+        s.draw.vertices.count=(unsigned)vertex_n;
+    }
+
+    /* Raw index buffer slice for the same primitive range. */
+    if(indexed&&g.ib){
+        D9Handle buffer;unsigned format;
+        if(!d9_get_index_info(g.device,&buffer,&format)&&buffer&&
+           (format==D9_INDEX16||format==D9_INDEX32)){
+            const void *data;size_t bytes;unsigned size=format==D9_INDEX32?4u:2u;
+            if(!d9_get_buffer_data(g.device,buffer,&data,&bytes)){
+                unsigned used=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;
+                size_t first=(size_t)start_index*size;
+                if(first<=bytes){
+                    size_t available=bytes-first;
+                    unsigned captured=used<D9_CAPTURE_MAX_INDICES?used:D9_CAPTURE_MAX_INDICES;
+                    if(available>=(size_t)captured*size){
+                        s.draw.indices.data.host=(const uint8_t *)data+first;
+                        s.draw.indices.data.bytes=available;
+                        s.draw.indices.size=size;s.draw.indices.count=used;
+                    }
+                }
+            }
+        }
+    }
+
+    /* The bridge exposes one bound texture stage. */
+    if(g.tex){
+        const void *pixels;size_t pitch,bytes;unsigned w,h,format;
+        if(!d9_get_texture_capture(g.device,g.tex->handle,0,&pixels,&pitch,&bytes,
+                                   &w,&h,&format)){
+            D9CaptureTexture *t=&s.textures[0];
+            t->stage=0;t->handle=g.tex->guest;t->width=w;t->height=h;t->format=format;
+            t->levels=d9_texture_levels(g.device,g.tex->handle);
+            t->pool=g.tex->pool;t->usage=g.tex->usage;
+            t->level=0;t->row_pitch=pitch;t->pixels.host=pixels;t->pixels.bytes=bytes;
+            s.texture_count=1;
+        }else{
+            /* GPU-only SKTX textures have no CPU pixels. Record the bound
+             * texture truthfully with an empty payload instead of omitting it. */
+            D9CaptureTexture *t=&s.textures[0];
+            t->stage=0;t->handle=g.tex->guest;t->width=g.tex->width;t->height=g.tex->height;
+            t->format=g.tex->format;t->levels=d9_texture_levels(g.device,g.tex->handle);
+            t->pool=g.tex->pool;t->usage=g.tex->usage;t->level=0;t->row_pitch=g.tex->pitch;
+            t->pixels.host=NULL;t->pixels.bytes=0;s.texture_count=1;
+        }
+    }
+
+    s.clear.valid=g.frame_clear;s.clear.color=g.clear;s.clear.flags=g.clear_flags;s.clear.rect_count=0;
+    s.present.present=g.capture_present;s.present.flags=g.capture_present_flags;
+    s.present.swap_chain=0;
+
+    int rc=d9_capture_offer(&s,g.mem);
+    if(rc<0)fprintf(stderr,"[d3d9-capture] offer %d: %s\n",rc,d9_capture_last_error());
+    g.capture_present=0;g.capture_present_flags=0;
+}
+#else
+static void capture_start(void){}
+static void capture_stop(void){}
+static void capture_draw(unsigned type,unsigned start,unsigned primitives,int indexed,
+                         int32_t base,unsigned min_vertex,unsigned vertex_count,
+                         unsigned start_index){
+    (void)type;(void)start;(void)primitives;(void)indexed;(void)base;
+    (void)min_vertex;(void)vertex_count;(void)start_index;
+}
+#endif
+static void draw_primitive(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||shader_state())RET(INVALID,4);
+    int rc=d9_draw_primitive(g.device,A(1),A(2),A(3));
+    if(rc==D9_OK)capture_draw(A(1),A(2),A(3),0,0,0,0,0);
+    else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitive: %s",d9_last_draw_diagnostic(g.device));
+    RET(hr(rc),4);}
+static void draw_indexed(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!A(4)||shader_state())RET(INVALID,7);
+    int rc=d9_draw_indexed_range(g.device,A(1),(int32_t)A(2),A(3),A(4),A(5),A(6));
+    if(rc==D9_OK)capture_draw(A(1),A(5),A(6),1,(int32_t)A(2),A(3),A(4),A(5));
+    else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitive: %s",d9_last_draw_diagnostic(g.device));
+    RET(hr(rc),7);}
+/* Number of stream-zero vertices a D3D9 triangle primitive consumes. */
+static int up_geometry(unsigned type,unsigned primitives,unsigned *vertices){
+    if(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)return -1;
+    if(!primitives||primitives>4096u/3u)return -1;
+    *vertices=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;return 0;
+}
+/* DrawPrimitiveUP borrows stream zero; it does not change the bound stream,
+ * index buffer, transforms, texture or render state. */
+static void draw_primitive_up(CPU *c){
+    unsigned type=A(1),primitives=A(2),stride=A(4),vertices=0;
+    if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
+       up_geometry(type,primitives,&vertices)||!stride||stride>4096u||shader_state()){
+        d3d_log("DrawPrimitiveUP","invalid scene, vertex format, primitive type/count or vertex stride");RET(INVALID,5);
+    }
+    void *data=ptr(A(3),(size_t)vertices*stride);
+    if(!data){d3d_log("DrawPrimitiveUP","vertex stream zero data is null or outside guest memory");RET(INVALID,5);}
+    int rc=d9_draw_primitive_up(g.device,type,primitives,data,stride);
+    /* There is no bound vertex buffer to record; the decoded vertices are still
+     * captured from the core. */
+    if(rc==D9_OK)capture_draw(type,0,primitives,0,0,0,0,0);
+    else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitiveUP: %s",d9_last_draw_diagnostic(g.device));
+    RET(hr(rc),5);}
+static void draw_indexed_up(CPU *c){
+    unsigned type=A(1),min=A(2),count=A(3),primitives=A(4),fmt=A(6),stride=A(8),indices=0,used,isize;
+    if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
+       up_geometry(type,primitives,&indices)||!count||min>UINT32_MAX-count||
+       (fmt!=D9_INDEX16&&fmt!=D9_INDEX32)||!stride||stride>4096u||shader_state()){
+        d3d_log("DrawIndexedPrimitiveUP","invalid scene, vertex format, index format/range, primitive count or vertex stride");RET(INVALID,9);
+    }
+    size_t need=(size_t)min+count;
+    if(need>SIZE_MAX/stride){d3d_log("DrawIndexedPrimitiveUP","vertex range overflows the stream-zero byte size");RET(INVALID,9);}
+    isize=fmt==D9_INDEX32?4u:2u;used=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;
+    void *idesc=ptr(A(5),(size_t)used*isize),*vdata=ptr(A(7),need*stride);
+    if(!idesc||!vdata){d3d_log("DrawIndexedPrimitiveUP","index or vertex stream zero data is null or outside guest memory");RET(INVALID,9);}
+    int rc=d9_draw_indexed_primitive_up(g.device,type,min,count,primitives,idesc,fmt,vdata,stride);
+    if(rc==D9_OK)capture_draw(type,0,primitives,0,0,0,0,0);
+    else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitiveUP: %s",d9_last_draw_diagnostic(g.device));
+    RET(hr(rc),9);}
+
+#define FUNCTIONS(X) X(unsupported) X(direct_create) X(query) X(addref) X(release_fn) X(adapter_count) X(display_mode) X(check_format) X(create_device) \
+ X(adapter_identifier) X(adapter_mode_count) X(enum_modes) X(check_device_type) X(check_multisample) X(check_depth_stencil) X(check_format_conversion) \
+ X(factory_caps) X(device_caps) X(adapter_monitor) X(register_software) \
+ X(d3dperf_set_options) X(d3dperf_begin) X(d3dperf_end) X(d3dperf_status) \
+ X(cooperative) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
+ X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
+ X(stream) X(indices) X(texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
+ X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(set_texture_stage_state) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
+ X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
+ X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
+ X(set_scissor_rect) X(get_scissor_rect) X(set_gamma_ramp) X(get_gamma_ramp) X(set_npatch_mode) X(get_npatch_mode) \
+ X(surface_desc) X(surface_container) X(surface_lock) X(surface_unlock) X(surface_dc) X(surface_release_dc)
+#define ENUM(f) I_##f,
+enum {FUNCTIONS(ENUM) I_COUNT};
+#undef ENUM
+
+static const char *const slot_names[KIND_COUNT][MAX_SLOTS]={
+    [FACTORY]={
+        "QueryInterface","AddRef","Release","RegisterSoftwareDevice","GetAdapterCount","GetAdapterIdentifier",
+        "GetAdapterModeCount","EnumAdapterModes","GetAdapterDisplayMode","CheckDeviceType","CheckDeviceFormat",
+        "CheckDeviceMultiSampleType","CheckDepthStencilMatch","CheckDeviceFormatConversion","GetDeviceCaps",
+        "GetAdapterMonitor","CreateDevice"},
+    [DEVICE]={
+        "QueryInterface","AddRef","Release","TestCooperativeLevel","GetAvailableTextureMem","EvictManagedResources",
+        "GetDirect3D","GetDeviceCaps","GetDisplayMode","GetCreationParameters","SetCursorProperties","SetCursorPosition",
+        "ShowCursor","CreateAdditionalSwapChain","GetSwapChain","GetNumberOfSwapChains","Reset","Present","GetBackBuffer",
+        "GetRasterStatus","SetDialogBoxMode","SetGammaRamp","GetGammaRamp","CreateTexture","CreateVolumeTexture",
+        "CreateCubeTexture","CreateVertexBuffer","CreateIndexBuffer","CreateRenderTarget","CreateDepthStencilSurface",
+        "UpdateSurface","UpdateTexture","GetRenderTargetData","GetFrontBufferData","StretchRect","ColorFill",
+        "CreateOffscreenPlainSurface","SetRenderTarget","GetRenderTarget","SetDepthStencilSurface","GetDepthStencilSurface",
+        "BeginScene","EndScene","Clear","SetTransform","GetTransform","MultiplyTransform","SetViewport","GetViewport",
+        "SetMaterial","GetMaterial","SetLight","GetLight","LightEnable","GetLightEnable","SetClipPlane","GetClipPlane",
+        "SetRenderState","GetRenderState","CreateStateBlock","BeginStateBlock","EndStateBlock","SetClipStatus","GetClipStatus",
+        "GetTexture","SetTexture","GetTextureStageState","SetTextureStageState","GetSamplerState","SetSamplerState",
+        "ValidateDevice","SetPaletteEntries","GetPaletteEntries","SetCurrentTexturePalette","GetCurrentTexturePalette",
+        "SetScissorRect","GetScissorRect","SetSoftwareVertexProcessing","GetSoftwareVertexProcessing","SetNPatchMode",
+        "GetNPatchMode","DrawPrimitive","DrawIndexedPrimitive","DrawPrimitiveUP","DrawIndexedPrimitiveUP","ProcessVertices",
+        "CreateVertexDeclaration","SetVertexDeclaration","GetVertexDeclaration","SetFVF","GetFVF","CreateVertexShader",
+        "SetVertexShader","GetVertexShader","SetVertexShaderConstantF","GetVertexShaderConstantF","SetVertexShaderConstantI",
+        "GetVertexShaderConstantI","SetVertexShaderConstantB","GetVertexShaderConstantB","SetStreamSource","GetStreamSource",
+        "SetStreamSourceFreq","GetStreamSourceFreq","SetIndices","GetIndices","CreatePixelShader","SetPixelShader","GetPixelShader",
+        "SetPixelShaderConstantF","GetPixelShaderConstantF","SetPixelShaderConstantI","GetPixelShaderConstantI",
+        "SetPixelShaderConstantB","GetPixelShaderConstantB","DrawRectPatch","DrawTriPatch","DeletePatch","CreateQuery"},
+    [VB]={
+        "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
+        "GetPriority","PreLoad","GetType","Lock","Unlock","GetDesc"},
+    [IB]={
+        "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
+        "GetPriority","PreLoad","GetType","Lock","Unlock","GetDesc"},
+    [TEX]={
+        "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
+        "GetPriority","PreLoad","GetType","SetLOD","GetLOD","GetLevelCount","SetAutoGenFilterType","GetAutoGenFilterType",
+        "GenerateMipSubLevels","GetLevelDesc","GetSurfaceLevel","LockRect","UnlockRect","AddDirtyRect"},
+    [VS]={"QueryInterface","AddRef","Release","GetDevice","GetFunction"},
+    [PS]={"QueryInterface","AddRef","Release","GetDevice","GetFunction"},
+    [DECL]={"QueryInterface","AddRef","Release","GetDevice","GetDeclaration"},
+    [SURFACE]={
+        "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
+        "GetPriority","PreLoad","GetType","GetContainer","GetDesc","LockRect","UnlockRect","GetDC","ReleaseDC"}
+};
+static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
+    const char *name=slot_names[kind][slot];if(!name)name="Unimplemented";
+    trace_enter(name,kind,slot,c);
+    void (*handler)(CPU *)=g.handlers[kind][slot];if(!handler)handler=unsupported;
+    handler(c);
+}
+#define COM_SLOTS(X) \
+ X(FACTORY,0) X(FACTORY,1) X(FACTORY,2) X(FACTORY,3) X(FACTORY,4) X(FACTORY,5) X(FACTORY,6) X(FACTORY,7) \
+ X(FACTORY,8) X(FACTORY,9) X(FACTORY,10) X(FACTORY,11) X(FACTORY,12) X(FACTORY,13) X(FACTORY,14) X(FACTORY,15) X(FACTORY,16) \
+ X(DEVICE,0) X(DEVICE,1) X(DEVICE,2) X(DEVICE,3) X(DEVICE,4) X(DEVICE,5) X(DEVICE,6) X(DEVICE,7) \
+ X(DEVICE,8) X(DEVICE,9) X(DEVICE,10) X(DEVICE,11) X(DEVICE,12) X(DEVICE,13) X(DEVICE,14) X(DEVICE,15) \
+ X(DEVICE,16) X(DEVICE,17) X(DEVICE,18) X(DEVICE,19) X(DEVICE,20) X(DEVICE,21) X(DEVICE,22) X(DEVICE,23) \
+ X(DEVICE,24) X(DEVICE,25) X(DEVICE,26) X(DEVICE,27) X(DEVICE,28) X(DEVICE,29) X(DEVICE,30) X(DEVICE,31) \
+ X(DEVICE,32) X(DEVICE,33) X(DEVICE,34) X(DEVICE,35) X(DEVICE,36) X(DEVICE,37) X(DEVICE,38) X(DEVICE,39) \
+ X(DEVICE,40) X(DEVICE,41) X(DEVICE,42) X(DEVICE,43) X(DEVICE,44) X(DEVICE,45) X(DEVICE,46) X(DEVICE,47) \
+ X(DEVICE,48) X(DEVICE,49) X(DEVICE,50) X(DEVICE,51) X(DEVICE,52) X(DEVICE,53) X(DEVICE,54) X(DEVICE,55) \
+ X(DEVICE,56) X(DEVICE,57) X(DEVICE,58) X(DEVICE,59) X(DEVICE,60) X(DEVICE,61) X(DEVICE,62) X(DEVICE,63) \
+ X(DEVICE,64) X(DEVICE,65) X(DEVICE,66) X(DEVICE,67) X(DEVICE,68) X(DEVICE,69) X(DEVICE,70) X(DEVICE,71) \
+ X(DEVICE,72) X(DEVICE,73) X(DEVICE,74) X(DEVICE,75) X(DEVICE,76) X(DEVICE,77) X(DEVICE,78) X(DEVICE,79) \
+ X(DEVICE,80) X(DEVICE,81) X(DEVICE,82) X(DEVICE,83) X(DEVICE,84) X(DEVICE,85) X(DEVICE,86) X(DEVICE,87) \
+ X(DEVICE,88) X(DEVICE,89) X(DEVICE,90) X(DEVICE,91) X(DEVICE,92) X(DEVICE,93) X(DEVICE,94) X(DEVICE,95) \
+ X(DEVICE,96) X(DEVICE,97) X(DEVICE,98) X(DEVICE,99) X(DEVICE,100) X(DEVICE,101) X(DEVICE,102) X(DEVICE,103) \
+ X(DEVICE,104) X(DEVICE,105) X(DEVICE,106) X(DEVICE,107) X(DEVICE,108) X(DEVICE,109) X(DEVICE,110) X(DEVICE,111) \
+ X(DEVICE,112) X(DEVICE,113) X(DEVICE,114) X(DEVICE,115) X(DEVICE,116) X(DEVICE,117) X(DEVICE,118) \
+ X(VB,0) X(VB,1) X(VB,2) X(VB,3) X(VB,4) X(VB,5) X(VB,6) X(VB,7) \
+ X(VB,8) X(VB,9) X(VB,10) X(VB,11) X(VB,12) X(VB,13) \
+ X(IB,0) X(IB,1) X(IB,2) X(IB,3) X(IB,4) X(IB,5) X(IB,6) X(IB,7) \
+ X(IB,8) X(IB,9) X(IB,10) X(IB,11) X(IB,12) X(IB,13) \
+ X(TEX,0) X(TEX,1) X(TEX,2) X(TEX,3) X(TEX,4) X(TEX,5) X(TEX,6) X(TEX,7) \
+ X(TEX,8) X(TEX,9) X(TEX,10) X(TEX,11) X(TEX,12) X(TEX,13) X(TEX,14) X(TEX,15) \
+ X(TEX,16) X(TEX,17) X(TEX,18) X(TEX,19) X(TEX,20) X(TEX,21) \
+ X(VS,0) X(VS,1) X(VS,2) X(VS,3) X(VS,4) X(PS,0) X(PS,1) X(PS,2) X(PS,3) X(PS,4) \
+ X(DECL,0) X(DECL,1) X(DECL,2) X(DECL,3) X(DECL,4) \
+ X(SURFACE,0) X(SURFACE,1) X(SURFACE,2) X(SURFACE,3) X(SURFACE,4) X(SURFACE,5) X(SURFACE,6) X(SURFACE,7) \
+ X(SURFACE,8) X(SURFACE,9) X(SURFACE,10) X(SURFACE,11) X(SURFACE,12) X(SURFACE,13) X(SURFACE,14) X(SURFACE,15) X(SURFACE,16)
+#define COM_ENUM(k,s) I_com_##k##_##s,
+#define COM_ENTRY(k,s) {THUNK+(I_COUNT+I_com_##k##_##s)*4,com_##k##_##s},
+#define COM_WRAP(k,s) static void com_##k##_##s(CPU *c){com_dispatch(k,s,c);}
+enum {
+COM_SLOTS(COM_ENUM)
+I_COM_COUNT
+};
+COM_SLOTS(COM_WRAP)
+#undef COM_WRAP
+#undef COM_ENUM
+#define ENTRY(f) {THUNK+I_##f*4,f},
+static const FnEntry all_entries[]={FUNCTIONS(ENTRY) COM_SLOTS(COM_ENTRY)};
+#undef ENTRY
+#undef COM_ENTRY
+#undef COM_SLOTS
+static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201};
+#define SLOT(k,s,f) do{g.handlers[k][s]=(f);uint32_t target=g.trace?THUNK+(I_COUNT+com_offsets[k]+(s))*4:THUNK+I_##f*4;guest_write32(g.mem,table_addr(k)+(s)*4,target);}while(0)
+static void init_tables(void){
+    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17};
+    for(unsigned k=1;k<=SURFACE;++k){for(unsigned i=0;i<counts[k];++i)SLOT(k,i,unsupported);SLOT(k,0,query);SLOT(k,1,addref);SLOT(k,2,release_fn);}
+    SLOT(FACTORY,3,register_software);SLOT(FACTORY,4,adapter_count);SLOT(FACTORY,5,adapter_identifier);
+    SLOT(FACTORY,6,adapter_mode_count);SLOT(FACTORY,7,enum_modes);SLOT(FACTORY,8,display_mode);
+    SLOT(FACTORY,9,check_device_type);SLOT(FACTORY,10,check_format);SLOT(FACTORY,11,check_multisample);
+    SLOT(FACTORY,12,check_depth_stencil);SLOT(FACTORY,13,check_format_conversion);SLOT(FACTORY,14,factory_caps);
+    SLOT(FACTORY,15,adapter_monitor);SLOT(FACTORY,16,create_device);
+    SLOT(DEVICE,3,cooperative);SLOT(DEVICE,6,direct3d);SLOT(DEVICE,7,device_caps);SLOT(DEVICE,8,device_display_mode);
+    SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
+    SLOT(DEVICE,23,create_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
+    SLOT(DEVICE,36,create_offscreen);SLOT(DEVICE,37,set_render_target);SLOT(DEVICE,38,get_render_target);SLOT(DEVICE,34,stretch_rect);SLOT(DEVICE,39,set_depth_stencil);
+    SLOT(DEVICE,40,get_depth_stencil);SLOT(DEVICE,41,begin_scene);SLOT(DEVICE,42,end_scene);SLOT(DEVICE,43,clear);SLOT(DEVICE,44,transform);
+    SLOT(DEVICE,47,set_viewport);SLOT(DEVICE,48,get_viewport);SLOT(DEVICE,65,texture);
+    SLOT(DEVICE,21,set_gamma_ramp);SLOT(DEVICE,22,get_gamma_ramp);
+    SLOT(DEVICE,75,set_scissor_rect);SLOT(DEVICE,76,get_scissor_rect);
+    SLOT(DEVICE,79,set_npatch_mode);SLOT(DEVICE,80,get_npatch_mode);
+    SLOT(DEVICE,57,set_render);SLOT(DEVICE,58,get_render);SLOT(DEVICE,67,set_texture_stage_state);SLOT(DEVICE,68,get_sampler);SLOT(DEVICE,69,set_sampler);
+    SLOT(DEVICE,81,draw_primitive);SLOT(DEVICE,82,draw_indexed);SLOT(DEVICE,83,draw_primitive_up);SLOT(DEVICE,84,draw_indexed_up);SLOT(DEVICE,89,set_fvf);SLOT(DEVICE,90,get_fvf);SLOT(DEVICE,100,stream);SLOT(DEVICE,104,indices);
+    SLOT(DEVICE,86,create_decl);SLOT(DEVICE,87,set_decl);SLOT(DEVICE,88,get_decl);SLOT(DEVICE,101,get_stream);SLOT(DEVICE,102,stream_freq);SLOT(DEVICE,103,get_stream_freq);SLOT(DEVICE,105,get_indices);
+    SLOT(DEVICE,91,create_vs);SLOT(DEVICE,92,set_vs);SLOT(DEVICE,93,get_vs);SLOT(DEVICE,94,set_vs_const);SLOT(DEVICE,95,get_vs_const);
+    SLOT(DEVICE,106,create_ps);SLOT(DEVICE,107,set_ps);SLOT(DEVICE,108,get_ps);
+    for(unsigned k=VB;k<=TEX;++k){SLOT(k,3,resource_device);SLOT(k,10,resource_type);}
+    for(unsigned k=VB;k<=IB;++k){SLOT(k,11,buffer_lock);SLOT(k,12,buffer_unlock);SLOT(k,13,buffer_desc);}
+    SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,19,texture_lock);SLOT(TEX,20,texture_unlock);
+    for(unsigned k=VS;k<=PS;++k){SLOT(k,3,resource_device);SLOT(k,4,shader_function);}
+    SLOT(DECL,3,resource_device);SLOT(DECL,4,declaration_data);
+    SLOT(SURFACE,3,resource_device);SLOT(SURFACE,10,resource_type);SLOT(SURFACE,11,surface_container);SLOT(SURFACE,12,surface_desc);
+    SLOT(SURFACE,13,surface_lock);SLOT(SURFACE,14,surface_unlock);SLOT(SURFACE,15,surface_dc);SLOT(SURFACE,16,surface_release_dc);
+}
+static int d9_com_start(GuestMemory *m,D9Device *d,const D9Backend *ops,void *ctx,size_t limit){
+    if(!m||g.mem||guest_map(m,BASE,0x3000))return -1;
+    memset(&g,0,sizeof g);g.mem=m;g.device=d;g.backend=ops;g.backend_ctx=ctx;g.backend_limit=limit;g.clear=0xff000000u;g.clear_flags=1;
+    const char *trace=getenv("TESV_D3D9_TRACE");g.trace=trace&&!strcmp(trace,"1");
+    g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
+    init_tables();win32_set_external_resolver(d9_com_resolve,NULL);
+    capture_start();
+    return 0;
+}
+int d9_com_init(GuestMemory *m,D9Device *d){return d9_com_start(m,d,NULL,NULL,0);}
+int d9_com_init_backend(GuestMemory *m,const D9Backend *ops,void *ctx,size_t limit){return d9_com_start(m,NULL,ops,ctx,limit);}
+int d9_com_set_backend(const D9Backend *ops,void *ctx,size_t limit){
+    if(!g.mem||g.device)return 0;
+    g.backend=ops;g.backend_ctx=ctx;g.backend_limit=limit;return 1;
+}
+int d9_null_register(void){
+    d9_null_reset();
+    return d9_com_set_backend(d9_null_backend(),d9_null_context(),D9_NULL_RESOURCE_LIMIT)?0:-1;
+}
+void d9_com_shutdown(void){if(!g.mem)return;capture_stop();win32_set_external_resolver(NULL,NULL);
+    if(g.phase)d9_present(g.device);g.phase=0;
+    if(g.device)d9_set_pixel_shader(g.device,NULL);
+    for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->lock_guest){
+            if(o->kind==SURFACE)unlock_surface(o);else if(unlock(o))guest_unmap(g.mem,o->lock_guest);
+        }free(o->pixels);o->pixels=NULL;free(o->code);o->code=NULL;free(o->declaration);o->declaration=NULL;}
+    /* Only a device created by CreateDevice is destroyed here; an adopted
+     * D9Device belongs to the caller. */
+    if(g.owns_device&&g.device){d9_destroy_device(g.device);g.device=NULL;g.owns_device=0;}
+    guest_unmap(g.mem,BASE);memset(&g,0,sizeof g);}
+int d9_com_pixel_shader_tev(uint32_t address,D9TevProgram *out){
+    Obj *o=obj(address,PS);
+    if(!o||!o->has_tev||!out)return 0;
+    *out=o->tev;return 1;
+}
+const char *d9_com_last_shader_rejection(void){return g.last_shader_rejection;}
+const char *d9_com_last_stretch_reject(void){return g.last_stretch_rejection;}
+static int dll_name(const char *s){static const char name[]="d3d9.dll";if(!s)return 0;for(unsigned i=0;i<sizeof name;++i){unsigned a=(unsigned char)s[i];if(a>='A'&&a<='Z')a+=32;if(a!=(unsigned char)name[i])return 0;if(!a)return 1;}return 0;}
+uint32_t d9_com_resolve(const PeImport *e,void *ctx){(void)ctx;
+    if(!g.mem||!e||!dll_name(e->dll)||!e->name)return 0;
+    if(!strcmp(e->name,"Direct3DCreate9"))return THUNK+I_direct_create*4;
+    if(!strcmp(e->name,"D3DPERF_SetOptions"))return THUNK+I_d3dperf_set_options*4;
+    if(!strcmp(e->name,"D3DPERF_BeginEvent"))return THUNK+I_d3dperf_begin*4;
+    if(!strcmp(e->name,"D3DPERF_EndEvent"))return THUNK+I_d3dperf_end*4;
+    if(!strcmp(e->name,"D3DPERF_GetStatus"))return THUNK+I_d3dperf_status*4;
+    return 0;
+}
+FnModule d9_com_module(void){return (FnModule){"d3d9-host",all_entries,I_COUNT+I_COM_COUNT};}

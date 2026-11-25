@@ -1,0 +1,700 @@
+/* Cooperative Win32 guest threads with real (host) stack switching.
+ * The contract is documented in win32_thread.h; read that first.
+ *
+ * One guest thread executes at a time. A thread gives up the CPU only inside a
+ * blocking shim (win32_thread_block / win32_thread_sleep) or when it terminates.
+ * The scheduler keeps a FIFO of runnable threads and switches host stacks, which
+ * preserves the lifted code's continuation and its local `Flags`. See
+ * THREAD_MODEL.md for why a CPU snapshot is not enough.
+ */
+#include "win32_thread.h"
+#include "win32_hostctx.h"
+#include "win32_sync.h"
+#include "guest_process.h" /* GP_TEB/GP_PEB/GP_TLS layout constants */
+#include "n3ds_lift_runtime.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#undef STILL_ACTIVE
+#undef CREATE_SUSPENDED
+#elif defined(__3DS__)
+#include <3ds.h>
+#endif
+
+#define MAX_THREADS ((unsigned)WIN32_THREAD_HANDLE_COUNT)
+#define THREAD_REGION_BASE 0x1c000000u
+#define THREAD_REGION_STRIDE 0x00200000u /* 2 MiB apart: disjoint at max stack */
+#define TEB_BYTES 0x2000u
+#define STILL_ACTIVE 259u
+#define ERR_INVALID_HANDLE 6u
+#define ERR_NOT_ENOUGH_MEMORY 8u
+#define ERR_INVALID_PARAMETER 87u
+#define ERR_CALL_NOT_IMPLEMENTED 120u
+#define MAIN_THREAD_ID 1u
+#define THREAD_ID_BASE 2u
+#define MAX_SUSPEND 0x7fffffffu
+#define CREATE_SUSPENDED 0x00000004u
+#define STACK_SIZE_IS_RESERVATION 0x00010000u
+#define INFINITE_MS 0xffffffffu
+#define MAX_WAIT 8u
+
+enum { ST_FREE = 0, ST_READY, ST_RUNNING, ST_BLOCKED, ST_EXITED };
+enum { WAIT_SIGNALED = 0, WAIT_TIMED_OUT = 1, WAIT_DEADLOCK = 2, WAIT_NO_SCHED = 3 };
+
+typedef struct {
+    uint8_t state, in_ready, close_pending, reaped, timed;
+    uint32_t id, start, param, exit_code, slot, handle;
+    uint32_t region_base, region_size, stack_top, teb;
+    uint32_t suspends, affinity;
+    int32_t priority;
+    CPU cpu;
+    N3dsThreadRtState rt;
+    Win32HostCtx *ctx;
+    uint32_t wait_h[MAX_WAIT];
+    unsigned wait_n;
+    int wait_all;
+    int wait_status;
+    uint64_t deadline, ticket, ready_seq;
+} W32Thread;
+
+static GuestMemory *mem;
+static W32Thread threads[MAX_THREADS];
+static W32Thread main_thread;
+static W32Thread *cur;
+static uint64_t g_seq, g_ticket;
+static W32Thread *reap_pending;
+static W32Thread *deadlock_self;
+static int scheduler_up;
+static char deadlock[256];
+static uint8_t teb_template[TEB_BYTES];
+static uint32_t tls_base, tls_size;
+static int teb_ready;
+
+static uint32_t tid_of(unsigned slot) { return THREAD_ID_BASE + slot; }
+static int slot_of(uint32_t handle, unsigned *slot) {
+    if (handle < WIN32_THREAD_HANDLE_BASE) return 0;
+    handle -= WIN32_THREAD_HANDLE_BASE;
+    if (handle >= MAX_THREADS) return 0;
+    *slot = handle;
+    return 1;
+}
+static W32Thread *thread_for(uint32_t handle) {
+    unsigned slot;
+    return slot_of(handle, &slot) && threads[slot].state != ST_FREE ? &threads[slot] : NULL;
+}
+static W32Thread *thread_for_id(uint32_t id) {
+    if (id == MAIN_THREAD_ID) return scheduler_up ? &main_thread : NULL;
+    for (unsigned i = 0; i < MAX_THREADS; ++i)
+        if (threads[i].state != ST_FREE && threads[i].id == id) return &threads[i];
+    return NULL;
+}
+static W32Thread *created_thread_for_id(uint32_t id) {
+    for (unsigned i = 0; i < MAX_THREADS; ++i)
+        if (threads[i].state != ST_FREE && threads[i].id == id) return &threads[i];
+    return NULL;
+}
+static void set_error(CPU *c, uint32_t err) {
+    if (c && c->fs_base) M32(c->fs_base + 0x34) = err;
+    win32_set_last_error(err);
+}
+#define A(n) M32(c->r[4] + 4 + 4 * (n))
+#define RET(v, n) do { c->r[0] = (uint32_t)(v); c->r[4] += 4 + 4 * (n); return; } while (0)
+#define FAIL(err, v, n) do { set_error(c, (err)); RET(v, n); } while (0)
+
+/* ---- clock ------------------------------------------------------------- */
+uint64_t win32_thread_now_ms(void) {
+#ifdef _WIN32
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER now;
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return (uint64_t)((now.QuadPart * 1000) / freq.QuadPart);
+#elif defined(__3DS__)
+    return (uint64_t)svcGetSystemTick() / (SYSCLOCK_ARM11 / 1000u);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000);
+#endif
+}
+static void host_sleep_ms(uint32_t ms) {
+    if (!ms) return;
+#ifdef _WIN32
+    Sleep(ms);
+#elif defined(__3DS__)
+    svcSleepThread((int64_t)ms * 1000000);
+#else
+    struct timespec ts = {(time_t)(ms / 1000), (long)(ms % 1000) * 1000000};
+    nanosleep(&ts, NULL);
+#endif
+}
+
+/* ---- ready queue ------------------------------------------------------- */
+static void enqueue(W32Thread *t) {
+    if (!t || t->state == ST_FREE || t->state == ST_EXITED) return;
+    t->state = ST_READY;
+    t->in_ready = 1;
+    t->ready_seq = ++g_seq;
+}
+static W32Thread *pick_ready(void) {
+    W32Thread *best = NULL;
+    if (scheduler_up && main_thread.state == ST_READY && main_thread.suspends == 0)
+        best = &main_thread;
+    for (unsigned i = 0; i < MAX_THREADS; ++i) {
+        W32Thread *t = &threads[i];
+        if (t->state != ST_READY || t->suspends) continue;
+        if (!best || t->ready_seq < best->ready_seq) best = t;
+    }
+    return best;
+}
+static void reap_now(void) {
+    W32Thread *t = reap_pending;
+    if (!t || t == cur) return;
+    reap_pending = NULL;
+    if (t->ctx) { win32_hostctx_destroy(t->ctx); t->ctx = NULL; }
+    if (mem && t->region_base) { guest_unmap(mem, t->region_base); t->region_base = 0; }
+    t->reaped = 1;
+    if (t->close_pending) memset(t, 0, sizeof *t);
+}
+
+static int trace_on(void) { static int v = -1; if (v < 0) v = getenv("THREAD_TRACE") != NULL; return v; }
+#define SCHED_TR(...) do { if (trace_on()) fprintf(stderr, __VA_ARGS__); } while (0)
+
+static void switch_to(W32Thread *n) {
+    W32Thread *prev = cur;
+    if (!n || !prev) abort();
+    SCHED_TR("[sched] %u(%d,%llu) -> %u(%d,%llu)\n", prev->id, prev->state,
+             (unsigned long long)prev->ready_seq, n->id, n->state,
+             (unsigned long long)n->ready_seq);
+    n->state = ST_RUNNING;
+    n->in_ready = 0;
+    cur = n;
+    win32_sync_set_current_thread(n->id);
+    n3ds_lift_thread_switch(&prev->rt, &n->rt);
+    win32_hostctx_switch(prev->ctx, n->ctx);
+    /* Resumed: another thread switched back to us. Free a stack whose thread
+     * terminated before that switch. Safe here: it is not our own stack. */
+    reap_now();
+}
+
+/* Wake timers / idle the host when nothing is runnable. Returns 1 when a
+ * deadline exists (even if it has not expired yet), 0 when every blocked thread
+ * waits forever. */
+static int idle_until_deadline(void) {
+    uint64_t best = UINT64_MAX;
+    int any = 0;
+    if (scheduler_up && main_thread.state == ST_BLOCKED && main_thread.timed) {
+        best = main_thread.deadline;
+        any = 1;
+    }
+    for (unsigned i = 0; i < MAX_THREADS; ++i) {
+        W32Thread *t = &threads[i];
+        if (t->state == ST_BLOCKED && t->timed && t->deadline < best) { best = t->deadline; any = 1; }
+    }
+    if (!any) return 0;
+    uint64_t now = win32_thread_now_ms();
+    if (best > now) {
+        uint64_t wait = best - now;
+        if (wait > 50) wait = 50;
+        host_sleep_ms((uint32_t)wait);
+        now = win32_thread_now_ms();
+    }
+    if (scheduler_up && main_thread.state == ST_BLOCKED && main_thread.timed &&
+        main_thread.deadline <= now) {
+        main_thread.wait_status = WAIT_TIMED_OUT;
+        enqueue(&main_thread);
+    }
+    for (unsigned i = 0; i < MAX_THREADS; ++i) {
+        W32Thread *t = &threads[i];
+        if (t->state == ST_BLOCKED && t->timed && t->deadline <= now) {
+            t->wait_status = WAIT_TIMED_OUT;
+            enqueue(t);
+        }
+    }
+    return 1;
+}
+
+static void describe_deadlock(void) {
+    size_t at = 0;
+    at += (size_t)snprintf(deadlock + at, sizeof deadlock - at,
+                           "all guest threads blocked (no runnable thread)");
+    W32Thread *all[2 + MAX_THREADS];
+    unsigned n = 0;
+    if (deadlock_self) all[n++] = deadlock_self;
+    if (scheduler_up && main_thread.state == ST_BLOCKED) all[n++] = &main_thread;
+    for (unsigned i = 0; i < MAX_THREADS; ++i)
+        if (threads[i].state == ST_BLOCKED) all[n++] = &threads[i];
+    for (unsigned i = 0; i < n && at + 24 < sizeof deadlock; ++i)
+        at += (size_t)snprintf(deadlock + at, sizeof deadlock - at, "%sthread %lu on handle 0x%lx",
+                               i ? ", " : ": ", (unsigned long)all[i]->id,
+                               all[i]->wait_n ? (unsigned long)all[i]->wait_h[0] : 0ul);
+}
+
+/* Block the current thread until `handles` may be ready / the deadline. */
+static int block_current(const uint32_t *handles, unsigned count, int wait_all,
+                         uint32_t timeout_ms) {
+    W32Thread *t = cur;
+    if (!t) return WAIT_NO_SCHED;
+    if (t->suspends) return WAIT_DEADLOCK; /* cannot be resumed while blocked */
+    if (count > MAX_WAIT) count = MAX_WAIT;
+    memset(t->wait_h, 0, sizeof t->wait_h);
+    for (unsigned i = 0; i < count; ++i) t->wait_h[i] = handles[i];
+    t->wait_n = count;
+    t->wait_all = wait_all;
+    t->ticket = ++g_ticket;
+    t->wait_status = -1;
+    t->timed = timeout_ms != INFINITE_MS;
+    t->deadline = t->timed ? win32_thread_now_ms() + timeout_ms : 0;
+    t->state = ST_BLOCKED;
+    t->in_ready = 0;
+    deadlock_self = NULL;
+    for (;;) {
+        W32Thread *n = pick_ready();
+        if (n) {
+            if (n == t) { t->state = ST_RUNNING; break; } /* own timeout fired */
+            switch_to(n);
+            if (t->state == ST_RUNNING) break;
+            continue;
+        }
+        if (idle_until_deadline()) continue;
+        if (t != &main_thread && scheduler_up && main_thread.state == ST_BLOCKED) {
+            /* Make the main thread runnable so its wait reports the deadlock in
+             * the main frame; a worker fault could otherwise leave no thread
+             * able to report it. */
+            main_thread.wait_status = WAIT_DEADLOCK;
+            enqueue(&main_thread);
+            switch_to(&main_thread);
+            continue;
+        }
+        t->state = ST_RUNNING;
+        t->wait_n = count;
+        deadlock_self = t;
+        return WAIT_DEADLOCK;
+    }
+    int st = t->wait_status;
+    t->wait_status = -1;
+    t->wait_n = count; /* keep the wait set for the deadlock message */
+    if (st == -1) st = WAIT_SIGNALED;
+    if (st == WAIT_DEADLOCK) deadlock_self = t;
+    else t->wait_n = 0;
+    return st;
+}
+
+int win32_thread_scheduler_ready(void) { return scheduler_up; }
+int win32_thread_block(const uint32_t *handles, unsigned count, int wait_all,
+                       uint32_t timeout_ms) {
+    if (!scheduler_up) return WAIT_NO_SCHED;
+    return block_current(handles, count, wait_all, timeout_ms);
+}
+const char *win32_thread_deadlock_text(void) {
+    describe_deadlock();
+    return deadlock;
+}
+
+/* ---- public scheduler hooks ------------------------------------------- */
+void win32_thread_wake(uint32_t handle) {
+    W32Thread *hit[1 + MAX_THREADS];
+    unsigned n = 0;
+    if (scheduler_up && main_thread.state == ST_BLOCKED) {
+        for (unsigned k = 0; k < main_thread.wait_n; ++k)
+            if (main_thread.wait_h[k] == handle) { hit[n++] = &main_thread; break; }
+    }
+    for (unsigned i = 0; i < MAX_THREADS; ++i) {
+        W32Thread *t = &threads[i];
+        if (t->state != ST_BLOCKED) continue;
+        for (unsigned k = 0; k < t->wait_n; ++k)
+            if (t->wait_h[k] == handle) { hit[n++] = t; break; }
+    }
+    /* FIFO: the oldest waiter is scheduled first. */
+    for (unsigned i = 1; i < n; ++i) {
+        W32Thread *v = hit[i];
+        unsigned j = i;
+        while (j && hit[j - 1]->ticket > v->ticket) { hit[j] = hit[j - 1]; --j; }
+        hit[j] = v;
+    }
+    for (unsigned i = 0; i < n; ++i) {
+        hit[i]->wait_status = WAIT_SIGNALED;
+        enqueue(hit[i]);
+    }
+}
+
+void win32_thread_yield(void) {
+    if (!scheduler_up) return;
+    W32Thread *self = cur;
+    if (!self) return;
+    enqueue(self);
+    W32Thread *n = pick_ready();
+    if (!n || n == self) { self->state = ST_RUNNING; self->in_ready = 0; return; }
+    switch_to(n);
+}
+
+void win32_thread_sleep(uint32_t ms) {
+    if (!scheduler_up) { host_sleep_ms(ms); return; }
+    if (ms == 0) { win32_thread_yield(); return; }
+    block_current(NULL, 0, 0, ms);
+}
+
+unsigned win32_thread_live_count(void) {
+    unsigned n = 0;
+    for (unsigned i = 0; i < MAX_THREADS; ++i)
+        if (threads[i].state == ST_READY || threads[i].state == ST_RUNNING ||
+            threads[i].state == ST_BLOCKED) ++n;
+    return n;
+}
+int win32_thread_memory(unsigned slot, uint32_t *guest_bytes, size_t *host_bytes) {
+    if (slot >= MAX_THREADS || threads[slot].state == ST_FREE) return -1;
+    if (guest_bytes) *guest_bytes = threads[slot].region_size;
+    if (host_bytes) *host_bytes = WIN32_THREAD_HOST_STACK;
+    return 0;
+}
+size_t win32_thread_struct_size(void) { return sizeof(W32Thread); }
+
+/* ---- thread body trampoline ------------------------------------------- */
+static void thread_trampoline(void *arg) {
+    W32Thread *t = arg;
+    n3ds_lift_thread_begin(&t->rt);
+    uint32_t parameter = t->param, result = 0;
+    int rc = n3ds_lift_invoke_reentrant(&t->cpu, t->start, &parameter, 1, &result);
+    if (rc == 0 || rc == N3DS_INVOKE_EXIT) {
+        t->exit_code = result;
+    } else {
+        t->exit_code = WIN32_THREAD_EXIT_FAULT;
+        fprintf(stderr, "[thread] id=%lu start=%08lx terminated without returning (%s)\n",
+                (unsigned long)t->id, (unsigned long)t->start,
+                rc == N3DS_INVOKE_TRAP ? n3ds_lift_fault() : "invalid call frame");
+    }
+    t->state = ST_EXITED;
+    t->in_ready = 0;
+    win32_thread_wake(t->handle);
+    reap_pending = t;
+    for (;;) {
+        W32Thread *n = pick_ready();
+        if (n) { switch_to(n); continue; }
+        if (idle_until_deadline()) continue;
+        if (scheduler_up && main_thread.state == ST_BLOCKED) {
+            main_thread.wait_status = WAIT_DEADLOCK;
+            enqueue(&main_thread);
+            switch_to(&main_thread);
+            continue;
+        }
+        fprintf(stderr, "[thread] no runnable guest thread and the main thread is not "
+                        "blocked; the process cannot continue\n");
+        abort();
+    }
+}
+
+/* Switch into a READY thread and let it run. Returns when it blocks or exits. */
+static void activate(W32Thread *t) {
+    if (!t || t->state != ST_READY) return;
+    W32Thread *self = cur;
+    if (!self) return;
+    if (t == self) { self->state = ST_RUNNING; return; }
+    if (!t->in_ready) enqueue(t);
+    enqueue(self); /* keep the creator runnable; it is scheduled after t */
+    switch_to(t);
+}
+
+/* ---- lifecycle --------------------------------------------------------- */
+int win32_thread_init(GuestMemory *m) {
+    if (!m || mem) return -1;
+    mem = m;
+    memset(threads, 0, sizeof threads);
+    memset(&main_thread, 0, sizeof main_thread);
+    memset(teb_template, 0, sizeof teb_template);
+    tls_base = tls_size = 0;
+    teb_ready = 0;
+    void *teb = guest_ptr(m, GP_TEB, TEB_BYTES);
+    if (teb) {
+        memcpy(teb_template, teb, TEB_BYTES);
+        teb_ready = 1;
+    }
+    for (size_t i = 0; i < m->count; ++i)
+        if (m->regions[i].base == GP_TLS) { tls_base = GP_TLS; tls_size = m->regions[i].size; }
+    if (win32_hostctx_init()) return -1;
+    main_thread.id = MAIN_THREAD_ID;
+    main_thread.state = ST_RUNNING;
+    main_thread.slot = ~0u;
+    if (win32_hostctx_main(&main_thread.ctx)) return -1;
+    n3ds_lift_thread_state_init(&main_thread.rt);
+    cur = &main_thread;
+    scheduler_up = 1;
+    g_seq = g_ticket = 0;
+    reap_pending = NULL;
+    win32_sync_set_current_thread(MAIN_THREAD_ID);
+    win32_sync_set_waker(win32_thread_wake);
+    return 0;
+}
+void win32_thread_shutdown(void) {
+    for (unsigned i = 0; i < MAX_THREADS; ++i) {
+        if (threads[i].state != ST_FREE && mem && threads[i].region_base)
+            guest_unmap(mem, threads[i].region_base);
+        if (threads[i].ctx) win32_hostctx_destroy(threads[i].ctx);
+        memset(&threads[i], 0, sizeof threads[i]);
+    }
+    if (main_thread.ctx) win32_hostctx_destroy(main_thread.ctx);
+    memset(&main_thread, 0, sizeof main_thread);
+    reap_pending = NULL;
+    scheduler_up = 0;
+    cur = NULL;
+    win32_sync_set_waker(NULL);
+    mem = NULL;
+    teb_ready = 0;
+}
+uint32_t win32_thread_current_id(void) { return cur ? cur->id : MAIN_THREAD_ID; }
+int win32_thread_is_handle(uint32_t handle) { return thread_for(handle) != NULL; }
+int win32_thread_signaled(uint32_t handle) {
+    W32Thread *t = thread_for(handle);
+    return t && t->state == ST_EXITED;
+}
+uint32_t win32_thread_exit_code(uint32_t handle) {
+    W32Thread *t = thread_for(handle);
+    return t && t->state == ST_EXITED ? t->exit_code : STILL_ACTIVE;
+}
+int win32_thread_query(uint32_t handle, uint32_t *exit_code) {
+    W32Thread *t = thread_for(handle);
+    if (!t) return -1;
+    if (t->state != ST_EXITED) return 0;
+    if (exit_code) *exit_code = t->exit_code;
+    return 1;
+}
+int win32_thread_close(uint32_t handle) {
+    W32Thread *t = thread_for(handle);
+    if (!t) return 0;
+    if (t == cur || t->state == ST_READY || t->state == ST_BLOCKED) {
+        /* Windows keeps a live thread alive after its handle is closed. */
+        t->close_pending = 1;
+        return 1;
+    }
+    if (t->ctx) { win32_hostctx_destroy(t->ctx); t->ctx = NULL; }
+    if (mem && t->region_base) guest_unmap(mem, t->region_base);
+    if (reap_pending == t) reap_pending = NULL;
+    memset(t, 0, sizeof *t);
+    return 1;
+}
+
+/* Map stack | TEB | private TLS copy as one guest region and build the TEB.
+ * Returns 0 on success. */
+static int build_thread_memory(W32Thread *t, uint32_t stack_bytes) {
+    uint64_t need = (uint64_t)stack_bytes + TEB_BYTES + tls_size;
+    need = (need + 0xfff) & ~UINT64_C(0xfff);
+    if (need > 0xffffffffu) return -1;
+    unsigned slot = (unsigned)(t - threads);
+    uint32_t base = THREAD_REGION_BASE + slot * THREAD_REGION_STRIDE;
+    if (guest_map(mem, base, (uint32_t)need)) return -1;
+    t->region_base = base;
+    t->region_size = (uint32_t)need;
+    t->teb = base + stack_bytes;
+    t->stack_top = base + stack_bytes - 64;
+    uint8_t *teb = guest_ptr(mem, t->teb, TEB_BYTES);
+    if (!teb) { guest_unmap(mem, base); t->region_base = 0; return -1; }
+    if (teb_ready) memcpy(teb, teb_template, TEB_BYTES);
+    else memset(teb, 0, TEB_BYTES);
+    uint32_t new_tls = t->teb + TEB_BYTES;
+    if (tls_size) {
+        void *src = guest_ptr(mem, tls_base, tls_size);
+        void *dst = guest_ptr(mem, new_tls, tls_size);
+        if (!src || !dst) { guest_unmap(mem, base); t->region_base = 0; return -1; }
+        memcpy(dst, src, tls_size);
+    }
+    /* TEB fields used by the shims and by MSVC SEH/CRT code. */
+    M32(t->teb + 0x00) = t->id;
+    M32(t->teb + 0x04) = t->stack_top;
+    M32(t->teb + 0x08) = t->region_base;
+    M32(t->teb + 0x18) = t->teb;
+    M32(t->teb + 0x20) = t->id;
+    M32(t->teb + 0x24) = 1;
+    if (!teb_ready) M32(t->teb + 0x30) = GP_PEB;
+    M32(t->teb + 0x2c) = t->teb + 0x1000;
+    M32(t->teb + 0x34) = 0; /* last error */
+    M32(t->teb + 0xf94) = t->teb + 0x1800;
+    /* Point the TEB TLS array at the private copy instead of the process block. */
+    if (tls_size)
+        for (uint32_t off = 0x1000; off < TEB_BYTES; off += 4) {
+            uint32_t v = M32(t->teb + off);
+            if (v >= tls_base && v - tls_base < tls_size)
+                M32(t->teb + off) = new_tls + (v - tls_base);
+        }
+    return 0;
+}
+
+static void s_CreateThread(CPU *c) {
+    uint32_t attrs = A(0), stack = A(1), start = A(2), param = A(3), flags = A(4), tid_out = A(5);
+    if (attrs && !guest_ptr(mem, attrs, 12)) FAIL(ERR_INVALID_PARAMETER, 0, 6);
+    if (!start) FAIL(ERR_INVALID_PARAMETER, 0, 6);
+    if (flags & ~(CREATE_SUSPENDED | STACK_SIZE_IS_RESERVATION)) FAIL(ERR_INVALID_PARAMETER, 0, 6);
+    if (tid_out && !guest_ptr(mem, tid_out, 4)) FAIL(ERR_INVALID_PARAMETER, 0, 6);
+    if (!stack) stack = WIN32_THREAD_DEFAULT_STACK;
+    if (stack < 0x10000u) stack = 0x10000u;
+    if (stack > WIN32_THREAD_MAX_STACK) FAIL(ERR_NOT_ENOUGH_MEMORY, 0, 6);
+    stack = (stack + 0xfff) & ~0xfffu;
+    unsigned slot;
+    for (slot = 0; slot < MAX_THREADS; ++slot) if (threads[slot].state == ST_FREE) break;
+    if (slot == MAX_THREADS) FAIL(ERR_NOT_ENOUGH_MEMORY, 0, 6);
+    W32Thread *t = &threads[slot];
+    memset(t, 0, sizeof *t);
+    t->slot = slot;
+    t->id = tid_of(slot);
+    t->handle = WIN32_THREAD_HANDLE_BASE + slot;
+    t->start = start;
+    t->param = param;
+    t->priority = 0; /* THREAD_PRIORITY_NORMAL */
+    t->affinity = 1;
+    t->state = ST_READY;
+    t->suspends = (flags & CREATE_SUSPENDED) ? 1 : 0;
+    if (build_thread_memory(t, stack)) {
+        memset(t, 0, sizeof *t);
+        FAIL(ERR_NOT_ENOUGH_MEMORY, 0, 6);
+    }
+    n3ds_lift_init_cpu(&t->cpu, t->stack_top, t->teb);
+    t->cpu.thread = t;
+    n3ds_lift_thread_state_init(&t->rt);
+    if (win32_hostctx_create(&t->ctx, thread_trampoline, t, WIN32_THREAD_HOST_STACK)) {
+        if (t->region_base) guest_unmap(mem, t->region_base);
+        memset(t, 0, sizeof *t);
+        FAIL(ERR_NOT_ENOUGH_MEMORY, 0, 6);
+    }
+    if (tid_out) M32(tid_out) = t->id;
+    set_error(c, 0);
+    if (!t->suspends) activate(t);
+    RET(t->handle, 6);
+}
+static void s_SuspendThread(CPU *c) {
+    uint32_t h = A(0);
+    if (h == 0xfffffffeu) {
+        fprintf(stderr, "[thread] SuspendThread(current thread) refused: the running "
+                        "thread cannot resume itself\n");
+        FAIL(ERR_CALL_NOT_IMPLEMENTED, 0xffffffffu, 1);
+    }
+    W32Thread *t = thread_for(h);
+    if (!t) FAIL(ERR_INVALID_HANDLE, 0xffffffffu, 1);
+    if (t == cur) FAIL(ERR_CALL_NOT_IMPLEMENTED, 0xffffffffu, 1);
+    uint32_t previous = t->suspends;
+    if (t->suspends < MAX_SUSPEND) ++t->suspends;
+    set_error(c, 0);
+    RET(previous, 1);
+}
+static void s_ResumeThread(CPU *c) {
+    uint32_t h = A(0);
+    if (h == 0xfffffffeu) RET(0, 1); /* current thread: previous count 0 */
+    W32Thread *t = thread_for(h);
+    if (!t) FAIL(ERR_INVALID_HANDLE, 0xffffffffu, 1);
+    uint32_t previous = t->suspends;
+    if (t->suspends) --t->suspends;
+    set_error(c, 0);
+    if (t->suspends == 0 && t->state == ST_READY) {
+        if (!t->in_ready) enqueue(t);
+        activate(t);
+    }
+    RET(previous, 1);
+}
+static void s_ExitThread(CPU *c) {
+    uint32_t code = A(0);
+    /* Worker exits are routine (TESV uses them); only a main-thread exit is
+     * worth a diagnostic because it terminates the process. */
+    if (win32_thread_current_id() == MAIN_THREAD_ID)
+        fprintf(stderr, "[thread] ExitThread(%lu) on the main guest thread exits the process\n",
+                (unsigned long)code);
+    n3ds_lift_exit(code);
+}
+static void s_GetExitCodeThread(CPU *c) {
+    uint32_t h = A(0), out = A(1);
+    if (!guest_ptr(mem, out, 4)) FAIL(ERR_INVALID_PARAMETER, 0, 2);
+    if (h == 0xfffffffeu) { M32(out) = STILL_ACTIVE; set_error(c, 0); RET(1, 2); }
+    W32Thread *t = thread_for(h);
+    if (!t) FAIL(ERR_INVALID_HANDLE, 0, 2);
+    M32(out) = t->state == ST_EXITED ? t->exit_code : STILL_ACTIVE;
+    set_error(c, 0);
+    RET(1, 2);
+}
+static void s_SetThreadPriority(CPU *c) {
+    uint32_t h = A(0);
+    int32_t prio = (int32_t)A(1);
+    if (prio < -15 || prio > 15) FAIL(ERR_INVALID_PARAMETER, 0, 2);
+    if (h == 0xfffffffeu) { set_error(c, 0); RET(1, 2); }
+    W32Thread *t = thread_for(h);
+    if (!t) FAIL(ERR_INVALID_HANDLE, 0, 2);
+    t->priority = prio;
+    set_error(c, 0);
+    RET(1, 2);
+}
+static void s_GetThreadPriority(CPU *c) {
+    uint32_t h = A(0);
+    if (h == 0xfffffffeu) { set_error(c, 0); RET(0, 1); }
+    W32Thread *t = thread_for(h);
+    if (!t) FAIL(ERR_INVALID_HANDLE, 0x7fffffffu, 1);
+    set_error(c, 0);
+    RET((uint32_t)t->priority, 1);
+}
+static void s_SetThreadAffinityMask(CPU *c) {
+    uint32_t h = A(0), mask = A(1);
+    if (!mask || (mask & ~1u)) FAIL(ERR_INVALID_PARAMETER, 0, 2);
+    if (h != 0xfffffffeu && !thread_for(h)) FAIL(ERR_INVALID_HANDLE, 0, 2);
+    if (h != 0xfffffffeu) thread_for(h)->affinity = 1;
+    set_error(c, 0);
+    RET(1, 2); /* previous mask: one logical CPU */
+}
+static void s_OpenThread(CPU *c) {
+    uint32_t id = A(2);
+    W32Thread *t = created_thread_for_id(id);
+    if (!t) FAIL(ERR_INVALID_PARAMETER, 0, 3);
+    set_error(c, 0);
+    RET(WIN32_THREAD_HANDLE_BASE + (t - threads), 3);
+}
+static void s_OpenProcess(CPU *c) {
+    if (A(2) != 1) FAIL(ERR_INVALID_PARAMETER, 0, 3);
+    set_error(c, 0);
+    RET(0xffffffffu, 3);
+}
+static void s_GetExitCodeProcess(CPU *c) {
+    uint32_t out = A(1);
+    if (A(0) != 0xffffffffu) FAIL(ERR_INVALID_HANDLE, 0, 2);
+    if (!guest_ptr(mem, out, 4)) FAIL(ERR_INVALID_PARAMETER, 0, 2);
+    M32(out) = STILL_ACTIVE;
+    set_error(c, 0);
+    RET(1, 2);
+}
+
+#define DEF(X) { "kernel32.dll", #X, s_##X },
+static const Win32ThreadDef defs[] = {
+    DEF(CreateThread) DEF(SuspendThread) DEF(ResumeThread) DEF(ExitThread)
+    DEF(GetExitCodeThread) DEF(SetThreadPriority) DEF(GetThreadPriority)
+    DEF(SetThreadAffinityMask) DEF(OpenThread) DEF(OpenProcess)
+    DEF(GetExitCodeProcess)
+};
+#undef DEF
+#define NDEFS (sizeof defs / sizeof defs[0])
+
+const Win32ThreadDef *win32_thread_defs(unsigned *count) {
+    if (count) *count = (unsigned)NDEFS;
+    return defs;
+}
+static int same(const char *a, const char *b) {
+    while (*a && *b) {
+        unsigned x = (unsigned char)*a++, y = (unsigned char)*b++;
+        if (x >= 'A' && x <= 'Z') x += 32;
+        if (y >= 'A' && y <= 'Z') y += 32;
+        if (x != y) return 0;
+    }
+    return *a == *b;
+}
+uint32_t win32_thread_resolve(const char *dll, const char *name) {
+    if (!dll || !name || (!same(dll, "kernel32.dll") && !same(dll, "kernel32"))) return 0;
+    for (unsigned i = 0; i < NDEFS; ++i)
+        if (!strcmp(name, defs[i].name)) return WIN32_THREAD_BASE + 4 * i;
+    return 0;
+}
+static FnEntry entries[NDEFS];
+const FnEntry *win32_thread_lookup(uint32_t addr) {
+    if (addr < WIN32_THREAD_BASE || (addr & 3)) return NULL;
+    unsigned i = (addr - WIN32_THREAD_BASE) / 4;
+    if (i >= NDEFS) return NULL;
+    entries[i] = (FnEntry){addr, defs[i].fn};
+    return &entries[i];
+}

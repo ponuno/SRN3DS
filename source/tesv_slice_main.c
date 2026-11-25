@@ -1,0 +1,214 @@
+/* Diagnostic runner: map the real TESV PE, bind imports (unknown ones become
+ * traps that name themselves), and execute a bounded lifted slice. This is not
+ * a claim that the game boots; it reports the first exact failure. */
+#include "n3ds_boot.h"
+#include "n3ds_pilot.h"
+#include "pilot_guard.h"
+#include "win32_shims.h"
+#include "rt_prof.h"
+#include "d3d9_com.h"
+#include "d3d9_null.h"
+#include "ir_core.h"
+#include "win32_audio_3ds.h"
+#include "win32_audio.h"
+#include <stdio.h>
+#include <stdlib.h>
+#ifdef __3DS__
+#include <3ds.h>
+#include "d3d9_citro3d.h"
+#endif
+
+extern const FnEntry g_fn_table_tesv[];
+extern const unsigned g_fn_count_tesv;
+
+#ifndef TESV_ARM_STEPS
+#define TESV_ARM_STEPS 2000000u
+#endif
+
+#ifdef __3DS__
+/* libctru's default split of a 178 MiB DEV1 title asks for an application heap
+ * larger than the heap area and svcBreak()s before main. Pin both heaps so that
+ * a diagnostic slice fits the 96 MiB .3dsx region as well as the 178 MiB CIA
+ * mode: code + heap + linear must stay inside the region. */
+u32 __ctru_heap_size = 64u << 20;
+u32 __ctru_linear_heap_size = 8u << 20;
+#endif
+
+static unsigned g_region_mib, g_free_mib;
+
+static int add_dll(BootSession *b, const char *name, uint32_t base, const char *root, const char *fallback) {
+    char path[512];
+    if (root && *root) {
+        snprintf(path, sizeof path, "%s/%s", root, name);
+        if (n3ds_boot_add_data_file(b, name, path, base) == 0) return 1;
+    }
+    if (fallback) {
+        snprintf(path, sizeof path, "%s/%s", fallback, name);
+        if (n3ds_boot_add_data_file(b, name, path, base) == 0) return 1;
+    }
+    return 0;
+}
+
+static int run(const char *exe, const char *root, unsigned steps, size_t budget, const char *log,
+               const D9Backend *backend, void *backend_ctx) {
+    BootSession b;
+    n3ds_boot_init(&b, budget);
+    int rc = -1;
+    if (n3ds_boot_add_file(&b, "TESV.exe", exe, 0)) {
+        printf("load: %s\n", b.message);
+        goto out;
+    }
+#ifdef __3DS__
+    add_dll(&b, "d3dx9_42.dll", 0x08000000u, root, NULL);
+    add_dll(&b, "binkw32.dll", 0x09000000u, root, NULL);
+    add_dll(&b, "X3DAudio1_7.dll", 0x0a000000u, root, NULL);
+    add_dll(&b, "steam_api.dll", 0x0b000000u, root, NULL);
+#else
+    add_dll(&b, "d3dx9_42.dll", 0x08000000u, root, "C:/Windows/SysWOW64");
+    add_dll(&b, "binkw32.dll", 0x09000000u, root, "E:/SteamLibrary/steamapps/common/Skyrim");
+    add_dll(&b, "X3DAudio1_7.dll", 0x0a000000u, root, "C:/Windows/SysWOW64");
+    add_dll(&b, "steam_api.dll", 0x0b000000u, root, "E:/SteamLibrary/steamapps/common/Skyrim");
+#endif
+    FnModule tables[2] = {{"tesv", g_fn_table_tesv, g_fn_count_tesv}, {"d3d9", NULL, 0}};
+    unsigned table_count = 1;
+    /* The D3D9 bridge answers the guest's renderer queries truthfully even in a
+     * headless diagnostic build: one 400x240x32 adapter, SM2-only caps. */
+    if (d9_com_init(&b.memory, NULL) == 0) {
+        tables[1] = d9_com_module();
+        table_count = 2;
+        /* Headless software backend on host; real PICA200 on 3DS when init
+         * succeeded.  Registration happens before the guest CreateDevice. */
+#ifdef __3DS__
+        if(backend&&d9_com_set_backend(backend,backend_ctx,4u<<20))printf("d3d9: PICA200 backend installed\n");
+        else
+#endif
+        if (d9_null_register() != 0) printf("d3d9: null backend not installed\n");
+    } else {
+        printf("d3d9: COM bridge unavailable; D3D9 imports stay unresolved\n");
+    }
+    n3ds_boot_set_unresolved_traps(&b, 1);
+    if (n3ds_boot_prepare(&b, tables, table_count, 0x80000, 0x200000, root)) {
+        printf("prepare: %s\n", b.message);
+        goto out;
+    }
+    if (n3ds_ir_cache_init(4u << 20) != 0) printf("IR cache: 4 MiB allocation failed; using default\n");
+    n3ds_pilot_set_steps(steps);
+    uint32_t status = 0;
+    rt_prof_reset();
+    rt_prof_enable(1);
+    int r = n3ds_boot_run(&b, &status);
+    rt_prof_enable(0);
+    IrCacheStats ir_stats;
+    n3ds_ir_cache_stats(&ir_stats);
+    printf("IR cache: blocks=%llu bytes=%llu hits=%llu misses=%llu evicted=%llu\n",
+           (unsigned long long)ir_stats.blocks, (unsigned long long)ir_stats.bytes,
+           (unsigned long long)ir_stats.hits, (unsigned long long)ir_stats.misses,
+           (unsigned long long)ir_stats.evicted);
+    printf("run rc=%d status=%lu message=%s\n", r, (unsigned long)status, b.message);
+    printf("first fault: %s\n", n3ds_lift_fault());
+#ifdef __3DS__
+    const char *prof_path = "sdmc:/Skyrim_N3DS_tesv_prof.csv";
+#else
+    const char *prof_path = "tesv_profile.csv";
+#endif
+    int rows = rt_prof_write_csv(prof_path);
+    printf("profile csv: %s (%d rows)\n", rows >= 0 ? prof_path : "(write failed)", rows);
+    rt_prof_print_top(24);
+    unsigned traps = win32_unresolved_trap_count();
+    printf("unresolved imports bound to fault trap: %u\n", traps);
+    for (unsigned i = 0; i < traps; ++i) printf("  %s\n", win32_unresolved_trap_text(i));
+    rc = r ? 1 : 0;
+out:
+    if (log) {
+        FILE *f = fopen(log, "w");
+        if (f) {
+            fprintf(f, "run rc=%d\nguest_used=%lu steps=%u\napp_region=%u MiB free=%u MiB\n%s\n%s\n", rc,
+                    (unsigned long)b.memory.used, steps, g_region_mib, g_free_mib, b.message, n3ds_lift_fault());
+            if (win32_last_exit_from())
+                fprintf(f, "exit code=%lu from=%08lx\n", (unsigned long)win32_last_exit_code(),
+                        (unsigned long)win32_last_exit_from());
+            unsigned traps = win32_unresolved_trap_count();
+            fprintf(f, "unresolved imports bound to fault trap: %u\n", traps);
+            for (unsigned i = 0; i < traps; ++i) fprintf(f, "  %s\n", win32_unresolved_trap_text(i));
+            fprintf(f, "executed functions: %lu, calls: %lu\n",
+                    (unsigned long)rt_prof_distinct(), (unsigned long)rt_prof_total());
+            fprintf(f, "IR cache: blocks=%llu bytes=%llu hits=%llu misses=%llu evicted=%llu\n",
+                    (unsigned long long)ir_stats.blocks, (unsigned long long)ir_stats.bytes,
+                    (unsigned long long)ir_stats.hits, (unsigned long long)ir_stats.misses,
+                    (unsigned long long)ir_stats.evicted);
+            fclose(f);
+        }
+    }
+    win32_memory_report(stderr);
+    d9_com_shutdown();
+    n3ds_boot_destroy(&b);
+    return rc;
+}
+
+#ifdef __3DS__
+int main(void) {
+    gfxInitDefault();
+    D9Citro *gpu=d9_citro_open();
+    consoleInit(GFX_TOP, NULL); osSetSpeedupEnable(true);
+    printf("Skyrim N3DS - TESV startup slice\nNot a playable build.\n\n");
+    printf("D3D9 backend: %s\n",gpu?"PICA200":"null fallback (PICA init failed)");
+    printf("Hold X at start: memory probe (measurement only)\n\n");
+    hidScanInput();
+#ifdef TESV_FORCE_MEMPROBE
+    int probe = 1; /* isolated diagnostic build only; never shippable */
+#else
+    int probe = (hidKeysHeld() & KEY_X) != 0;
+#endif
+    if (probe) {
+#ifdef TESV_FORCE_MEMPROBE
+        printf("MEMORY PROBE ON (build-time diagnostic): told it can commit 512 MiB.\n");
+#else
+        printf("MEMORY PROBE ON: the engine is told it can commit 512 MiB.\n");
+#endif
+        printf("This value is fictional and exists only to measure the next barrier.\n\n");
+        win32_set_memory_probe(1);
+    }
+    /* Real audio sink for the guest's waveOut calls; it logs which backend ran. */
+    win32_audio_3ds_install();
+    bool n3ds = false; APT_CheckNew3DS(&n3ds);
+    size_t region = osGetMemRegionSize(MEMREGION_APPLICATION);
+    size_t free_mem = osGetMemRegionFree(MEMREGION_APPLICATION);
+    /* Guest mappings come from the newlib application heap. The 178 MiB CIA
+     * region has enough room for a 64 MiB heap; keep a 4 MiB reserve for libctru
+     * and runtime allocations and allow a 60 MiB diagnostic guest budget. */
+    size_t budget = (60u << 20);
+    if (budget > ((__ctru_heap_size) - (4u << 20))) budget = (__ctru_heap_size) - (4u << 20);
+    g_region_mib = (unsigned)(region >> 20);
+    g_free_mib = (unsigned)(free_mem >> 20);
+    printf("App region: %u MiB, free %u MiB\n\n", g_region_mib, g_free_mib);
+    if (n3ds) run("sdmc:/Skyrim/TESV.exe", "sdmc:/Skyrim", TESV_ARM_STEPS, budget, "sdmc:/Skyrim_N3DS_tesv.log",
+                  gpu?d9_citro_backend():NULL,gpu);
+    else puts("New Nintendo 3DS required");
+    d9_citro_close(gpu);
+    puts("START: exit");
+    while (aptMainLoop()) {
+        hidScanInput();
+        win32_audio_tick();
+        if (hidKeysDown() & KEY_START) break;
+        gspWaitForVBlank();
+    }
+    win32_audio_3ds_shutdown();
+    gfxExit();
+    return 0;
+}
+#else
+int main(int argc, char **argv) {
+    if (argc < 2) { fprintf(stderr, "usage: %s TESV.exe [root] [steps] [budget_bytes] [memprobe]\n", argv[0]); return 2; }
+    const char *root = argc > 2 ? argv[2] : ".";
+    unsigned steps = argc > 3 ? (unsigned)strtoul(argv[3], NULL, 10) : 200000;
+    size_t budget = argc > 4 ? (size_t)strtoull(argv[4], NULL, 0) : (64u << 20);
+    if (budget < (28u << 20)) budget = 28u << 20;
+    if (budget > (256u << 20)) budget = 256u << 20;
+    if ((argc > 5 && !strcmp(argv[5], "memprobe")) || getenv("TESV_MEMPROBE")) {
+        fprintf(stderr, "[mem] probe enabled: the engine will be told it can commit "
+                        "512 MiB. Measurement only.\n");
+        win32_set_memory_probe(1);
+    }
+    return run(argv[1], root, steps, budget, NULL, NULL, NULL);
+}
+#endif

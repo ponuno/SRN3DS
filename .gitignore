@@ -1,0 +1,29 @@
+# Local build/test artifacts and generated code (never distribute)
+build/
+build_*/
+dist/
+build_cia/
+build_azahar/
+build_host/
+build_crash/
+pilot_out*/
+staged/
+.venv/
+*.elf
+*.3dsx
+*.cia
+*.dmp
+*.map
+*.lst
+*.o
+*.d
+skyrim_audit*.json
+__pycache__/
+*.pyc
+# Retail-derived test fixtures (regenerate with tools/extract_closure_fixtures.py)
+tests/fixtures/menu_closure_real_shaders.h
+# Stale duplicate harness at the repository root; tools/ is canonical
+/run_host_tests.ps1
+# Isolated test build products and archived runs
+tests/isolated/**/build/
+tests/isolated/**/results/
