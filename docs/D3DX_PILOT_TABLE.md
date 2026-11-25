@@ -16,10 +16,12 @@ slice expects the combined table in:
 | `pilot_04.c` | `f_8032EAD` | `D3DXVec3TransformCoord` (real body) | `pilot_vec3coord` |
 | `pilot_05.c` | `f_803306A` | `D3DXVec3TransformNormal` (real body) | `pilot_vec3normal` |
 | `pilot_06.c` | `f_8032CBF` | `D3DXVec3Normalize` (real body) | `pilot_vec3normalize` |
+| `pilot_07.c` | `f_802FFFD` | `D3DXMatrixInverse` (real body) | `pilot_matrixinverse` |
 | `pilot_shims.c` | `f_081A65EC` | `_CIsqrt` CRT thunk for Vec3Normalize | part of `pilot_vec3normalize` |
+| `pilot_shims.c` | `f_081A6694` | `_finite` CRT thunk for MatrixInverse | part of `pilot_matrixinverse` |
 
-`pilot_table.c` has nine entries (seven imported exports plus the internal
-helper and the `_CIsqrt` shim) and `g_fn_count_pilot = 9`. The
+`pilot_table.c` has eleven entries (eight imported exports plus the internal
+helper and the two CRT shims) and `g_fn_count_pilot = 11`. The
 `pilot_config.h` in that directory is the `D3DXMatrixMultiply` configuration
 used by `pilot_real`; the other tests have their own directories:
 
@@ -29,6 +31,7 @@ used by `pilot_real`; the other tests have their own directories:
 - `pilot_out_mult/D3DXVec3TransformCoord/gen`
 - `pilot_out_mult/D3DXVec3TransformNormal/gen`
 - `pilot_out_mult/D3DXVec3Normalize/gen`
+- `pilot_out_mult/D3DXMatrixInverse/gen`
 
 ## Generate from the exact DLL
 
@@ -51,14 +54,17 @@ Use the DLL whose SHA-256 is
   C:\Windows\SysWOW64\D3DX9_42.dll staged <scratch-vec3normal> --export D3DXVec3TransformNormal
 .venv\Scripts\python.exe tools\prepare_pilot.py `
   C:\Windows\SysWOW64\D3DX9_42.dll staged <scratch-vec3normalize> --export D3DXVec3Normalize
+.venv\Scripts\python.exe tools\prepare_pilot.py `
+  C:\Windows\SysWOW64\D3DX9_42.dll staged <scratch-matrixinverse> --export D3DXMatrixInverse
 ```
 
 Each run prints the generated directory as `Use PILOT_GEN=...`. The tool
 resolves the lazy-ILT export through the initializer's real-body table and
 falls back to `entry+11` only when that address is a real body, not another
 wrapper. It also recognises direct calls to `jmp [IAT]` CRT thunks and emits
-`pilot_shims.c` for `_CIsqrt` (x87 ST(0) sqrt). `D3DXVec3TransformCoord` has
-two generated functions: the entry plus its internal helper `f_802E9DB`.
+`pilot_shims.c` for `_CIsqrt` (x87 ST(0) sqrt) and `_finite` (an 8-byte guest
+double at `[esp+4]`). `D3DXVec3TransformCoord` has two generated functions:
+the entry plus its internal helper `f_802E9DB`.
 
 ## Merge the combined table
 
@@ -68,19 +74,21 @@ two generated functions: the entry plus its internal helper `f_802E9DB`.
    multiply-transpose `pilot_00.c` there as `pilot_02.c`; copy the
    plane-transform `pilot_00.c` there as `pilot_03.c`; copy the
    Vec3TransformCoord and Vec3TransformNormal sources as `pilot_04.c` and
-   `pilot_05.c`; copy the Vec3Normalize source as `pilot_06.c`; copy its
-   generated `pilot_shims.c`.
+   `pilot_05.c`; copy the Vec3Normalize source as `pilot_06.c`; copy the
+   MatrixInverse source as `pilot_07.c`; merge `pilot_shims.c` so it contains
+   both `_CIsqrt` and `_finite`.
 3. Merge the `funcs_pilot.h` declarations and the `pilot_table.c` entries; set
-   `g_fn_count_pilot = 9`. Keep the table sorted by address: `0x802E9DB`,
-   `0x802FA80`, `0x802FCE0`, `0x802FD9D`, `0x8032303`, `0x8032CBF`,
-   `0x8032EAD`, `0x803306A`, `0x81A65EC`.
+   `g_fn_count_pilot = 11`. Keep the table sorted by address: `0x802E9DB`,
+   `0x802FA80`, `0x802FCE0`, `0x802FD9D`, `0x802FFFD`, `0x8032303`,
+   `0x8032CBF`, `0x8032EAD`, `0x803306A`, `0x81A65EC`, `0x81A6694`.
 4. Copy the generated directories to
    `pilot_out_mult/D3DXMatrixTranspose/gen`,
    `pilot_out_mult/D3DXMatrixMultiplyTranspose/gen`,
    `pilot_out_mult/D3DXPlaneTransform/gen`,
    `pilot_out_mult/D3DXVec3TransformCoord/gen`,
-   `pilot_out_mult/D3DXVec3TransformNormal/gen` and
-   `pilot_out_mult/D3DXVec3Normalize/gen` so their individual `pilot_*` tests
+   `pilot_out_mult/D3DXVec3TransformNormal/gen`,
+   `pilot_out_mult/D3DXVec3Normalize/gen` and
+   `pilot_out_mult/D3DXMatrixInverse/gen` so their individual `pilot_*` tests
    can find the matching `pilot_config.h`.
 5. Do **not** run a single-export `prepare_pilot.py` directly into
    `pilot_out_mult/D3DXMatrixMultiply/gen`: it would replace the combined
@@ -94,16 +102,18 @@ directory is ignored; this tracked file is the durable reference.
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\run_host_tests.ps1 `
   -Only pilot_real,pilot_transpose,pilot_multranspose,pilot_planetransform,`
-        pilot_vec3coord,pilot_vec3normal,pilot_vec3normalize
+        pilot_vec3coord,pilot_vec3normal,pilot_vec3normalize,pilot_matrixinverse
 ```
 
 Each test must print `PASS (3/3)`. A TESV slice built with the combined table
-logs `d3dx: 9 lifted function(s) registered` (seven exports plus the internal
-Vec3TransformCoord helper and the `_CIsqrt` shim).
+logs `d3dx: 11 lifted function(s) registered` (eight exports plus the internal
+Vec3TransformCoord helper and the two CRT shims).
 
 `pilot_vec3coord`/`pilot_vec3normal`/`pilot_vec3normalize` use a three-float
 output; the shared pilot runner selects that by case 6/7/8.
-`pilot_planetransform` uses four floats (case 11). The surrounding canaries are
+`pilot_planetransform` uses four floats (case 11). `pilot_matrixinverse` uses a
+fixed invertible source matrix, compares all 16 output floats and checks the
+determinant written through the second argument. The surrounding canaries are
 still checked.
 
 ## Loader resolution

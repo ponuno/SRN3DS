@@ -12,6 +12,7 @@
 #define OUTPUT (DATA+0x100)
 #define INPUT_A (DATA+0x200)
 #define INPUT_B (DATA+0x300)
+#define DET (OUTPUT+0x180)
 static unsigned steps;
 static uint32_t budget_pc[16][64];
 static unsigned budget_pc_count[16];
@@ -25,9 +26,9 @@ int n3ds_pilot_identity(const char *path,uint64_t *bytes,uint64_t *hash){
 }
 static uint32_t fbits(float f){uint32_t u;memcpy(&u,&f,4);return u;}
 static int fail(PilotResult *r,const char *fmt,...){va_list a;va_start(a,fmt);vsnprintf(r->message,sizeof r->message,fmt,a);va_end(a);return -1;}
-static void expected(unsigned type,unsigned variant,float a[16],float b[16],float out[16],uint32_t args[4],size_t *argc){
+static void expected(unsigned type,unsigned variant,float a[16],float b[16],float out[16],uint32_t args[4],size_t *argc,float *want_det){
     for(unsigned i=0;i<16;++i){a[i]=(float)((int)((i*3+variant)%17)-8);b[i]=(float)((int)((i*5+variant*2)%13)-6);out[i]=0;}
-    args[0]=OUTPUT;args[1]=INPUT_A;args[2]=INPUT_B;*argc=2;
+    *want_det=0;args[0]=OUTPUT;args[1]=INPUT_A;args[2]=INPUT_B;*argc=2;
     if(type==1){for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)out[i*4+j]=a[j*4+i];}
     else if(type==4){*argc=3;for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)out[i*4+j]+=a[i*4+k]*b[k*4+j];}
     else if(type==5){*argc=3;for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)out[i*4+j]+=a[j*4+k]*b[k*4+i];}
@@ -42,6 +43,24 @@ static void expected(unsigned type,unsigned variant,float a[16],float b[16],floa
         out[1]=a[0]*b[1]+a[1]*b[5]+a[2]*b[9];
         out[2]=a[0]*b[2]+a[1]*b[6]+a[2]*b[10];}
     else if(type==8){float len=sqrtf(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);if(len>0){out[0]=a[0]/len;out[1]=a[1]/len;out[2]=a[2]/len;}}
+    else if(type==9){
+        static const float src[16]={2,0,0,0, 1,3,0,0, 0,1,4,0, 1,1,1,1};
+        memcpy(b,src,sizeof src);
+        float aug[4][8];
+        for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j){aug[i][j]=b[i*4+j];aug[i][4+j]=(i==j)?1.0f:0.0f;}
+        float det=1.0f;int sign=1;
+        for(unsigned c=0;c<4;++c){
+            unsigned p=c;for(unsigned r=c+1;r<4;++r)if(fabsf(aug[r][c])>fabsf(aug[p][c]))p=r;
+            if(fabsf(aug[p][c])<1e-12f){det=0;break;}
+            if(p!=c){for(unsigned j=0;j<8;++j){float t=aug[c][j];aug[c][j]=aug[p][j];aug[p][j]=t;}sign=-sign;}
+            float piv=aug[c][c];det*=piv;
+            for(unsigned j=0;j<8;++j)aug[c][j]/=piv;
+            for(unsigned r=0;r<4;++r)if(r!=c){float f=aug[r][c];for(unsigned j=0;j<8;++j)aug[r][j]-=f*aug[c][j];}
+        }
+        for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)out[i*4+j]=aug[i][4+j];
+        *want_det=det*(float)sign;
+        *argc=3;args[1]=DET;args[2]=INPUT_B;
+    }
     else if(type==10){float len=sqrtf(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);if(len>0)for(unsigned i=0;i<4;++i)out[i]=a[i]/len;}
     else if(type==11){*argc=3;for(unsigned i=0;i<4;++i)out[i]=a[0]*b[i]+a[1]*b[4+i]+a[2]*b[8+i]+a[3]*b[12+i];}
     else{float x=variant+0.5f,y=-(float)variant-2,z=3.25f;args[1]=fbits(x);args[2]=fbits(y);args[3]=fbits(z);*argc=4;
@@ -61,16 +80,18 @@ int n3ds_pilot_run(const char *path,const PilotSpec *spec,const FnEntry *table,u
     if(guest_process_init(&process,&m,&mod,1,0x80000)||guest_map(&m,DATA,4096)){fail(r,"Pilot process/stack allocation failed");goto done;}
     if(n3ds_lift_bind(&m,table,count)){fail(r,"Invalid function table");goto done;}bound=1;
     if(!n3ds_lift_has_function(spec->entry)){fail(r,"Export missing from generated function table");goto done;}
-    CPU c;for(unsigned i=0;i<3;++i){float a[16],b[16],want[16],out[16];uint32_t args[4],ret;size_t argc;
-        expected(spec->test_case,i,a,b,want,args,&argc);
+    CPU c;for(unsigned i=0;i<3;++i){float a[16],b[16],want[16],out[16],want_det=0;uint32_t args[4],ret;size_t argc;
+        expected(spec->test_case,i,a,b,want,args,&argc,&want_det);
         size_t out_len=case_out_len(spec->test_case);
         guest_write(&m,INPUT_A,a,sizeof a);guest_write(&m,INPUT_B,b,sizeof b);
+        { float det0=0; guest_write(&m,DET,&det0,sizeof det0); }
         memset(guest_ptr(&m,OUTPUT-16,96),0xcd,96);
         n3ds_lift_init_cpu(&c,process.stack_top,process.teb);steps=2048;
         int status=n3ds_lift_invoke(&c,spec->entry,args,argc,&ret);
         if(status){fail(r,"%s test %u: %s (status %d)",spec->name,i+1,n3ds_lift_fault(),status);goto done;}
         if(ret!=OUTPUT||guest_read(&m,OUTPUT,out,out_len*sizeof(float))){fail(r,"Unexpected return pointer in test %u",i+1);goto done;}
         for(unsigned j=0;j<out_len;++j)if(!isfinite(out[j])||fabsf(out[j]-want[j])>1e-4f){fail(r,"Test %u element %u: got %.5g expected %.5g",i+1,j,out[j],want[j]);goto done;}
+        if(spec->test_case==9){float got_det=0;if(guest_read(&m,DET,&got_det,sizeof got_det)||!isfinite(got_det)||fabsf(got_det-want_det)>1e-4f){fail(r,"Test %u determinant: got %.5g expected %.5g",i+1,got_det,want_det);goto done;}}
         uint8_t canary[16];memset(canary,0xcd,16);
         if(memcmp(guest_ptr(&m,OUTPUT-16,16),canary,16)||memcmp(guest_ptr(&m,OUTPUT+64,16),canary,16)||
            memcmp(guest_ptr(&m,INPUT_A,64),a,64)||memcmp(guest_ptr(&m,INPUT_B,64),b,64)){fail(r,"Unexpected write outside matrix output");goto done;}

@@ -88,19 +88,21 @@ occurs before this gate.
    execution path exists.
 2. **Other D3DX hotpatch bodies.** The loader now follows the one-time
    initializer's real-body table, so it no longer mistakes `entry+11` for the
-   body on exports such as `D3DXVec3TransformCoord`. Seven imported bodies are
+   body on exports such as `D3DXVec3TransformCoord`. Eight imported bodies are
    lifted: `D3DXMatrixMultiply` `0x0802fa80`, `D3DXMatrixTranspose`
    `0x0802fce0`, `D3DXMatrixMultiplyTranspose` `0x0802fd9d`,
    `D3DXPlaneTransform` `0x08032303`, `D3DXVec3TransformCoord` `0x08032ead`,
-   `D3DXVec3TransformNormal` `0x0803306a` and `D3DXVec3Normalize` `0x08032cbf`
-   (plus the internal helper `0x0802e9db` and the `_CIsqrt` shim
-   `0x081a65ec`; nine table entries). Each has its own 3/3 pilot test. A later
-   call to `D3DXMatrixInverse` `0x0802fffd` or `D3DXPlaneNormalize`
-   `0x08032000` would still fail explicitly at its body address;
-   `PlaneNormalize` is generated but its early-copy/helper stack interaction is
-   miscompiled in the pilot, and `MatrixInverse` still needs the `_finite` shim
-   and determinant test. Generation, merge and per-body test details are in
-   `docs/D3DX_PILOT_TABLE.md`; `pilot_out*/` is generated locally and ignored.
+   `D3DXVec3TransformNormal` `0x0803306a`, `D3DXVec3Normalize` `0x08032cbf`
+   and `D3DXMatrixInverse` `0x0802fffd` (plus the internal helper
+   `0x0802e9db` and the `_CIsqrt`/`_finite` shims `0x081a65ec`/`0x081a6694`;
+   eleven table entries). Each has its own 3/3 pilot test. A later call to
+   `D3DXPlaneNormalize` `0x08032000` would still fail explicitly at its body
+   address; it is generated but its early-copy/helper stack interaction is
+   miscompiled in the pilot. The nine plain D3DX exports (image/texture load,
+   surface load, `D3DXCompileShader`) are not lazy-ILT thunks and still need
+   host shims or a lifted closure. Generation, merge and per-body test details
+   are in `docs/D3DX_PILOT_TABLE.md`; `pilot_out*/` is generated locally and
+   ignored.
 3. **HW T&L shipping gate (`0x00c6d8c6`).** Still deferred
    (`docs/HWTL_DECISION.md`); the probe is measurement-only.
 4. **Two texture stages (honest).** Implemented: a backend with `draw_two`
