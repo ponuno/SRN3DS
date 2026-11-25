@@ -209,6 +209,66 @@ int main(void) {
         CHECK(pe_link_resolve(&gamma, &hp_link) == hp_base + 0x40bu);
     }
 
+    /* A second hotpatch layout: the export slot points to a wrapper that
+     * calls an initializer which copies a real-body table.  entry+11 is
+     * another wrapper, so the resolver must use the table, not entry+11. */
+    const uint32_t hp2_base = 0x00050000u;
+    CHECK(guest_map(&memory, hp2_base, 0x2000u) == 0);
+    GuestImage hp2 = {.base = hp2_base, .size = 0x2000u,
+                      .export_rva = 0x100u, .export_size = 0x100u};
+    put32(&memory, hp2_base + 0x110u, 1);
+    put32(&memory, hp2_base + 0x114u, 1);
+    put32(&memory, hp2_base + 0x118u, 1);
+    put32(&memory, hp2_base + 0x11cu, 0x140u);
+    put32(&memory, hp2_base + 0x120u, 0x148u);
+    put32(&memory, hp2_base + 0x124u, 0x150u);
+    put32(&memory, hp2_base + 0x140u, 0x500u);
+    put32(&memory, hp2_base + 0x148u, 0x1a0u);
+    put16(&memory, hp2_base + 0x150u, 0);
+    put_string(&memory, hp2_base + 0x1a0u, "Epsilon");
+    {
+        uint8_t entry[11] = {0xff, 0x25, 0x00, 0x06, 0x05, 0x00,
+                             0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
+        CHECK(guest_write(&memory, hp2_base + 0x500u, entry, sizeof entry) == 0);
+    }
+    put32(&memory, hp2_base + 0x600u, hp2_base + 0x4e0u); /* slot -> wrapper */
+    {
+        uint8_t wrapper[19] = {0x8b, 0xff, 0x55, 0x8b, 0xec, 0x6a, 0x01, 0xe8,
+                               0x14, 0x02, 0x00, 0x00, /* call 0x700 */
+                               0x5d, 0xff, 0x25, 0x00, 0x06, 0x05, 0x00};
+        CHECK(guest_write(&memory, hp2_base + 0x4e0u, wrapper, sizeof wrapper) == 0);
+    }
+    /* Initializer: mov esi,0x50800; mov edi,0x50600; nops; rep movsd. */
+    {
+        uint8_t init[17] = {0xbe, 0x00, 0x08, 0x05, 0x00,
+                            0xbf, 0x00, 0x06, 0x05, 0x00,
+                            0x90, 0x90, 0x90, 0x90, 0x90, 0xf3, 0xa5};
+        CHECK(guest_write(&memory, hp2_base + 0x700u, init, sizeof init) == 0);
+    }
+    /* entry+11 is a second wrapper, not the body. */
+    {
+        uint8_t wrapper2[19] = {0x8b, 0xff, 0x55, 0x8b, 0xec, 0x6a, 0x01, 0xe8,
+                                0x49, 0x02, 0x00, 0x00, /* call 0x760 */
+                                0x5d, 0xff, 0x25, 0x04, 0x06, 0x05, 0x00};
+        CHECK(guest_write(&memory, hp2_base + 0x50bu, wrapper2, sizeof wrapper2) == 0);
+    }
+    put32(&memory, hp2_base + 0x604u, hp2_base + 0x50bu);
+    put32(&memory, hp2_base + 0x800u, hp2_base + 0x520u); /* source table[0] */
+    {
+        uint8_t body[6] = {0x8b, 0xff, 0x55, 0x8b, 0xec, 0xc3};
+        CHECK(guest_write(&memory, hp2_base + 0x520u, body, sizeof body) == 0);
+    }
+    PeModule hp2_module = {"HP2.DLL", &hp2};
+    PeLinker hp2_link = {&memory, &hp2_module, 1, NULL, NULL, NULL, NULL};
+    PeImport epsilon = {.dll = "hp2.dll", .name = "Epsilon"};
+    CHECK(pe_export_find(&memory, &hp2, "Epsilon", 0) == hp2_base + 0x500u);
+    CHECK(pe_link_resolve(&epsilon, &hp2_link) == hp2_base + 0x520u);
+    /* An invalid table entry must leave the raw export, not entry+11. */
+    put32(&memory, hp2_base + 0x800u, 0);
+    CHECK(pe_link_resolve(&epsilon, &hp2_link) == hp2_base + 0x500u);
+    put32(&memory, hp2_base + 0x800u, hp2_base + 0x520u);
+    CHECK(pe_link_resolve(&epsilon, &hp2_link) == hp2_base + 0x520u);
+
     guest_destroy(&memory);
     puts("PE import/export linker tests passed");
     return 0;

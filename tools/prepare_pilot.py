@@ -85,9 +85,38 @@ def resolve_ilt_thunk(image, base, root):
         raise ValueError(f"export {root:#x}: wrapper does not forward through slot {slot:#x}")
     if image[off - 5:off] != HOTPATCH_PAD:
         raise ValueError(f"export {root:#x}: wrapper padding before the export thunk does not match")
-    real = root + 11
-    if image[real - base:real - base + 4] != b"\x8b\xff\x55\x8b":
-        raise ValueError(f"export {root:#x}: real body lacks MSVC prologue")
+    real = None
+    io = init - base
+    if 0 <= io <= len(image) - 128:
+        chunk = image[io:io + 128]
+        for i in range(len(chunk) - 10):
+            if chunk[i] != 0xbe or chunk[i + 5] not in (0xbf, 0xbb):
+                continue
+            src = int.from_bytes(chunk[i + 1:i + 5], "little")
+            dst = int.from_bytes(chunk[i + 6:i + 10], "little")
+            if not (0 <= src - base <= len(image) - 4):
+                continue
+            if not (0 <= dst - base <= len(image) - 4):
+                continue
+            if not any(chunk[j] == 0xf3 and chunk[j + 1] == 0xa5
+                       for j in range(i + 10, min(len(chunk) - 1, i + 48))):
+                continue
+            if slot < dst or (slot - dst) % 4:
+                continue
+            idx = (slot - dst) // 4
+            if idx >= 256:
+                continue
+            cand = int.from_bytes(image[src - base + 4 * idx:][:4], "little")
+            if (0 <= cand - base <= len(image) - 4 and
+                    image[cand - base:cand - base + 4] == b"\x8b\xff\x55\x8b"):
+                real = cand
+                break
+    if real is None:
+        real = root + 11
+        if image[real - base:real - base + 4] != b"\x8b\xff\x55\x8b":
+            raise ValueError(f"export {root:#x}: real body lacks MSVC prologue")
+        if image[real - base + 5:real - base + 8] == b"\x6a\x01\xe8":
+            raise ValueError(f"export {root:#x}: entry+11 is another wrapper and the initializer table did not resolve a body")
     return {"slot": slot, "wrapper": wrapper, "init": init, "real": real}
 
 

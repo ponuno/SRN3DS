@@ -260,6 +260,7 @@ if (Test-Path (Join-Path $irPilotGen "pilot_00.c")) {
         "tests/ir_equiv.c", "tests/ir_aot_fixture.c",
         (Join-Path $irPilotGen "pilot_00.c"), (Join-Path $irPilotGen "pilot_01.c"),
         (Join-Path $irPilotGen "pilot_02.c"), (Join-Path $irPilotGen "pilot_03.c"),
+        (Join-Path $irPilotGen "pilot_04.c"), (Join-Path $irPilotGen "pilot_05.c"),
         (Join-Path $irPilotGen "pilot_table.c"))) @()
 } else {
     Write-Log "IR equivalence test SKIPPED (pilot fixture missing)"
@@ -300,6 +301,18 @@ if ((Test-Path (Join-Path $planetransformGen "pilot_config.h")) -and (Test-Path 
     Add-Test "pilot_planetransform" ($liftCommon + @("-I`"$planetransformGen`"")) ($legacySources + @("source/guest_process.c", "source/n3ds_pilot.c", "tests/pilot_host.c") + $planetransformSrc) @($PilotDll)
     Write-Log "PlaneTransform pilot test uses $planetransformGen"
 }
+$vec3coordGen = Join-Path $root "pilot_out_mult\D3DXVec3TransformCoord\gen"
+if ((Test-Path (Join-Path $vec3coordGen "pilot_config.h")) -and (Test-Path $PilotDll)) {
+    $vec3coordSrc = Get-ChildItem -Path $vec3coordGen -Filter "*.c" | ForEach-Object { $_.FullName }
+    Add-Test "pilot_vec3coord" ($liftCommon + @("-I`"$vec3coordGen`"")) ($legacySources + @("source/guest_process.c", "source/n3ds_pilot.c", "tests/pilot_host.c") + $vec3coordSrc) @($PilotDll)
+    Write-Log "Vec3TransformCoord pilot test uses $vec3coordGen"
+}
+$vec3normalGen = Join-Path $root "pilot_out_mult\D3DXVec3TransformNormal\gen"
+if ((Test-Path (Join-Path $vec3normalGen "pilot_config.h")) -and (Test-Path $PilotDll)) {
+    $vec3normalSrc = Get-ChildItem -Path $vec3normalGen -Filter "*.c" | ForEach-Object { $_.FullName }
+    Add-Test "pilot_vec3normal" ($liftCommon + @("-I`"$vec3normalGen`"")) ($legacySources + @("source/guest_process.c", "source/n3ds_pilot.c", "tests/pilot_host.c") + $vec3normalSrc) @($PilotDll)
+    Write-Log "Vec3TransformNormal pilot test uses $vec3normalGen"
+}
 
 if (Test-Path $TesvExe) {
     Add-Test "tesv_probe" $liftCommon ($legacySources + @("tests/tesv_probe.c")) @($TesvExe)
@@ -309,7 +322,7 @@ if (Test-Path $TesvExe) {
         $sliceD3dx = @()
         if ($PilotGen -and (Test-Path (Join-Path $PilotGen "pilot_table.c"))) {
             $sliceFlags += @("-I`"$PilotGen`"")
-            $sliceD3dx = @((Join-Path $PilotGen "pilot_00.c"), (Join-Path $PilotGen "pilot_01.c"), (Join-Path $PilotGen "pilot_02.c"), (Join-Path $PilotGen "pilot_03.c"), (Join-Path $PilotGen "pilot_table.c"))
+            $sliceD3dx = @((Join-Path $PilotGen "pilot_00.c"), (Join-Path $PilotGen "pilot_01.c"), (Join-Path $PilotGen "pilot_02.c"), (Join-Path $PilotGen "pilot_03.c"), (Join-Path $PilotGen "pilot_04.c"), (Join-Path $PilotGen "pilot_05.c"), (Join-Path $PilotGen "pilot_table.c"))
         } else {
             Write-Log "tesv_slice: no generated D3DX table; hotpatch bodies will fail explicitly"
         }

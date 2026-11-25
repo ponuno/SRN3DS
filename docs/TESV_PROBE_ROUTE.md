@@ -86,15 +86,18 @@ occurs before this gate.
    pass this branch; it would not make the device accept arbitrary `ps_3_0`
    programs, so the documented decision is to keep 2.0/2.0 until a real SM3
    execution path exists.
-2. **Other D3DX hotpatch bodies.** The loader now binds every validated
-   hotpatch export to its body. `D3DXMatrixMultiply` `0x0802fa80`,
-   `D3DXMatrixTranspose` `0x0802fce0`, `D3DXMatrixMultiplyTranspose`
-   `0x0802fd9d` and `D3DXPlaneTransform` `0x08032303` are lifted, each has its
-   own 3/3 pilot test, and the slice registers all four. A later call to
-   `D3DXVec3TransformCoord` `0x0802f294`, `D3DXMatrixInverse` `0x0802fffd`,
-   etc. would still fail explicitly at the body address until those bodies are
-   generated; the conservative pilot gate currently rejects them for indirect
-   branches/calls. Generation, merge and per-body test details are in
+2. **Other D3DX hotpatch bodies.** The loader now follows the one-time
+   initializer's real-body table, so it no longer mistakes `entry+11` for the
+   body on exports such as `D3DXVec3TransformCoord`. Six imported bodies are
+   lifted: `D3DXMatrixMultiply` `0x0802fa80`, `D3DXMatrixTranspose`
+   `0x0802fce0`, `D3DXMatrixMultiplyTranspose` `0x0802fd9d`,
+   `D3DXPlaneTransform` `0x08032303`, `D3DXVec3TransformCoord` `0x08032ead`
+   and `D3DXVec3TransformNormal` `0x0803306a` (plus the internal helper
+   `0x0802e9db`; seven table entries). Each has its own 3/3 pilot test. A later
+   call to `D3DXVec3Normalize` `0x08032cbf`, `D3DXMatrixInverse` `0x0802fffd`
+   or `D3DXPlaneNormalize` `0x08032000` would still fail explicitly at its body
+   address; the conservative pilot gate rejects them for an indirect target
+   near `0x081a6xxx`. Generation, merge and per-body test details are in
    `docs/D3DX_PILOT_TABLE.md`; `pilot_out*/` is generated locally and ignored.
 3. **HW T&L shipping gate (`0x00c6d8c6`).** Still deferred
    (`docs/HWTL_DECISION.md`); the probe is measurement-only.

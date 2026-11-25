@@ -31,11 +31,21 @@ static void expected(unsigned type,unsigned variant,float a[16],float b[16],floa
     if(type==1){for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)out[i*4+j]=a[j*4+i];}
     else if(type==4){*argc=3;for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)out[i*4+j]+=a[i*4+k]*b[k*4+j];}
     else if(type==5){*argc=3;for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)out[i*4+j]+=a[j*4+k]*b[k*4+i];}
+    else if(type==6){*argc=3;
+        float x=a[0]*b[0]+a[1]*b[4]+a[2]*b[8]+b[12];
+        float y=a[0]*b[1]+a[1]*b[5]+a[2]*b[9]+b[13];
+        float z=a[0]*b[2]+a[1]*b[6]+a[2]*b[10]+b[14];
+        float w=a[0]*b[3]+a[1]*b[7]+a[2]*b[11]+b[15];
+        out[0]=x/w;out[1]=y/w;out[2]=z/w;}
+    else if(type==7){*argc=3;
+        out[0]=a[0]*b[0]+a[1]*b[4]+a[2]*b[8];
+        out[1]=a[0]*b[1]+a[1]*b[5]+a[2]*b[9];
+        out[2]=a[0]*b[2]+a[1]*b[6]+a[2]*b[10];}
     else if(type==11){*argc=3;for(unsigned i=0;i<4;++i)out[i]=a[0]*b[i]+a[1]*b[4+i]+a[2]*b[8+i]+a[3]*b[12+i];}
     else{float x=variant+0.5f,y=-(float)variant-2,z=3.25f;args[1]=fbits(x);args[2]=fbits(y);args[3]=fbits(z);*argc=4;
         out[15]=1;if(type==2){out[0]=x;out[5]=y;out[10]=z;}else{out[0]=out[5]=out[10]=1;out[12]=x;out[13]=y;out[14]=z;}}
 }
-static size_t case_out_len(unsigned type){return type==11u?4u:16u;}
+static size_t case_out_len(unsigned type){return (type==6u||type==7u)?3u:(type==11u?4u:16u);}
 int n3ds_pilot_run(const char *path,const PilotSpec *spec,const FnEntry *table,unsigned count,size_t budget,PilotResult *r){
     memset(r,0,sizeof *r);r->limit=budget;
     if(!path||!spec||!spec->name||spec->test_case<1||spec->test_case>11||!table||!count)return fail(r,"Invalid pilot configuration");

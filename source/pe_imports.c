@@ -101,10 +101,35 @@ static unsigned lower(unsigned c){return c>='A'&&c<='Z'?c+32:c;}
 /* MSVC /hotpatch lazy-ILT export.  The exported entry is a forwarder
  * (`FF 25 <slot>`) followed by five int3 padding bytes; the slot is
  * initialised to a wrapper that calls a one-time initializer and forwards
- * through the same slot; the real function starts 11 bytes after the export
- * entry.  This is the exact shape prepare_pilot.py validates for a single
- * import.  Return the body only when every byte matches; otherwise the caller
- * keeps the raw export address, so an unknown layout still fails explicitly. */
+ * through the same slot.  Some exports put the real body at entry+11; others
+ * (for example D3DXVec3TransformCoord) put another wrapper there, and the
+ * one-time initializer copies the real body pointer from a 74-entry table.
+ * Resolve that table when present, then fall back to entry+11 only when it is
+ * a real function prologue and not another wrapper.  Every byte is validated;
+ * otherwise the caller keeps the raw export address. */
+static uint32_t le32(const uint8_t *p){
+    return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
+}
+/* Find the `mov esi,src; mov edi/ebx,dst; ... rep movsd` table copy in the
+ * one-time initializer.  The immediates are relocated guest addresses. */
+static int init_table(GuestMemory *m,const GuestImage *im,uint32_t init,uint32_t *src,uint32_t *dst){
+    uint8_t b[128];
+    if(init<im->base||init-im->base>im->size-sizeof b)return 0;
+    if(guest_read(m,init,b,sizeof b))return 0;
+    for(unsigned i=0;i+10<sizeof b;++i){
+        if(b[i]!=0xbe)continue;
+        if(b[i+5]!=0xbf&&b[i+5]!=0xbb)continue;
+        uint32_t s=le32(b+i+1),d=le32(b+i+6);
+        if(s<im->base||s-im->base>im->size-4)continue;
+        if(d<im->base||d-im->base>im->size-4)continue;
+        int rep=0;
+        for(unsigned j=i+10;j+1<sizeof b&&j<i+48;++j)
+            if(b[j]==0xf3&&b[j+1]==0xa5){rep=1;break;}
+        if(!rep)continue;
+        *src=s;*dst=d;return 1;
+    }
+    return 0;
+}
 static uint32_t hotpatch_body(GuestMemory *m,const GuestImage *im,uint32_t entry){
     if(!m||!im||entry<im->base||entry-im->base>im->size-11)return 0;
     uint8_t e[11];
@@ -124,12 +149,27 @@ static uint32_t hotpatch_body(GuestMemory *m,const GuestImage *im,uint32_t entry
     uint32_t rel=(uint32_t)w[8]|((uint32_t)w[9]<<8)|((uint32_t)w[10]<<16)|((uint32_t)w[11]<<24);
     uint32_t init=(uint32_t)(wrapper+12+rel);
     if(init<im->base||init-im->base>=im->size)return 0;
-    uint32_t wslot=(uint32_t)w[15]|((uint32_t)w[16]<<8)|((uint32_t)w[17]<<16)|((uint32_t)w[18]<<24);
+    uint32_t wslot=le32(w+15);
     if(wslot!=slot)return 0;
+    uint32_t src=0,dst=0,real=0;
+    if(init_table(m,im,init,&src,&dst)&&slot>=dst&&((slot-dst)&3u)==0){
+        uint32_t idx=(slot-dst)/4u;
+        uint32_t cand=0;
+        if(idx<256&&!guest_read32(m,src+4u*idx,&cand)&&
+           cand>=im->base&&cand-im->base<=im->size-4){
+            uint8_t cb[4];
+            if(!guest_read(m,cand,cb,sizeof cb)&&
+               cb[0]==0x8b&&cb[1]==0xff&&cb[2]==0x55&&cb[3]==0x8b)
+                real=cand;
+        }
+    }
+    if(real)return real;
     uint32_t body=entry+11;
-    uint8_t b[3];
+    uint8_t b[8];
     if(guest_read(m,body,b,sizeof b))return 0;
-    if(!(b[0]==0x8b&&b[1]==0xff&&b[2]==0x55))return 0;
+    /* Accept entry+11 only when it is a real body, not another wrapper. */
+    if(!(b[0]==0x8b&&b[1]==0xff&&b[2]==0x55&&b[3]==0x8b&&b[4]==0xec))return 0;
+    if(b[5]==0x6a&&b[6]==0x01&&b[7]==0xe8)return 0;
     return body;
 }
 static int same_dll(const char *a,const char *b){
