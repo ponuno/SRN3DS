@@ -41,11 +41,13 @@ static void expected(unsigned type,unsigned variant,float a[16],float b[16],floa
         out[0]=a[0]*b[0]+a[1]*b[4]+a[2]*b[8];
         out[1]=a[0]*b[1]+a[1]*b[5]+a[2]*b[9];
         out[2]=a[0]*b[2]+a[1]*b[6]+a[2]*b[10];}
+    else if(type==8){float len=sqrtf(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);if(len>0){out[0]=a[0]/len;out[1]=a[1]/len;out[2]=a[2]/len;}}
+    else if(type==10){float len=sqrtf(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);if(len>0)for(unsigned i=0;i<4;++i)out[i]=a[i]/len;}
     else if(type==11){*argc=3;for(unsigned i=0;i<4;++i)out[i]=a[0]*b[i]+a[1]*b[4+i]+a[2]*b[8+i]+a[3]*b[12+i];}
     else{float x=variant+0.5f,y=-(float)variant-2,z=3.25f;args[1]=fbits(x);args[2]=fbits(y);args[3]=fbits(z);*argc=4;
         out[15]=1;if(type==2){out[0]=x;out[5]=y;out[10]=z;}else{out[0]=out[5]=out[10]=1;out[12]=x;out[13]=y;out[14]=z;}}
 }
-static size_t case_out_len(unsigned type){return (type==6u||type==7u)?3u:(type==11u?4u:16u);}
+static size_t case_out_len(unsigned type){return (type==6u||type==7u||type==8u)?3u:((type==10u||type==11u)?4u:16u);}
 int n3ds_pilot_run(const char *path,const PilotSpec *spec,const FnEntry *table,unsigned count,size_t budget,PilotResult *r){
     memset(r,0,sizeof *r);r->limit=budget;
     if(!path||!spec||!spec->name||spec->test_case<1||spec->test_case>11||!table||!count)return fail(r,"Invalid pilot configuration");

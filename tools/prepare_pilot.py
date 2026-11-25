@@ -127,8 +127,9 @@ def fnv64(data):
     return h
 
 
-def discover(md, image, base, executable, root, x86):
+def discover(md, image, base, executable, root, x86, iat):
     """A small bounded direct-control-flow slice, in upstream JSON format."""
+    host_thunks = set()
     def code_at(addr):
         return any(lo <= addr < hi for lo, hi in executable)
 
@@ -169,10 +170,16 @@ def discover(md, image, base, executable, root, x86):
                     if len(i.operands) != 1 or i.operands[0].type != x86.X86_OP_IMM:
                         raise ValueError(f"indirect call at {a:#x}; pilot needs a closed direct-call slice")
                     dst = i.operands[0].imm & 0xffffffff
-                    if not code_at(dst):
+                    slot = u32(image, base, dst + 2) if image[dst-base:dst-base + 2] == HOTPATCH_JMP else None
+                    if dst in iat or (slot is not None and slot in iat):
+                        # `_CIsqrt`/`_finite`-style import thunk: a host shim,
+                        # not another guest function to decode.
+                        host_thunks.add(dst)
+                    elif not code_at(dst):
                         raise ValueError(f"external direct call at {a:#x}")
-                    pending.append(dst)
-                    edges[start].add(dst)
+                    else:
+                        pending.append(dst)
+                        edges[start].add(dst)
                 elif x86.X86_GRP_RET in groups:
                     break
                 elif x86.X86_GRP_JUMP in groups:
@@ -218,7 +225,9 @@ def discover(md, image, base, executable, root, x86):
     visit(root)
     return {"image_base": base, "entry": root,
             "functions": {hex(a): b for a, b in sorted(funcs.items())},
-            "iat": {}, "jump_tables": {}, "indirect_jumps": []}, total
+            "iat": {hex(k): v for k, v in iat.items()},
+            "host_thunks": sorted(host_thunks),
+            "jump_tables": {}, "indirect_jumps": []}, total
 
 
 def prepare(dll, staged, out, requested):
@@ -244,13 +253,25 @@ def prepare(dll, staged, out, requested):
     exports = {s.name.decode("ascii", "replace"): BASE+s.address
                for s in getattr(getattr(pe,"DIRECTORY_ENTRY_EXPORT",None),"symbols",[])
                if s.name and not s.forwarder}
+    iat = {}
+    for e in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
+        dllname = e.dll.decode("ascii", "replace")
+        for imp in e.imports:
+            if not imp.address:
+                continue
+            iname = imp.name.decode("ascii", "replace") if imp.name else f"#{imp.ordinal}"
+            label = f"{dllname}!{iname}"
+            iat[imp.address] = label
+            if original != BASE:
+                iat[imp.address - original + BASE] = label
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
     md.detail = True
     if not (staged/"lift.py").is_file():
         raise ValueError("Missing staged/lift.py; run stage_upstream.py first")
     out.mkdir(parents=True, exist_ok=False)
     reasons = {}
-    env = dict(os.environ, LIFT_GAME="skyrim", LIFT_FILES="1", LIFT_TSO="0", LIFT_MEMORDER="0")
+    env = dict(os.environ, LIFT_GAME="skyrim", LIFT_FILES="1", LIFT_TSO="0", LIFT_MEMORDER="0",
+               LIFT_SPILL="0", LIFT_GLOBALREGS="0")
     for name in [requested] if requested else CANDIDATES:
         try:
             if name not in exports:
@@ -258,7 +279,7 @@ def prepare(dll, staged, out, requested):
             entry = exports[name]
             thunk = resolve_ilt_thunk(image, BASE, entry)
             start = thunk["real"] if thunk else entry
-            analysis, insns = discover(md, image, BASE, code, start, x86)
+            analysis, insns = discover(md, image, BASE, code, start, x86, iat)
             if thunk:
                 ranges = [tuple(b) for blocks in analysis["functions"].values() for b in blocks]
                 starts = {int(a, 16) for a in analysis["functions"]}
@@ -289,6 +310,39 @@ def prepare(dll, staged, out, requested):
                 labels+=n;p.write_text('#include "pilot_guard.h"\n'+body,encoding="utf-8")
             if not labels:
                 raise ValueError("no generated block labels for execution guard")
+            host = analysis.get("host_thunks", [])
+            if host:
+                shim_lines = ['#include "x86.h"', '#include "guest.h"', '#include <math.h>', '']
+                extra = []
+                for a in host:
+                    imp_name = iat.get(a)
+                    if not imp_name:
+                        slot = u32(image, BASE, a + 2)
+                        imp_name = iat.get(slot)
+                    fn = f"f_{a:08X}"
+                    if imp_name == "msvcrt.dll!_CIsqrt":
+                        shim_lines.append(f"void {fn}(CPU *c){{ (void)c; ST(0) = sqrt(ST(0)); }}")
+                    elif imp_name == "msvcrt.dll!_finite":
+                        shim_lines.append(f"void {fn}(CPU *c){{ c->r[0] = isfinite(M64(c->r[4] + 4)) ? 1u : 0u; }}")
+                    else:
+                        raise ValueError(f"unsupported host import thunk {a:#x} ({imp_name})")
+                    extra.append((a, fn))
+                decl = gen/"funcs_pilot.h"
+                text = decl.read_text(encoding="utf-8")
+                for a, fn in extra:
+                    if f"void {fn}(CPU *c);" not in text:
+                        text += f"void {fn}(CPU *c);\n"
+                decl.write_text(text, encoding="utf-8")
+                table = gen/"pilot_table.c"
+                ttext = table.read_text(encoding="utf-8")
+                entries = re.findall(r"\{0x([0-9A-Fa-f]+)u,\s*(f_[0-9A-Fa-f]+)\}", ttext)
+                entries += [(f"{a:08X}", fn) for a, fn in extra]
+                entries = sorted({(int(a, 16), fn) for a, fn in entries})
+                head = '#include "funcs_pilot.h"\n#include "rt_table.h"\n'
+                body = ''.join(f"    {{0x{a:08X}u, {fn}}},\n" for a, fn in entries)
+                table.write_text(f"{head}const FnEntry g_fn_table_pilot[] = {{\n{body}}};\n"
+                                 f"const unsigned g_fn_count_pilot = {len(entries)};\n", encoding="utf-8")
+                (gen/"pilot_shims.c").write_text("\n".join(shim_lines) + "\n", encoding="utf-8")
             manifest = {"export":name,"case":CANDIDATES[name],"export_address":entry,"address":start,"base":BASE,"file_size":len(raw),
                         "fnv64":f"{fnv64(raw):016x}","sha256":hashlib.sha256(raw).hexdigest(),"functions":len(analysis["functions"]),"instructions":insns,
                         "ilt_thunk":thunk,"lazy_ilt_init_bypassed":bool(thunk)}

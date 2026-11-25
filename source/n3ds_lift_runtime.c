@@ -464,6 +464,11 @@ static int invoke_common(CPU *c,uint32_t address,uint32_t ir_end,int reentrant,
     else if(n3ds_rt_dispatch(c,address))rt_unimpl(c,address,"unknown function/import");
     active=f.prev;
     int ok=c->r[4]==base+4 || c->r[4]==sp;
+    if(!ok){
+        const char *v=getenv("N3DS_INVOKE_TRACE");
+        if(v&&*v&&strcmp(v,"0"))fprintf(stderr,"[invoke] stack esp=%08lx base=%08lx sp=%08lx\n",
+            (unsigned long)c->r[4],(unsigned long)base,(unsigned long)sp);
+    }
     c->r[4]=sp;if(!ok)return -1;
     *result=c->r[0];return 0;
 }
