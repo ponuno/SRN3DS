@@ -460,22 +460,29 @@ match the packed atlas entries.  This is CPU vertex/index data only.
 table.  Each triangle uses the 1-based style in `triangle_fills[]`:
 
 * A solid fill's RGBA is transformed per channel by the record CXFORM
-  (`mult` 8.8, `add` 8-bit) and written to all three vertices.  The same white
+  (`mult` 8.8, `add` 8-bit) and written to its shared vertex.  The same white
   texel UV is written to every vertex.
 * Linear/radial/focal gradients are the exact named refusal
   `gradient fills are not implemented`; bitmap fills are
   `bitmap fills are not implemented`.  Neither produces fallback pixels.
-* The batch expands to three vertices per triangle, so no vertex sharing is
-  assumed.  Indices are local; the caller adds the append base.  A mirroring
-  (negative determinant) matrix is allowed and reverses each triangle's
-  winding; a zero determinant is `ERR_SCALE`.
-* Limits are 262,144 vertices and 786,432 indices.  Counts and styles are
-  validated before any write; refusals leave the buffers untouched.
+* The batch reuses `mesh->vertices[]` and `mesh->indices[]`: each source vertex
+  is emitted once, and copied only when the same vertex is referenced by
+  triangles with different fills.  This keeps the real StartMenu at **57,480**
+  vertices, below the 65,536-vertex 16-bit indexed limit, instead of expanding
+  to 86,154 vertices.  Indices are local; the caller adds the append base.  A
+  mirroring (negative determinant) matrix is allowed and reverses each
+  triangle's winding; a zero determinant is `ERR_SCALE`.
+* Limits are 262,144 vertices and 786,432 indices; one indexed draw additionally
+  requires at most 65,536 vertices.  The caller capacity must cover the
+  worst-case `vertex_count + index_count` output vertices (actual StartMenu
+  output is 57,480).  Counts and styles are validated before any write;
+  refusals leave the buffers untouched.
 * No allocation, texture, upload or GPU call is performed.
 
-The real pipeline tessellates 28,718 triangles and emits 86,154 shape vertices
-and indices, all carrying a non-white fill colour (`86154/86154`).  The full
-combined batch is 86,160 indices / 28,720 triangles after the control glyph.
+The real pipeline tessellates 28,718 triangles and emits 57,480 shape vertices
+and 86,154 indices, all carrying a non-white fill colour (`57480/57480`).  The
+full combined batch is 57,484 vertices / 86,160 indices / 28,720 triangles after
+the control glyph.
 
 ## 12. Host COM A8 draw
 
@@ -720,11 +727,11 @@ rotated-clip refusals, and real 33..36 atlas quads.  The fill test adds a
 solid `80402010` fill with exact per-vertex ARGB, an 8.8 CXFORM result
 `808a2003`, mirrored winding, gradient and bitmap named refusals, and a
 short-output refusal that leaves the buffer untouched; the real check reports
-40 solid fills with no gradients/bitmaps, a black shape 2, and 828/828 shape-2
+40 solid fills with no gradients/bitmaps, a black shape 2, and 552/552 shape-2
 vertices carrying fill colours.
 
 Full host suite with real data and the main-tree generated slice/IR container:
-**132 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
+**135 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
 contributes 21 synthetic checks, `menu_swf_fill` 32, `menu_swf_atlas` 27,
 `menu_swf_raster` 44,
 `menu_swf_text` 33, `menu_swf_tess` 47, `menu_swf_shape` 28, `menu_swf_clip`
@@ -770,14 +777,14 @@ source_records=57 nonempty_records=3 source_lines=3 source_glyph_slots=72
 refused_records=57 refused_font_mask=00000204 resolved_text_glyphs=0
 empty_shapes=0 degenerate_shapes=0 strokes_skipped=182
 tessellated_vertices=57480 triangles=28718
-shape_colour_vertices=86154/86154
-shape_batch_vertices=86154 shape_batch_indices=86154
+shape_colour_vertices=57480/57480
+shape_batch_vertices=57480 shape_batch_indices=86154
 glyph=33 tess_vertices=319 triangles=159
 raster=64x64 rect=24,1,40,63 sum=178003 atlas_used_height=62
-batch_vertices=57532 indices=86232 triangles=28744
+batch_vertices=57484 indices=86160 triangles=28720
 limits=262144 vertices / 786432 indices
-COM draw_calls=1 expanded_vertices=0 indexed_draws=1 indexed_vertices=57532 indexed_indices=86232
-FVF=0x142 A8=64x64 control_text_quads=1; 49 checks, 0 failures
+COM draw_calls=1 expanded_vertices=0 indexed_draws=1 indexed_vertices=57484 indexed_indices=86160
+FVF=0x142 A8=64x64 control_text_quads=1; 52 checks, 0 failures
 ```
 
 The 57 real text records produce three nonempty plain sources (72 source glyph
@@ -793,15 +800,15 @@ No pixel readback, GPU/PICA sampling, visual equivalence or frame is claimed.
 Verification:
 
 * targeted
-  `menu_swf_fill,menu_swf_shape,menu_swf_tess,menu_swf_batch,menu_pipeline_e2e`
-  with real data: **15 passed, 0 diagnostic, 0 failed**; check counts 43, 40,
-  55, 34 and 50;
-* fill + real e2e under ASan: **43 + 50 checks, 0 failures; harness 12
+  `menu_swf_fill,menu_swf_batch,menu_swf_shape,menu_swf_tess,menu_indexed_draw,menu_pipeline_e2e`
+  with real data: **16 passed, 0 diagnostic, 0 failed**; check counts 43, 34,
+  40, 55, indexed PASS and 52;
+* fill + real e2e under ASan: **43 + 52 checks, 0 failures; harness 12
   passed, 0 diagnostic, 0 failed**;
 * full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data`:
-  **132 passed, 1 diagnostic (`tesv_slice`), 0 failed**;
+  **135 passed, 1 diagnostic (`tesv_slice`), 0 failed**;
 * ARM compile-only: `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B,
-  `menu_swf_batch.o` 9,880 B;
+  `menu_swf_batch.o` 10,664 B, `d3d9_menu_text.o` 5,864 B;
 * ARM compile-only `-Mode com -Isolated edit_text`: `.elf` 6,178,376 B,
   SHA256 `2fd3e1af9ec6de706e762f20012340a90f74ad61dec2b64ccdf339cfecc4191e`;
   `.3dsx` 913,460 B, SHA256
@@ -950,11 +957,12 @@ frame.
   + FVF `0x142`, and issues one DrawPrimitiveUP for **12 expanded vertices**.
   A refusing backend is `ERR_A8` with no RGBA substitution.
 * The real StartMenu integration classifies all 216 flattened records,
-  tessellates 53 shape records into 28,742 triangles, appends one local-font
-  control text quad and submits 57,532 batch vertices / 86,232 indices as
+  tessellates 53 shape records into 28,718 triangles, appends one local-font
+  control text quad and submits 57,484 batch vertices / 86,160 indices as
   **one 16-bit indexed draw** (the fallback without the callback is 22 bounded
-  DrawPrimitiveUP calls).  Sprite/text/mask/stroke/style gaps are
-  counted, not silently rendered.
+  DrawPrimitiveUP calls).  The shape layer reuses its 57,480 shared mesh
+  vertices instead of expanding to 86,154.  Sprite/text/mask/stroke/style gaps
+  are counted, not silently rendered.
 * No AVM action is executed, no texture cache or real GFx draw/frame is built,
   and no frame/pixel/Azahar/hardware result is claimed.
 

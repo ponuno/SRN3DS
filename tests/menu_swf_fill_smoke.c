@@ -265,11 +265,11 @@ static void test_solid_fill(void) {
 
     MenuSwfBatchShapeStyle style;
     identity_style(&style);
-    MenuSwfBatchVertex vertices[3];
-    uint32_t indices[3];
+    MenuSwfBatchVertex vertices[8];
+    uint32_t indices[8];
     MenuSwfBatchResult br;
     MenuSwfBatchStatus bs = menu_swf_batch_shape(
-        &mesh, &style, NULL, vertices, 3, indices, 3, &br, reason,
+        &mesh, &style, NULL, vertices, 8, indices, 8, &br, reason,
         sizeof reason);
     check(bs == MENU_SWF_BATCH_OK && br.vertex_count == 3 &&
               br.index_count == 3 && br.triangle_count == 1,
@@ -294,7 +294,7 @@ static void test_solid_fill(void) {
     style.add[1] = 0;
     style.add[2] = -5;
     style.add[3] = 0;
-    bs = menu_swf_batch_shape(&mesh, &style, NULL, vertices, 3, indices, 3,
+    bs = menu_swf_batch_shape(&mesh, &style, NULL, vertices, 8, indices, 8,
                               &br, reason, sizeof reason);
     check(bs == MENU_SWF_BATCH_OK && vertices[0].color == 0x808a2003u,
           "solid fill applies record colour transform");
@@ -302,7 +302,7 @@ static void test_solid_fill(void) {
     /* A mirroring matrix is allowed and reverses index winding. */
     identity_style(&style);
     style.m00 = -0x10000;
-    bs = menu_swf_batch_shape(&mesh, &style, NULL, vertices, 3, indices, 3,
+    bs = menu_swf_batch_shape(&mesh, &style, NULL, vertices, 8, indices, 8,
                               &br, reason, sizeof reason);
     check(bs == MENU_SWF_BATCH_OK && indices[0] == 0 && indices[1] == 2 &&
               indices[2] == 1,
@@ -406,11 +406,11 @@ static void test_bitmap_refusal(void) {
     if (st != MENU_SWF_OK) return;
     MenuSwfBatchShapeStyle style;
     identity_style(&style);
-    MenuSwfBatchVertex vertices[3];
-    uint32_t indices[3];
+    MenuSwfBatchVertex vertices[8];
+    uint32_t indices[8];
     MenuSwfBatchResult br;
     MenuSwfBatchStatus bs = menu_swf_batch_shape(
-        &mesh, &style, NULL, vertices, 3, indices, 3, &br, reason,
+        &mesh, &style, NULL, vertices, 8, indices, 8, &br, reason,
         sizeof reason);
     check(bs == MENU_SWF_BATCH_ERR_FILL &&
               strstr(reason, "bitmap fills are not implemented"),
@@ -521,7 +521,7 @@ static void test_real(const char *data_dir) {
         check(st == MENU_SWF_OK && mesh.triangle_count > 0,
               "real shape2 tessellates");
         if (st == MENU_SWF_OK && mesh.triangle_count > 0) {
-            uint32_t n = mesh.triangle_count * 3u;
+            uint32_t n = mesh.vertex_count + mesh.index_count;
             MenuSwfBatchVertex *vertices =
                 (MenuSwfBatchVertex *)malloc(n * sizeof *vertices);
             uint32_t *indices = (uint32_t *)malloc(n * sizeof *indices);

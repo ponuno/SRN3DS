@@ -219,7 +219,7 @@ MenuTextDrawStatus menu_text_draw_batch(MenuTextDraw *ctx,
     }
 
     D9ComDemo *d = ctx->demo;
-    uint32_t args[4];
+    uint32_t args[8];
     uint32_t hr;
 
     args[0] = 0;

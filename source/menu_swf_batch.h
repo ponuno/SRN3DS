@@ -107,11 +107,13 @@ MenuSwfBatchStatus menu_swf_batch_text(
  * ARGB; linear/radial/focal gradients return MENU_SWF_BATCH_ERR_FILL with
  * "gradient fills are not implemented"; bitmap fills return the same status
  * with "bitmap fills are not implemented".  A negative determinant mirrors and
- * reverses each triangle's winding; zero is ERR_SCALE.  The output is expanded
- * to three vertices per triangle, so it does not depend on vertex sharing.
- * Counts and fills are validated before any write; a refusal leaves the
- * buffers untouched.  Indices are local to this batch (add the base when
- * appending). */
+ * reverses each triangle's winding; zero is ERR_SCALE.  The batch reuses
+ * mesh->vertices[]/indices[]: a source vertex shared by triangles with
+ * different fills is copied once and its index remapped.  The caller capacity
+ * must cover vertex_count + index_count output vertices; that worst case is
+ * checked before any write.  Indices are local to this batch (add the base
+ * when appending).  A single 16-bit indexed draw additionally requires at most
+ * 65,536 output vertices. */
 MenuSwfBatchStatus menu_swf_batch_shape(
     const MenuSwfTessMesh *mesh, const MenuSwfBatchShapeStyle *style,
     const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,

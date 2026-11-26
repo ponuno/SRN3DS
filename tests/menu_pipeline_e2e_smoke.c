@@ -982,6 +982,12 @@ static void run_real(const char *data_dir) {
     stats.batch_vertices = vertex_count;
     stats.batch_indices = index_count;
     stats.batch_triangles = index_count / 3u;
+    check(stats.tess_vertices == 57480 && stats.shape_batch_vertices == 57480 &&
+              stats.shape_batch_indices == 86154 &&
+              stats.batch_vertices == 57484 && stats.batch_indices == 86160,
+          "indexed shape batch keeps mesh vertex sharing");
+    check(stats.batch_vertices <= 65536u,
+          "combined batch fits the 16-bit indexed vertex range");
 
     printf("real: source=%s StartMenu.swf bytes=%u tags=%u avm_skipped=%u\n",
            winner, swf_size, summary.tag_count, stats.avm_tags);

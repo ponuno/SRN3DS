@@ -404,22 +404,18 @@ MenuSwfBatchStatus menu_swf_batch_shape(
     }
     int flip = det < 0;
     uint32_t triangles = mesh->triangle_count;
-    uint32_t need_vertices = triangles * 3u;
-    uint32_t need_indices = triangles * 3u;
-    if (need_vertices > MENU_SWF_BATCH_MAX_SHAPE_VERTICES ||
-        need_indices > MENU_SWF_BATCH_MAX_SHAPE_INDICES ||
-        need_vertices > vertex_capacity || need_indices > index_capacity ||
-        (need_vertices && (!vertices || !indices))) {
-        batch_reason(reason, reason_cap,
-                     "shape batch: %u triangles need %u vertices/%u indices "
-                     "(capacity %u/%u)",
-                     triangles, need_vertices, need_indices, vertex_capacity,
-                     index_capacity);
-        return MENU_SWF_BATCH_ERR_OVERFLOW;
-    }
     if (!triangles) return MENU_SWF_BATCH_OK;
 
-    /* Validate every fill and transformed point before writing anything. */
+    /* Validate every fill and transformed source point before writing. */
+    for (uint32_t s = 0; s < mesh->vertex_count; ++s) {
+        int32_t x, y;
+        if (shape_transform(style, mesh->vertices[s].x, mesh->vertices[s].y,
+                            &x, &y)) {
+            batch_reason(reason, reason_cap,
+                         "shape batch: transformed point overflow");
+            return MENU_SWF_BATCH_ERR_OVERFLOW;
+        }
+    }
     for (uint32_t t = 0; t < triangles; ++t) {
         uint32_t color;
         MenuSwfBatchStatus st = shape_fill_color(
@@ -433,51 +429,100 @@ MenuSwfBatchStatus menu_swf_batch_shape(
                              index, mesh->vertex_count);
                 return MENU_SWF_BATCH_ERR_ARGUMENT;
             }
-            int32_t x, y;
-            if (shape_transform(style, mesh->vertices[index].x,
-                                mesh->vertices[index].y, &x, &y)) {
-                batch_reason(reason, reason_cap,
-                             "shape batch: transformed point overflow");
-                return MENU_SWF_BATCH_ERR_OVERFLOW;
-            }
         }
     }
 
-    uint32_t vcount = 0, icount = 0;
+    uint64_t worst64 = (uint64_t)mesh->vertex_count + mesh->index_count;
+    uint32_t worst_vertices = worst64 > UINT32_MAX
+                                  ? UINT32_MAX
+                                  : (uint32_t)worst64;
+    if (mesh->vertex_count > MENU_SWF_BATCH_MAX_SHAPE_VERTICES ||
+        mesh->index_count > MENU_SWF_BATCH_MAX_SHAPE_INDICES ||
+        worst_vertices > MENU_SWF_BATCH_MAX_SHAPE_VERTICES ||
+        worst_vertices > vertex_capacity ||
+        mesh->index_count > index_capacity ||
+        (worst_vertices && (!vertices || !indices))) {
+        batch_reason(reason, reason_cap,
+                     "shape batch: %u source vertices / %u indices need up to "
+                     "%u vertices (capacity %u/%u)",
+                     mesh->vertex_count, mesh->index_count, worst_vertices,
+                     vertex_capacity, index_capacity);
+        return MENU_SWF_BATCH_ERR_OVERFLOW;
+    }
+
+
+    /* Keep the source mesh's vertex sharing.  Each source vertex starts with
+     * the colour of its first triangle; a vertex shared by triangles with
+     * different fills is duplicated only when that conflict is observed. */
+    uint8_t seen[(MENU_SWF_BATCH_MAX_SHAPE_VERTICES + 7u) / 8u];
+    memset(seen, 0, sizeof seen);
+    uint32_t vcount = 0;
     int have_bounds = 0;
     int32_t bxmin = 0, bxmax = 0, bymin = 0, bymax = 0;
+    for (uint32_t s = 0; s < mesh->vertex_count; ++s) {
+        MenuSwfBatchVertex *v = &vertices[vcount];
+        if (shape_transform(style, mesh->vertices[s].x, mesh->vertices[s].y,
+                            &v->x, &v->y)) {
+            batch_reason(reason, reason_cap,
+                         "shape batch: transformed point overflow");
+            return MENU_SWF_BATCH_ERR_OVERFLOW;
+        }
+        v->u = style->u;
+        v->v = style->v;
+        v->color = 0;
+        ++vcount;
+        if (!have_bounds) {
+            bxmin = bxmax = v->x;
+            bymin = bymax = v->y;
+            have_bounds = 1;
+        } else {
+            if (v->x < bxmin) bxmin = v->x;
+            if (v->x > bxmax) bxmax = v->x;
+            if (v->y < bymin) bymin = v->y;
+            if (v->y > bymax) bymax = v->y;
+        }
+    }
+
+    uint32_t icount = 0;
     for (uint32_t t = 0; t < triangles; ++t) {
         uint32_t color;
         MenuSwfBatchStatus st = shape_fill_color(
             mesh, mesh->triangle_fills[t], style, &color, reason, reason_cap);
         if (st != MENU_SWF_BATCH_OK) return st;
-        uint32_t base = vcount;
+        uint32_t tri[3];
         for (unsigned k = 0; k < 3; ++k) {
-            uint32_t index = mesh->indices[t * 3u + k];
-            MenuSwfBatchVertex *v = &vertices[vcount++];
-            if (shape_transform(style, mesh->vertices[index].x,
-                                mesh->vertices[index].y, &v->x, &v->y)) {
-                batch_reason(reason, reason_cap,
-                             "shape batch: transformed point overflow");
-                return MENU_SWF_BATCH_ERR_OVERFLOW;
-            }
-            v->u = style->u;
-            v->v = style->v;
-            v->color = color;
-            if (!have_bounds) {
-                bxmin = bxmax = v->x;
-                bymin = bymax = v->y;
-                have_bounds = 1;
+            uint32_t s = mesh->indices[t * 3u + k];
+            uint32_t index;
+            uint8_t mask = (uint8_t)(1u << (s & 7u));
+            if (!(seen[s >> 3] & mask)) {
+                seen[s >> 3] |= mask;
+                vertices[s].color = color;
+                index = s;
+            } else if (vertices[s].color == color) {
+                index = s;
             } else {
-                if (v->x < bxmin) bxmin = v->x;
-                if (v->x > bxmax) bxmax = v->x;
-                if (v->y < bymin) bymin = v->y;
-                if (v->y > bymax) bymax = v->y;
+                /* A source vertex shared across fills needs one copy. */
+                if (vcount >= vertex_capacity ||
+                    vcount >= MENU_SWF_BATCH_MAX_SHAPE_VERTICES) {
+                    batch_reason(reason, reason_cap,
+                                 "shape batch: %u vertex copies exceed %u",
+                                 vcount + 1, vertex_capacity);
+                    return MENU_SWF_BATCH_ERR_OVERFLOW;
+                }
+                vertices[vcount] = vertices[s];
+                vertices[vcount].color = color;
+                index = vcount++;
             }
+            tri[k] = index;
         }
-        indices[icount++] = base + 0;
-        indices[icount++] = base + (flip ? 2u : 1u);
-        indices[icount++] = base + (flip ? 1u : 2u);
+        if (flip) {
+            uint32_t swap = tri[1];
+            tri[1] = tri[2];
+            tri[2] = swap;
+        }
+        indices[icount++] = tri[0];
+        indices[icount++] = tri[1];
+        indices[icount++] = tri[2];
     }
     out->vertex_count = vcount;
     out->index_count = icount;
