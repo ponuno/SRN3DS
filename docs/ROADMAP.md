@@ -263,6 +263,13 @@ demo cube. *Not met.*
 | 5 | Shader model check | honest caps still report SM2; after T&L, TESV's later `0xc6e22d` check requires SM3. Generic TEV covers 19 real PS chunks; the menu-light prototype covers 6 logo signatures. The bounded menu shader closure (`p1200005` + menu copy) now has a runtime contract that never widens the global caps. |
 | 6 | Device creation + first frame | **implemented and host-tested**: the measured TESV `CreateDevice` set is accepted, including `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER` (retained 512x256 target, real Present blit and LockRect read/write) and explicit `D24S8/D24X8` depth-stencil surfaces with hardware clear/attach. Host evidence is pixel-complete through the null backend (`tests/back_buffer_lockable_smoke.c`); PICA/Azahar pixel proof is the next step (`docs/BACK_BUFFER_LOCKABLE.md`). |
 
+
+Measured post-renderer state (2026-11-26): with the measurement-only SM3 probe the gate
+passes and renderer initialisation continues. The first substantial call is
+`CreateTexture(D3DUSAGE_RENDERTARGET)`; LDR targets are now implemented (pow2 8..1024
+X8R8G8B8/A8R8G8B8, one level, pool DEFAULT) as real target-backed textures, while
+float/HDR (`0x71/0x72`) stay named refusals. The next census records the first
+depth-stencil/shader/draw call after this layer. No frame is claimed.
 Steps 1–4 are engineering. Step 5 is the architectural question: PICA200 has no
 programmable fragment shader, so SM3 pixel shaders can only run through a
 specialised translation of the exact shader set Skyrim uses, or not at all.
