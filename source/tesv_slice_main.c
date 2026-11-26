@@ -42,7 +42,7 @@ extern const unsigned g_fn_count_pilot __attribute__((weak));
  * larger than the heap area and svcBreak()s before main. Pin both heaps so that
  * a diagnostic slice fits the 96 MiB .3dsx region as well as the 178 MiB CIA
  * mode: code + heap + linear must stay inside the region. */
-u32 __ctru_heap_size = 64u << 20;
+u32 __ctru_heap_size = 96u << 20;
 u32 __ctru_linear_heap_size = 8u << 20;
 #endif
 
@@ -256,9 +256,9 @@ int main(void) {
     size_t region = osGetMemRegionSize(MEMREGION_APPLICATION);
     size_t free_mem = osGetMemRegionFree(MEMREGION_APPLICATION);
     /* Guest mappings come from the newlib application heap. The 178 MiB CIA
-     * region has enough room for a 64 MiB heap; keep a 4 MiB reserve for libctru
-     * and runtime allocations and allow a 60 MiB diagnostic guest budget. */
-    size_t budget = (60u << 20);
+     * region has enough room for a 96 MiB heap; keep a 4 MiB reserve for libctru
+     * and runtime allocations and allow a 92 MiB guest budget. */
+    size_t budget = (92u << 20);
     if (budget > ((__ctru_heap_size) - (4u << 20))) budget = (__ctru_heap_size) - (4u << 20);
     g_region_mib = (unsigned)(region >> 20);
     g_free_mib = (unsigned)(free_mem >> 20);

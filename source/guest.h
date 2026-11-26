@@ -8,7 +8,7 @@
  * backed independently (non-contiguous), so the port never needs a 256 MiB
  * contiguous host reservation. This matters on the 3DS: MEMOP_RESERVE is not
  * implemented (measured: svcControlMemory returns 0xE0E01BEE for every size). */
-#define GUEST_MAX_SLABS 8
+#define GUEST_MAX_SLABS 32
 
 typedef int (*GuestPageFill)(void *ctx, uint64_t offset, uint8_t *dst, size_t n,
                              size_t *got);
