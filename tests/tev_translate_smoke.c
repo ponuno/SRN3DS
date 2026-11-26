@@ -97,6 +97,26 @@ static void test_blit(void) {
     for (int i = 0; i < 4; ++i) check_near(out[i], k_tex[0][i], "blit: passthrough");
 }
 
+static void test_texcoord_alias(void) {
+    static const uint32_t code[] = {
+        VER_PS30,
+        DI(0x1F, 2), DCL_TEXCOORD(0), TEXD(0),
+        DI(0x1F, 2), DCL_SAMPLER2D, SAMP(0),
+        DI(0x01, 2), 0x80030000u, SRC_T(0), /* mov r0.xy, v0 */
+        DI(0x42, 3), DST_C0, SRC_R(0), SAMP(0),
+        END_TOKEN,
+    };
+    D9TevProgram p;
+    char why[256];
+    check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) == 0, why);
+    check(p.stages == 1 && p.textures == 1 && p.texture[0].texcoord_reg == 0,
+          "texcoord alias: direct input provenance");
+    float c[D9TEV_MAX_STAGES][4] = {{0}};
+    float out[4];
+    eval_with(&p, c, out);
+    for (int i = 0; i < 4; ++i) check_near(out[i], k_tex[0][i], "texcoord alias: passthrough");
+}
+
 static void test_tint(void) {
     static const uint32_t code[] = {
         VER_PS30,
@@ -155,6 +175,37 @@ static void test_channel_carry(void) {
                              k_tex[0][2] * 0.25f * q50,
                              k_tex[0][3] * 0.75f};
     for (int i = 0; i < 4; ++i) check_near(out[i], expect[i], "channel carry: math");
+}
+
+static void test_split_channel_sources(void) {
+    static const uint32_t code[] = {
+        VER_PS30,
+        DI(0x1F, 2), DCL_TEXCOORD(0), TEXD(0),
+        DI(0x1F, 2), DCL_SAMPLER2D, SAMP(0),
+        DI(0x1F, 2), DCL_SAMPLER2D, SAMP(1),
+        DI(0x51, 5), DST_C(0), 0x3F000000u, 0x3E800000u, 0x3F400000u, 0x3E000000u,
+        DI(0x42, 3), DST_R(0), SRC_T(0), SAMP(0),
+        DI(0x42, 3), DST_R(1), SRC_T(0), SAMP(1),
+        DI(0x01, 2), 0x80080000u, 0x80FF0001u, /* mov r0.a, r1.a */
+        DI(0x05, 3), DST_C0, SRC_R(0), SRC_C(0),
+        END_TOKEN,
+    };
+    D9TevProgram p;
+    char why[256];
+    check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) == 0, why);
+    check(p.stages == 1 && p.textures == 2,
+          "split channels: one stage, two textures");
+    check(p.stage[0].src_rgb[0] == D9TEV_SRC_TEX0 &&
+          p.stage[0].src_a[0] == D9TEV_SRC_TEX1,
+          "split channels: RGB TEXTURE0, alpha TEXTURE1");
+    float c[D9TEV_MAX_STAGES][4] = {{0}};
+    float out[4];
+    eval_with(&p, c, out);
+    const float q50 = 128.0f / 255.0f, q25 = 64.0f / 255.0f;
+    const float q75 = 191.0f / 255.0f, q125 = 32.0f / 255.0f;
+    const float expect[4] = {k_tex[0][0] * q50, k_tex[0][1] * q25,
+                             k_tex[0][2] * q75, k_tex[1][3] * q125};
+    for (int i = 0; i < 4; ++i) check_near(out[i], expect[i], "split channels: math");
 }
 
 static void test_lrp(void) {
@@ -397,17 +448,32 @@ static void test_literal_validation(void) {
         check(strstr(why, "modifier or mask") != NULL,
               "literal range: def mask reason is named");
     }
-    { /* An unused def must still be validated. */
+    { /* An out-of-range unused lane is never materialised into the result. */
         uint32_t code[] = {
             VER_PS30,
-            DI(0x51, 5), DST_C(0), 0x3FC00000u, 0, 0, 0,
-            DI(0x01, 2), DST_C0, SRC_C(1),
+            DI(0x51, 5), DST_C(0), 0x3FC00000u, 0x3F000000u, 0, 0x3F800000u,
+            DI(0x01, 2), DST_C0_RGB, SRC_C(0) & ~(0xE4u << 16) | (0x55u << 16),
+            END_TOKEN,
+        };
+        check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) == 0,
+              "literal range: ignore invalid unused component");
+        float constants[D9TEV_MAX_STAGES][4] = {{0}};
+        float out[4];
+        eval_with(&p, constants, out);
+        check_near(out[0], 128.0f / 255.0f, "literal range: selected valid lane");
+        check_near(out[3], 1.0f, "literal range: alpha fixup");
+    }
+    { /* Selecting the invalid lane still rejects instead of clamping it. */
+        uint32_t code[] = {
+            VER_PS30,
+            DI(0x51, 5), DST_C(0), 0x3FC00000u, 0x3F000000u, 0, 0x3F800000u,
+            DI(0x01, 2), DST_C0, SRC_C(0),
             END_TOKEN,
         };
         check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) < 0,
-              "literal range: reject invalid unused def");
+              "literal range: reject selected invalid component");
         check(strstr(why, "def c0.x") && strstr(why, "outside [0,1]"),
-              "literal range: unused def reason is named");
+              "literal range: selected invalid component is named");
     }
     { /* A redefinition must not replace a previously valid literal unchecked. */
         uint32_t code[] = {
@@ -636,8 +702,10 @@ static void test_pack(void) {
 
 int main(void) {
     test_blit();
+    test_texcoord_alias();
     test_tint();
     test_channel_carry();
+    test_split_channel_sources();
     test_lrp();
     test_mad_two_constants();
     test_dp3();

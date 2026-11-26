@@ -22,8 +22,8 @@
  *   - TEV stage outputs and the per-stage constant colour are clamped/
  *     quantised to RGBA8.  The subset is therefore an LDR subset; HDR
  *     intermediates and constants needing more than 8 bits are not exact.
- *     Literal def components must be finite and already in [0,1]; invalid
- *     literals are rejected rather than silently clamped.
+ *     Literal def components must be finite; every selected component must
+ *     already be in [0,1].  Invalid unused lanes are never materialised.
  */
 
 #include "d3d9_tev.h"
@@ -99,6 +99,7 @@ typedef struct {
     uint8_t src[4];          /* D9TEV_SRC_*, or 0xFF when the channel is stale */
     uint8_t comp[4];         /* component selected from src (0..3) */
     uint8_t const_reg[4];    /* c# when src == D9TEV_SRC_CONST */
+    uint8_t input_reg[4];    /* v# when src is an input TEV colour source */
     uint8_t defined;
 } Value;
 
@@ -136,9 +137,9 @@ static DefConst *lookup_def(Ctx *ctx, int reg) {
     return NULL;
 }
 
-/* PICA stage constants are LDR RGBA8 values.  Clamping here would change the
- * shader's algebra (for example mad(-1,2,2) would become 1 instead of 0), so
- * reject literals that cannot be represented without a range-changing rewrite. */
+/* PICA stage constants are LDR RGBA8 values.  Range is checked when a
+ * component is actually selected, not for unused lanes: clamping an unused
+ * lane cannot change the shader, while clamping a used lane would. */
 static int validate_def_literal(unsigned reg, const float value[4],
                                 char *why, size_t cap) {
     static const char components[4] = {'x', 'y', 'z', 'w'};
@@ -147,11 +148,19 @@ static int validate_def_literal(unsigned reg, const float value[4],
             reject(why, cap, "def c%u.%c literal is not finite", reg, components[i]);
             return -1;
         }
-        if (value[i] < 0.0f || value[i] > 1.0f) {
-            reject(why, cap, "def c%u.%c literal %.9g is outside [0,1]",
-                   reg, components[i], value[i]);
-            return -1;
-        }
+    }
+    return 0;
+}
+
+static int validate_def_component(Ctx *ctx, unsigned reg, unsigned comp,
+                                  char *why, size_t cap) {
+    DefConst *def = lookup_def(ctx, (int)reg);
+    if (!def) return 0; /* external constant: range is runtime state */
+    float value = def->value[comp];
+    if (value < 0.0f || value > 1.0f) {
+        reject(why, cap, "def c%u.%c literal %.9g is outside [0,1]",
+               reg, "xyzw"[comp], value);
+        return -1;
     }
     return 0;
 }
@@ -159,7 +168,10 @@ static int validate_def_literal(unsigned reg, const float value[4],
 static Value empty_value(void) {
     Value value;
     memset(&value, 0, sizeof value);
-    for (int c = 0; c < 4; ++c) value.src[c] = VAL_NONE;
+    for (int c = 0; c < 4; ++c) {
+        value.src[c] = VAL_NONE;
+        value.input_reg[c] = 0xFFu;
+    }
     return value;
 }
 
@@ -419,12 +431,14 @@ static int map_operand(Ctx *ctx, uint32_t token,
             preg[k] = preg[fallback];
         }
         for (int k = 0; k < 4; ++k) {
-            if (psrc[k] != D9TEV_SRC_CONST) continue;
+            if (psrc[k] != D9TEV_SRC_CONST || !(needed & (1u << k))) continue;
             if (note_constant(ctx, (int)preg[k]) < 0) {
                 reject(why, cap, "%s: more than %d distinct constants",
                        opname, D9TEV_MAX_CONSTANTS);
                 return -1;
             }
+            if (validate_def_component(ctx, preg[k], pcomp[k], why, cap) < 0)
+                return -1;
         }
         /* Channel provenance was recorded above. */
 
@@ -452,6 +466,12 @@ static int map_operand(Ctx *ctx, uint32_t token,
             pcomp[k] = selected[k];
             preg[k] = type == D9TEV_REG_CONST ? index : 0xFFu;
         }
+        if (type == D9TEV_REG_CONST) {
+            for (int k = 0; k < 4; ++k)
+                if ((needed & (1u << k)) &&
+                    validate_def_component(ctx, index, pcomp[k], why, cap) < 0)
+                    return -1;
+        }
     }
 
     /* RGB selector: colour (per-channel) or one replicated component. */
@@ -475,6 +495,45 @@ static int map_operand(Ctx *ctx, uint32_t token,
     *a_op = alpha_selector(pcomp[3], mod == 1);
     if (*src_rgb == D9TEV_SRC_CONST) creg[0] = preg[0];
     if (*src_a == D9TEV_SRC_CONST) creg[1] = preg[3];
+    return 0;
+}
+
+/* A temp-to-temp mov is metadata, not arithmetic.  Alias its per-channel
+ * provenance instead of consuming a TEV stage; this is the main case where
+ * RGB can remain TEXTURE0 while alpha becomes TEXTURE1/CONSTANT/INPUT. */
+static int alias_temp_mov(Ctx *ctx, unsigned dst_reg, unsigned mask,
+                          uint32_t token, char *why, size_t cap) {
+    if (SRCMOD(token) != 0) return 1; /* negation still needs a real stage */
+    unsigned src_rgb, src_a, rop, aop, creg[2];
+    uint8_t taint;
+    if (map_operand(ctx, token, &src_rgb, &rop, &src_a, &aop,
+                    creg, &taint, mask, why, cap, "mov") < 0)
+        return -1;
+    unsigned type = REGTYPE(token), index = REGNUM(token);
+    uint32_t sw = SWZ(token);
+    Value source = empty_value();
+    if (type == D9TEV_REG_TEMP) {
+        source = temp_value(ctx, (int)index);
+    } else {
+        unsigned base = type == D9TEV_REG_CONST ? D9TEV_SRC_CONST : src_rgb;
+        for (int c = 0; c < 4; ++c) {
+            source.src[c] = (uint8_t)base;
+            source.comp[c] = (uint8_t)((sw >> (2u * (unsigned)c)) & 3u);
+            source.const_reg[c] = type == D9TEV_REG_CONST ? (uint8_t)index : 0xFFu;
+            source.input_reg[c] = type == D9TEV_REG_INPUT ? (uint8_t)index : 0xFFu;
+        }
+    }
+    Value result = temp_value(ctx, (int)dst_reg);
+    for (int c = 0; c < 4; ++c) {
+        if (!(mask & (1u << c))) continue;
+        unsigned selected = (sw >> (2u * (unsigned)c)) & 3u;
+        result.src[c] = source.src[selected];
+        result.comp[c] = source.comp[selected];
+        result.const_reg[c] = source.const_reg[selected];
+        result.input_reg[c] = source.input_reg[selected];
+        if (result.src[c] != VAL_NONE) result.defined |= (uint8_t)(1u << c);
+    }
+    set_temp(ctx, (int)dst_reg, result);
     return 0;
 }
 
@@ -525,6 +584,37 @@ static int is_supported_alu(unsigned op) {
     default:
         return 0;
     }
+}
+
+static int resolve_texcoord(Ctx *ctx, uint32_t token, unsigned *reg,
+                           char *why, size_t cap) {
+    unsigned type = REGTYPE(token), index = REGNUM(token);
+    if (index >= 16) {
+        reject(why, cap, "texld: UV register %u out of range", index);
+        return -1;
+    }
+    if (type == D9TEV_REG_INPUT) {
+        if (ctx->input_usage[index] != D9TEV_USAGE_TEXCOORD) {
+            reject(why, cap, "texld: UV operand is not a declared texcoord input "
+                   "(register type %u, index %u)", type, index);
+            return -1;
+        }
+        *reg = index;
+        return 0;
+    }
+    if (type == D9TEV_REG_TEMP) {
+        Value value = temp_value(ctx, (int)index);
+        if (value.src[0] != VAL_NONE && value.src[0] == value.src[1] &&
+            value.input_reg[0] != 0xFFu && value.input_reg[0] == value.input_reg[1] &&
+            value.comp[0] == 0 && value.comp[1] == 1 &&
+            ctx->input_usage[value.input_reg[0]] == D9TEV_USAGE_TEXCOORD) {
+            *reg = value.input_reg[0];
+            return 0;
+        }
+    }
+    reject(why, cap, "texld: UV operand is not a declared texcoord input or an "
+           "unmodified .xy alias (register type %u, index %u)", type, index);
+    return -1;
 }
 
 static int translate(Ctx *ctx, const uint32_t *code, size_t words,
@@ -742,17 +832,7 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
                        uv_mod);
                 return -1;
             }
-            unsigned uv_type = REGTYPE(uv_token);
-            unsigned uv_index = REGNUM(uv_token);
-            if (uv_index >= 16) {
-                reject(why, cap, "texld: UV register %u out of range", uv_index);
-                return -1;
-            }
-            if (uv_type != D9TEV_REG_INPUT || ctx->input_usage[uv_index] != D9TEV_USAGE_TEXCOORD) {
-                reject(why, cap, "texld: UV operand is not a declared texcoord input "
-                       "(register type %u, index %u)", uv_type, uv_index);
-                return -1;
-            }
+            unsigned uv_index;
             if (SWZ(uv_token) != 0xE4u) {
                 reject(why, cap, "texld: UV swizzle .%c%c%c%c is outside the TEV subset",
                        "xyzw"[(SWZ(uv_token) >> 0) & 3u],
@@ -761,6 +841,7 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
                        "xyzw"[(SWZ(uv_token) >> 6) & 3u]);
                 return -1;
             }
+            if (resolve_texcoord(ctx, uv_token, &uv_index, why, cap) < 0) return -1;
             unsigned smp_token = arg[2];
             if (!(smp_token & 0x80000000u)) {
                 reject(why, cap, "texld: malformed sampler operand token 0x%08x", smp_token);
@@ -876,6 +957,15 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
             reject(why, cap, "%s expects %u sources, token has %u",
                    d9_tev_opcode_name(op), expected, nsrc);
             return -1;
+        }
+
+        if (op == 0x01 && dst_type == D9TEV_REG_TEMP) {
+            int aliased = alias_temp_mov(ctx, dst_index, mask, arg[1], why, cap);
+            if (aliased < 0) return -1;
+            if (aliased == 0) {
+                pos += total;
+                continue;
+            }
         }
 
         unsigned src_rgb[3], src_a[3], rop[3], aop[3];
@@ -1067,6 +1157,7 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
                 result.src[c] = D9TEV_SRC_PREV;
                 result.comp[c] = (uint8_t)c;
                 result.const_reg[c] = 0xFFu;
+                result.input_reg[c] = 0xFFu;
                 result.defined |= (uint8_t)(1u << c);
             } else if (written || (overwritten && !((c == 3 ? keep_a : keep_rgb)))) {
                 result.src[c] = VAL_NONE;

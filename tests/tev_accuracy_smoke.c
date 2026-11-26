@@ -273,6 +273,22 @@ int main(void) {
         float constants[4][4] = {{q[0] / 255.0f, q[1] / 255.0f, q[2] / 255.0f, q[3] / 255.0f}};
         failures += run_case("channel-carry", code, n, constants, 1, 1);
     }
+    { /* split source selectors: RGB from texture0, alpha from texture1 */
+        unsigned q[4] = {128, 64, 191, 32};
+        size_t n = 0;
+        put_version(code, &n);
+        put_texcoord_dcl(code, &n, 0);
+        put_sampler_dcl(code, &n, 0);
+        put_sampler_dcl(code, &n, 1);
+        put_def(code, &n, 0, q);
+        put_texld(code, &n, 0, 0, 0);
+        put_texld(code, &n, 1, 0, 1);
+        code[n++] = DI(0x01, 2); code[n++] = 0x80080000u; code[n++] = 0x80FF0001u;
+        code[n++] = DI(0x05, 3); code[n++] = DST_C0; code[n++] = SRC_R(0); code[n++] = SRC_C(0);
+        put_end(code, &n);
+        float constants[4][4] = {{q[0] / 255.0f, q[1] / 255.0f, q[2] / 255.0f, q[3] / 255.0f}};
+        failures += run_case("split-channels", code, n, constants, 1, 0);
+    }
     { /* two textures, lrp */
         unsigned q[4] = {192, 192, 192, 192};
         size_t n = 0;

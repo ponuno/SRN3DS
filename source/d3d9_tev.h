@@ -16,6 +16,8 @@
  * UI tint / simple effect).  Anything outside the subset is rejected with the
  * offending opcode's name in ``why``.  Literal ``def`` components must be
  * finite and in [0,1] because PICA stage constants are LDR RGBA8 values.
+ * Selected literal components are range-checked; unused lanes may be out of
+ * range because they are never selected or allowed to affect the result.
  * See docs/SHADERS.md section 5.
  */
 

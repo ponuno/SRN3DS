@@ -362,6 +362,17 @@ all other discard forms remain named refusals. Retail acceptance stays
 **27/9,621** (UI 3, sky 7): the shipped UI texkill programs use adjusted or
 intermediate scalars, so none is falsely accepted.
 
+The selector/literal layer makes temp `mov` a per-channel alias and emits
+independent `src_rgb`/`src_a` operands. A one-stage regression now computes RGB
+from TEXTURE0 and alpha from TEXTURE1 while multiplying both by one literal.
+Unmodified `.xy` texcoord aliases are accepted for `texld`; computed/dependent
+UVs remain refused. Literal range validation is per selected component, so an
+unused `1.5` lane is ignored but selecting it still rejects by name. Retail
+acceptance remains **27/9,621** (UI 3, sky 7). The next measured UI blockers are
+38 computed/dependent UV temps, 25 `rcp`, 15 adjusted/intermediate `texkill`,
+9 `dp4`, and full-vector two-live-intermediate shapes that cannot fit one
+PREVIOUS register without a larger scheduler.
+
 The accepted column is the generic translator only. The separate fixed-pipeline
 matcher in §7.4 recognises 6 additional base-lit chunks (5 `p5_MAD_NORMAL`, 1
 `p1200005_ADD_NORMAL`); they remain rejected by the generic translator and are
@@ -401,9 +412,9 @@ This is a **real translation** of the token stream, not a hash template.
 | Opcode | TEV mapping |
 |---|---|
 | `dcl_texcoord tN` / `dcl_2d sN` | records input / 2D sampler; `dcl_position vPos` is accepted and ignored until read |
-| `def cN, x,y,z,w` | finite LDR literal in [0,1], packed RGBA8; other values rejected |
+| `def cN, x,y,z,w` | finite literal; each selected component must be in [0,1] and is packed RGBA8. Unused out-of-range lanes are ignored, never clamped into a used channel |
 | `texld rN, tM, sK` | allocates texture unit (≤3); value is `TEXTURE0..2` |
-| `mov` | `REPLACE` |
+| `mov` | output `REPLACE`; temp copies alias per-channel provenance without consuming a TEV stage |
 | `mul` | `MODULATE` |
 | `add` | `ADD` |
 | `sub` | `SUBTRACT` |
@@ -432,8 +443,9 @@ modifiers must be none or negate; `texld` UV/sampler operands must be
 unmodified, non-relative register tokens, with a UV register below 16; 2D
 samplers only; no MRT, no depth output. `oC0.rgb` must be fully defined; an
 undefined alpha is forced to 1 with one extra `REPLACE` stage. Literal `def`
-components must be finite and in [0,1]; non-finite or out-of-range values are
-rejected with the constant and component named rather than silently clamped.
+components must be finite; every component selected by an instruction must be
+in [0,1]. Unused out-of-range lanes are ignored rather than clamped into a used
+channel, and selecting one is a named rejection.
 
 ### 7.2 Integrated shader hook and COM retention
 
