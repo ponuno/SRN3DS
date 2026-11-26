@@ -270,3 +270,4 @@ Hardware (CIA) before step 8: crash **before `main`** in
 - Do not skip a fault by stubbing; implement the named API or add the exact
   decoded function, with a test.
 - Hardware and emulator results are separate columns.
+

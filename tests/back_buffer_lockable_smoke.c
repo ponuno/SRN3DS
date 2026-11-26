@@ -271,7 +271,74 @@ static void set_cap_env(const char *v){
 #endif
 }
 
-int main(void){
+static void set_pair_probe(const char *value){
+#ifdef _WIN32
+    _putenv_s("TESV_D3D9_DEPTH_PAIR_PROBE",value);
+#else
+    setenv("TESV_D3D9_DEPTH_PAIR_PROBE",value,1);
+#endif
+}
+
+static void scaled_pair_flow(void){
+    Harness h;
+    set_pair_probe("1");
+    assert(!harness_start(&h));
+    uint32_t device=create_device(&h,tesv_pp);
+    assert(device);
+    uint32_t depth_args[]={512,1024,D9_D24S8,0,0,0,OUT2,0};
+    assert(call(&h,device,29,depth_args,8)==0);
+    uint32_t depth=rd(&h,OUT2);
+    uint32_t bb[]={0,0,0,OUT};
+    assert(call(&h,device,18,bb,4)==0);
+    uint32_t back=rd(&h,OUT);
+    assert(call1(&h,back,12,OUT2)==0);
+    assert(rd(&h,OUT2+24)==512&&rd(&h,OUT2+28)==1024);
+    uint32_t tile_args[]={8,8,D9_X8R8G8B8,0,0,1,OUT2,0};
+    assert(call(&h,device,28,tile_args,8)==0);
+    uint32_t tile=rd(&h,OUT2);
+    uint32_t lock[]={OUT2,0,0};
+    assert(call(&h,tile,13,lock,3)==0);
+    uint32_t tile_addr=rd(&h,OUT2+4),pitch=rd(&h,OUT2);
+    uint32_t colors[]={0xff112233,0xff445566,0xff778899,0xffaabbcc};
+    for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x)
+        wr32(&h,tile_addr+y*pitch+x*4,colors[(y/4)*2+x/4]);
+    assert(call(&h,tile,14,NULL,0)==0);
+    assert(call(&h,device,37,(uint32_t[]){0,back},2)==0);
+    assert(call1(&h,device,39,depth)==0);
+    unsigned clears=d9_null_stats()->depth_clears;
+    assert(call(&h,device,43,(uint32_t[]){0,0,7,0,fbits(0.5f),7},6)==0);
+    assert(call(&h,device,41,NULL,0)==0);
+    assert(d9_null_stats()->depth_clears==clears+1);
+    assert(d9_null_stats()->viewport_w==512&&d9_null_stats()->viewport_h==1024);
+    assert(call(&h,device,34,(uint32_t[]){tile,0,back,0,D9_FILTER_POINT},5)==0);
+    assert(call(&h,device,42,NULL,0)==0);
+    assert(call(&h,device,17,(uint32_t[]){0,0,0,0},4)==0);
+    unsigned w,hgt;
+    const uint32_t *pixels=screen_pixels(&w,&hgt);
+    for(unsigned y=0;y<hgt;++y)for(unsigned x=0;x<w;++x)
+        assert(pixels[y*w+x]==colors[(y>=hgt/2)*2+(x>=w/2)]);
+    /* Reset with the effective dimensions reported by the swap chain, and
+     * remove the lockable flag. The resized back buffer must still present. */
+    assert(call1(&h,device,39,0)==0);
+    assert(unref(&h,depth)==0&&unref(&h,tile)==0);
+    uint32_t pp[14];memcpy(pp,tesv_pp,sizeof pp);
+    pp[0]=512;pp[1]=1024;pp[11]=0;wr(&h,PP,pp,sizeof pp);
+    assert(call1(&h,device,16,PP)==0);
+    assert(call(&h,back,13,lock,3)==0x8876086au&&rd(&h,OUT2+4)==0);
+    present_frame(&h,device,colors[0],1,-1.0f,0);
+    check_screen(colors[0]);
+    assert(unref(&h,back)==1&&unref(&h,device)==0&&unref(&h,h.factory)==0);
+    d9_com_shutdown();n3ds_lift_release();guest_destroy(&h.memory);
+    set_pair_probe("0");
+}
+
+int main(int argc,char **argv){
+    if(argc==2&&!strcmp(argv[1],"--scaled-pair")){
+        scaled_pair_flow();
+        puts("PASS 512x1024 depth/back buffer, four quadrants scaled to 400x240, non-lockable Reset");
+        return 0;
+    }
+    set_pair_probe("0");
     set_cap_env("512"); /* this regression exercises the 512x256 readable target */
     Harness h;assert(!harness_start(&h));
 

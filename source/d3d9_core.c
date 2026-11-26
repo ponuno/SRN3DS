@@ -1,4 +1,5 @@
 #include "d3d9_core.h"
+#include "d3d9_adapter.h"
 #include "d3d9_bc.h"
 #include "d3d9_texcache.h"
 #include "d3d9_texture_data.h"
@@ -1785,23 +1786,20 @@ int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format
     if(!d||d->teardown||!w||!h||w>16384||h>16384||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))return D9_INVALID;
     if(d->scene)return D9_INVALID;
     D9Handle fresh=0;unsigned tw=0,th=0;
-    if(lockable){
-        if(!d9_backend_supports_lockable_back_buffer(&d->ops))return D9_UNSUPPORTED;
+    int scaled=w>D9_DISPLAY_WIDTH||h>D9_DISPLAY_HEIGHT;
+    if(lockable||scaled){
+        if(!d->ops.target_viewport||!d->ops.target_blit||
+           (lockable&&!d9_backend_supports_lockable_back_buffer(&d->ops)))return D9_UNSUPPORTED;
         tw=pow2_up(w);th=pow2_up(h);
         if(!tw||!th)return D9_UNSUPPORTED;
-        /* Create the replacement first so a failed allocation leaves the old
-         * back buffer intact.  The retained target is already at its native
-         * power-of-two size, so it uses the unbounded path. */
-        int rc=create_target(d,tw,th,format,1,0,&fresh);
+        /* Allocate first: an unsuccessful resize must leave the old surface live. */
+        int rc=create_target(d,tw,th,format,lockable,0,&fresh);
         if(rc)return rc;
     }
-    if(d->back_target){
-        (void)d9_release_render_target(d,d->back_target);
-        d->back_target=0;d->back_tex_w=d->back_tex_h=0;
-    }
+    if(d->back_target)destroy_target_slot(d,target(d,d->back_target));
+    d->back_target=fresh;d->back_tex_w=tw;d->back_tex_h=th;
     d->back_w=w;d->back_h=h;d->back_format=format;d->back_valid=1;
     d->back_lockable=lockable?1:0;
-    if(lockable){d->back_target=fresh;(void)d9_render_target_storage_info(d,fresh,&d->back_tex_w,&d->back_tex_h);}
     return D9_OK;
 }
 int d9_reset_device_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable){
@@ -3097,8 +3095,8 @@ int d9_present(D9Device *d){
         memset(&src,0,sizeof src);memset(&dst,0,sizeof dst);
         src.surface=(D9BlitSurface){bt->native,d->back_w,d->back_h,bt->format,d->back_tex_w,d->back_tex_h};
         src.width=d->back_w;src.height=d->back_h;
-        dst.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format,0,0};
-        dst.width=d->back_w;dst.height=d->back_h;
+        dst.surface=(D9BlitSurface){NULL,D9_DISPLAY_WIDTH,D9_DISPLAY_HEIGHT,d->back_format,0,0};
+        dst.width=dst.surface.width;dst.height=dst.surface.height;
         /* Present is the only operation that targets the LCD screen. */
         if(d->ops.target_bind(d->ctx,NULL)){
             d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;

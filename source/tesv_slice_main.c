@@ -20,7 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef __3DS__
-#include <unistd.h>
 #include <3ds.h>
 #include <unistd.h>
 #include "d3d9_citro3d.h"
@@ -278,6 +277,8 @@ int main(void) {
         fprintf(stderr, "[probe] probe flags present: HW T&L + SM3 gate + shader skip "
                         "(measurement only, not shippable)\n");
     }
+    if (access("sdmc:/Skyrim/tesv_depth_pair_probe.flag", F_OK) == 0)
+        setenv("TESV_D3D9_DEPTH_PAIR_PROBE", "1", 1);
     if (n3ds) run("sdmc:/Skyrim/TESV.exe", "sdmc:/Skyrim", TESV_ARM_STEPS, budget, "sdmc:/Skyrim_N3DS_tesv.log",
                   gpu?d9_citro_backend():NULL,gpu);
     else puts("New Nintendo 3DS required");

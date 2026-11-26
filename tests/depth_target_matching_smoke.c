@@ -1,12 +1,8 @@
 /* Render-target / depth-stencil pairing and mismatch classification.
  *
- * TESV's Ni2DBuffer path creates a 512x1024 depth while the implicit
- * back buffer is 400x240.  A depth/RT size mismatch is D3DERR_INVALIDCALL,
- * not D3DERR_NOTAVAILABLE: the engine retried NOTAVAILABLE and overflowed its
- * worker stack.  This test pins the exact pair matrix, the SetRenderTarget ->
- * SetDepthStencilSurface order, the INVALIDCALL code, the named diagnostic and
- * the COM refcounts; a failed bind must leave the previous pair intact and
- * return immediately (no re-entry / retry recursion).
+ * The bridge uses the colour target's embedded depth attachment and currently
+ * requires matching dimensions. Exercise this restriction with the measurement
+ * override disabled. Failed binds must preserve both bindings and refcounts.
  */
 #include "d3d9_com.h"
 #include "d3d9_adapter.h"
@@ -253,7 +249,7 @@ int main(void) {
     assert(unref(&h, d512x1024) == 0);
     assert(unref(&h, rt512x1024) == 0);
 
-    /* The mismatch code is the D3D9 classification, not NOTAVAILABLE. */
+    /* This bridge returns INVALIDCALL for a rejected pair. */
     assert(INVALIDCALL != NOTAVAILABLE);
 
     harness_stop(&h);

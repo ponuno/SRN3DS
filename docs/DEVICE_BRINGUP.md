@@ -58,3 +58,15 @@ worker stack overflows at `0x1d1ffffc`. The remaining work is the pair itself
 - No HW T&L and no SM3 execution; both gates are honest refusals.
 - No 512x1024 colour render target/group for the depth pair.
 - No frame, no pixel comparison, no hardware run.
+
+## Measuring the 512x1024 depth pair
+
+For the host census, add `TESV_D3D9_DEPTH_PAIR_PROBE=1` to the existing
+measurement environment. In a TESV build containing this change, the
+independent SD switch is `sdmc:/Skyrim/tesv_depth_pair_probe.flag`.
+CreateDevice and Reset allocate a full 512x1024 colour target and Present
+scales it to the 400x240 display. Allocation can fail on PICA. The pair probe
+prints `MEASUREMENT ONLY` and does not change caps or shader execution.
+Enable the existing D3D9 trace to record successful depth binds with the
+active colour surface and both dimensions. Count guest SetTexture, draw and
+Present calls separately from the bridge regression `depth_pair_scaled`.

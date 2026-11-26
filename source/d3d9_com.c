@@ -120,6 +120,7 @@ static struct {
     void (*handlers[KIND_COUNT][MAX_SLOTS])(CPU *c);
     int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;
     int hdr_ldr_fallback; /* measurement-only: store 0x71/0x72 RTs as A8R8G8B8 */int tnl_proto;
+    int depth_pair_probe;
     int shader_skip_probe,shader_probe_logged; /* host-slice measurement-only */
 } g;
 static void upload_tev_constants(void);
@@ -571,7 +572,8 @@ static void device_caps(CPU *c){
 }
 static const char *presentation_reason(const uint32_t *pp){
     unsigned w=pp[0],h=pp[1],fmt=pp[2],count=pp[3],ms=pp[4],quality=pp[5],swap=pp[6];
-    if(!((w==D9_DISPLAY_WIDTH&&h==D9_DISPLAY_HEIGHT)||(w==0&&h==0)))return "back buffer is not the 400x240 display mode";
+    int probe_size=g.depth_pair_probe&&w==512&&h==1024;
+    if(!probe_size&&!((w==D9_DISPLAY_WIDTH&&h==D9_DISPLAY_HEIGHT)||(w==0&&h==0)))return "back buffer is not the 400x240 display mode";
     if(fmt&&!SURFACE_FORMAT(fmt))return "back-buffer format is not 32-bit X8R8G8B8/A8R8G8B8";
     if(count>1)return "more than one back buffer is not implemented";
     if(ms)return "multisampling is not implemented";
@@ -587,12 +589,13 @@ static const char *presentation_reason(const uint32_t *pp){
     if(pp[13]>1)return "only immediate or one-frame presentation intervals are implemented";
     return NULL;
 }
-static void presentation_store(const uint32_t *pp){
-    memcpy(g.pp,pp,14*sizeof *pp);
-    if(!g.pp[0])g.pp[0]=D9_DISPLAY_WIDTH;
-    if(!g.pp[1])g.pp[1]=D9_DISPLAY_HEIGHT;
-    if(!g.pp[2])g.pp[2]=D9_X8R8G8B8;
-    if(!g.pp[3])g.pp[3]=1;
+static void presentation_parameters(uint32_t out[14],const uint32_t *pp){
+    memcpy(out,pp,14*sizeof *pp);
+    if(g.depth_pair_probe){out[0]=512;out[1]=1024;}
+    if(!out[0])out[0]=D9_DISPLAY_WIDTH;
+    if(!out[1])out[1]=D9_DISPLAY_HEIGHT;
+    if(!out[2])out[2]=D9_X8R8G8B8;
+    if(!out[3])out[3]=1;
 }
 static void free_palettes(void){
     for(unsigned i=0;i<MAX_PALETTES;++i){free(g.palettes[i]);g.palettes[i]=NULL;}
@@ -633,14 +636,14 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
         g.owns_device=1;
     }
     (void)d9_set_tnl_proto(g.device,g.tnl_proto);
-    presentation_store(ptr(pp,56));
+    presentation_parameters(g.pp,ptr(pp,56));
     int bbrc=d9_set_back_buffer_info_ex(g.device,g.pp[0],g.pp[1],g.pp[2],g.pp[11]&1u);
     if(bbrc){
         if(g.owns_device){d9_destroy_device(g.device);g.device=NULL;g.owns_device=0;}
         d3d_log("CreateDevice",bbrc==D9_MEMORY?
-            "the retained lockable back buffer does not fit the device memory budget":
+            "the retained back buffer does not fit the device memory budget":
             bbrc==D9_UNSUPPORTED?
-            "the backend cannot allocate the retained lockable back buffer":
+            "the backend cannot allocate the retained back buffer":
             "back-buffer presentation metadata was rejected");
         RET(bbrc==D9_MEMORY?OUTMEM:UNAVAILABLE,7);
     }
@@ -658,10 +661,10 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];g.back->usage=1;g.back->pool=0;
     g.back->handle=d9_back_buffer_target(g.device);
-    g.back->lockable=g.back->handle?1:0;
+    g.back->lockable=g.pp[11]&1u;
     g.back->pitch=g.back->width*4;g.back->bytes=g.back->width*g.back->height*4;
     if(g.back->handle)
-        trace_detail("lockable back buffer: retained target handle=%lu logical %lux%lu",
+        trace_detail("retained back buffer: target handle=%lu logical %lux%lu",
             (unsigned long)g.back->handle,(unsigned long)g.back->width,(unsigned long)g.back->height);
     g.rt=g.back;g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;
     (void)d9_set_render_target(g.device,0);
@@ -681,11 +684,7 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     for(unsigned i=0;i<g.next;++i)if(g.o[i].refs&&g.o[i].lock_guest){
         d3d_fail("Reset","release locked resources before Reset",INVALID);RET(INVALID,2);
     }
-    uint32_t np[14];memcpy(np,ptr(pp,56),sizeof np);
-    if(!np[0])np[0]=D9_DISPLAY_WIDTH;
-    if(!np[1])np[1]=D9_DISPLAY_HEIGHT;
-    if(!np[2])np[2]=D9_X8R8G8B8;
-    if(!np[3])np[3]=1;
+    uint32_t np[14];presentation_parameters(np,ptr(pp,56));
     int rc=d9_reset_device_ex(g.device,np[0],np[1],np[2],np[11]&1u);
     if(rc){
         d3d_fail("Reset",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),2);
@@ -699,7 +698,7 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     for(unsigned i=0;i<D9_MAX_STREAMS;++i){bind(&g.streams[i],NULL);g.offsets[i]=g.strides[i]=0;}
     bind(&g.ib,NULL);
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
-    g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.back->handle?1:0;
+    g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.pp[11]&1u;
     g.back->pitch=g.back->width*4;g.back->bytes=g.back->width*g.back->height*4;
     bind_render_target(g.back);
     (void)d9_set_render_target(g.device,0);
@@ -1116,7 +1115,11 @@ static void set_depth_stencil(CPU *c){
     if(!o||!o->is_depth||o->lock_guest){d3d_log("SetDepthStencilSurface","argument is not a depth-stencil surface");RET(INVALID,2);}
     int rc=d9_set_depth_surface(g.device,o->depth);
     if(rc){d3d_fail("SetDepthStencilSurface",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),2);}
-    bind(&g.depth,o);RET(OK,2);
+    bind(&g.depth,o);
+    trace_detail("Depth=0x%08lx %ux%u RenderTarget=0x%08lx %ux%u Implicit=%u",
+                 (unsigned long)o->guest,o->width,o->height,(unsigned long)g.rt->guest,
+                 g.rt->width,g.rt->height,(unsigned)(g.rt==g.back));
+    RET(OK,2);
 }
 static void get_depth_stencil(CPU *c){uint32_t out=A(1);if(!ptr(out,4))RET(INVALID,2);M32(out)=0;
     if(!obj(A(0),DEVICE))RET(INVALID,2);
@@ -1851,7 +1854,7 @@ static int lock_surface_rect(Obj *o,const int32_t r[4],unsigned flags,
                              unsigned *pitch_out,uint32_t *address_out,unsigned *rows_out){
     if(!o||o->kind!=SURFACE||!g.mem||!r||!pitch_out||!address_out||!rows_out)return D9_INVALID;
     if(o->is_depth)return D9_INVALID;
-    if(o==g.back&&!o->handle)return D9_BACKEND; /* no D3DPRESENTFLAG_LOCKABLE_BACKBUFFER */
+    if(o==g.back&&!o->lockable)return D9_BACKEND; /* no D3DPRESENTFLAG_LOCKABLE_BACKBUFFER */
     if(o->lock_guest||g.phase)return D9_INVALID;
     /* Explicit/retained targets are readable, and lockable ones are writable. */
     if(o->handle&&(!o->lockable||(flags&~0x8010u)))return D9_INVALID;
@@ -1935,7 +1938,7 @@ static int unlock_surface(Obj *o){
 static void surface_lock(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
     if(!o||!ptr(out,8))RET(INVALID,4);M32(out)=M32(out+4)=0;
     int rc=lock_surface(o,out,A(2),A(3));
-    if(rc==D9_BACKEND)d3d_log("LockRect",o->handle?
+    if(rc==D9_BACKEND)d3d_log("LockRect",o!=g.back||o->lockable?
         "the backend has no readable render-target pixels":
         "the back buffer is not lockable; D3DPRESENTFLAG_LOCKABLE_BACKBUFFER was not requested");
     else if(rc==D9_INVALID&&o->is_depth)d3d_log("LockRect","depth-stencil surfaces are not lockable here");
@@ -2018,13 +2021,16 @@ static void end_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1)RET(INVALID,1);g.
 static uint32_t present_common(CPU *c){
     if(g.phase!=2){d3d_fail("Present","Present requires EndScene",INVALID);return INVALID;}
     if(A(1)||A(2)||A(3)||A(4))return INVALID;
-    int rc=d9_present(g.device);if(!rc){g.phase=0;
+    int rc=d9_present(g.device);
+    /* Once submitted, the core ends the scene even if the screen blit fails. */
+    g.phase=0;
 #if D9_CAPTURE_HOOK
+    if(!rc){
         g.capture_present=1;g.capture_present_flags=A(4);
         capture_present_event();
-#endif
-        collect();
     }
+#endif
+    collect();
     return hr(rc);
 }
 static void present(CPU *c){if(!obj(A(0),DEVICE))RET(INVALID,5);RET(present_common(c),5);}
@@ -3563,6 +3569,10 @@ static int d9_com_start(GuestMemory *m,D9Device *d,const D9Backend *ops,void *ct
     g.o=calloc(MAX_OBJECTS,sizeof *g.o);
     if(!g.o){guest_unmap(m,BASE);return -1;}
     g.mem=m;g.device=d;g.backend=ops;g.backend_ctx=ctx;g.backend_limit=limit;g.clear=0xff000000u;g.clear_flags=1;
+    const char *pair=getenv("TESV_D3D9_DEPTH_PAIR_PROBE");
+    g.depth_pair_probe=pair&&!strcmp(pair,"1");
+    if(g.depth_pair_probe)
+        fprintf(stderr,"[d3d9] MEASUREMENT ONLY: requesting a 512x1024 back buffer for the depth pair; Present scales to 400x240\n");
     const char *trace=getenv("TESV_D3D9_TRACE");g.trace=trace&&!strcmp(trace,"1");
     const char *tnl=getenv("TESV_D3D9_TNL_PROTO");
     g.tnl_proto=tnl&&tnl[0]&&strcmp(tnl,"0")?1:0;

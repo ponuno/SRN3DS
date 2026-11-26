@@ -484,8 +484,8 @@ int d9_set_back_buffer_info(D9Device *d,unsigned w,unsigned h,unsigned format);
  * and LockRect can read/write.  The backend must provide target_create,
  * target_delete, target_bind, target_clear, target_read, target_write,
  * target_blit and target_viewport; otherwise D9_UNSUPPORTED is returned and no
- * promise is made.  A non-lockable back buffer keeps the previous
- * implicit-screen behaviour. */
+ * promise is made.  Back buffers larger than the LCD also need a retained target
+ * for scaled presentation, regardless of lockability. */
 int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable);
 /* Reset the device in place for the same or a compatible presentation mode.
  * Releases DEFAULT-pool GPU copies and explicit targets/depth, keeps

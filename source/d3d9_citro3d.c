@@ -85,7 +85,11 @@ void d9_citro_close(D9Citro *c){
 }
 typedef struct {C3D_Tex tex;unsigned levels,format;} NativeTex;
 typedef struct {C3D_Tex tex;C3D_TexCube cube;unsigned edge,levels,format;} NativeCube;
-typedef struct {C3D_RenderTarget *target;unsigned w,h,format;} NativeTargetHead;
+typedef struct {
+    C3D_RenderTarget *target;
+    C3D_Tex *blit_texture; /* 2D colour storage; cube-face views cannot be blit sources. */
+    unsigned w,h,format;
+} NativeTargetHead;
 typedef struct {NativeTargetHead head;C3D_Tex tex;NativeTex sample;} NativeTarget;
 typedef struct {NativeTargetHead head;NativeCube *cube;unsigned face,level;} NativeCubeFace;
 static int tex_create_format(void *ctx,unsigned w,unsigned h,unsigned levels,
@@ -534,6 +538,7 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
     /* Sampling view: same C3D_Tex data, separate filter/wrap state.  The
      * target's own C3D_Tex owns the storage; the view is never deleted. */
     t->sample.tex=t->tex;t->sample.levels=1;
+    t->head.blit_texture=&t->tex;
     t->head.w=w;t->head.h=h;t->head.format=format;*native=t;return 0;
 }
 static void *target_texture(void *ctx,void *native){
@@ -675,8 +680,10 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
         return D9_BLIT_RECT;
     NativeTargetHead *native=dst->surface.native;
     C3D_RenderTarget *rt=native?native->target:c->target;
-    C3D_Tex *stex=(C3D_Tex *)src->surface.native;
-    if(!rt||!stex)return D9_BLIT_BACKEND;
+    NativeTargetHead *source=src->surface.native;
+    C3D_Tex *stex=source->blit_texture;
+    if(!stex)return D9_BLIT_UNSUPPORTED;
+    if(!rt)return D9_BLIT_BACKEND;
     unsigned sw=src->surface.storage_width?src->surface.storage_width:src->surface.width;
     unsigned shgt=src->surface.storage_height?src->surface.storage_height:src->surface.height;
     unsigned dw=dst->surface.storage_width?dst->surface.storage_width:dst->surface.width;

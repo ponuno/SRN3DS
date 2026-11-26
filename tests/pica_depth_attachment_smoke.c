@@ -6,7 +6,7 @@
  * attachment.  Clear(Z) must still reach the backend depth clear with the
  * packed 24-bit depth/8-bit stencil value.  The null-backend shape without the
  * embedded-depth callback keeps the old separate-object semantics: match S_OK,
- * mismatch D3DERR_NOTAVAILABLE.  DevCaps stay 0x00082000. */
+ * undersized depth D3DERR_INVALIDCALL.  DevCaps stay 0x00082000. */
 #include "d3d9_core.h"
 #include "d3d9_null.h"
 #include "d3d9_adapter.h"
@@ -94,6 +94,6 @@ int main(void) {
     d9_destroy_device(p);
 
     puts("PICA embedded depth: matching descriptor S_OK, mismatch INVALIDCALL, "
-         "Clear(Z) reaches backend, null shape keeps NOTAVAILABLE, caps unchanged PASS");
+         "Clear(Z) reaches backend, undersized depth rejected, caps unchanged PASS");
     return 0;
 }
