@@ -202,6 +202,11 @@ read stage without fake successes. *Not met.*
       triangle ranges; real codes 33..36 produce 2,818 vertices / 1,408
       triangles with the 94-pair kerning table. Empty and unknown glyphs are
       explicit; no raster, atlas or GFx draw. See `docs/MENU_SWF.md`.
+- [x] Bounded glyph A8 coverage rasterisation: 4x4 subpixel samples, 16.16
+      matrix+pen, non-zero/even-odd tessellation holes, mirrors, clipping and
+      named NaN/overflow/scale/too-small refusals into caller buffers. Real
+      code 33: 32x32 sum 41,464; 64x64 sum 178,003. No atlas, upload, cache,
+      GPU or frame. See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer
