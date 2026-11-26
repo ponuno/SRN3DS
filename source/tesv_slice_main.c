@@ -272,7 +272,9 @@ int main(void) {
      * measured.  Never present on a shipping card. */
     if (access("sdmc:/Skyrim/tesv_caps_probe.flag", F_OK) == 0) {
         setenv("TESV_D3D9_CAPS_PROBE", "1", 1);
-        fprintf(stderr, "[probe] caps flag present: HW T&L advertised "
+        setenv("TESV_D3D9_SM3_GATE_PROBE", "1", 1);
+        setenv("TESV_D3D9_SHADER_SKIP_PROBE", "1", 1);
+        fprintf(stderr, "[probe] probe flags present: HW T&L + SM3 gate + shader skip "
                         "(measurement only, not shippable)\n");
     }
     if (n3ds) run("sdmc:/Skyrim/TESV.exe", "sdmc:/Skyrim", TESV_ARM_STEPS, budget, "sdmc:/Skyrim_N3DS_tesv.log",
