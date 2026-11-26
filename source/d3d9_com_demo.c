@@ -44,7 +44,7 @@ static int make_import(D9ComDemo *s){GuestMemory *m=&s->memory;
     GuestImage image={.base=SCRATCH,.size=4096,.import_rva=0x100,.import_size=40};size_t count=0;
     return pe_import_bind(m,&image,win32_resolve,NULL,&count)||count!=1?error(s,"D3D9 import bind failed"):0;}
 int d9_com_demo_init(D9ComDemo *s,D9Device *d){
-    memset(s,0,sizeof *s);guest_init(&s->memory,2u<<20);
+    memset(s,0,sizeof *s);guest_init(&s->memory,8u<<20);
     if(guest_map(&s->memory,0x10000000,0x4000)||guest_map(&s->memory,SCRATCH,4096))return error(s,"guest allocation failed");
     if(d9_com_init(&s->memory,d))return error(s,"COM init failed");s->bridge=1;
     if(win32_init(&s->memory,0x8000,"."))return error(s,"Win32 init failed");s->shims=1;
@@ -85,6 +85,7 @@ int d9_com_demo_init(D9ComDemo *s,D9Device *d){
     uint32_t stream[]={0,s->vb,0,sizeof(D9Vertex)},stage[]={0,s->texture},fvf=0x102;
     if(call(s,s->device,100,stream,4)||call(s,s->device,104,&s->ib,1)||call(s,s->device,65,stage,2)||call(s,s->device,89,&fvf,1))return -1;
     D9Matrix view,proj;d9_demo_camera(&view,&proj);if(matrix(s,2,&view)||matrix(s,3,&proj))return -1;
+    s->menu_indexed=d9_backend_has_menu_indexed(d);
     s->ready=1;snprintf(s->message,sizeof s->message,"Guest IAT, vtables and resource upload OK");return 0;
 }
 int d9_com_demo_frame(D9ComDemo *s,float angle){if(!s->ready)return -1;

@@ -3,10 +3,12 @@
  *
  * This is a host-side menu layer, not the TESV renderer.  It creates a real
  * D3DFMT_A8 texture through the COM device, uploads the caller atlas with
- * LockRect/UnlockRect, expands the indexed batch to DrawPrimitiveUP vertices,
- * and sets stage-0 MODULATE(TEXTURE,DIFFUSE), POINT/CLAMP sampler and
- * XYZ|DIFFUSE|TEX1 FVF.  A8 is never silently replaced by A8R8G8B8; if the
- * device/backend cannot create or upload A8, the operation fails by name.
+ * LockRect/UnlockRect, expands the indexed batch once, and submits either one
+ * DrawIndexedPrimitiveUP (when the backend provides draw_menu_indexed) or the
+ * legacy bounded DrawPrimitiveUP expansion.  It sets stage-0
+ * MODULATE(TEXTURE,DIFFUSE), POINT/CLAMP sampler and XYZ|DIFFUSE|TEX1 FVF.  A8
+ * is never silently replaced by A8R8G8B8; if the device/backend cannot create
+ * or upload A8, the operation fails by name.
  *
  * The caller must have an active BeginScene for draw.  No frame, pixel result,
  * texture cache, GPU sample or TESV integration is claimed.
@@ -40,6 +42,7 @@ typedef struct {
     uint32_t scratch_bytes;
     uint32_t width, height;
     uint8_t mapped_scratch;
+    int indexed; /* the device backend provides draw_menu_indexed */
     char reason[192];
 } MenuTextDraw;
 
@@ -54,8 +57,12 @@ MenuTextDrawStatus menu_text_draw_init(MenuTextDraw *ctx, D9ComDemo *demo,
                                        uint32_t scratch,
                                        uint32_t scratch_bytes);
 
-/* Expand the indexed batch and issue exactly one DrawPrimitiveUP.  indices
- * must be triangles and refer to vertices.  Empty batches are a named refusal. */
+/* Submit the indexed batch.  When the device backend provides the indexed
+ * menu callback and the scratch holds vertex_count*24 + index_count*2 bytes,
+ * the batch is expanded once and sent through DrawIndexedPrimitiveUP (16-bit
+ * indices); otherwise it keeps the old one-DrawPrimitiveUP expansion (at most
+ * 4,095 indices).  indices must be triangles and refer to vertices.  Empty
+ * batches are a named refusal. */
 MenuTextDrawStatus menu_text_draw_batch(MenuTextDraw *ctx,
                                         const MenuSwfBatchVertex *vertices,
                                         uint32_t vertex_count,

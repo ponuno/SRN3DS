@@ -4,7 +4,7 @@
 typedef struct {
     GuestMemory memory;CPU cpu;FnModule tables[2];
     uint32_t factory,device,vb,ib,texture,bc[3],vs,ps,decl,decl_pos,decl_uv;
-    int bridge,shims,bound,ready,shaders,declaration;
+    int bridge,shims,bound,ready,shaders,declaration,menu_indexed;
     char message[160];
 } D9ComDemo;
 int d9_com_demo_init(D9ComDemo *s,D9Device *device);

@@ -3246,6 +3246,14 @@ static int up_geometry(unsigned type,unsigned primitives,unsigned *vertices){
     if(!primitives||primitives>4096u/3u)return -1;
     *vertices=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;return 0;
 }
+/* DrawIndexedPrimitiveUP is the compact menu path: up to 262,144 indices
+ * (87,381 triangles) are one COM call; the core still bounds the source
+ * vertex range to 65,536 for 16-bit indices. */
+static int indexed_up_geometry(unsigned type,unsigned primitives,unsigned *vertices){
+    if(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)return -1;
+    if(!primitives||primitives>262144u/3u)return -1;
+    *vertices=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;return 0;
+}
 /* DrawPrimitiveUP borrows stream zero; it does not change the bound stream,
  * index buffer, transforms, texture or render state. */
 static void draw_primitive_up(CPU *c){
@@ -3266,7 +3274,7 @@ static void draw_primitive_up(CPU *c){
 static void draw_indexed_up(CPU *c){
     unsigned type=A(1),min=A(2),count=A(3),primitives=A(4),fmt=A(6),stride=A(8),indices=0,used,isize;
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
-       up_geometry(type,primitives,&indices)||!count||min>UINT32_MAX-count||
+       indexed_up_geometry(type,primitives,&indices)||!count||min>UINT32_MAX-count||
        (fmt!=D9_INDEX16&&fmt!=D9_INDEX32)||!stride||stride>4096u){
         d3d_log("DrawIndexedPrimitiveUP","invalid scene, vertex format, index format/range, primitive count or vertex stride");RET(INVALID,9);
     }

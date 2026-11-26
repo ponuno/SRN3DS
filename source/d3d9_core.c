@@ -9,7 +9,10 @@
 
 enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_VOLUMES=8,
       MAX_TEX_ENTRIES=MAX_TEXTURES+MAX_CUBES+MAX_VOLUMES,
-      MAX_TARGETS=32,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+      MAX_TARGETS=32,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11,
+      /* Indexed menu draws are not expanded into MAX_DRAW_VERTICES; the
+       * backend receives the compact vertex stream plus 16-bit indices. */
+      MAX_INDEXED_MENU_VERTICES=65536,MAX_INDEXED_MENU_INDICES=262144};
 /* Bounded native storage for explicit LDR render targets.  The default is 256
  * so the measured TESV set fits the N3DS 6 MiB VRAM budget:
  *   5x1024 + 4x512 logical targets -> nine 256x256 targets
@@ -1756,6 +1759,9 @@ int d9_backend_supports_lockable_back_buffer(const D9Backend *ops){
            ops->target_clear&&ops->target_read&&ops->target_write&&ops->target_blit&&
            ops->target_viewport;
 }
+int d9_backend_has_menu_indexed(const D9Device *d){
+    return d&&d->ops.draw_menu_indexed?1:0;
+}
 static unsigned pow2_up(unsigned n){
     unsigned p=8;while(p<n&&p<1024)p<<=1;return p>=n&&p<=1024?p:0;
 }
@@ -2644,8 +2650,59 @@ static int cube_levels_ready(const CubeTexture *c){
            c->level[level].face_mask!=((1u<<D9_CUBE_FACES)-1u))return 0;
     return 1;
 }
+/* 16-bit indexed menu-text draw.  The compact vertex stream keeps the source
+ * vertex count (<= 65,536) and the original indices, so a 57k-vertex batch is
+ * one backend call instead of the 4,095-index UP expansion.  Only the
+ * certified fixed-function text plan uses this path. */
+static int draw_menu_indexed_text(D9Device *d,
+                                  const DrawStream streams[D9_MAX_STREAMS],
+                                  const UpSource *up,unsigned start,
+                                  unsigned min,unsigned count,unsigned primitives,
+                                  const D9TevProgram *plan,const D9Matrix *clip,
+                                  void *texture,const D9DrawState *state){
+    size_t n=(size_t)primitives*3;
+    if(up->count>MAX_INDEXED_MENU_VERTICES||n>MAX_INDEXED_MENU_INDICES){
+        set_diagnosis(d,"indexed menu draw exceeds the 65,536-vertex/262,144-index limit");
+        return D9_UNSUPPORTED;
+    }
+    D9ColorVertex *vertices=malloc(up->count*sizeof *vertices);
+    uint16_t *indices=malloc(n*sizeof *indices);
+    if(!vertices||!indices){
+        free(vertices);free(indices);
+        set_diagnosis(d,"indexed menu draw compact vertex/index allocation failed");
+        return D9_MEMORY;
+    }
+    D9Vertex decoded;float normal[3];
+    for(size_t i=0;i<up->count;++i){
+        int rc=fetch(d,streams,(uint64_t)i,&decoded,&vertices[i],normal);
+        if(rc){
+            free(vertices);free(indices);
+            set_diagnosis(d,"indexed menu vertex decode failed");
+            return rc;
+        }
+    }
+    const uint8_t *src=up->indices+(size_t)start*2u;
+    for(size_t i=0;i<n;++i){
+        uint32_t raw=(uint32_t)src[i*2u]|((uint32_t)src[i*2u+1u]<<8);
+        if(raw<min||(uint64_t)raw>=(uint64_t)min+count||raw>=up->count){
+            free(vertices);free(indices);
+            set_diagnosis(d,"indexed menu index does not name a decoded vertex");
+            return D9_INVALID;
+        }
+        indices[i]=(uint16_t)raw;
+    }
+    int rc=d->ops.draw_menu_indexed(d->ctx,vertices,up->count,indices,n,
+                                    clip,texture,NULL,state,NULL);
+    free(vertices);free(indices);
+    if(rc){
+        set_diagnosis(d,"menu indexed draw rejected by the backend");
+        return D9_BACKEND;
+    }
+    return D9_OK;
+}
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
-    if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
+    unsigned max_prims=(indexed&&up&&up->indices)?MAX_INDEXED_MENU_INDICES/3u:MAX_DRAW_VERTICES/3u;
+    if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>max_prims||(limited&&!count))return D9_INVALID;
     if(d->clip_plane_enable){
         set_diagnosis(d,"user clip planes are enabled; PICA has no user clip-plane stage");
         return D9_UNSUPPORTED;
@@ -2742,7 +2799,56 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     int cube_has_normal=cube_mode&&d->decl_active&&d->declaration.normal!=UINT32_MAX;
     float cube_nm[3][3];int cube_nm_ok=0;
     if(cube_has_normal)cube_nm_ok=!tnl_normal_matrix(&d->transforms[D9_WORLD],cube_nm);
+    D9Matrix clip;
+    if(d->decl_active&&d->declaration.position_t){
+        if(d->shader_active)
+            clip=d->shader_clip; /* an explicit shader owns its own transform */
+        else if(!d->view_w||!d->view_h){
+            set_diagnosis(d,"POSITIONT/XYZRHW draw needs a viewport size; call d9_set_viewport_size first");
+            return D9_UNSUPPORTED;
+        }else positiont_matrix(&clip,d->view_w,d->view_h);
+    }else if(d->shader_active)clip=d->shader_clip;
+    else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
+    D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
+    int has_color=lit||(d->decl_active&&d->declaration.color!=UINT32_MAX);
+    /* The menu-text quad has an explicit certified plan even though the guest
+     * used fixed-function stage state.  Select it only for the exact
+     * MODULATE(TEXTURE0,DIFFUSE), one-stage, A8 case; anything else keeps the
+     * existing fixed-function colour path. */
+    const D9TevProgram *menu_plan=state.pixel_shader;
+    D9TevProgram text_plan;int text_menu=0;
+    int cand=!menu_plan&&(d->ops.draw_menu||d->ops.draw_menu_indexed)&&has_color&&t&&t->format==D9_A8&&
+       !d->texture1&&d->second.stage_colorop==D9_TOP_DISABLE&&
+       state.stage_colorop==D9_TOP_MODULATE&&
+       state.stage_colorarg1==D9_TA_TEXTURE&&
+       (state.stage_colorarg2==D9_TA_DIFFUSE||state.stage_colorarg2==D9_TA_CURRENT)&&
+       state.stage_alphaop==D9_TOP_MODULATE&&
+       state.stage_alphaarg1==D9_TA_TEXTURE&&
+       (state.stage_alphaarg2==D9_TA_DIFFUSE||state.stage_alphaarg2==D9_TA_CURRENT)&&
+       state.stage_texcoordindex==0;
+    if(cand){
+        core_text_plan(&text_plan);
+        menu_plan=&text_plan;
+        text_menu=1;
+    }
     size_t n=(size_t)primitives*3,in=type==D9_TRIANGLELIST?n:(size_t)primitives+2;
+    /* A 16-bit indexed menu-text batch is submitted compactly; 57k vertices /
+     * 86k indices stay one or a few calls instead of the 4,095-index expansion.
+     * Anything else (32-bit indices, no callback, another plan) keeps the
+     * expanded path and its 4,096-output-vertex bound. */
+    if(text_menu&&indexed&&up&&up->indices&&up->index_size==2&&
+       type==D9_TRIANGLELIST&&!cube_mode&&!lit&&d->ops.draw_menu_indexed&&
+       up->count<=MAX_INDEXED_MENU_VERTICES&&n<=MAX_INDEXED_MENU_INDICES){
+        D9DrawState indexed_state=state;indexed_state.pixel_shader=menu_plan;
+        return draw_menu_indexed_text(d,streams,up,start,min,count,primitives,
+                                      menu_plan,&clip,t?t->native:NULL,
+                                      &indexed_state);
+    }
+    if(n>MAX_DRAW_VERTICES){
+        set_diagnosis(d,"indexed draw exceeds the expanded 4,096-vertex limit; "
+                        "a 16-bit menu-indexed backend is required");
+        return D9_UNSUPPORTED;
+    }
     if(indexed&&!(up&&up->indices)&&((size_t)start>ixbytes/step||in>ixbytes/step-(size_t)start))return D9_INVALID;
     for(size_t i=0;i<n;++i){size_t rel=triangle_index(type,i);int64_t index=(int64_t)start+(int64_t)rel;
         if(indexed){const uint8_t *p=ixdata+((size_t)start+rel)*step;uint32_t raw=(uint32_t)p[0]|(uint32_t)p[1]<<8;
@@ -2777,17 +2883,6 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         }
     }
     d->scratch_count=(unsigned)n;d->color_scratch_count=(unsigned)n;
-    D9Matrix clip;
-    if(d->decl_active&&d->declaration.position_t){
-        if(d->shader_active)
-            clip=d->shader_clip; /* an explicit shader owns its own transform */
-        else if(!d->view_w||!d->view_h){
-            set_diagnosis(d,"POSITIONT/XYZRHW draw needs a viewport size; call d9_set_viewport_size first");
-            return D9_UNSUPPORTED;
-        }else positiont_matrix(&clip,d->view_w,d->view_h);
-    }else if(d->shader_active)clip=d->shader_clip;
-    else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
-    D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
     if(cube_mode){
         D9CubeView view;fill_cube_view(&view,ct);
         state.resident_mips=cube_mips?ct->levels:1;
@@ -2797,25 +2892,6 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         }
         set_diagnosis(d,"");
         return D9_OK;
-    }
-    int has_color=lit||(d->decl_active&&d->declaration.color!=UINT32_MAX);
-    /* The menu-text quad has an explicit certified plan even though the guest
-     * used fixed-function stage state.  Select it only for the exact
-     * MODULATE(TEXTURE0,DIFFUSE), one-stage, A8 case; anything else keeps the
-     * existing fixed-function colour path. */
-    const D9TevProgram *menu_plan=state.pixel_shader;
-    D9TevProgram text_plan;
-    if(!menu_plan&&d->ops.draw_menu&&has_color&&t&&t->format==D9_A8&&
-       !d->texture1&&d->second.stage_colorop==D9_TOP_DISABLE&&
-       state.stage_colorop==D9_TOP_MODULATE&&
-       state.stage_colorarg1==D9_TA_TEXTURE&&
-       state.stage_colorarg2==D9_TA_DIFFUSE&&
-       state.stage_alphaop==D9_TOP_MODULATE&&
-       state.stage_alphaarg1==D9_TA_TEXTURE&&
-       state.stage_alphaarg2==D9_TA_DIFFUSE&&
-       state.stage_texcoordindex==0){
-        core_text_plan(&text_plan);
-        menu_plan=&text_plan;
     }
     /* Menu TEV plans can need a second texture unit, color0 and an external
      * constant bank.  Route those before the fixed-function two-stage path. */
@@ -2910,7 +2986,7 @@ int d9_draw_primitive_up(D9Device *d,unsigned type,unsigned primitives,const voi
 }
 int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,unsigned vertex_count,unsigned primitives,const void *index_data,unsigned index_format,const void *vertex_data,unsigned vertex_stride){
     if(!vertex_data||!vertex_stride||!index_data||(index_format!=D9_INDEX16&&index_format!=D9_INDEX32)||
-       !primitives||primitives>MAX_DRAW_VERTICES/3||!vertex_count||min_vertex>UINT32_MAX-vertex_count)return D9_INVALID;
+       !primitives||primitives>MAX_INDEXED_MENU_INDICES/3u||!vertex_count||min_vertex>UINT32_MAX-vertex_count)return D9_INVALID;
     UpSource up={vertex_data,vertex_stride,(size_t)min_vertex+vertex_count,index_data,index_format==D9_INDEX32?4u:2u};
     return draw(d,type,0,0,primitives,1,1,min_vertex,vertex_count,&up);
 }

@@ -274,6 +274,19 @@ typedef struct {
                                  void **native);
     int (*texture_upload_format)(void *ctx,void *native,unsigned level,
                                  const void *data,size_t bytes);
+    /* Optional indexed menu submission, appended last so all existing
+     * positional initializers keep their meaning.  Used for the certified
+     * fixed-function menu-text plan when the caller supplied 16-bit indices;
+     * vertices are the compact D9ColorVertex stream and indices index it
+     * directly (all values <= 65535).  A NULL callback keeps the older
+     * expanded draw_menu / draw_colored path, which is limited to
+     * MAX_DRAW_VERTICES output vertices per call. */
+    int (*draw_menu_indexed)(void *ctx,const D9ColorVertex *vertices,
+                             size_t count,const uint16_t *indices,
+                             size_t index_count,const D9Matrix *clip,
+                             void *tex0,void *tex1,
+                             const D9DrawState *state,
+                             const float (*constants)[4]);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -452,6 +465,8 @@ int d9_reset_device_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int loc
 D9Handle d9_back_buffer_target(const D9Device *d);
 /* True when the backend can implement D3DPRESENTFLAG_LOCKABLE_BACKBUFFER. */
 int d9_backend_supports_lockable_back_buffer(const D9Backend *ops);
+/* True when the device's backend provides draw_menu_indexed. */
+int d9_backend_has_menu_indexed(const D9Device *d);
 /* Evidence that the retained back buffer exists (it is a real offscreen
  * target) and that LockRect/Present can do what the flag promises. */
 int d9_back_buffer_info_ex(const D9Device *d,unsigned *w,unsigned *h,

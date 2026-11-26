@@ -12,6 +12,7 @@
 #include "d3d9_cube_coords.h"
 
 #define FRAME_VERTICES 16384u
+#define FRAME_INDICES 262144u
 /* Cube draw vertex: the PICA cube shader reads a 3-component direction and
  * writes texcoord0.xy + texcoord0w, so the attribute stride is 40 bytes. */
 typedef struct {float x,y,z,dx,dy,dz,r,g,b,a;} D9CubeVertex;
@@ -40,6 +41,11 @@ struct D9Citro {
     int program_cube_ready,uniform_cube;
     D9CubeVertex *arena_cube;
     size_t cursor_cube;
+    /* Indexed menu draws: 16-bit indices are copied into this per-frame linear
+     * arena and passed to C3D_DrawElements.  Reset in begin(), never freed
+     * before the GPU consumes them. */
+    uint16_t *arena_index;
+    size_t cursor_index;
 };
 D9Citro *d9_citro_open(void){
     D9Citro *c=calloc(1,sizeof *c);if(!c)return NULL;
@@ -62,6 +68,7 @@ D9Citro *d9_citro_open(void){
     if(R_FAILED(shaderProgramSetVsh(&c->program_cube,&c->shader_cube->DVLE[0])))goto fail;
     c->uniform_cube=shaderInstanceGetUniformLocation(c->program_cube.vertexShader,"clip");if(c->uniform_cube<0)goto fail;
     c->arena_cube=linearAlloc(FRAME_VERTICES*sizeof(D9CubeVertex));if(!c->arena_cube)goto fail;
+    c->arena_index=linearAlloc(FRAME_INDICES*sizeof(uint16_t));if(!c->arena_index)goto fail;
     return c;
 fail:d9_citro_close(c);return NULL;
 }
@@ -70,6 +77,7 @@ void d9_citro_close(D9Citro *c){
     if(c->arena)linearFree(c->arena);
     if(c->arena_color)linearFree(c->arena_color);
     if(c->arena_cube)linearFree(c->arena_cube);
+    if(c->arena_index)linearFree(c->arena_index);
     if(c->program_cube_ready)shaderProgramFree(&c->program_cube);if(c->shader_cube)DVLB_Free(c->shader_cube);
     if(c->program_color_ready)shaderProgramFree(&c->program_color);if(c->shader_color)DVLB_Free(c->shader_color);
     if(c->program_ready)shaderProgramFree(&c->program);if(c->shader)DVLB_Free(c->shader);
@@ -179,7 +187,7 @@ static void prepare_draw(D9Citro *c){
 }
 static int begin(void *ctx,uint32_t argb){
     D9Citro *c=ctx;if(c->scene||!C3D_FrameBegin(C3D_FRAME_SYNCDRAW))return -1;
-    c->scene=1;c->cursor=0;c->cursor_color=0;c->cursor_cube=0;c->active_target=NULL;
+    c->scene=1;c->cursor=0;c->cursor_color=0;c->cursor_cube=0;c->cursor_index=0;c->active_target=NULL;
     uint32_t rgba=(argb<<8)|(argb>>24);
     C3D_RenderTargetClear(c->target,C3D_CLEAR_ALL,rgba,0);
     if(!C3D_FrameDrawOn(c->target)){C3D_FrameEnd(0);c->scene=0;return -1;}
@@ -422,12 +430,15 @@ static int draw_cube(void *ctx,const D9ColorVertex *vertices,size_t count,
 /* Menu TEV plans: the colour vertex program carries color0, the plan can bind
  * two texture units, and external stage constants come from the c0..c8 bank.
  * c8 is the internal ambient+emissive fold, not a D3D9 cap. */
-static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
-                     const D9Matrix *clip,void *texture0,void *texture1,
-                     const D9DrawState *state,const float (*constants)[4]){
+static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
+                        const D9Matrix *clip,void *texture0,void *texture1,
+                        const D9DrawState *state,const float (*constants)[4],
+                        const uint16_t *indices,size_t index_count){
     D9Citro *c=ctx;
     if(!c||!c->scene||!c->program_color_ready||!vertices||!clip||!state||
-       !state->pixel_shader||!count||count%3)return -1;
+       !state->pixel_shader||!count)return -1;
+    if(indices?(!index_count||index_count%3):(!count||count%3))return -1;
+    if(indices)for(size_t i=0;i<index_count;++i)if(indices[i]>=count)return -1;
     int text_plan=(state->pixel_shader->backend_flags&D9TEV_PLAN_MENU_TEXT)!=0;
     NativeTex *native0=texture0,*native1=texture1;
     if(text_plan&&
@@ -437,6 +448,7 @@ static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
         return -1;
     }
     if(count>FRAME_VERTICES-c->cursor_color)return -1;
+    if(indices&&index_count>FRAME_INDICES-c->cursor_index)return -1;
     D9DrawState draw_state=*state;
     if(text_plan){
         /* The menu-text contract is point sampling with clamped UVs, regardless
@@ -447,6 +459,10 @@ static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
     }
     memcpy(c->arena_color+c->cursor_color,vertices,count*sizeof *vertices);
     GSPGPU_FlushDataCache(c->arena_color+c->cursor_color,count*sizeof *vertices);
+    if(indices){
+        memcpy(c->arena_index+c->cursor_index,indices,index_count*sizeof *indices);
+        GSPGPU_FlushDataCache(c->arena_index+c->cursor_index,index_count*sizeof *indices);
+    }
     prepare_draw_color(c);
     D9Matrix mtx=*clip;orient_clip(c,&mtx);
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
@@ -463,11 +479,28 @@ static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
         prepare_draw(c);
         return -1;
     }
-    C3D_DrawArrays(GPU_TRIANGLES,(int)c->cursor_color,(int)count);
+    if(indices)
+        C3D_DrawElements(GPU_TRIANGLES,(int)index_count,C3D_UNSIGNED_SHORT,
+                         c->arena_index+c->cursor_index);
+    else
+        C3D_DrawArrays(GPU_TRIANGLES,(int)c->cursor_color,(int)count);
     d9_pica_citro3d_restore_tev();
     c->cursor_color+=count;
+    if(indices)c->cursor_index+=index_count;
     prepare_draw(c);
     return 0;
+}
+static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
+                     const D9Matrix *clip,void *texture0,void *texture1,
+                     const D9DrawState *state,const float (*constants)[4]){
+    return draw_menu_ex(ctx,vertices,count,clip,texture0,texture1,state,constants,NULL,0);
+}
+static int draw_menu_indexed(void *ctx,const D9ColorVertex *vertices,size_t count,
+                             const uint16_t *indices,size_t index_count,
+                             const D9Matrix *clip,void *texture0,void *texture1,
+                             const D9DrawState *state,const float (*constants)[4]){
+    if(!indices||!clip)return -1;
+    return draw_menu_ex(ctx,vertices,count,clip,texture0,texture1,state,constants,indices,index_count);
 }
 static void end(void *ctx){D9Citro *c=ctx;if(c->scene){C3D_FrameEnd(0);c->scene=0;}c->active_target=NULL;}
 static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
@@ -724,4 +757,4 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
     target_write,depth_clear,target_viewport,draw_menu,target_texture,
     cube_create,cube_upload,target_viewport_scaled,NULL,NULL,draw_cube,cube_delete,
-    cube_face_create,cube_face_delete,tex_create_format,tex_upload_format};return &ops;}
+    cube_face_create,cube_face_delete,tex_create_format,tex_upload_format,draw_menu_indexed};return &ops;}

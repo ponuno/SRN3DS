@@ -34,7 +34,7 @@
 #define E2E_MAX_BATCH_INDICES 786432u
 #define E2E_DRAW_MAX_INDICES 4095u /* 1,365 triangles, d3d9_menu_text limit */
 #define E2E_SCRATCH_ADDR 0x10100000u
-#define E2E_SCRATCH_BYTES 0x20000u
+#define E2E_SCRATCH_BYTES 0x300000u
 #define E2E_OUT_ADDR 0x10010400u
 #define E2E_ATLAS_SIZE 64u
 #define E2E_RASTER_SIZE 64u
@@ -212,6 +212,8 @@ typedef struct {
     unsigned created, uploaded, deleted, begin, draw, colored, end;
     unsigned a8_creates, a8_uploads, a8_bytes, a8_deletes;
     unsigned draw_calls, expanded_vertices, max_draw_vertices, bad_draws;
+    unsigned indexed_draw_calls, indexed_vertices, indexed_indices;
+    uint16_t first_index;
     int active;
     size_t count;
     void *texture;
@@ -329,6 +331,39 @@ static int backend_draw_colored(void *ctx, const D9ColorVertex *vertices,
     return 0;
 }
 
+static int backend_draw_menu_indexed(void *ctx, const D9ColorVertex *vertices,
+                                     size_t count, const uint16_t *indices,
+                                     size_t index_count, const D9Matrix *matrix,
+                                     void *texture, void *texture1,
+                                     const D9DrawState *state,
+                                     const float (*constants)[4]) {
+    Mock *mock = ctx;
+    (void)matrix; (void)constants;
+    if (!mock->active || !vertices || !count || !indices || !index_count ||
+        (index_count % 3u) != 0 || !texture || texture1 || !state ||
+        state->address_u != 3 || state->address_v != 3 ||
+        state->min_filter != 1 || state->mag_filter != 1 ||
+        state->mip_filter != 0 || state->stage_colorop != 4 ||
+        state->stage_colorarg1 != 2 || state->stage_colorarg2 != 1 ||
+        state->stage_alphaop != 4 || state->stage_alphaarg1 != 2 ||
+        state->stage_alphaarg2 != 1) {
+        ++mock->bad_draws;
+        return -1;
+    }
+    for (size_t i = 0; i < index_count; ++i)
+        if (indices[i] >= count) { ++mock->bad_draws; return -1; }
+    mock->count = count;
+    mock->texture = texture;
+    mock->state = *state;
+    mock->first_vertex = vertices[0];
+    mock->first_index = indices[0];
+    ++mock->indexed_draw_calls;
+    mock->indexed_vertices += (unsigned)count;
+    mock->indexed_indices += (unsigned)index_count;
+    ++mock->draw_calls;
+    return 0;
+}
+
 static void backend_end(void *ctx) {
     Mock *mock = ctx;
     assert(mock->active);
@@ -346,6 +381,7 @@ static const D9Backend backend_ops = {
     .draw_colored = backend_draw_colored,
     .texture_create_format = tex_create_format,
     .texture_upload_format = tex_upload_format,
+    .draw_menu_indexed = backend_draw_menu_indexed,
 };
 
 static uint32_t com_call(D9ComDemo *demo, uint32_t object, unsigned slot,
@@ -439,30 +475,48 @@ static void run_com_batch(MenuSwfBatchVertex *vertices, uint32_t vertex_count,
           "A8 atlas UnlockRect");
 
     check(com_call(&demo, demo.device, 41, NULL, 0) == 0, "BeginScene");
-    uint32_t offset = 0;
-    while (offset < index_count) {
-        uint32_t remaining = index_count - offset;
-        uint32_t chunk = remaining > E2E_DRAW_MAX_INDICES
-                             ? E2E_DRAW_MAX_INDICES
-                             : remaining;
+    if (text.indexed) {
         status = menu_text_draw_batch(&text, vertices, vertex_count,
-                                      indices + offset, chunk);
+                                      indices, index_count);
+        check(status == MENU_TEXT_DRAW_OK && mock.indexed_draw_calls == 1,
+              "one indexed menu draw");
+        check(mock.indexed_vertices == vertex_count,
+              "indexed draw keeps the compact source vertex count");
+        check(mock.indexed_indices == index_count,
+              "indexed draw keeps every index");
+        check(mock.draw_calls == 1 && mock.expanded_vertices == 0,
+              "indexed path replaces the UP chunks");
         if (status != MENU_TEXT_DRAW_OK) {
-            printf("real: COM batch offset=%u refused: %s (%s)\n", offset,
+            printf("real: indexed COM batch refused: %s (%s)\n",
                    menu_text_draw_status_name(status), text.reason);
             ++failures;
-            break;
         }
-        offset += chunk;
+    } else {
+        uint32_t offset = 0;
+        while (offset < index_count) {
+            uint32_t remaining = index_count - offset;
+            uint32_t chunk = remaining > E2E_DRAW_MAX_INDICES
+                                 ? E2E_DRAW_MAX_INDICES
+                                 : remaining;
+            status = menu_text_draw_batch(&text, vertices, vertex_count,
+                                          indices + offset, chunk);
+            if (status != MENU_TEXT_DRAW_OK) {
+                printf("real: COM batch offset=%u refused: %s (%s)\n", offset,
+                       menu_text_draw_status_name(status), text.reason);
+                ++failures;
+                break;
+            }
+            offset += chunk;
+        }
+        check(offset == index_count, "all combined indices submitted");
+        check(mock.draw_calls == (index_count + E2E_DRAW_MAX_INDICES - 1) /
+                                     E2E_DRAW_MAX_INDICES,
+              "DrawPrimitiveUP chunk count");
+        check(mock.expanded_vertices == index_count,
+              "expanded draw vertices equal batch index count");
+        check(mock.max_draw_vertices <= E2E_DRAW_MAX_INDICES,
+              "every draw respects the UP vertex limit");
     }
-    check(offset == index_count, "all combined indices submitted");
-    check(mock.draw_calls == (index_count + E2E_DRAW_MAX_INDICES - 1) /
-                                 E2E_DRAW_MAX_INDICES,
-          "DrawPrimitiveUP chunk count");
-    check(mock.expanded_vertices == index_count,
-          "expanded draw vertices equal batch index count");
-    check(mock.max_draw_vertices <= E2E_DRAW_MAX_INDICES,
-          "every draw respects the UP vertex limit");
     check(mock.bad_draws == 0, "every backend draw has texture and menu state");
 
     uint32_t fvf_args[1] = {E2E_OUT_ADDR};
@@ -504,8 +558,10 @@ static void run_com_batch(MenuSwfBatchVertex *vertices, uint32_t vertex_count,
 
     stats->batch_triangles = index_count / 3u;
     printf("real: COM draw_calls=%u expanded_vertices=%u max_draw_vertices=%u "
+           "indexed_draws=%u indexed_vertices=%u indexed_indices=%u "
            "FVF=0x142 A8=%ux%u control_text_quads=%u\n",
            mock.draw_calls, mock.expanded_vertices, mock.max_draw_vertices,
+           mock.indexed_draw_calls, mock.indexed_vertices, mock.indexed_indices,
            E2E_ATLAS_SIZE, E2E_ATLAS_SIZE, stats->text_quads);
 
 done_demo:

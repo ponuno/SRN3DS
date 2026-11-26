@@ -2,7 +2,7 @@
 
 Status: the SWF **container, tag stream, flattened display list, DefineEditText
 parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch and a host CPU ->
-COM DrawPrimitiveUP integration** are implemented.  Real StartMenu text sources
+COM indexed menu submission** are implemented.  Real StartMenu text sources
 are counted, but their imported `gfxfontlib.swf` fonts are unavailable and are
 named refusals rather than substituted.  This is still not a menu frame:
 mask/clip rendering, AVM/AS2, full GFx text/assets, per-fill gradient/style
@@ -40,6 +40,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
 | `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: flattened records -> shape tessellation + DefineEditText source census/import-font refusals -> local-font control glyph -> bounded COM DrawPrimitiveUP chunks; no frame claim |
 | `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
+| `tests/menu_indexed_draw_smoke.c` | Core recording backend: exact compact vertices/indices, >4,095-index batch, 32-bit and 65,536-vertex fallbacks, named expansion limit and DevCaps 0x00082000 |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -493,17 +494,20 @@ combined batch is 86,160 indices / 28,720 triangles after the control glyph.
 * `menu_text_draw_init()` creates the A8 texture through the COM device path,
   uploads the atlas with exact pitch, and maps a caller guest scratch region
   for expanded vertices.
-* `menu_text_draw_batch()` expands the indexed batch into 24-byte
+* `menu_text_draw_batch()` expands the source vertices once into 24-byte
   `XYZ|DIFFUSE|TEX1` vertices (float3 position, D3DCOLOR, float2 UV), then:
   - `SetTexture(0, texture)`;
   - sampler stage 0: MIN/MAG POINT, MIP NONE, ADDRESS U/V CLAMP;
   - stage 0 COLOROP/ALPHAOP = MODULATE, ARG1 = TEXTURE, ARG2 = DIFFUSE;
   - `SetFVF(0x142)`;
-  - exactly one `DrawPrimitiveUP(TRIANGLELIST)`.
+  - one `DrawIndexedPrimitiveUP(TRIANGLELIST, 16-bit)` when the backend
+    provides `draw_menu_indexed` and the whole source vertex set / index list
+    fits the scratch; otherwise one bounded `DrawPrimitiveUP` expansion.
   The caller must have an active BeginScene; the module does not claim a frame.
-* Empty batches, invalid indices, more than 1,365 triangles, scratch overflow,
-  state/FVF/draw failures and A8 creation/upload failures are named.  The API
-  never logs a successful batch as a rendered frame.
+* Empty batches, invalid indices, indexed scratch overflow, more than 1,365
+  triangles on the UP fallback, source vertices above 65,536, state/FVF/draw
+  failures and A8 creation/upload failures are named.  The API never logs a
+  successful batch as a rendered frame.
 
 Measured COM-demo result (2 synthetic glyphs, 8x8 atlas, 8x8 A8 texture):
 
@@ -749,10 +753,11 @@ CPU layers and the real COM demo.  It reads the winning
    rasterises its 159 triangles, packs the used A8 rectangle beside one white
    texel and appends the resulting control text quad;
 6. creates/uploads the 64x64 A8 atlas through `d3d9_menu_text`, submits the
-   combined indexed batch in 4,095-index (1,365-triangle) chunks and verifies
-   `DrawPrimitiveUP`, FVF `0x142`, POINT/NONE/CLAMP, MODULATE(TEXTURE,DIFFUSE),
-   A8 identity/upload/lock bytes, draw/expanded-vertex counts and named empty /
-   bad-index refusals.
+   combined indexed batch as one 16-bit `DrawIndexedPrimitiveUP` (the mock
+   backend provides the indexed callback) and verifies FVF `0x142`,
+   POINT/NONE/CLAMP, MODULATE(TEXTURE,DIFFUSE), A8 identity/upload/lock bytes,
+   indexed draw/vertex/index counts and named empty / bad-index refusals.  A
+   backend without the callback keeps the 4,095-index `DrawPrimitiveUP` chunks.
 
 Measured real result (2026-11-26):
 
@@ -769,10 +774,10 @@ shape_colour_vertices=86154/86154
 shape_batch_vertices=86154 shape_batch_indices=86154
 glyph=33 tess_vertices=319 triangles=159
 raster=64x64 rect=24,1,40,63 sum=178003 atlas_used_height=62
-batch_vertices=86158 indices=86160 triangles=28720
-limits=262144 vertices / 786432 indices; draw_chunk_indices=4095
-COM draw_calls=22 expanded_vertices=86160 max_draw_vertices=4095
-FVF=0x142 A8=64x64 control_text_quads=1; 50 checks, 0 failures
+batch_vertices=57532 indices=86232 triangles=28744
+limits=262144 vertices / 786432 indices
+COM draw_calls=1 expanded_vertices=0 indexed_draws=1 indexed_vertices=57532 indexed_indices=86232
+FVF=0x142 A8=64x64 control_text_quads=1; 49 checks, 0 failures
 ```
 
 The 57 real text records produce three nonempty plain sources (72 source glyph
@@ -820,8 +825,8 @@ Verification:
    there is no persistent cache, PICA A8 sampling or real GFx text object yet.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
-5. **Draw path** — real GFx display list/masks, dynamic vertex buffer/FVF,
-   TEV/PICA submission and the first real frame.  The host COM DrawPrimitiveUP
+5. **Draw path** - real GFx display list/masks, dynamic vertex buffer/FVF,
+   TEV/PICA submission and the first real frame.  The host COM indexed/UP draw
    is not a frame claim.
 
 ## 19. Integration
@@ -945,10 +950,10 @@ frame.
   + FVF `0x142`, and issues one DrawPrimitiveUP for **12 expanded vertices**.
   A refusing backend is `ERR_A8` with no RGBA substitution.
 * The real StartMenu integration classifies all 216 flattened records,
-  tessellates 53 shape records into 28,718 triangles, emits **86,154**
-  solid-fill vertices/indices (all non-white), appends one local-font control
-  text quad and submits 86,158 batch vertices / 86,160 indices through
-  **22 bounded DrawPrimitiveUP calls**.  Sprite/text/mask/stroke/style gaps are
+  tessellates 53 shape records into 28,742 triangles, appends one local-font
+  control text quad and submits 57,532 batch vertices / 86,232 indices as
+  **one 16-bit indexed draw** (the fallback without the callback is 22 bounded
+  DrawPrimitiveUP calls).  Sprite/text/mask/stroke/style gaps are
   counted, not silently rendered.
 * No AVM action is executed, no texture cache or real GFx draw/frame is built,
   and no frame/pixel/Azahar/hardware result is claimed.

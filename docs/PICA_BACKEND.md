@@ -1309,6 +1309,52 @@ survive Reset, while the depth binding and explicit targets are dropped.
   `.text` 910,908 B.  Build-only evidence; no Azahar/hardware run or frame
   claimed.
 
+## 5.9 Indexed menu-text draw (2026-11-26)
+
+`D9Backend` gains one append-only callback:
+
+```c
+int (*draw_menu_indexed)(void *ctx, const D9ColorVertex *vertices,
+                         size_t count, const uint16_t *indices,
+                         size_t index_count, const D9Matrix *clip,
+                         void *tex0, void *tex1, const D9DrawState *state,
+                         const float (*constants)[4]);
+```
+
+It is the indexed counterpart of `draw_menu` and takes the same clip, texture
+units, state and c0..c8 bank.  The core uses it for the certified fixed-function
+menu-text plan when all of these hold: a `TRIANGLELIST` `DrawIndexedPrimitiveUP`
+with 16-bit indices, a source vertex range of at most 65,536, at most 262,144
+indices, no cube/CPU-T&L path and a backend that provides the callback.  It
+decodes each source vertex once into a compact `D9ColorVertex` stream and passes
+the original 16-bit indices; nothing is expanded per output vertex.  A missing
+callback, 32-bit indices or a larger source range keep the old expanded
+`draw_menu`/`draw_colored` path, whose 4,096-output-vertex bound is a named
+refusal.  The compact arrays are heap temporaries freed before return.
+
+The PICA implementation copies the indices into a persistent per-frame linear
+arena (`FRAME_INDICES = 262,144`) that `begin()` resets, then issues
+`C3D_DrawElements(GPU_TRIANGLES, index_count, C3D_UNSIGNED_SHORT, ...)` after the
+same texture/TEV/sampler setup as `draw_menu`.  No per-call allocation can leak;
+the cache cap is bounded.  The null backend validates every index and records
+`menu_indexed_draws`, compact vertices, indices and the first three indices.
+
+`d3d9_menu_text` expands the source vertices once and sends one
+`DrawIndexedPrimitiveUP` when the COM demo reports the backend callback and the
+scratch holds `vertex_count*24 + index_count*2` bytes; otherwise it keeps the
+old 4,095-index `DrawPrimitiveUP` chunks.  On the real StartMenu batch this
+changes **57,532 vertices / 86,232 indices from 22 UP draws to one indexed
+draw** (22 → 1).
+
+`menu_indexed_draw` covers exact compact vertices/indices, a 6,000-vertex /
+20,000-index batch, 32-bit fallback, a 65,537-vertex named refusal, a backend
+without the callback and DevCaps `0x00082000`.  `menu_pipeline_e2e` (real data)
+reports `draw_calls=1 indexed_draws=1 indexed_vertices=57532
+indexed_indices=86232`.
+
+This is host-contract and compile-time evidence only; no GPU execution, pixel
+result or frame is claimed.
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.

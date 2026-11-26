@@ -38,6 +38,11 @@ typedef struct {
     D9DrawState last_color_state;
     unsigned menu_draws,menu_textures;
     float last_menu_constants[9][4];
+    /* Indexed menu-text recording: vertices is the compact source stream,
+     * indices are 16-bit and index into it. */
+    unsigned menu_indexed_draws,menu_indexed_vertices,menu_indexed_indices;
+    unsigned last_menu_indexed_count,last_menu_index_count;
+    uint16_t last_menu_indices[3];
     /* Cube-map creation/upload accounting.  The core owns the six face stores;
      * these counters prove the null backend accepted every face/level. */
     unsigned cube_creates,cube_uploads;

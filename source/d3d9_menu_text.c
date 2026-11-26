@@ -81,6 +81,7 @@ MenuTextDrawStatus menu_text_draw_init(MenuTextDraw *ctx, D9ComDemo *demo,
     ctx->demo = demo;
     ctx->width = atlas->width;
     ctx->height = atlas->height;
+    ctx->indexed = demo->menu_indexed;
 
     GuestMemory *mem = &demo->memory;
     if (!guest_ptr(mem, scratch, scratch_bytes)) {
@@ -140,38 +141,81 @@ MenuTextDrawStatus menu_text_draw_batch(MenuTextDraw *ctx,
         return MENU_TEXT_DRAW_ERR_GEOMETRY;
     }
     uint32_t triangles = index_count / 3u;
-    if (triangles > 4096u / 3u) {
-        text_reason(ctx, "menu-text %lu triangles exceed the UP draw limit",
-                    (unsigned long)triangles);
-        return MENU_TEXT_DRAW_ERR_OVERFLOW;
-    }
-    size_t bytes = (size_t)index_count * sizeof(MenuTextVertex);
-    if (bytes > ctx->scratch_bytes) {
-        text_reason(ctx, "menu-text %lu vertices exceed the %lu-byte scratch",
-                    (unsigned long)index_count,
-                    (unsigned long)ctx->scratch_bytes);
-        return MENU_TEXT_DRAW_ERR_OVERFLOW;
-    }
-    MenuTextVertex *dst = (MenuTextVertex *)guest_ptr(
-        &ctx->demo->memory, ctx->scratch, bytes);
-    if (!dst) {
-        text_reason(ctx, "menu-text scratch is not mapped");
-        return MENU_TEXT_DRAW_ERR_DEVICE;
-    }
-    for (uint32_t i = 0; i < index_count; ++i) {
-        uint32_t index = indices[i];
-        if (index >= vertex_count) {
-            text_reason(ctx, "menu-text index %lu >= %lu vertices",
-                        (unsigned long)index, (unsigned long)vertex_count);
-            return MENU_TEXT_DRAW_ERR_GEOMETRY;
+    /* Prefer one indexed submission: expand each source vertex once and keep
+     * the caller's 16-bit indices.  The fallback keeps the old expanded UP
+     * path and its 4,095-index limit. */
+    int use_indexed = ctx->indexed && vertex_count <= 65536u;
+    size_t vbytes = (size_t)vertex_count * sizeof(MenuTextVertex);
+    size_t ioff = (vbytes + 3u) & ~(size_t)3u;
+    size_t ibytes = (size_t)index_count * 2u;
+    MenuTextVertex *dst = NULL;
+    uint16_t *index16 = NULL;
+    if (use_indexed) {
+        if (ioff > ctx->scratch_bytes || ibytes > ctx->scratch_bytes - ioff) {
+            text_reason(ctx, "indexed menu-text %lu vertices/%lu indices exceed "
+                             "the %lu-byte scratch",
+                        (unsigned long)vertex_count, (unsigned long)index_count,
+                        (unsigned long)ctx->scratch_bytes);
+            return MENU_TEXT_DRAW_ERR_OVERFLOW;
         }
-        const MenuSwfBatchVertex *v = &vertices[index];
-        dst[i].x = (float)v->x;
-        dst[i].y = (float)v->y;
-        dst[i].z = 0.0f;
-        dst[i].color = v->color;
-        dst[i].u = (float)v->u / 65536.0f;
-        dst[i].v = (float)v->v / 65536.0f;
+        void *base = guest_ptr(&ctx->demo->memory, ctx->scratch, ioff + ibytes);
+        if (!base) {
+            text_reason(ctx, "menu-text indexed scratch is not mapped");
+            return MENU_TEXT_DRAW_ERR_DEVICE;
+        }
+        dst = (MenuTextVertex *)base;
+        index16 = (uint16_t *)((uint8_t *)base + ioff);
+        for (uint32_t i = 0; i < vertex_count; ++i) {
+            const MenuSwfBatchVertex *v = &vertices[i];
+            dst[i].x = (float)v->x;
+            dst[i].y = (float)v->y;
+            dst[i].z = 0.0f;
+            dst[i].color = v->color;
+            dst[i].u = (float)v->u / 65536.0f;
+            dst[i].v = (float)v->v / 65536.0f;
+        }
+        for (uint32_t i = 0; i < index_count; ++i) {
+            uint32_t index = indices[i];
+            if (index >= vertex_count || index > 0xFFFFu) {
+                text_reason(ctx, "menu-text index %lu >= %lu vertices or 16-bit range",
+                            (unsigned long)index, (unsigned long)vertex_count);
+                return MENU_TEXT_DRAW_ERR_GEOMETRY;
+            }
+            index16[i] = (uint16_t)index;
+        }
+    } else {
+        if (triangles > 4096u / 3u) {
+            text_reason(ctx, "menu-text %lu triangles exceed the UP draw limit",
+                        (unsigned long)triangles);
+            return MENU_TEXT_DRAW_ERR_OVERFLOW;
+        }
+        size_t bytes = (size_t)index_count * sizeof(MenuTextVertex);
+        if (bytes > ctx->scratch_bytes) {
+            text_reason(ctx, "menu-text %lu vertices exceed the %lu-byte scratch",
+                        (unsigned long)index_count,
+                        (unsigned long)ctx->scratch_bytes);
+            return MENU_TEXT_DRAW_ERR_OVERFLOW;
+        }
+        dst = (MenuTextVertex *)guest_ptr(&ctx->demo->memory, ctx->scratch, bytes);
+        if (!dst) {
+            text_reason(ctx, "menu-text scratch is not mapped");
+            return MENU_TEXT_DRAW_ERR_DEVICE;
+        }
+        for (uint32_t i = 0; i < index_count; ++i) {
+            uint32_t index = indices[i];
+            if (index >= vertex_count) {
+                text_reason(ctx, "menu-text index %lu >= %lu vertices",
+                            (unsigned long)index, (unsigned long)vertex_count);
+                return MENU_TEXT_DRAW_ERR_GEOMETRY;
+            }
+            const MenuSwfBatchVertex *v = &vertices[index];
+            dst[i].x = (float)v->x;
+            dst[i].y = (float)v->y;
+            dst[i].z = 0.0f;
+            dst[i].color = v->color;
+            dst[i].u = (float)v->u / 65536.0f;
+            dst[i].v = (float)v->v / 65536.0f;
+        }
     }
 
     D9ComDemo *d = ctx->demo;
@@ -237,15 +281,32 @@ MenuTextDrawStatus menu_text_draw_batch(MenuTextDraw *ctx,
         return MENU_TEXT_DRAW_ERR_FVF;
     }
 
-    args[0] = D9_TRIANGLELIST;
-    args[1] = triangles;
-    args[2] = ctx->scratch;
-    args[3] = (uint32_t)sizeof(MenuTextVertex);
-    hr = call(d, d->device, 83, args, 4); /* DrawPrimitiveUP */
-    if (hr) {
-        text_reason(ctx, "DrawPrimitiveUP failed: %s",
-                    d9_com_last_diagnostic());
-        return MENU_TEXT_DRAW_ERR_DRAW;
+    if (use_indexed) {
+        args[0] = D9_TRIANGLELIST;
+        args[1] = 0; /* MinIndex */
+        args[2] = vertex_count;
+        args[3] = triangles;
+        args[4] = ctx->scratch + (uint32_t)ioff;
+        args[5] = D9_INDEX16;
+        args[6] = ctx->scratch;
+        args[7] = (uint32_t)sizeof(MenuTextVertex);
+        hr = call(d, d->device, 84, args, 8); /* DrawIndexedPrimitiveUP */
+        if (hr) {
+            text_reason(ctx, "DrawIndexedPrimitiveUP failed: %s",
+                        d9_com_last_diagnostic());
+            return MENU_TEXT_DRAW_ERR_DRAW;
+        }
+    } else {
+        args[0] = D9_TRIANGLELIST;
+        args[1] = triangles;
+        args[2] = ctx->scratch;
+        args[3] = (uint32_t)sizeof(MenuTextVertex);
+        hr = call(d, d->device, 83, args, 4); /* DrawPrimitiveUP */
+        if (hr) {
+            text_reason(ctx, "DrawPrimitiveUP failed: %s",
+                        d9_com_last_diagnostic());
+            return MENU_TEXT_DRAW_ERR_DRAW;
+        }
     }
     return MENU_TEXT_DRAW_OK;
 }

@@ -507,13 +507,39 @@ static int null_draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
     s->triangles+=(unsigned)(count/3);s->vertices+=count;s->color_vertices+=(unsigned)count;
     return 0;
 }
+/* Indexed menu-text recording.  Vertices stay compact; indices are 16-bit
+ * and must name one of them.  No pixel or expansion is claimed. */
+static int null_draw_menu_indexed(void *ctx,const D9ColorVertex *vertices,size_t count,
+                                  const uint16_t *indices,size_t index_count,
+                                  const D9Matrix *clip,void *tex0,void *tex1,
+                                  const D9DrawState *state,const float (*constants)[4]){
+    D9NullStats *s=stats(ctx);
+    (void)tex1;(void)constants;
+    if(!s->scene||!vertices||!count||!indices||!index_count||index_count%3||
+       !tex0||!clip||!state)return -1;
+    for(size_t i=0;i<count;++i){
+        const D9ColorVertex *v=&vertices[i];
+        if(!isfinite(v->x)||!isfinite(v->y)||!isfinite(v->z)||
+           !isfinite(v->u)||!isfinite(v->v)||!isfinite(v->r)||
+           !isfinite(v->g)||!isfinite(v->b)||!isfinite(v->a))return -1;
+    }
+    for(size_t i=0;i<index_count;++i)if(indices[i]>=count)return -1;
+    ++s->menu_indexed_draws;++s->draws;++s->color_draws;
+    s->menu_indexed_vertices+=(unsigned)count;
+    s->menu_indexed_indices+=(unsigned)index_count;
+    s->last_menu_indexed_count=(unsigned)count;
+    s->last_menu_index_count=(unsigned)index_count;
+    for(unsigned i=0;i<3&&i<index_count;++i)s->last_menu_indices[i]=indices[i];
+    s->triangles+=(unsigned)(index_count/3);s->vertices+=count;
+    return 0;
+}
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
     null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
     null_cube_create,null_cube_upload,null_target_viewport_scaled,
     null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete,
     null_cube_face_create,null_cube_face_delete,
-    null_texture_create_format,null_texture_upload_format};
+    null_texture_create_format,null_texture_upload_format,null_draw_menu_indexed};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}
