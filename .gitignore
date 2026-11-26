@@ -17,6 +17,7 @@ staged/
 *.lst
 *.o
 *.d
+source/generated/*.shbin
 skyrim_audit*.json
 __pycache__/
 *.pyc

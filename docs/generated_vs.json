@@ -1,0 +1,120 @@
+{
+  "entries": [
+    {
+      "asm": "game.vs.0ccc7542.v.pica",
+      "constants": [
+        0,
+        1,
+        2
+      ],
+      "id": "game.vs.0ccc7542",
+      "inputs": [
+        {
+          "reg_index": 0,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        },
+        {
+          "reg_index": 1,
+          "usage": 5,
+          "usage_index": 0,
+          "usage_name": "texcoord"
+        }
+      ],
+      "instructions": 4,
+      "outputs": [
+        {
+          "reg_index": 0,
+          "type": 6,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        },
+        {
+          "reg_index": 1,
+          "type": 6,
+          "usage": 5,
+          "usage_index": 0,
+          "usage_name": "texcoord"
+        }
+      ],
+      "sha256": "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7",
+      "source_offset": 4808,
+      "source_package": "shadersfx\\imagespace002.fxp"
+    },
+    {
+      "asm": "game.vs.31d368ce.v.pica",
+      "constants": [
+        0,
+        1
+      ],
+      "id": "game.vs.31d368ce",
+      "inputs": [
+        {
+          "reg_index": 0,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        },
+        {
+          "reg_index": 1,
+          "usage": 5,
+          "usage_index": 0,
+          "usage_name": "texcoord"
+        }
+      ],
+      "instructions": 4,
+      "outputs": [
+        {
+          "reg_index": 0,
+          "type": 6,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        },
+        {
+          "reg_index": 1,
+          "type": 6,
+          "usage": 5,
+          "usage_index": 0,
+          "usage_name": "texcoord"
+        }
+      ],
+      "sha256": "31d368cecad5b4d215c4c1fe1580d9ab0606e09af4ee3d2fa4ce8c4fcae9359f",
+      "source_offset": 4206,
+      "source_package": "shadersfx\\imagespace002.fxp"
+    },
+    {
+      "asm": "game.vs.5b644ad2.v.pica",
+      "constants": [
+        0,
+        1,
+        3
+      ],
+      "id": "game.vs.5b644ad2",
+      "inputs": [
+        {
+          "reg_index": 0,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        }
+      ],
+      "instructions": 4,
+      "outputs": [
+        {
+          "reg_index": 0,
+          "type": 6,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        }
+      ],
+      "sha256": "5b644ad269588d8c13d79f96d9fe895fff581fd7b595aed739b5260c2b8056b0",
+      "source_offset": 34158,
+      "source_package": "shadersfx\\shaders001.fxp"
+    }
+  ],
+  "schema": "d9-generated-vs-v1"
+}

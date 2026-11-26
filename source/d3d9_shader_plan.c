@@ -7,6 +7,12 @@
  * SHA-256; no bytecode is embedded. */
 #include "d3d9_shader_plan_table.inc"
 
+/* Exact SHA-256 -> emitted .v.pica id, generated from docs/generated_vs.json
+ * by tools/vs_emit.py.  This table is append-only and separate from the
+ * descriptor table: it records that assembly exists, not that a draw is
+ * certified. */
+#include "d3d9_generated_vs_table.inc"
+
 unsigned d9_shader_plan_count(void) {
     return (unsigned)D9_SHADER_PLAN_ENTRY_COUNT;
 }
@@ -54,6 +60,31 @@ int d9_shader_plan_sha256_equal(const char *a, const char *b) {
         if (!a[i] || !b[i]) return 0;
     }
     return a[64] == 0 && b[64] == 0;
+}
+
+unsigned d9_generated_vs_count(void) {
+    return (unsigned)D9_GENERATED_VS_ENTRY_COUNT;
+}
+
+const char *d9_generated_vs_id_at(unsigned index) {
+    if (index >= D9_GENERATED_VS_ENTRY_COUNT) return NULL;
+    return d9_generated_vs_entries[index].id;
+}
+
+int d9_generated_vs_lookup(const char *sha256_hex,
+                           const char **id, const char **asm_name) {
+    if (id) *id = NULL;
+    if (asm_name) *asm_name = NULL;
+    if (!sha256_hex || strlen(sha256_hex) != 64u) return -1;
+    for (unsigned i = 0; i < D9_GENERATED_VS_ENTRY_COUNT; ++i) {
+        if (!d9_shader_plan_sha256_equal(d9_generated_vs_entries[i].sha256,
+                                         sha256_hex))
+            continue;
+        if (id) *id = d9_generated_vs_entries[i].id;
+        if (asm_name) *asm_name = d9_generated_vs_entries[i].asm_name;
+        return 1;
+    }
+    return 0;
 }
 
 int d9_shader_plan_lookup(unsigned stage, const char *sha256_hex,

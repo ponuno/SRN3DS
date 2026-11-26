@@ -71,3 +71,15 @@ int d9_shader_plan_sha256_equal(const char *a, const char *b);
  * restores the generated table. */
 int d9_shader_plan_test_set(const D9ShaderPlan *entries, unsigned count);
 #endif
+
+/* Emitted PICA VS assembly table (docs/generated_vs.json, append-only).
+ *
+ * These helpers answer only "does an exact-hash .v.pica exist?".  They do not
+ * certify equivalence and do not change caps or the draw gate.  Wire them into
+ * CreateVertexShader only together with a real shader-binary upload path and
+ * an exact-hash descriptor match; a miss must stay on the legacy path. */
+unsigned d9_generated_vs_count(void);
+const char *d9_generated_vs_id_at(unsigned index);
+/* 1 hit (and sets *id/*asm_name when non-NULL), 0 miss, -1 bad argument. */
+int d9_generated_vs_lookup(const char *sha256_hex,
+                           const char **id, const char **asm_name);

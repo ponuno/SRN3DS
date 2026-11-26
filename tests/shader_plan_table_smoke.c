@@ -14,6 +14,7 @@
 
 #define LOGO_SHA "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"
 #define COPY_SHA "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de"
+#define GENERATED_VS_SHA "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7"
 #define FOREIGN_SHA "0000000000000000000000000000000000000000000000000000000000000000"
 
 #define DI(op, operands) ((uint32_t)(op) | ((uint32_t)(operands) << 24))
@@ -209,6 +210,37 @@ int main(void) {
               "copy entry vertex-colour flag equals the C plan");
         CHECK(copy && translated.requires_alpha_fixup == copy->tev.requires_alpha_fixup,
               "copy entry alpha-fixup flag equals the C plan");
+    }
+
+    /* Generated VS assembly table: exact hash only, append-only, no draw claim. */
+    {
+        const char *id = NULL, *asm_name = NULL;
+        CHECK(d9_generated_vs_count() == 3, "three emitted VS assemblies");
+        CHECK(d9_generated_vs_lookup(GENERATED_VS_SHA, &id, &asm_name) == 1,
+              "pilot hash selects an emitted VS");
+        CHECK(id && strcmp(id, "game.vs.0ccc7542") == 0, "generated VS id");
+        CHECK(asm_name && strcmp(asm_name, "game.vs.0ccc7542.v.pica") == 0,
+              "generated VS asm name");
+        const char *upper_id = NULL;
+        const char *upper_sha =
+            "0CCC7542AA06B2E20A41283ACC2D5473602FC03F5495CC95166EC3B01820D2F7";
+        CHECK(d9_generated_vs_lookup(upper_sha, &upper_id, NULL) == 1 &&
+              upper_id == id, "generated VS lookup accepts upper case");
+        id = (const char *)1;
+        CHECK(d9_generated_vs_lookup(FOREIGN_SHA, &id, NULL) == 0,
+              "foreign hash is not generated");
+        CHECK(id == NULL, "miss clears the id");
+        CHECK(d9_generated_vs_lookup("abc", &id, NULL) == -1,
+              "short hash is invalid");
+        CHECK(d9_generated_vs_lookup(NULL, &id, NULL) == -1,
+              "NULL hash is invalid");
+        for (unsigned i = 0; i < d9_generated_vs_count(); ++i) {
+            const char *entry_id = d9_generated_vs_id_at(i);
+            CHECK(entry_id && strncmp(entry_id, "game.vs.", 8) == 0,
+                  "generated VS ids are game.vs.*");
+        }
+        CHECK(d9_generated_vs_id_at(d9_generated_vs_count()) == NULL,
+              "generated VS out-of-range index returns NULL");
     }
 
     /* Caps are untouched by plan lookup/selection. */

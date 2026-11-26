@@ -253,10 +253,14 @@ The existing menu e2e is unchanged: `menu_pipeline_e2e` still reports
 
 ## 6. What is not done
 
-1. **PICA VS code emitter.** The 276 accepted VS contracts are descriptors
-   only. `draw_enabled = 0` is enforced; the next step is a PICA VS binary
-   emitter plus a shader-binary upload, with the same symbolic equivalence
-   test used for TEV.
+1. **PICA VS code emitter.** `tools/vs_emit.py` now lowers 41 of the 276
+   accepted VS hashes to straight-line picasso assembly and three real
+   `game.vs.*` assemblies compile with picasso. The remaining 235 are named
+   refusals (unsupported output semantics 102, skinning 97, expandable ops 17,
+   source modifiers 9, direct opcodes 6, destination modifiers 3, color1 +
+   texcoord2 conflict 1). `docs/generated_vs.json` maps hash -> emitted id;
+   `CreateVertexShader` still has no PICA VS binary upload/binding path, so no
+   plan is draw-enabled.
 2. **Per-channel TEV selectors.** `D9TevStage.op_rgb` is per source, so a
    uniform swizzle is required. PICA hardware supports a selector per output
    channel; widening the descriptor is the main route to the 5 non-uniform
