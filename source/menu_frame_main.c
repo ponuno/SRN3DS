@@ -687,6 +687,14 @@ int main(void) {
         setenv("MENU_DEBUG_A8_RED", "1", 1);
         fprintf(stderr, "MENU_DEBUG_A8_RED: alpha reads the A8 red channel\n");
     }
+    FILE *white1_flag = fopen("sdmc:/menu_debug_white1.flag", "r");
+    if (white1_flag) {
+        static uint8_t white_pixel = 255;
+        fclose(white1_flag);
+        atlas.width = atlas.height = atlas.stride = 1;
+        atlas.pixels = &white_pixel;
+        fprintf(stderr, "MENU_DEBUG_WHITE1: binding a 1x1 opaque A8 texture\n");
+    }
     if (cpu_ok) {
         unsigned nonzero = 0;
         for (unsigned i = 0; i < sizeof g_atlas_pixels; ++i)
