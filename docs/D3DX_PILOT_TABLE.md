@@ -38,8 +38,10 @@ used by `pilot_real`; the other tests have their own directories:
 ## Generate from the exact DLL
 
 Use the DLL whose SHA-256 is
-`f8b9cfab7fffbc8f98e41aa439d72921dc180634a1febca2a9d41a0df35d3472`
-(preferred base `0x10000000`):
+`f8b9cfab7fffbc8f98e41aa439d72921dc180634a1febca2a9d41a0df35d3472`.
+Its original `ImageBase` is `0x10000000`; the staged/generated image and the
+loader use the relocated base `0x08000000`, so addresses in generated manifests
+are `0x08...` (subtract `0x08000000` from the original-base address).
 
 ```powershell
 .venv\Scripts\python.exe tools\prepare_pilot.py `
@@ -86,8 +88,12 @@ generated functions: the entry plus its internal helper `f_802E9DB`.
    `pilot_05.c`; copy the Vec3Normalize source as `pilot_06.c`; copy the
    MatrixInverse source as `pilot_07.c`; copy the PlaneNormalize source as
    `pilot_08.c`; merge `pilot_shims.c` so it contains both `_CIsqrt` and
-   `_finite` **with the return-address pop**.
-3. Merge the `funcs_pilot.h` declarations and the `pilot_table.c` entries; set
+   `_finite` **with the return-address pop**. **Strip the duplicate
+   `f_802E9DB` definition from `pilot_06.c`**: Vec3Normalize's generated source
+   also contains the shared internal helper, which must stay defined only in
+   `pilot_04.c`. Copying it verbatim gives a duplicate symbol.
+3. Merge the `funcs_pilot.h` declarations and the `pilot_table.c` entries,
+   de-duplicating by address (not by `(address, function)` pair), and set
    `g_fn_count_pilot = 12`. Keep the table sorted by address: `0x802E9DB`,
    `0x802FA80`, `0x802FCE0`, `0x802FD9D`, `0x802FFFD`, `0x8032000`,
    `0x8032303`, `0x8032CBF`, `0x8032EAD`, `0x803306A`, `0x81A65EC`,
@@ -105,9 +111,13 @@ generated functions: the entry plus its internal helper `f_802E9DB`.
 5. Do **not** run a single-export `prepare_pilot.py` directly into
    `pilot_out_mult/D3DXMatrixMultiply/gen`: it would replace the combined
    header/table with a one-entry table.
+6. The Makefile and `run_host_tests.ps1` glob `pilot_*.c` from the combined
+   directory (guarded by `pilot_table.c` and `pilot_00.c`), so a new body does
+   not need a hard-coded source-list edit.
 
-The `pilot_out_mult/README.md` copy of this note is local-only because the whole
-directory is ignored; this tracked file is the durable reference.
+The `pilot_out_mult/README.md` note is local-only because the whole directory
+is ignored; this tracked file is the durable reference. If the local note
+disagrees with this file, this file wins.
 
 ## Verify
 
@@ -125,21 +135,31 @@ Vec3TransformCoord helper and the two CRT shims).
 `pilot_vec3coord`/`pilot_vec3normal`/`pilot_vec3normalize` use a three-float
 output; the shared pilot runner selects that by case 6/7/8.
 `pilot_planenormalize` and `pilot_planetransform` use four floats (case
-10/11). `pilot_matrixinverse` uses a fixed invertible source matrix, compares
-all 16 output floats and checks the determinant written through the second
-argument. The surrounding canaries are still checked.
+10/11). For those shorter results the runner also verifies that the bytes
+between `out_len*4` and the full 16-float buffer are untouched, so a body that
+writes a whole matrix cannot pass a three-float test. `pilot_matrixinverse`
+uses three invertible source matrices (variant 1 forces a row swap at the first
+pivot), compares all 16 output floats and checks the determinant written
+through the second argument. The surrounding canaries are still checked.
 
 ## Loader resolution
 
 `pe_link_resolve`/`hotpatch_body` reads the export's `FF 25 <slot>` and the
-wrapper's one-time initializer. It scans the initializer for the
-`mov esi,src; mov edi/ebx,dst; ... rep movsd` table copy and uses the source
-entry for this slot as the real body. This is required because some exports
-(for example `D3DXVec3TransformCoord`) place another wrapper at `entry+11`; the
-resolver must not bind that wrapper. If the initializer table is unavailable
-and `entry+11` is another wrapper, it returns zero and the caller keeps the raw
-export. `tests/pe_imports_smoke.c` covers both layouts, including the invalid
-table entry negative case.
+wrapper's one-time initializer. It scans every
+`mov esi,src; mov edi/ebx,dst; ... rep movsd` copy, uses a preceding
+`mov ecx,imm32` as the copied-dword count (falling back to the readable
+`src`/`dst` span, capped at 256), and takes the source entry for this slot as
+the real body. A candidate must start with the full `8B FF 55 8B EC` prologue
+and must not be the wrapper's `push 1; call` tail; `entry` and `wrapper` are
+rejected explicitly. Every read is bounds-checked against the image, so an
+entry near the end cannot borrow a prologue from the next page. This is
+required because some exports (for example `D3DXVec3TransformCoord`) place
+another wrapper at `entry+11`; the resolver must not bind that wrapper. If the
+initializer table is unavailable and `entry+11` is another wrapper, it returns
+zero and the caller keeps the raw export. `tests/pe_imports_smoke.c` covers
+both layouts, a wrapper-valued table entry, the copied-count bound, a bogus
+first memcpy followed by the real one, the end-of-image case and the
+invalid-table negative; `tests/hotpatch_resolver_test.py` mirrors them.
 
 ## Remaining imported bodies
 

@@ -44,8 +44,14 @@ static void expected(unsigned type,unsigned variant,float a[16],float b[16],floa
         out[2]=a[0]*b[2]+a[1]*b[6]+a[2]*b[10];}
     else if(type==8){float len=sqrtf(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);if(len>0){out[0]=a[0]/len;out[1]=a[1]/len;out[2]=a[2]/len;}}
     else if(type==9){
-        static const float src[16]={2,0,0,0, 1,3,0,0, 0,1,4,0, 1,1,1,1};
-        memcpy(b,src,sizeof src);
+        /* Three invertible sources; variant 1 forces a row swap at the first
+         * pivot, so the determinant/output check covers the pivot path too. */
+        static const float src[3][16]={
+            {2,0,0,0, 1,3,0,0, 0,1,4,0, 1,1,1,1},
+            {0,2,0,0, 3,0,0,0, 1,1,4,0, 2,1,1,1},
+            {1,2,3,4, 0,1,5,6, 0,0,1,7, 0,0,0,1},
+        };
+        memcpy(b,src[variant%3],sizeof src[0]);
         float aug[4][8];
         for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j){aug[i][j]=b[i*4+j];aug[i][4+j]=(i==j)?1.0f:0.0f;}
         float det=1.0f;int sign=1;
@@ -92,6 +98,13 @@ int n3ds_pilot_run(const char *path,const PilotSpec *spec,const FnEntry *table,u
         if(ret!=OUTPUT||guest_read(&m,OUTPUT,out,out_len*sizeof(float))){fail(r,"Unexpected return pointer in test %u",i+1);goto done;}
         for(unsigned j=0;j<out_len;++j)if(!isfinite(out[j])||fabsf(out[j]-want[j])>1e-4f){fail(r,"Test %u element %u: got %.5g expected %.5g",i+1,j,out[j],want[j]);goto done;}
         if(spec->test_case==9){float got_det=0;if(guest_read(&m,DET,&got_det,sizeof got_det)||!isfinite(got_det)||fabsf(got_det-want_det)>1e-4f){fail(r,"Test %u determinant: got %.5g expected %.5g",i+1,got_det,want_det);goto done;}}
+        if(out_len<16){
+            /* The result buffer is 16 floats; a function must not write past
+             * its documented out_len even though the canaries beyond +64 pass. */
+            size_t tail=(16-out_len)*sizeof(float);
+            const uint8_t *p=guest_ptr(&m,OUTPUT+out_len*sizeof(float),tail);
+            for(size_t j=0;j<tail;++j)if(p[j]!=0xcd){fail(r,"Test %u wrote past the %u-float result",i+1,(unsigned)out_len);goto done;}
+        }
         uint8_t canary[16];memset(canary,0xcd,16);
         if(memcmp(guest_ptr(&m,OUTPUT-16,16),canary,16)||memcmp(guest_ptr(&m,OUTPUT+64,16),canary,16)||
            memcmp(guest_ptr(&m,INPUT_A,64),a,64)||memcmp(guest_ptr(&m,INPUT_B,64),b,64)){fail(r,"Unexpected write outside matrix output");goto done;}

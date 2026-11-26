@@ -23,6 +23,27 @@ CANDIDATES = {"D3DXMatrixTranspose": 1, "D3DXMatrixScaling": 2,
 MAX_FUNCTIONS, MAX_INSNS = 32, 2048
 HOTPATCH_JMP = b"\xff\x25"
 HOTPATCH_PAD = b"\xcc" * 5
+MSVC_PROLOGUE = b"\x8b\xff\x55\x8b\xec"
+WRAPPER_TAIL = b"\x6a\x01\xe8"
+
+
+def in_image(image, base, addr, size):
+    """True when [addr, addr+size) is wholly inside the image (no underflow)."""
+    off = addr - base
+    return 0 <= off and size <= len(image) - off
+
+
+def real_prologue(image, base, addr):
+    """A real body starts with the MSVC frame prologue and is not a wrapper.
+
+    The lazy-ILT guard wrapper begins with the same five bytes, so the five
+    byte check alone would accept it; reject the wrapper's push 1 / call tail.
+    """
+    off = addr - base
+    if not in_image(image, base, addr, 8):
+        return False
+    chunk = image[off:off + 8]
+    return chunk[:5] == MSVC_PROLOGUE and chunk[5:8] != WRAPPER_TAIL
 
 
 def u32(image, base, addr):
@@ -43,9 +64,13 @@ def resolve_ilt_thunk(image, base, root):
         root+6   : CC CC CC CC CC      int3 padding
         root+11  : 8B FF 55 8B ...     real function body
         slot     : wrapper (file-initialized value)
-        wrapper  : 8B FF 55 8B EC, push imm8, call <init>
+        wrapper+0x00       : 8B FF 55 8B EC
+        wrapper+0x05       : 6A 01        push 1
+        wrapper+0x07       : E8 rel32      call <one-time initializer>
+        wrapper+0x0C       : 5D            pop ebp
+        wrapper+0x0D..0x12 : FF 25 <slot>   same thunk as the export
         wrapper+0x13..0x17 : int3 padding
-        wrapper+0x18       : FF 25 <slot>   (same thunk as the export)
+        wrapper+0x18       : FF 25 <slot>   (the export entry when root=wrapper+0x18)
         wrapper+0x23       : real body == root+11
 
     Returns a dict describing the chain, or None when the export is already a
@@ -94,28 +119,42 @@ def resolve_ilt_thunk(image, base, root):
                 continue
             src = int.from_bytes(chunk[i + 1:i + 5], "little")
             dst = int.from_bytes(chunk[i + 6:i + 10], "little")
-            if not (0 <= src - base <= len(image) - 4):
+            if not in_image(image, base, src, 4) or not in_image(image, base, dst, 4):
                 continue
-            if not (0 <= dst - base <= len(image) - 4):
+            rep = next((j for j in range(i + 10, min(len(chunk) - 1, i + 48))
+                        if chunk[j] == 0xf3 and chunk[j + 1] == 0xa5), None)
+            if rep is None:
                 continue
-            if not any(chunk[j] == 0xf3 and chunk[j + 1] == 0xa5
-                       for j in range(i + 10, min(len(chunk) - 1, i + 48))):
-                continue
-            if slot < dst or (slot - dst) % 4:
+            # `mov ecx,imm32` before `rep movsd` is the copied dword count.
+            # Without it, use the largest count whose src/dst entries are both
+            # readable, capped at 256 so a bogus pair cannot walk far.
+            count = 0
+            for j in range(i + 10, rep):
+                if chunk[j] == 0xb9:
+                    value = int.from_bytes(chunk[j + 1:j + 5], "little")
+                    if 1 <= value <= 256:
+                        count = value
+                    break
+            if not count:
+                while (count < 256 and in_image(image, base, src + 4 * count, 4)
+                       and in_image(image, base, dst + 4 * count, 4)):
+                    count += 1
+            if count == 0 or slot < dst or (slot - dst) % 4:
                 continue
             idx = (slot - dst) // 4
-            if idx >= 256:
+            if idx >= count or not in_image(image, base, src + 4 * idx, 4):
                 continue
             cand = int.from_bytes(image[src - base + 4 * idx:][:4], "little")
-            if (0 <= cand - base <= len(image) - 4 and
-                    image[cand - base:cand - base + 4] == b"\x8b\xff\x55\x8b"):
-                real = cand
-                break
+            if cand in (root, wrapper) or not real_prologue(image, base, cand):
+                continue
+            real = cand
+            break
     if real is None:
         real = root + 11
-        if image[real - base:real - base + 4] != b"\x8b\xff\x55\x8b":
+        off = real - base
+        if not in_image(image, base, real, 8) or image[off:off + 5] != MSVC_PROLOGUE:
             raise ValueError(f"export {root:#x}: real body lacks MSVC prologue")
-        if image[real - base + 5:real - base + 8] == b"\x6a\x01\xe8":
+        if image[off + 5:off + 8] == WRAPPER_TAIL:
             raise ValueError(f"export {root:#x}: entry+11 is another wrapper and the initializer table did not resolve a body")
     return {"slot": slot, "wrapper": wrapper, "init": init, "real": real}
 
@@ -272,6 +311,11 @@ def prepare(dll, staged, out, requested):
     reasons = {}
     env = dict(os.environ, LIFT_GAME="skyrim", LIFT_FILES="1", LIFT_TSO="0", LIFT_MEMORDER="0",
                LIFT_SPILL="0", LIFT_GLOBALREGS="0")
+    # These two flags are part of the shim contract, not a preference: the
+    # generated host shims read c->r[4]/c->r[0] after SPILL()/RELOAD() around
+    # rt_call.  With global registers or another spill scheme those values can
+    # be stale, so keep both at 0 when changing codegen.
+    assert env["LIFT_SPILL"] == "0" and env["LIFT_GLOBALREGS"] == "0"
     for name in [requested] if requested else CANDIDATES:
         try:
             if name not in exports:
@@ -325,9 +369,12 @@ def prepare(dll, staged, out, requested):
                         slot = u32(image, BASE, a + 2)
                         imp_name = iat.get(slot)
                     fn = f"f_{a:08X}"
-                    if imp_name == "msvcrt.dll!_CIsqrt":
+                    # DLL/name matching is case-insensitive; an ordinal import
+                    # has no name and falls through to the explicit error.
+                    norm = (imp_name or "").lower()
+                    if norm == "msvcrt.dll!_cisqrt":
                         shim_lines.append(f"void {fn}(CPU *c){{ (void)c; ST(0) = sqrt(ST(0)); c->r[4] += 4; }}")
-                    elif imp_name == "msvcrt.dll!_finite":
+                    elif norm == "msvcrt.dll!_finite":
                         shim_lines.append(f"void {fn}(CPU *c){{ double x=0; memcpy(&x, n3ds_guest_ptr(c->r[4] + 4, 8), 8); c->r[0] = isfinite(x) ? 1u : 0u; c->r[4] += 4; }}")
                     else:
                         raise ValueError(f"unsupported host import thunk {a:#x} ({imp_name})")

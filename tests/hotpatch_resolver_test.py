@@ -70,6 +70,22 @@ def expect_reject(label, image, needle):
     raise AssertionError(f"{label}: expected ValueError")
 
 
+def with_table(image, src, dst, count, entries):
+    """Install a `mov esi/src; mov edi/dst; mov ecx/count; rep movsd` initializer."""
+    buf = bytearray(image)
+    pack = (b"\xbe" + struct.pack("<I", src) + b"\xbf" + struct.pack("<I", dst)
+            + b"\xb9" + struct.pack("<I", count) + b"\xf3\xa5")
+    buf[INIT - BASE:INIT - BASE + len(pack)] = pack
+    for i, value in enumerate(entries):
+        w32(buf, src + 4 * i, value)
+    return bytes(buf)
+
+
+def wrapper_body():
+    """entry+11 that is a second guard wrapper, so only the table can resolve."""
+    return PROLOGUE + b"\x6a\x01\xe8\x00\x00\x00\x00\xc3"
+
+
 def main():
     print("hotpatch resolver tests")
     image, wrapper = make_image("jmp")
@@ -95,6 +111,42 @@ def main():
     broken = bytearray(image)
     w32(broken, SLOT, BASE + 0x0A00)  # zero-filled address before the export
     expect_reject("slot target without prologue", bytes(broken), "frame prologue")
+
+    # The one-time initializer's real-body table is authoritative when entry+11
+    # is another wrapper.
+    image, wrapper = make_image("jmp", body=wrapper_body())
+    body = BASE + 0x2600
+    buf = bytearray(image)
+    buf[body - BASE:body - BASE + 6] = PROLOGUE + b"\xc3"
+    expect_ok("initializer real-body table", with_table(bytes(buf), BASE + 0x2400, SLOT, 4, [body]),
+              real=body)
+
+    # A table entry that points at the guard wrapper must not be accepted just
+    # because the wrapper shares the five-byte frame prologue.
+    image, wrapper = make_image("jmp", body=wrapper_body())
+    table = with_table(image, BASE + 0x2400, SLOT, 4, [wrapper])
+    expect_reject("table entry is a wrapper", table, "entry+11 is another wrapper")
+
+    # A later memcpy pattern must be found when the first one is a bogus table.
+    image, wrapper = make_image("jmp", body=wrapper_body())
+    buf = bytearray(image)
+    buf[body - BASE:body - BASE + 6] = PROLOGUE + b"\xc3"
+    first = b"\xbe" + struct.pack("<I", BASE + 0x2700) + b"\xbf" + struct.pack("<I", SLOT) + b"\xf3\xa5"
+    second = (b"\xbe" + struct.pack("<I", BASE + 0x2400) + b"\xbf" + struct.pack("<I", SLOT)
+              + b"\xb9\x01\x00\x00\x00\xf3\xa5")
+    buf[INIT - BASE:INIT - BASE + len(first)] = first
+    buf[INIT - BASE + 0x20:INIT - BASE + 0x20 + len(second)] = second
+    w32(buf, BASE + 0x2700, 0)
+    w32(buf, BASE + 0x2400, body)
+    expect_ok("second memcpy pattern is used", bytes(buf), real=body)
+
+    # The copied dword count bounds the table index even when a readable dword
+    # with a valid prologue sits past it.
+    image, wrapper = make_image("jmp", body=wrapper_body())
+    buf = bytearray(image)
+    buf[body - BASE:body - BASE + 6] = PROLOGUE + b"\xc3"
+    table = with_table(bytes(buf), BASE + 0x2400, SLOT - 12, 1, [0, 0, 0, body])
+    expect_reject("table index beyond copied count", table, "entry+11 is another wrapper")
 
     print("hotpatch resolver: all checks passed")
     return 0

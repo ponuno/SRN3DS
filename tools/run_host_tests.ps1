@@ -255,15 +255,10 @@ Add-Test "registry" $liftCommon @("source/guest.c", "source/win32_registry.c", "
 Add-Test "renderer_requirements" $common @("source/d3d9_renderer_requirements.c", "tests/renderer_requirements_smoke.c") @()
 Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "tests/d3d9_capture_smoke.c") @()
 $irPilotGen = Join-Path $root "pilot_out_mult\D3DXMatrixMultiply\gen"
-if (Test-Path (Join-Path $irPilotGen "pilot_00.c")) {
+if ((Test-Path (Join-Path $irPilotGen "pilot_00.c")) -and (Test-Path (Join-Path $irPilotGen "pilot_table.c"))) {
+    $irPilotSrc = Get-ChildItem -Path $irPilotGen -Filter "pilot_*.c" | ForEach-Object { $_.FullName }
     Add-Test "ir_equiv" ($liftCommon + @("-I`"$irPilotGen`"")) ($legacySources + @(
-        "tests/ir_equiv.c", "tests/ir_aot_fixture.c",
-        (Join-Path $irPilotGen "pilot_00.c"), (Join-Path $irPilotGen "pilot_01.c"),
-        (Join-Path $irPilotGen "pilot_02.c"), (Join-Path $irPilotGen "pilot_03.c"),
-        (Join-Path $irPilotGen "pilot_04.c"), (Join-Path $irPilotGen "pilot_05.c"),
-        (Join-Path $irPilotGen "pilot_06.c"), (Join-Path $irPilotGen "pilot_07.c"),
-        (Join-Path $irPilotGen "pilot_08.c"), (Join-Path $irPilotGen "pilot_shims.c"),
-        (Join-Path $irPilotGen "pilot_table.c"))) @()
+        "tests/ir_equiv.c", "tests/ir_aot_fixture.c") + $irPilotSrc) @()
 } else {
     Write-Log "IR equivalence test SKIPPED (pilot fixture missing)"
 }
@@ -340,9 +335,9 @@ if (Test-Path $TesvExe) {
         $sliceSrc = Get-ChildItem -Path $TesvSliceGen -Filter "tesv_*.c" | ForEach-Object { $_.FullName }
         $sliceFlags = $liftCommon + @("-O0", "-I`"$TesvSliceGen`"")
         $sliceD3dx = @()
-        if ($PilotGen -and (Test-Path (Join-Path $PilotGen "pilot_table.c"))) {
+        if ($PilotGen -and (Test-Path (Join-Path $PilotGen "pilot_00.c")) -and (Test-Path (Join-Path $PilotGen "pilot_table.c"))) {
             $sliceFlags += @("-I`"$PilotGen`"")
-            $sliceD3dx = @((Join-Path $PilotGen "pilot_00.c"), (Join-Path $PilotGen "pilot_01.c"), (Join-Path $PilotGen "pilot_02.c"), (Join-Path $PilotGen "pilot_03.c"), (Join-Path $PilotGen "pilot_04.c"), (Join-Path $PilotGen "pilot_05.c"), (Join-Path $PilotGen "pilot_06.c"), (Join-Path $PilotGen "pilot_07.c"), (Join-Path $PilotGen "pilot_08.c"), (Join-Path $PilotGen "pilot_shims.c"), (Join-Path $PilotGen "pilot_table.c"))
+            $sliceD3dx = Get-ChildItem -Path $PilotGen -Filter "pilot_*.c" | ForEach-Object { $_.FullName }
         } else {
             Write-Log "tesv_slice: no generated D3DX table; hotpatch bodies will fail explicitly"
         }

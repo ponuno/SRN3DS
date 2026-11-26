@@ -269,6 +269,80 @@ int main(void) {
     put32(&memory, hp2_base + 0x800u, hp2_base + 0x520u);
     CHECK(pe_link_resolve(&epsilon, &hp2_link) == hp2_base + 0x520u);
 
+    /* A table entry that points at the guard wrapper must not be accepted just
+     * because the wrapper shares the five-byte MSVC frame prologue. */
+    put32(&memory, hp2_base + 0x800u, hp2_base + 0x4e0u);
+    CHECK(pe_link_resolve(&epsilon, &hp2_link) == hp2_base + 0x500u);
+    put32(&memory, hp2_base + 0x800u, hp2_base + 0x520u);
+
+    /* `mov ecx,1` bounds the copy: an index past it must not read table[3]
+     * even when that dword is a readable function body. */
+    {
+        uint8_t init[17] = {0xbe, 0x00, 0x08, 0x05, 0x00,
+                            0xbf, 0xf4, 0x05, 0x05, 0x00, /* dst = slot - 12 */
+                            0xb9, 0x01, 0x00, 0x00, 0x00, /* mov ecx,1 */
+                            0xf3, 0xa5};
+        CHECK(guest_write(&memory, hp2_base + 0x700u, init, sizeof init) == 0);
+    }
+    put32(&memory, hp2_base + 0x800u, 0);
+    put32(&memory, hp2_base + 0x80cu, hp2_base + 0x520u); /* table[3] */
+    CHECK(pe_link_resolve(&epsilon, &hp2_link) == hp2_base + 0x500u);
+
+    /* The first memcpy pattern may be some other table; keep scanning. */
+    {
+        uint8_t init[128] = {0};
+        uint8_t first[12] = {0xbe, 0x00, 0x09, 0x05, 0x00,
+                             0xbf, 0xfc, 0x05, 0x05, 0x00, 0xf3, 0xa5};
+        uint8_t second[17] = {0xbe, 0x00, 0x08, 0x05, 0x00,
+                              0xbf, 0x00, 0x06, 0x05, 0x00,
+                              0xb9, 0x01, 0x00, 0x00, 0x00, 0xf3, 0xa5};
+        memcpy(init, first, sizeof first);
+        memcpy(init + 0x20, second, sizeof second);
+        CHECK(guest_write(&memory, hp2_base + 0x700u, init, sizeof init) == 0);
+    }
+    put32(&memory, hp2_base + 0x800u, hp2_base + 0x520u);
+    put32(&memory, hp2_base + 0x904u, 0); /* first pattern's table[1] */
+    CHECK(pe_link_resolve(&epsilon, &hp2_link) == hp2_base + 0x520u);
+
+    /* An entry at size-11 has its body one past the image.  A readable prologue
+     * in the next mapped page must not be mistaken for that body. */
+    const uint32_t hp3_base = 0x00090000u;
+    CHECK(guest_map(&memory, hp3_base, 0x1000u) == 0);
+    CHECK(guest_map(&memory, hp3_base + 0x1000u, 0x1000u) == 0);
+    GuestImage hp3 = {.base = hp3_base, .size = 0x1000u,
+                      .export_rva = 0x100u, .export_size = 0x100u};
+    put32(&memory, hp3_base + 0x110u, 1);
+    put32(&memory, hp3_base + 0x114u, 1);
+    put32(&memory, hp3_base + 0x118u, 1);
+    put32(&memory, hp3_base + 0x11cu, 0x140u);
+    put32(&memory, hp3_base + 0x120u, 0x148u);
+    put32(&memory, hp3_base + 0x124u, 0x150u);
+    put32(&memory, hp3_base + 0x140u, 0xff5u);
+    put32(&memory, hp3_base + 0x148u, 0x1a0u);
+    put16(&memory, hp3_base + 0x150u, 0);
+    put_string(&memory, hp3_base + 0x1a0u, "Zeta");
+    {
+        uint8_t entry[11] = {0xff, 0x25, 0x00, 0x06, 0x09, 0x00,
+                             0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
+        CHECK(guest_write(&memory, hp3_base + 0xff5u, entry, sizeof entry) == 0);
+    }
+    put32(&memory, hp3_base + 0x600u, hp3_base + 0x800u);
+    {
+        uint8_t wrapper[19] = {0x8b, 0xff, 0x55, 0x8b, 0xec, 0x6a, 0x01, 0xe8,
+                               0x74, 0xff, 0xff, 0xff, /* call 0x700 */
+                               0x5d, 0xff, 0x25, 0x00, 0x06, 0x09, 0x00};
+        CHECK(guest_write(&memory, hp3_base + 0x800u, wrapper, sizeof wrapper) == 0);
+    }
+    {
+        uint8_t body[6] = {0x8b, 0xff, 0x55, 0x8b, 0xec, 0xc3};
+        CHECK(guest_write(&memory, hp3_base + 0x1000u, body, sizeof body) == 0);
+    }
+    PeModule hp3_module = {"HP3.DLL", &hp3};
+    PeLinker hp3_link = {&memory, &hp3_module, 1, NULL, NULL, NULL, NULL};
+    PeImport zeta = {.dll = "hp3.dll", .name = "Zeta"};
+    CHECK(pe_export_find(&memory, &hp3, "Zeta", 0) == hp3_base + 0xff5u);
+    CHECK(pe_link_resolve(&zeta, &hp3_link) == hp3_base + 0xff5u);
+
     guest_destroy(&memory);
     puts("PE import/export linker tests passed");
     return 0;

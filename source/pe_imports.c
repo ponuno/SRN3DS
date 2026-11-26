@@ -105,42 +105,68 @@ static unsigned lower(unsigned c){return c>='A'&&c<='Z'?c+32:c;}
  * (for example D3DXVec3TransformCoord) put another wrapper there, and the
  * one-time initializer copies the real body pointer from a 74-entry table.
  * Resolve that table when present, then fall back to entry+11 only when it is
- * a real function prologue and not another wrapper.  Every byte is validated;
- * otherwise the caller keeps the raw export address. */
+ * a real function body and not another wrapper.  Every byte read is bounded by
+ * in_image(); otherwise the caller keeps the raw export address. */
 static uint32_t le32(const uint8_t *p){
     return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
 }
-/* Find the `mov esi,src; mov edi/ebx,dst; ... rep movsd` table copy in the
- * one-time initializer.  The immediates are relocated guest addresses. */
-static int init_table(GuestMemory *m,const GuestImage *im,uint32_t init,uint32_t *src,uint32_t *dst){
+/* True when [addr, addr+n) is inside the image.  Compare in 64-bit so a tiny
+ * image cannot underflow im->size-n and accept a read past the image. */
+static int in_image(const GuestImage *im,uint32_t addr,uint32_t n){
+    return addr>=im->base && (uint64_t)addr+(uint64_t)n<=(uint64_t)im->base+(uint64_t)im->size;
+}
+/* addr+4*index without wrapping guest arithmetic. */
+static int in_image4(const GuestImage *im,uint32_t addr,uint32_t index){
+    uint64_t a=(uint64_t)addr+4ull*index;
+    return a<=UINT32_MAX && in_image(im,(uint32_t)a,4);
+}
+/* A real MSVC frame body starts 8B FF 55 8B EC.  The lazy-ILT guard wrapper
+ * starts with the same five bytes, so require the full prologue and reject the
+ * wrapper's `push 1; call` tail before accepting a candidate. */
+static int real_prologue(GuestMemory *m,const GuestImage *im,uint32_t addr){
+    uint8_t b[8];
+    if(!in_image(im,addr,sizeof b)||guest_read(m,addr,b,sizeof b))return 0;
+    if(!(b[0]==0x8b&&b[1]==0xff&&b[2]==0x55&&b[3]==0x8b&&b[4]==0xec))return 0;
+    return !(b[5]==0x6a&&b[6]==0x01&&b[7]==0xe8);
+}
+typedef struct {uint32_t src,dst,count;} InitTable;
+/* Find the `want`-th `mov esi,src; mov edi/ebx,dst; ... rep movsd` table copy
+ * in the one-time initializer.  The immediates are relocated guest addresses.
+ * The copied dword count comes from a preceding `mov ecx,imm32`; without one,
+ * use the largest count whose src and dst entries are both readable, capped at
+ * 256.  Callers iterate the patterns because the first memcpy is not always the
+ * real-body table. */
+static int init_table_at(GuestMemory *m,const GuestImage *im,uint32_t init,unsigned want,InitTable *t){
     uint8_t b[128];
-    if(init<im->base||init-im->base>im->size-sizeof b)return 0;
-    if(guest_read(m,init,b,sizeof b))return 0;
-    for(unsigned i=0;i+10<sizeof b;++i){
-        if(b[i]!=0xbe)continue;
-        if(b[i+5]!=0xbf&&b[i+5]!=0xbb)continue;
+    if(!in_image(im,init,sizeof b)||guest_read(m,init,b,sizeof b))return 0;
+    for(unsigned i=0,seen=0;i+10<sizeof b;++i){
+        if(b[i]!=0xbe||(b[i+5]!=0xbf&&b[i+5]!=0xbb))continue;
         uint32_t s=le32(b+i+1),d=le32(b+i+6);
-        if(s<im->base||s-im->base>im->size-4)continue;
-        if(d<im->base||d-im->base>im->size-4)continue;
-        int rep=0;
+        if(!in_image(im,s,4)||!in_image(im,d,4))continue;
+        int rep=-1;
         for(unsigned j=i+10;j+1<sizeof b&&j<i+48;++j)
-            if(b[j]==0xf3&&b[j+1]==0xa5){rep=1;break;}
-        if(!rep)continue;
-        *src=s;*dst=d;return 1;
+            if(b[j]==0xf3&&b[j+1]==0xa5){rep=(int)j;break;}
+        if(rep<0)continue;
+        uint32_t count=0;
+        for(unsigned j=i+10;j<(unsigned)rep;++j)
+            if(b[j]==0xb9){uint32_t c=le32(b+j+1);if(c>=1&&c<=256)count=c;break;}
+        if(!count)while(count<256&&in_image4(im,s,count)&&in_image4(im,d,count))++count;
+        if(!count||seen++!=want)continue;
+        t->src=s;t->dst=d;t->count=count;return 1;
     }
     return 0;
 }
 static uint32_t hotpatch_body(GuestMemory *m,const GuestImage *im,uint32_t entry){
-    if(!m||!im||entry<im->base||entry-im->base>im->size-11)return 0;
+    if(!m||!im||!in_image(im,entry,11))return 0;
     uint8_t e[11];
     if(guest_read(m,entry,e,sizeof e))return 0;
     if(e[0]!=0xff||e[1]!=0x25)return 0;
     for(unsigned i=6;i<11;++i)if(e[i]!=0xcc)return 0;
-    uint32_t slot=(uint32_t)e[2]|((uint32_t)e[3]<<8)|((uint32_t)e[4]<<16)|((uint32_t)e[5]<<24);
-    if(slot<im->base||slot-im->base>im->size-4)return 0;
+    uint32_t slot=le32(e+2);
+    if(!in_image(im,slot,4))return 0;
     uint32_t wrapper;
     if(guest_read32(m,slot,&wrapper))return 0;
-    if(wrapper<im->base||wrapper>=entry||wrapper-im->base>im->size-19)return 0;
+    if(wrapper>=entry||!in_image(im,wrapper,19))return 0;
     uint8_t w[19];
     if(guest_read(m,wrapper,w,sizeof w))return 0;
     /* 8B FF 55 8B EC | 6A 01 | E8 rel32 | 5D | FF 25 <same slot> */
@@ -148,28 +174,23 @@ static uint32_t hotpatch_body(GuestMemory *m,const GuestImage *im,uint32_t entry
     if(w[5]!=0x6a||w[6]!=0x01||w[7]!=0xe8||w[12]!=0x5d||w[13]!=0xff||w[14]!=0x25)return 0;
     uint32_t rel=(uint32_t)w[8]|((uint32_t)w[9]<<8)|((uint32_t)w[10]<<16)|((uint32_t)w[11]<<24);
     uint32_t init=(uint32_t)(wrapper+12+rel);
-    if(init<im->base||init-im->base>=im->size)return 0;
+    if(!in_image(im,init,1))return 0;
     uint32_t wslot=le32(w+15);
     if(wslot!=slot)return 0;
-    uint32_t src=0,dst=0,real=0;
-    if(init_table(m,im,init,&src,&dst)&&slot>=dst&&((slot-dst)&3u)==0){
-        uint32_t idx=(slot-dst)/4u;
-        uint32_t cand=0;
-        if(idx<256&&!guest_read32(m,src+4u*idx,&cand)&&
-           cand>=im->base&&cand-im->base<=im->size-4){
-            uint8_t cb[4];
-            if(!guest_read(m,cand,cb,sizeof cb)&&
-               cb[0]==0x8b&&cb[1]==0xff&&cb[2]==0x55&&cb[3]==0x8b)
-                real=cand;
-        }
+    InitTable t;
+    for(unsigned n=0;init_table_at(m,im,init,n,&t);++n){
+        if(slot<t.dst||((slot-t.dst)&3u))continue;
+        uint32_t idx=(slot-t.dst)/4u;
+        if(idx>=t.count||!in_image4(im,t.src,idx))continue;
+        uint32_t cand;
+        if(guest_read32(m,(uint32_t)((uint64_t)t.src+4ull*idx),&cand))continue;
+        if(cand==entry||cand==wrapper)continue;
+        if(real_prologue(m,im,cand))return cand;
     }
-    if(real)return real;
-    uint32_t body=entry+11;
-    uint8_t b[8];
-    if(guest_read(m,body,b,sizeof b))return 0;
-    /* Accept entry+11 only when it is a real body, not another wrapper. */
-    if(!(b[0]==0x8b&&b[1]==0xff&&b[2]==0x55&&b[3]==0x8b&&b[4]==0xec))return 0;
-    if(b[5]==0x6a&&b[6]==0x01&&b[7]==0xe8)return 0;
+    uint64_t body64=(uint64_t)entry+11u;
+    if(body64>UINT32_MAX)return 0;
+    uint32_t body=(uint32_t)body64;
+    if(!real_prologue(m,im,body))return 0;
     return body;
 }
 static int same_dll(const char *a,const char *b){
