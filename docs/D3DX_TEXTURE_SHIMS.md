@@ -113,9 +113,9 @@ chain. `d3d9_com` exposes object kind `CUBE` /
 `GetLevelCount`, `GetLevelDesc`, `GetCubeMapSurface`, `LockRect`/`UnlockRect`
 and `AddDirtyRect`. `GetCubeMapSurface` returns a surface view into one
 face/level; compressed views use block-aligned LockRect geometry. `SetTexture`
-accepts a cube and `GetTexture` returns it. The cube's CPU faces are real; a
-draw with a cube bound fails with `D3DERR_NOTAVAILABLE` and
-`"cube-map sampling is not implemented"` rather than silently sampling face 0.
+accepts a cube and `GetTexture` returns it. The cube's CPU faces are real. A
+cube-bound draw uses the optional backend `draw_cube` callback (see below); a
+backend without it refuses by name and never substitutes face 0.
 
 Cube creation requires the backend `texture_create_cube/upload_cube` callbacks.
 The null backend advertises them and counts every face/level upload; the PICA
@@ -128,8 +128,38 @@ payload. Missing bits, non-square edges, truncation and non-cube DDS return
 `D3DXERR_INVALIDDATA`. A cube DDS passed to the 2D loaders still returns
 `E_NOTIMPL`.
 
-Remaining in the cube layer: cube-map sampling/PICA cube faces are not
+Remaining in the cube layer: PICA cube faces/native sampling are not
 implemented.
+
+### Cube sampling in a draw
+
+`D9Backend` has one append-only callback after the volume callbacks:
+
+```c
+int (*draw_cube)(void *ctx, const D9ColorVertex *vertices, size_t count,
+                 const unsigned *faces, const D9Matrix *clip,
+                 const D9CubeView *cube, const D9DrawState *state);
+```
+
+The core selects one D3D cube face per vertex before the callback:
+
+* `D3DCUBEMAP_FACES` order `+X,-X,+Y,-Y,+Z,-Z` (indices 0..5).
+* With a NORMAL element, the object normal is transformed by the world normal
+  matrix and the largest absolute component selects the face.
+* Without a usable normal, the documented 2D-emulation direction is
+  `(u-0.5, v-0.5, 0)`; UV centre therefore selects `+Z`. A zero normal also
+  takes this fallback.
+* Only stage 0, one active colour stage, no pixel shader and no CPU T&L
+  lighting are accepted; each other combination is a named refusal.
+
+The null backend really samples the core's six CPU face stores and records the
+selected face plus the sampled ARGB texel. It point-samples level 0 with
+`D3DTADDRESS_WRAP/MIRROR/CLAMP` and supports A8R8G8B8, X8R8G8B8 and
+DXT1/DXT3/DXT5. PICA leaves `draw_cube` NULL, so a cube-bound draw returns
+`D3DERR_NOTAVAILABLE` with `"requires a backend draw_cube callback"`. The FVF
+NORMAL gate remains owned by the test-only T&L prototype; cube tests use an
+explicit vertex declaration carrying NORMAL, so DevCaps and T&L behavior are
+unchanged.
 
 ## Volume textures
 
@@ -187,8 +217,8 @@ are detached from the core slot to avoid a double free.
   loader returns `E_NOTIMPL` and never creates a 2D texture.
 * `D3DXCreateCubeTextureFromFileInMemory` on a volume DDS - `E_NOTIMPL`; the
   dedicated volume loader is named in the diagnostic.
-* Cube/volume sampling in a draw - `D3DERR_NOTAVAILABLE` with the exact
-  `"cube-map sampling"` / `"volume sampling"` reason.
+* Cube sampling on a backend without `draw_cube` (PICA) - `D3DERR_NOTAVAILABLE`;
+  volume sampling in any draw is still a named refusal.
 
 `cube` DDS passed to `D3DXCreateVolumeTextureFromFileInMemory` is rejected as
 `D3DXERR_INVALIDDATA`; a volume DDS passed to the cube loader returns
@@ -206,14 +236,15 @@ are detached from the core slot to avoid a double free.
   `0x200` are accepted by the existing bridge and stored in the texture object.
   For cube maps it exposes `d9_com_host_create_cube_texture` and
   `d9_com_host_upload_cube_face_level`, backed by the core six-face store.
-* `source/d3d9_core.c` owns `CubeTexture` (six faces, shared mips,
-  `cube_used` budget accounting) and only creates one when the backend
-  advertises `texture_create_cube/upload_cube`.
-* `source/d3d9_null.c` provides those callbacks and counts face uploads;
-  `source/d3d9_citro3d.c` leaves them NULL, which is the PICA refusal path.
+* `source/d3d9_core.c` owns `CubeTexture` (six faces, shared mips, unified
+  `D9TexCache` accounting) and only creates one when the backend advertises
+  `texture_create_cube/upload_cube`; a cube draw additionally needs `draw_cube`.
+* `source/d3d9_null.c` provides those callbacks, counts face uploads and
+  point-samples the six CPU faces (`draw_cube`); `source/d3d9_citro3d.c` leaves
+  them NULL, which is the PICA refusal path.
 * `source/d3d9_bc.c` already provides `d9_bc_decode_block`; the shim uses it and
   converts RGBA to `A8R8G8B8` byte order (B,G,R,A) per level.
-* Thunk windows stay disjoint: texture `0xfd000000..0xfd000014`, surface
+* Thunk windows stay disjoint: texture `0xfd000000..0xfd000024`, surface
   `0xfd010000..0xfd010008`, D3D9 bridge `0xfe000000`, win32 `0xff000000`.
 
 ## Regression test

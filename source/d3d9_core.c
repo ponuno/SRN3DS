@@ -87,6 +87,7 @@ struct D9Device {
     D9Handle texture1,cube_texture,cube_texture1,volume_texture,volume_texture1;
     D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
     D9ColorVertex color_scratch[MAX_DRAW_VERTICES];unsigned color_scratch_count;
+    unsigned cube_faces[MAX_DRAW_VERTICES]; /* per-output-vertex D3D cube face */
     unsigned view_w,view_h;
     char diagnosis[224];
 };
@@ -1573,15 +1574,86 @@ static int stage_uses_diffuse(const D9DrawState *s){
     return s->stage_colorarg1==D9_TA_DIFFUSE||s->stage_colorarg1==D9_TA_CURRENT||
            s->stage_colorarg2==D9_TA_DIFFUSE||s->stage_colorarg2==D9_TA_CURRENT;
 }
+/* D3D cube faces are selected by the major axis of the sampling direction.  A
+ * NORMAL element is transformed by the world normal matrix; without one the
+ * documented 2D-emulation direction is (u-0.5, v-0.5, 0), with +Z at UV centre.
+ * Returns 0 and writes face 0..5, or -1 when a non-zero normal exists but the
+ * world matrix is singular. */
+static int cube_face_from_direction(float x,float y,float z,unsigned *face){
+    float ax=fabsf(x),ay=fabsf(y),az=fabsf(z);
+    if(ax==0.0f&&ay==0.0f&&az==0.0f){*face=D9_CUBE_FACE_POSITIVE_Z;return 0;}
+    if(ax>=ay&&ax>=az)*face=x>=0.0f?D9_CUBE_FACE_POSITIVE_X:D9_CUBE_FACE_NEGATIVE_X;
+    else if(ay>=az)*face=y>=0.0f?D9_CUBE_FACE_POSITIVE_Y:D9_CUBE_FACE_NEGATIVE_Y;
+    else *face=z>=0.0f?D9_CUBE_FACE_POSITIVE_Z:D9_CUBE_FACE_NEGATIVE_Z;
+    return 0;
+}
+static int cube_select_face(const float normal[3],int has_normal,
+                            int normal_matrix_ok,const float nm[3][3],
+                            const D9Vertex *v,unsigned *face){
+    if(has_normal){
+        float len2=normal[0]*normal[0]+normal[1]*normal[1]+normal[2]*normal[2];
+        if(len2>1e-20f){
+            if(!normal_matrix_ok)return -1;
+            float n[3];
+            for(unsigned j=0;j<3;++j)
+                n[j]=normal[0]*nm[0][j]+normal[1]*nm[1][j]+normal[2]*nm[2][j];
+            float n2=n[0]*n[0]+n[1]*n[1]+n[2]*n[2];
+            if(n2>1e-20f){float inv=1.0f/sqrtf(n2);
+                return cube_face_from_direction(n[0]*inv,n[1]*inv,n[2]*inv,face);}
+        }
+    }
+    return cube_face_from_direction(v->u-0.5f,v->v-0.5f,0.0f,face);
+}
+static void fill_cube_view(D9CubeView *view,const CubeTexture *c){
+    memset(view,0,sizeof *view);
+    view->native=c->native;view->edge=c->edge;view->levels=c->levels;
+    view->format=c->format;view->pixels=c->pixels;view->face_bytes=c->face_bytes;
+    for(unsigned i=0;i<c->levels&&i<D9_CUBE_MAX_LEVELS;++i){
+        view->level_edge[i]=c->level[i].w;
+        view->level_pitch[i]=c->level[i].pitch;
+        view->level_bytes[i]=c->level[i].bytes;
+    }
+}
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
-    if(d->cube_texture||d->cube_texture1){
-        set_diagnosis(d,"cube-map sampling is not implemented; bind a 2D texture for this draw");
+    CubeTexture *ct=NULL;int cube_mode=0;
+    if(d->cube_texture1){
+        set_diagnosis(d,"cube-map sampling on texture stage 1 is not implemented; bind the cube to stage 0");
         return D9_UNSUPPORTED;
     }
     if(d->volume_texture||d->volume_texture1){
         set_diagnosis(d,"volume sampling is not implemented; bind a 2D texture for this draw");
         return D9_UNSUPPORTED;
+    }
+    if(d->cube_texture){
+        ct=cube_texture(d,d->cube_texture);
+        if(!ct||ct->cpu_only||!ct->native||!ct->pixels||
+           ct->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u)){
+            set_diagnosis(d,"cube-map draw requires a complete six-face cube texture");
+            return D9_INVALID;
+        }
+        if(!d->ops.draw_cube){
+            set_diagnosis(d,"cube-map sampling requires a backend draw_cube callback; "
+                            "this backend cannot sample cube maps");
+            return D9_UNSUPPORTED;
+        }
+        if(d->pixel_shader){
+            set_diagnosis(d,"cube-map sampling with a pixel shader is not implemented");
+            return D9_UNSUPPORTED;
+        }
+        if(d->texture1||d->second.stage_colorop!=D9_TOP_DISABLE){
+            set_diagnosis(d,"cube-map sampling supports only texture stage 0");
+            return D9_UNSUPPORTED;
+        }
+        if(d->state.stage_colorop==D9_TOP_DISABLE){
+            set_diagnosis(d,"cube-map sampling requires an active stage-0 colour operation");
+            return D9_UNSUPPORTED;
+        }
+        if(d->tnl_proto&&d->tnl.lighting&&!(d->decl_active&&d->declaration.position_t)){
+            set_diagnosis(d,"cube-map sampling with CPU T&L lighting is not implemented");
+            return D9_UNSUPPORTED;
+        }
+        cube_mode=1;
     }
     if(up&&(!up->vertices||!up->stride||(up->indices&&up->index_size!=2&&up->index_size!=4)))return D9_INVALID;
     const uint8_t *ixdata=NULL;size_t ixbytes=0;unsigned step=2;
@@ -1622,6 +1694,9 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     }
     /* Repeated indexed vertices often share UV/position. Cache decoded values per draw only. */
     struct Cached {uint64_t index;D9Vertex vertex;D9ColorVertex color;float normal[3];int valid;} cache[64]={0};
+    int cube_has_normal=cube_mode&&d->decl_active&&d->declaration.normal!=UINT32_MAX;
+    float cube_nm[3][3];int cube_nm_ok=0;
+    if(cube_has_normal)cube_nm_ok=!tnl_normal_matrix(&d->transforms[D9_WORLD],cube_nm);
     size_t n=(size_t)primitives*3,in=type==D9_TRIANGLELIST?n:(size_t)primitives+2;
     if(indexed&&!(up&&up->indices)&&((size_t)start>ixbytes/step||in>ixbytes/step-(size_t)start))return D9_INVALID;
     for(size_t i=0;i<n;++i){size_t rel=triangle_index(type,i);int64_t index=(int64_t)start+(int64_t)rel;
@@ -1645,6 +1720,16 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
             }
             entry->index=(uint64_t)index;entry->valid=1;}
         d->scratch[i]=entry->vertex;d->color_scratch[i]=entry->color;
+        if(cube_mode){
+            unsigned face=0;
+            if(cube_select_face(entry->normal,cube_has_normal,cube_nm_ok,cube_nm,
+                                &entry->vertex,&face)){
+                set_diagnosis(d,"cube sampling: the world matrix is singular and the "
+                                "normal cannot be transformed");
+                return D9_INVALID;
+            }
+            d->cube_faces[i]=face;
+        }
     }
     d->scratch_count=(unsigned)n;d->color_scratch_count=(unsigned)n;
     D9Matrix clip;
@@ -1658,6 +1743,16 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     }else if(d->shader_active)clip=d->shader_clip;
     else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
     D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
+    if(cube_mode){
+        D9CubeView view;fill_cube_view(&view,ct);
+        state.resident_mips=1;
+        if(d->ops.draw_cube(d->ctx,d->color_scratch,n,d->cube_faces,&clip,&view,&state)){
+            set_diagnosis(d,"cube-map draw rejected by the backend");
+            return D9_BACKEND;
+        }
+        set_diagnosis(d,"");
+        return D9_OK;
+    }
     int has_color=lit||(d->decl_active&&d->declaration.color!=UINT32_MAX);
     /* Menu TEV plans can need a second texture unit, color0 and an external
      * constant bank.  Route those before the fixed-function two-stage path. */

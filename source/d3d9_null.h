@@ -42,6 +42,13 @@ typedef struct {
      * these counters prove the null backend accepted every face/level. */
     unsigned cube_creates,cube_uploads;
     unsigned volume_creates,volume_uploads;
+    /* Cube sampling: the last draw's selected faces and sampled ARGB texels.
+     * cube_face_counts accumulates every sampled vertex by face. */
+    unsigned cube_draws,cube_vertices;
+    unsigned cube_face_counts[6];
+    unsigned last_cube_count;
+    unsigned last_cube_faces[3];
+    uint32_t last_cube_samples[3];
 } D9NullStats;
 
 const D9Backend *d9_null_backend(void);

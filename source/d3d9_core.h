@@ -103,6 +103,23 @@ typedef struct {
     unsigned x,y,width,height; /* non-empty, already clipped/validated by core */
 } D9BlitRegion;
 
+/* Read-only cube-map view passed to an optional draw_cube backend callback.
+ * The core owns all six face stores and their mip chain.  Face order is the
+ * D3DCUBEMAP_FACES order: +X,-X,+Y,-Y,+Z,-Z.  pixels is face-major. */
+enum {D9_CUBE_MAX_LEVELS=11};
+enum {D9_CUBE_FACE_POSITIVE_X=0,D9_CUBE_FACE_NEGATIVE_X=1,
+      D9_CUBE_FACE_POSITIVE_Y=2,D9_CUBE_FACE_NEGATIVE_Y=3,
+      D9_CUBE_FACE_POSITIVE_Z=4,D9_CUBE_FACE_NEGATIVE_Z=5};
+typedef struct {
+    void *native;
+    unsigned edge,levels,format;
+    const uint8_t *pixels; /* six faces, face-major */
+    size_t face_bytes;
+    unsigned level_edge[D9_CUBE_MAX_LEVELS];
+    size_t level_pitch[D9_CUBE_MAX_LEVELS];
+    size_t level_bytes[D9_CUBE_MAX_LEVELS];
+} D9CubeView;
+
 /* Result of a backend target_blit() call.  Negative values are rejections and
  * must not leave a partially written destination. */
 enum {
@@ -214,6 +231,16 @@ typedef struct {
                                  unsigned levels,void **native);
     int (*texture_upload_volume)(void *ctx,void *native,unsigned level,
                                  const void *data,size_t bytes);
+    /* Optional cube-map draw.  Appended after the volume callbacks.  The core
+     * has already selected one face per vertex: object normals are transformed
+     * by the world normal matrix and the major axis picks the D3D cube face;
+     * without a NORMAL element the direction (u-0.5, v-0.5, 0) is used instead.
+     * faces[i] is 0..5 in +X,-X,+Y,-Y,+Z,-Z order.  NULL means this backend
+     * cannot sample cube maps, so a cube-bound draw is refused by name and
+     * never substitutes face 0. */
+    int (*draw_cube)(void *ctx,const D9ColorVertex *vertices,size_t count,
+                     const unsigned *faces,const D9Matrix *clip,
+                     const D9CubeView *cube,const D9DrawState *state);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);

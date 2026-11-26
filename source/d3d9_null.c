@@ -1,4 +1,5 @@
 #include "d3d9_null.h"
+#include "d3d9_bc.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,6 +144,70 @@ static int null_draw_colored(void *ctx,const D9ColorVertex *v,size_t n,
     s->last_color_count=n<3?n:3;
     memcpy(s->last_color_vertices,v,s->last_color_count*sizeof *v);
     s->last_color_state=*st;
+    return 0;
+}
+/* Cube sampling for the null backend: point-sample level 0 from the core's
+ * CPU face store.  Address modes follow D3DTADDRESS_WRAP/MIRROR/CLAMP. */
+static int cube_coord(int c,unsigned edge,unsigned address){
+    if(address==1)return c&(int)(edge-1u); /* WRAP; edge is a power of two */
+    if(address==3)return c<0?0:c>=(int)edge?(int)edge-1:c; /* CLAMP */
+    int period=(int)edge*2;c%=period;if(c<0)c+=period; /* MIRROR */
+    return c>=(int)edge?period-1-c:c;
+}
+static int null_cube_texel(const D9CubeView *cube,unsigned face,float u,float v,
+                           unsigned address_u,unsigned address_v,uint32_t *out){
+    if(!cube||!cube->pixels||face>=6u||!cube->edge||!cube->levels||!out)return -1;
+    int x=cube_coord((int)floorf(u*(float)cube->edge),(unsigned)cube->edge,address_u);
+    int y=cube_coord((int)floorf(v*(float)cube->edge),(unsigned)cube->edge,address_v);
+    const uint8_t *base=cube->pixels+(size_t)face*cube->face_bytes;
+    if(cube->format==D9_A8R8G8B8||cube->format==D9_X8R8G8B8){
+        const uint8_t *p=base+(size_t)y*cube->level_pitch[0]+(size_t)x*4u;
+        *out=(uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|
+             ((uint32_t)(cube->format==D9_X8R8G8B8?255u:p[3])<<24);
+        return 0;
+    }
+    unsigned block=cube->format==D9_DXT1?8u:
+                   (cube->format==D9_DXT3||cube->format==D9_DXT5)?16u:0u;
+    if(!block)return -1;
+    const uint8_t *bp=base+(size_t)(y/4)*cube->level_pitch[0]+(size_t)(x/4)*block;
+    uint8_t rgba[64];
+    if(d9_bc_decode_block(cube->format,bp,block,rgba))return -1;
+    *out=(uint32_t)rgba[0]|((uint32_t)rgba[1]<<8)|((uint32_t)rgba[2]<<16)|
+         ((uint32_t)rgba[3]<<24);
+    return 0;
+}
+static int null_draw_cube(void *ctx,const D9ColorVertex *v,size_t n,
+                          const unsigned *faces,const D9Matrix *clip,
+                          const D9CubeView *cube,const D9DrawState *st){
+    D9NullStats *s=stats(ctx);
+    if(!s->scene){null_log("DrawPrimitive","no scene is active");return -1;}
+    if(!v||!n||n%3||!faces||!cube||!clip||!st){
+        null_log("DrawPrimitive","cube draw is missing vertices, faces, view, clip or state");return -1;
+    }
+    if(!cube->pixels||cube->levels<1||cube->edge<8||cube->edge>1024){
+        null_log("DrawPrimitive","cube view has no CPU pixels or an invalid edge");return -1;
+    }
+    if(cube->format!=D9_A8R8G8B8&&cube->format!=D9_X8R8G8B8&&
+       cube->format!=D9_DXT1&&cube->format!=D9_DXT3&&cube->format!=D9_DXT5){
+        null_log("DrawPrimitive","null cube sampling supports A8/X8/DXT1/3/5 level 0");return -1;
+    }
+    uint32_t samples[3]={0};unsigned last_faces[3]={0};
+    for(size_t i=0;i<n;++i){
+        if(faces[i]>=6u){null_log("DrawPrimitive","cube face index is outside 0..5");return -1;}
+        uint32_t texel=0;
+        if(null_cube_texel(cube,faces[i],v[i].u,v[i].v,st->address_u,st->address_v,&texel)){
+            null_log("DrawPrimitive","cube face/texel sample failed");return -1;
+        }
+        if(i<3){samples[i]=texel;last_faces[i]=faces[i];}
+    }
+    if(null_draw_colored(ctx,v,n,clip,NULL,st))return -1;
+    ++s->cube_draws;s->cube_vertices+=n;
+    s->last_cube_count=n<3?n:3;
+    for(unsigned i=0;i<s->last_cube_count;++i){
+        s->last_cube_faces[i]=last_faces[i];
+        s->last_cube_samples[i]=samples[i];
+    }
+    for(size_t i=0;i<n;++i)++s->cube_face_counts[faces[i]];
     return 0;
 }
 static int null_draw(void *ctx,const D9Vertex *vertices,size_t count,const D9Matrix *pica_clip,void *texture,const D9DrawState *st){
@@ -373,7 +438,7 @@ static const D9Backend backend={null_texture_create,null_texture_upload,null_tex
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
     null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
     null_cube_create,null_cube_upload,null_target_viewport_scaled,
-    null_volume_create,null_volume_upload};
+    null_volume_create,null_volume_upload,null_draw_cube};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}
