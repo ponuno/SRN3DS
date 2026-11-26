@@ -1331,6 +1331,10 @@ static int path_for(const char *name,char *out,size_t cap) {
     return rc;
 }
 static FILE *file_for(uint32_t h){return h>=0x100 && h<0x100+MAX_FILES?files[h-0x100]:NULL;}
+int win32_guest_path(const char *guest_name,char *out,size_t capacity){
+    if(!mem||!root[0]||!cwd[0]||!guest_name||!out||capacity<2u)return -1;
+    return path_for(guest_name,out,capacity);
+}
 static FindState *find_for(uint32_t h){
     uint32_t i=h-FIND_HANDLE_BASE;
     return h>=FIND_HANDLE_BASE && h<FIND_HANDLE_BASE+MAX_FINDS && finds[i].used?&finds[i]:NULL;

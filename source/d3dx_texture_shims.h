@@ -9,10 +9,12 @@
  *   D3DXGetImageInfoFromFileInMemory      DDS header -> D3DXIMAGE_INFO
  *   D3DXCreateTextureFromFileInMemory     DDS -> IDirect3DTexture9 via the
  *                                        existing d3d9_com/d3d9_core path
+ *   D3DXGetImageInfoFromFileA            sandboxed file read -> same parser
+ *   D3DXCreateTextureFromFileExA         file-derived subset only; the real
+ *                                        ABI has 14 args (pPalette at A(12))
+ *                                        and a `ret 0x38` epilogue
  *
  * Named unsupported (never a fake success):
- *   D3DXGetImageInfoFromFileA
- *   D3DXCreateTextureFromFileExA
  *   D3DXCreateCubeTextureFromFileInMemory
  *   D3DXCreateVolumeTextureFromFileInMemory
  */
@@ -31,7 +33,8 @@ extern "C" {
 
 /* Make d3dx9_42.dll imports resolve to host thunks.  Must be called before
  * n3ds_boot_prepare(); safe to call after d9_com_init() (the resolvers chain).
- * Returns 0 on success. */
+ * The file-path exports additionally require win32_init() to have configured
+ * the sandbox root before they are called.  Returns 0 on success. */
 int d3dx_texture_shims_install(GuestMemory *memory);
 /* Drop the guest-memory binding; the resolver becomes inert.  The resolver
  * slot itself is released by win32_shutdown(). */

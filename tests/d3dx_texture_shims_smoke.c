@@ -6,9 +6,12 @@
  *   2. D3DXGetImageInfoFromFileInMemory parses a synthetic DDS from guest
  *      memory and fills all seven D3DXIMAGE_INFO fields;
  *   3. D3DXCreateTextureFromFileInMemory creates a real IDirect3DTexture9
- *      through the d3d9_com/d3d9_core path and LockRect shows the file pixels.
- * Cube/volume creation, file-path exports and non-DDS input must fail with a
- * named HRESULT, never S_OK.
+ *      through the d3d9_com/d3d9_core path and LockRect shows the file pixels;
+ *   4. D3DXGetImageInfoFromFileA and D3DXCreateTextureFromFileExA read a
+ *      synthetic file from the win32 sandbox root, reject paths outside it,
+ *      and reject the unsupported Ex resize/format parameters by name.
+ * Cube/volume creation and non-DDS input must fail with a named HRESULT,
+ * never S_OK.
  */
 #include "d3d9_com.h"
 #include "d3d9_null.h"
@@ -17,8 +20,26 @@
 #include "win32_shims.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#include <process.h>
+#define TEST_MKDIR(p) _mkdir(p)
+#define TEST_UNLINK(p) _unlink(p)
+#define TEST_RMDIR(p) _rmdir(p)
+#define TEST_PID() _getpid()
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#define TEST_MKDIR(p) mkdir(p,0700)
+#define TEST_UNLINK(p) unlink(p)
+#define TEST_RMDIR(p) rmdir(p)
+#define TEST_PID() getpid()
+#endif
 
 #define SCRATCH 0x10010000u
 #define PP (SCRATCH+0x200)
@@ -115,13 +136,60 @@ static uint32_t shim_call(Harness *h,const char *name,const uint32_t *args,unsig
     uint32_t r=0;assert(!invoke(h,fn,args,n,&r));return r;
 }
 
+/* Synthetic files live outside the repository and are removed at the end. */
+static char sandbox[512];
+static uint8_t menu_dds[4096];
+static size_t menu_dds_size;
+static int sandbox_path(char *out,size_t cap,const char *name){
+    return snprintf(out,cap,"%s/%s",sandbox,name)<(int)cap?0:-1;
+}
+static int sandbox_write(const char *name,const void *data,size_t bytes){
+    char path[640];if(sandbox_path(path,sizeof path,name))return -1;
+    FILE *f=fopen(path,"wb");if(!f)return -1;
+    int ok=fwrite(data,1,bytes,f)==bytes;
+    if(fclose(f))ok=0;return ok?0:-1;
+}
+static int sandbox_write_oversize(const char *name){
+    char path[640];if(sandbox_path(path,sizeof path,name))return -1;
+    FILE *f=fopen(path,"wb");if(!f)return -1;
+    int ok=fseek(f,(long)(64u<<20),SEEK_SET)==0;
+    if(ok)ok=fputc(0,f)!=EOF;
+    if(fclose(f))ok=0;return ok?0:-1;
+}
+static void sandbox_remove(void){
+    static const char *const files[]={"menu.dds","bad.dds","cube.dds","volume.dds","huge.dds"};
+    for(unsigned i=0;i<sizeof files/sizeof files[0];++i){
+        char path[640];if(!sandbox_path(path,sizeof path,files[i]))TEST_UNLINK(path);
+    }
+    TEST_RMDIR(sandbox);
+}
+static void set_guest_path(Harness *h,const char *path){
+    assert(strlen(path)<260);
+    assert(!guest_write(&h->memory,DATA,path,strlen(path)+1));
+}
+
 int main(void){
     Harness h;memset(&h,0,sizeof h);
     guest_init(&h.memory,2u<<20);
     assert(!guest_map(&h.memory,0x10000000,0x4000)&&!guest_map(&h.memory,SCRATCH,0x4000));
     assert(!d9_com_init(&h.memory,NULL));
     assert(!d9_null_register());
+    const char *tmp=getenv("TEMP");if(!tmp||!*tmp)tmp=getenv("TMP");assert(tmp&&*tmp);
+    snprintf(sandbox,sizeof sandbox,"%s/n3ds_d3dx_file_%ld",tmp,(long)TEST_PID());
+    (void)TEST_MKDIR(sandbox);
+    assert(!win32_init(&h.memory,0x10000,sandbox));
     assert(!d3dx_texture_shims_install(&h.memory));
+
+    /* Synthetic sandbox inputs: valid 2-mip A8R8G8B8, junk, cube/volume
+     * headers and an oversized file (size is checked before reading). */
+    menu_dds_size=make_a8r8g8b8_dds(menu_dds,8,8,2,0x20);
+    assert(!sandbox_write("menu.dds",menu_dds,menu_dds_size));
+    {const uint8_t junk[64]="this is not a DDS file";assert(!sandbox_write("bad.dds",junk,sizeof junk));}
+    {uint8_t filebuf[256];size_t n=dds_header(filebuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200u,1);
+     assert(!sandbox_write("cube.dds",filebuf,n));
+     n=dds_header(filebuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200000u,4);
+     assert(!sandbox_write("volume.dds",filebuf,n));}
+    assert(!sandbox_write_oversize("huge.dds"));
     static const FnEntry probe[]={{PROBE_FN,guest_dispatch_probe}};
     FnModule modules[3]={{"probe",probe,1},d3dx_texture_shims_module(),d9_com_module()};
     assert(!n3ds_lift_bind_modules(&h.memory,modules,3));
@@ -289,22 +357,148 @@ int main(void){
     assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",vct,4)==HR_E_NOTIMPL);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"volume"));
 
-    /* 7. File-path and dedicated cube/volume exports: explicit E_NOTIMPL. */
-    uint8_t path[16];memcpy(path,"nonexistent.dds",16);assert(!guest_write(&h.memory,DATA,path,16));
+    /* 7. File-path exports: guest path -> sandbox root -> host buffer -> the
+     *    same legacy-DDS parser.  Every call goes through the stdcall probe,
+     *    so the 2-slot and 14-slot epilogues are checked by the harness. */
+    uint32_t gi[2]={DATA,INFO};
+
+    set_guest_path(&h,"menu.dds");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
+    assert(rd(&h,INFO+0)==8&&rd(&h,INFO+4)==8&&rd(&h,INFO+8)==1);
+    assert(rd(&h,INFO+12)==2&&rd(&h,INFO+16)==FMT_A8R8G8B8);
+    assert(rd(&h,INFO+20)==3&&rd(&h,INFO+24)==4);
+    assert(!*d3dx_texture_shims_last_error());
+
+    /* The recognised C:\Skyrim\ virtual root aliases the same sandbox. */
+    set_guest_path(&h,"C:\\Skyrim\\menu.dds");
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
+    assert(rd(&h,INFO+0)==8&&rd(&h,INFO+16)==FMT_A8R8G8B8);
+
+    set_guest_path(&h,"missing.dds");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDDATA);
+    assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"cannot open"));
+
+    set_guest_path(&h,"..\\escape.dds");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDCALL);
+    assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"outside the sandbox"));
+
+    set_guest_path(&h,"C:\\Windows\\menu.dds");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDCALL);
+    assert(rd(&h,INFO)==0);
+
+    set_guest_path(&h,"bad.dds");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDDATA);
+    assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"not a DDS"));
+
+    set_guest_path(&h,"huge.dds");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDDATA);
+    assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"64 MiB"));
+
+    {uint32_t np[2]={0,INFO};assert(shim_call(&h,"D3DXGetImageInfoFromFileA",np,2)==HR_INVALIDCALL);}
+
+    /* 7b. D3DXCreateTextureFromFileExA: 14 real arguments (pPalette at A(12),
+     *     ppTexture at A(13)); ret 0x38 verified from D3DX9_42.dll. */
+    uint32_t exa_base[14]={h.device,DATA,0,0,0,0,0,1,
+                          0xffffffffu,0xffffffffu,0,INFO,SCRATCH+0x700u,OUT};
+    set_guest_path(&h,"menu.dds");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    uint32_t gi[]={DATA,INFO};
-    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_E_NOTIMPL);
-    uint32_t exa[13]={DATA,0,0,0,0,FMT_DXT1,1,0,0,0,INFO,0,OUT};
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,13)==HR_E_NOTIMPL);
-    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"ExA"));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_OK);
+    uint32_t file_tex=rd(&h,OUT);assert(file_tex);
+    assert(rd(&h,INFO+0)==8&&rd(&h,INFO+4)==8&&rd(&h,INFO+12)==2);
+    assert(rd(&h,INFO+16)==FMT_A8R8G8B8&&rd(&h,INFO+24)==4);
+    assert(call(&h,file_tex,13,NULL,0)==2);
+    uint32_t fl[]={0,OUT2,0,0};assert(call(&h,file_tex,19,fl,4)==HR_OK);
+    assert(rd(&h,OUT2)==32&&guest_ptr(&h.memory,rd(&h,OUT2+4),256));
+    assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),256),menu_dds+128,256));
+    uint32_t lvl0=0;assert(call(&h,file_tex,20,&lvl0,1)==HR_OK);
+    assert(call(&h,file_tex,2,NULL,0)==0);
+
+    /* Filter=0 and MipFilter=0 are accepted as the no-resize alternative. */
+    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[8]=0;exa[9]=0;
+     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+     assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_OK);
+     uint32_t t=rd(&h,OUT);assert(t);
+     assert(call(&h,t,2,NULL,0)==0);}
+
+    /* Parameter subset: anything that asks for resize/filter/usage/pool or a
+     * concrete format is rejected before the file is read and before any
+     * resource exists. */
+    static const struct {unsigned index;uint32_t value;const char *needle;} bad_params[]={
+        {2,8,"Width"},{3,8,"Height"},{4,2,"MipLevels"},{5,1,"Usage"},
+        {6,FMT_A8R8G8B8,"Format"},{7,0,"Pool"},
+        {8,2,"Filter/MipFilter"},{9,2,"Filter/MipFilter"},{10,0x00ff00ffu,"ColorKey"},
+    };
+    for(unsigned i=0;i<sizeof bad_params/sizeof bad_params[0];++i){
+        uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[bad_params[i].index]=bad_params[i].value;
+        assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+        assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+        assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_NOTAVAILABLE);
+        assert(rd(&h,OUT)==0);
+        assert(rd(&h,INFO)==0xdeadbeefu);
+        assert(strstr(d3dx_texture_shims_last_error(),bad_params[i].needle));
+    }
+    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[11]=0x70000000u;
+     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+     assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_INVALIDCALL);
+     assert(rd(&h,OUT)==0);}
+    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[13]=0x70000000u;
+     assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_INVALIDCALL);}
+    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[0]=SCRATCH;
+     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+     assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_INVALIDCALL);
+     assert(rd(&h,OUT)==0);}
+
+    set_guest_path(&h,"bad.dds");
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDDATA);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"not a DDS"));
+
+    set_guest_path(&h,"cube.dds");
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_E_NOTIMPL);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"cube"));
+
+    set_guest_path(&h,"volume.dds");
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_E_NOTIMPL);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"volume"));
+
+    set_guest_path(&h,"missing.dds");
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDDATA);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"cannot open"));
+
+    set_guest_path(&h,"..\\escape.dds");
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDCALL);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"outside the sandbox"));
+
+    set_guest_path(&h,"huge.dds");
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDDATA);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"64 MiB"));
+
+    /* 7c. Dedicated cube/volume exports still fail by name: the D3D9 bridge
+     *     has no cube/volume object type or upload path. */
+    cube_bytes=dds_header(ddsbuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200u,1);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,cube_bytes));
     uint32_t cube[4]={h.device,DATA,(uint32_t)cube_bytes,OUT};
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
     assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cube,4)==HR_E_NOTIMPL);
-    assert(rd(&h,OUT)==0);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"IDirect3DCubeTexture9"));
+    vol_bytes=dds_header(ddsbuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200000u,4);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,vol_bytes));
     uint32_t vol[4]={h.device,DATA,(uint32_t)vol_bytes,OUT};
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
     assert(shim_call(&h,"D3DXCreateVolumeTextureFromFileInMemory",vol,4)==HR_E_NOTIMPL);
-    assert(rd(&h,OUT)==0);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"IDirect3DVolumeTexture9"));
 
     /* 8. Device validation: a non-device pointer must not create a texture. */
     dds_a8=make_dxt1_dds(ddsbuf,16,16,0x40);
@@ -318,8 +512,10 @@ int main(void){
     assert(call(&h,h.factory,2,NULL,0)==0);
     d3dx_texture_shims_uninstall();
     d9_com_shutdown();
+    win32_shutdown();
     n3ds_lift_release();
     guest_destroy(&h.memory);
+    sandbox_remove();
     puts("D3DX9_42 DDS image-info + texture-create host shims: PASS");
     return 0;
 }

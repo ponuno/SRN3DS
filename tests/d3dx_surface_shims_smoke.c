@@ -208,7 +208,9 @@ static void test_shared_binding(H *h) {
     uint32_t fn = win32_resolve(&info, NULL);
     assert(fn == D3DX_TEXTURE_THUNK_BASE + 8u);
     assert(!n3ds_lift_invoke(&h->cpu, fn, gi, 2, &r));
-    assert(r == HR_E_NOTIMPL);
+    /* This harness never calls win32_init(), so the file shim has no sandbox
+     * root and fails closed with INVALIDCALL instead of E_NOTIMPL. */
+    assert(r == HR_INVALIDCALL);
     assert(strstr(d3dx_texture_shims_last_error(), "D3DXGetImageInfoFromFileA"));
 
     uint32_t compile[10] = {0};

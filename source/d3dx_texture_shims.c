@@ -5,13 +5,16 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define D3DX_OK 0u
 #define D3DX_E_NOTIMPL 0x80004001u
 #define D3DX_D3DERR_INVALIDCALL 0x8876086cu
 #define D3DX_D3DERR_NOTAVAILABLE 0x8876086au
+#define D3DX_D3DERR_OUTOFMEMORY 0x8876017cu
 #define D3DXERR_INVALIDDATA 0x88760b59u
+#define D3DX_DEFAULT 0xffffffffu
 
 #define D3DX_FILETYPE_DDS 4u
 #define D3DRTYPE_TEXTURE 3u
@@ -191,6 +194,163 @@ static int level_layout(unsigned format,unsigned w,unsigned h,size_t *pitch,size
     return -1;
 }
 
+#define D3DX_FILE_LIMIT (64u<<20) /* 64 MiB: refuse to buffer larger files */
+
+static int parse_checked(const char *who,const uint8_t *p,size_t n,DdsImage *d){
+    int rc=parse_dds(p,n,d);
+    if(rc)
+        reject("%s: %s (host shim supports legacy DDS only)",who,
+               rc==-2?"unsupported DDS pixel format/header":"not a DDS file");
+    return rc;
+}
+
+static void write_image_info(uint8_t *info,const DdsImage *d,const char *who){
+    wr32(info+0,d->width);wr32(info+4,d->height);wr32(info+8,d->depth);
+    wr32(info+12,d->mips);wr32(info+16,d->format);wr32(info+20,d->resource);
+    wr32(info+24,D3DX_FILETYPE_DDS);
+    if(d->resource!=D3DRTYPE_TEXTURE)
+        fprintf(stderr,"[d3dx] %s: reporting %s DDS metadata "
+                "(%ux%ux%u, %u mip(s), %s); upload for this resource type is not implemented\n",
+                who,
+                d->resource==D3DRTYPE_CUBETEXTURE?"cube":d->resource==D3DRTYPE_VOLUMETEXTURE?"volume":"non-texture",
+                d->width,d->height,d->depth,d->mips,format_name(d->format));
+}
+
+/* Create and fill an IDirect3DTexture9 from an already-parsed DDS.  Every
+ * rejection happens before d9_com_host_create_texture(); any failure after
+ * creation releases the texture.  *out is only written on success. */
+static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t *p,
+                                   size_t size,DdsImage *d,uint32_t *out){
+    if(d->resource==D3DRTYPE_CUBETEXTURE||d->resource==D3DRTYPE_VOLUMETEXTURE){
+        reject("%s: %s DDS needs IDirect3D%sTexture9, which the D3D9 bridge does not "
+               "implement (d3d9_core/d3d9_com expose 2D textures only); E_NOTIMPL",
+               who,d->resource==D3DRTYPE_CUBETEXTURE?"cube":"volume",
+               d->resource==D3DRTYPE_CUBETEXTURE?"Cube":"Volume");
+        return D3DX_E_NOTIMPL;
+    }
+    if(!texture_format_supported(d->format)){
+        reject("%s: DDS format %s is not implemented by the D3D9 bridge",
+               who,format_name(d->format));
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    unsigned max_mips=1,w=d->width,h=d->height;
+    if(w>1024u||h>1024u){
+        reject("%s: %ux%u exceeds the D3D9 bridge's 1024 texture limit",
+               who,d->width,d->height);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if((w&(w-1u))||(h&(h-1u))){
+        reject("%s: %ux%u is not power-of-two; "
+               "the D3D9 bridge only creates pow2 textures",who,d->width,d->height);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(bc_bytes(d->format)&&(w<8u||h<8u)){
+        reject("%s: compressed base level %ux%u "
+               "is below the D3D9 bridge's 8x8 floor",who,d->width,d->height);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    while(w>1||h>1){if(w>1)w>>=1;if(h>1)h>>=1;++max_mips;}
+    if(d->mips>max_mips){
+        reject("%s: %u mip levels do not fit %ux%u",who,
+               d->mips,d->width,d->height);
+        return D3DXERR_INVALIDDATA;
+    }
+    /* Validate the entire mip chain before creating any resource. */
+    size_t offset=d->data_offset;w=d->width;h=d->height;
+    for(unsigned i=0;i<d->mips;++i){
+        size_t pitch,bytes;
+        if(level_layout(d->format,w,h,&pitch,&bytes)||
+           offset>size||bytes>size-offset){
+            reject("%s: truncated DDS mip chain at level %u",who,i);
+            return D3DXERR_INVALIDDATA;
+        }
+        offset+=bytes;
+        if(w>1)w>>=1;if(h>1)h>>=1;
+    }
+    uint32_t texture=0;
+    /* D3DX uses D3DPOOL_MANAGED, usage 0 for file-created textures. */
+    uint32_t hr=d9_com_host_create_texture(device,d->width,d->height,d->mips,0,d->format,
+                                           D9_POOL_MANAGED,&texture);
+    if(hr){
+        reject("%s: %s",who,d9_com_last_diagnostic());
+        return hr;
+    }
+    offset=d->data_offset;w=d->width;h=d->height;
+    for(unsigned i=0;i<d->mips;++i){
+        size_t pitch=0,bytes=0;
+        if(level_layout(d->format,w,h,&pitch,&bytes)){ /* validated above */ }
+        hr=d9_com_host_upload_texture_level(texture,i,p+offset,pitch,bytes);
+        if(hr){
+            reject("%s: level %u upload failed (%s)",who,i,d9_com_last_diagnostic());
+            d9_com_host_release(texture);
+            return hr;
+        }
+        offset+=bytes;
+        if(w>1)w>>=1;if(h>1)h>>=1;
+    }
+    *out=texture;
+    fprintf(stderr,"[d3dx] %s: %ux%u %s, %u level(s)\n",
+            who,d->width,d->height,format_name(d->format),d->mips);
+    return D3DX_OK;
+}
+
+/* Read a guest-named file through the win32 sandbox mapping.  The returned
+ * buffer belongs to the caller; failures never write it. */
+static uint32_t read_sandbox_file(const char *who,const char *guest_path,
+                                  uint8_t **out,size_t *out_size){
+    *out=NULL;*out_size=0;
+    char host[640];
+    if(win32_guest_path(guest_path,host,sizeof host)){
+        reject("%s(\"%s\"): path is outside the sandbox game root",who,guest_path);
+        return D3DX_D3DERR_INVALIDCALL;
+    }
+    FILE *f=fopen(host,"rb");
+    if(!f){
+        reject("%s(\"%s\"): cannot open the file inside the sandbox "
+               "(missing, unreadable, or not a regular file)",who,guest_path);
+        return D3DXERR_INVALIDDATA;
+    }
+    if(fseek(f,0,SEEK_END)!=0){
+        fclose(f);
+        reject("%s(\"%s\"): cannot determine the file size",who,guest_path);
+        return D3DXERR_INVALIDDATA;
+    }
+    long length=ftell(f);
+    if(length<=0){
+        fclose(f);
+        reject("%s(\"%s\"): file is empty or its size cannot be read",who,guest_path);
+        return D3DXERR_INVALIDDATA;
+    }
+    if((unsigned long)length>D3DX_FILE_LIMIT){
+        fclose(f);
+        reject("%s(\"%s\"): file is %ld bytes, above the 64 MiB shim limit",
+               who,guest_path,length);
+        return D3DXERR_INVALIDDATA;
+    }
+    if(fseek(f,0,SEEK_SET)!=0){
+        fclose(f);
+        reject("%s(\"%s\"): cannot rewind the file",who,guest_path);
+        return D3DXERR_INVALIDDATA;
+    }
+    uint8_t *buffer=malloc((size_t)length);
+    if(!buffer){
+        fclose(f);
+        reject("%s(\"%s\"): out of host memory for %ld bytes",who,guest_path,length);
+        return D3DX_D3DERR_OUTOFMEMORY;
+    }
+    size_t got=fread(buffer,1,(size_t)length,f);
+    int read_failed=ferror(f)||got!=(size_t)length;
+    fclose(f);
+    if(read_failed){
+        free(buffer);
+        reject("%s(\"%s\"): short read (%lu of %ld bytes)",who,guest_path,
+               (unsigned long)got,length);
+        return D3DXERR_INVALIDDATA;
+    }
+    *out=buffer;*out_size=(size_t)length;
+    return D3DX_OK;
+}
+
 static void shim_get_image_info_mem(CPU *c){
     uint32_t src=A(0),size=A(1),out=A(2);
     const uint8_t *p=src&&size&&g.memory?guest_ptr(g.memory,src,size):NULL;
@@ -202,20 +362,9 @@ static void shim_get_image_info_mem(CPU *c){
         RET(D3DX_D3DERR_INVALIDCALL,3);
     }
     DdsImage d;
-    int rc=parse_dds(p,size,&d);
-    if(rc){
-        reject("D3DXGetImageInfoFromFileInMemory: %s (host shim supports legacy DDS only)",
-               rc==-2?"unsupported DDS pixel format/header":"not a DDS file");
+    if(parse_checked("D3DXGetImageInfoFromFileInMemory",p,size,&d))
         RET(D3DXERR_INVALIDDATA,3);
-    }
-    wr32(info+0,d.width);wr32(info+4,d.height);wr32(info+8,d.depth);
-    wr32(info+12,d.mips);wr32(info+16,d.format);wr32(info+20,d.resource);
-    wr32(info+24,D3DX_FILETYPE_DDS);
-    if(d.resource!=D3DRTYPE_TEXTURE)
-        fprintf(stderr,"[d3dx] D3DXGetImageInfoFromFileInMemory: reporting %s DDS metadata "
-                "(%ux%ux%u, %u mip(s), %s); texture upload for this resource type is not implemented\n",
-                d.resource==D3DRTYPE_CUBETEXTURE?"cube":d.resource==D3DRTYPE_VOLUMETEXTURE?"volume":"non-texture",
-                d.width,d.height,d.depth,d.mips,format_name(d.format));
+    write_image_info(info,&d,"D3DXGetImageInfoFromFileInMemory");
     g.last_error[0]=0;
     RET(D3DX_OK,3);
 }
@@ -231,118 +380,121 @@ static void shim_create_tex_mem(CPU *c){
         RET(D3DX_D3DERR_INVALIDCALL,4);
     }
     DdsImage d;
-    int prc=parse_dds(p,size,&d);
-    if(prc){
-        reject("D3DXCreateTextureFromFileInMemory: %s (host shim supports legacy DDS only)",
-               prc==-2?"unsupported DDS pixel format/header":"not a DDS file");
+    if(parse_checked("D3DXCreateTextureFromFileInMemory",p,size,&d))
         RET(D3DXERR_INVALIDDATA,4);
-    }
-    if(d.resource==D3DRTYPE_CUBETEXTURE){
-        reject("D3DXCreateTextureFromFileInMemory: cube DDS is named unsupported (E_NOTIMPL)");
-        RET(D3DX_E_NOTIMPL,4);
-    }
-    if(d.resource==D3DRTYPE_VOLUMETEXTURE){
-        reject("D3DXCreateTextureFromFileInMemory: volume DDS is named unsupported (E_NOTIMPL)");
-        RET(D3DX_E_NOTIMPL,4);
-    }
-    if(!texture_format_supported(d.format)){
-        reject("D3DXCreateTextureFromFileInMemory: DDS format %s is not implemented by the D3D9 bridge",
-               format_name(d.format));
-        RET(D3DX_D3DERR_NOTAVAILABLE,4);
-    }
-    unsigned max_mips=1,w=d.width,h=d.height;
-    if(w>1024u||h>1024u){
-        reject("D3DXCreateTextureFromFileInMemory: %ux%u exceeds the D3D9 bridge's 1024 texture limit",
-               d.width,d.height);
-        RET(D3DX_D3DERR_NOTAVAILABLE,4);
-    }
-    if((w&(w-1u))||(h&(h-1u))){
-        reject("D3DXCreateTextureFromFileInMemory: %ux%u is not power-of-two; "
-               "the D3D9 bridge only creates pow2 textures",d.width,d.height);
-        RET(D3DX_D3DERR_NOTAVAILABLE,4);
-    }
-    if(bc_bytes(d.format)&&(w<8u||h<8u)){
-        reject("D3DXCreateTextureFromFileInMemory: compressed base level %ux%u "
-               "is below the D3D9 bridge's 8x8 floor",d.width,d.height);
-        RET(D3DX_D3DERR_NOTAVAILABLE,4);
-    }
-    while(w>1||h>1){if(w>1)w>>=1;if(h>1)h>>=1;++max_mips;}
-    if(d.mips>max_mips){
-        reject("D3DXCreateTextureFromFileInMemory: %u mip levels do not fit %ux%u",
-               d.mips,d.width,d.height);
-        RET(D3DXERR_INVALIDDATA,4);
-    }
-    /* Validate the entire mip chain before creating any resource. */
-    size_t offset=d.data_offset;w=d.width;h=d.height;
-    for(unsigned i=0;i<d.mips;++i){
-        size_t pitch,bytes;
-        if(level_layout(d.format,w,h,&pitch,&bytes)||
-           offset>size||bytes>size-offset){
-            reject("D3DXCreateTextureFromFileInMemory: truncated DDS mip chain at level %u",i);
-            RET(D3DXERR_INVALIDDATA,4);
-        }
-        offset+=bytes;
-        if(w>1)w>>=1;if(h>1)h>>=1;
-    }
     uint32_t texture=0;
-    /* D3DX uses D3DPOOL_MANAGED, usage 0 for file-created textures. */
-    uint32_t hr=d9_com_host_create_texture(device,d.width,d.height,d.mips,0,d.format,
-                                           D9_POOL_MANAGED,&texture);
-    if(hr){
-        reject("D3DXCreateTextureFromFileInMemory: %s",d9_com_last_diagnostic());
-        RET(hr,4);
-    }
-    offset=d.data_offset;w=d.width;h=d.height;
-    for(unsigned i=0;i<d.mips;++i){
-        size_t pitch=0,bytes=0;
-        if(level_layout(d.format,w,h,&pitch,&bytes)){ /* validated above */ }
-        hr=d9_com_host_upload_texture_level(texture,i,p+offset,pitch,bytes);
-        if(hr){
-            reject("D3DXCreateTextureFromFileInMemory: level %u upload failed (%s)",
-                   i,d9_com_last_diagnostic());
-            d9_com_host_release(texture);
-            RET(hr,4);
-        }
-        offset+=bytes;
-        if(w>1)w>>=1;if(h>1)h>>=1;
-    }
+    uint32_t hr=create_2d_from_dds("D3DXCreateTextureFromFileInMemory",device,p,size,&d,&texture);
+    if(hr)RET(hr,4);
     *out_guest=texture;
     g.last_error[0]=0;
-    fprintf(stderr,"[d3dx] D3DXCreateTextureFromFileInMemory: %ux%u %s, %u level(s)\n",
-            d.width,d.height,format_name(d.format),d.mips);
     RET(D3DX_OK,4);
 }
 
-/* Named-unsupported exports.  They still resolve to a host thunk so the IAT no
- * longer points at an unlifted guest body; the call returns a real failure and
- * logs which export and path were rejected. */
+/* File-path exports.  The guest path is bounded, mapped below the sandbox root
+ * by win32_guest_path(), buffered on the host, then parsed by the exact same
+ * legacy-DDS code as the InMemory entry points. */
 static void shim_get_image_info_file_a(CPU *c){
+    uint32_t out=A(1);
+    uint8_t *info=out&&g.memory?guest_ptr(g.memory,out,28):NULL;
+    if(!info){
+        reject("D3DXGetImageInfoFromFileA: invalid D3DXIMAGE_INFO pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,2);
+    }
+    memset(info,0,28);
     const char *path=(A(0)&&g.memory)?guest_cstr(g.memory,A(0),260):NULL;
-    reject("D3DXGetImageInfoFromFileA(\"%s\"): file-path shim is not implemented (E_NOTIMPL)",
-           path?path:"(invalid path)");
-    RET(D3DX_E_NOTIMPL,2);
+    if(!path){
+        reject("D3DXGetImageInfoFromFileA: source path is null, unterminated, "
+               "or longer than 259 bytes");
+        RET(D3DX_D3DERR_INVALIDCALL,2);
+    }
+    uint8_t *buffer=NULL;size_t size=0;
+    uint32_t hr=read_sandbox_file("D3DXGetImageInfoFromFileA",path,&buffer,&size);
+    if(hr)RET(hr,2);
+    DdsImage d;
+    int prc=parse_checked("D3DXGetImageInfoFromFileA",buffer,size,&d);
+    if(prc){free(buffer);RET(D3DXERR_INVALIDDATA,2);}
+    write_image_info(info,&d,"D3DXGetImageInfoFromFileA");
+    free(buffer);
+    g.last_error[0]=0;
+    RET(D3DX_OK,2);
 }
+
 static void shim_create_tex_ex_a(CPU *c){
-    const char *path=(A(0)&&g.memory)?guest_cstr(g.memory,A(0),260):NULL;
-    uint32_t out=A(12);
+    uint32_t device=A(0);
+    uint32_t width=A(2),height=A(3),mip_levels=A(4),usage=A(5),format=A(6),pool=A(7);
+    uint32_t filter=A(8),mip_filter=A(9),color_key=A(10),info_addr=A(11),out=A(13);
+    /* A(12) is PALETTEENTRY*.  It is deliberately ignored: only non-paletted
+     * 32-bit/BC formats reach the create path.  The real D3DX9_42 export has
+     * 14 arguments and a `ret 0x38` epilogue (verified from the DLL), so the
+     * shim must pop 14 slots, not 13. */
     uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
-    if(out_guest)*out_guest=0;
-    reject("D3DXCreateTextureFromFileExA(\"%s\"): file-path shim is not implemented (E_NOTIMPL)",
-           path?path:"(invalid path)");
-    RET(D3DX_E_NOTIMPL,13);
+    if(!out_guest){
+        reject("D3DXCreateTextureFromFileExA: invalid output texture pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,14);
+    }
+    *out_guest=0;
+    if(width||height||mip_levels||usage||format||pool!=D9_POOL_MANAGED){
+        reject("D3DXCreateTextureFromFileExA: only the file-derived subset is implemented "
+               "(Width=0, Height=0, MipLevels=0, Usage=0, Format=D3DFMT_UNKNOWN, "
+               "Pool=D3DPOOL_MANAGED); got %lux%lu, mips=%lu, usage=0x%lx, format=%lu, pool=%lu",
+               (unsigned long)width,(unsigned long)height,(unsigned long)mip_levels,
+               (unsigned long)usage,(unsigned long)format,(unsigned long)pool);
+        RET(D3DX_D3DERR_NOTAVAILABLE,14);
+    }
+    if((filter!=D3DX_DEFAULT&&filter!=0u)||(mip_filter!=D3DX_DEFAULT&&mip_filter!=0u)){
+        reject("D3DXCreateTextureFromFileExA: Filter/MipFilter must be D3DX_DEFAULT "
+               "(0xffffffff) or 0 because no resize/filter path exists; got 0x%lx/0x%lx",
+               (unsigned long)filter,(unsigned long)mip_filter);
+        RET(D3DX_D3DERR_NOTAVAILABLE,14);
+    }
+    if(color_key){
+        reject("D3DXCreateTextureFromFileExA: ColorKey 0x%08lx is not implemented; "
+               "use 0",(unsigned long)color_key);
+        RET(D3DX_D3DERR_NOTAVAILABLE,14);
+    }
+    uint8_t *info=info_addr&&g.memory?guest_ptr(g.memory,info_addr,28):NULL;
+    if(info_addr&&!info){
+        reject("D3DXCreateTextureFromFileExA: invalid D3DXIMAGE_INFO output pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,14);
+    }
+    const char *path=(A(1)&&g.memory)?guest_cstr(g.memory,A(1),260):NULL;
+    if(!path){
+        reject("D3DXCreateTextureFromFileExA: source path is null, unterminated, "
+               "or longer than 259 bytes");
+        RET(D3DX_D3DERR_INVALIDCALL,14);
+    }
+    uint8_t *buffer=NULL;size_t size=0;
+    uint32_t hr=read_sandbox_file("D3DXCreateTextureFromFileExA",path,&buffer,&size);
+    if(hr)RET(hr,14);
+    DdsImage d;
+    int prc=parse_checked("D3DXCreateTextureFromFileExA",buffer,size,&d);
+    if(prc){free(buffer);RET(D3DXERR_INVALIDDATA,14);}
+    if(info)write_image_info(info,&d,"D3DXCreateTextureFromFileExA");
+    uint32_t texture=0;
+    hr=create_2d_from_dds("D3DXCreateTextureFromFileExA",device,buffer,size,&d,&texture);
+    free(buffer);
+    if(hr)RET(hr,14);
+    *out_guest=texture;
+    g.last_error[0]=0;
+    RET(D3DX_OK,14);
 }
+
 static void shim_create_cube_mem(CPU *c){
     uint32_t out=A(3);
     uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
     if(out_guest)*out_guest=0;
-    reject("D3DXCreateCubeTextureFromFileInMemory: cube texture creation is named unsupported (E_NOTIMPL)");
+    reject("D3DXCreateCubeTextureFromFileInMemory: the D3D9 bridge has no "
+           "IDirect3DCubeTexture9 object type, cube-face surfaces, or six-face backend "
+           "upload (d3d9_core/d3d9_com are 2D-only); E_NOTIMPL");
     RET(D3DX_E_NOTIMPL,4);
 }
 static void shim_create_volume_mem(CPU *c){
     uint32_t out=A(3);
     uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
     if(out_guest)*out_guest=0;
-    reject("D3DXCreateVolumeTextureFromFileInMemory: volume texture creation is named unsupported (E_NOTIMPL)");
+    reject("D3DXCreateVolumeTextureFromFileInMemory: the D3D9 bridge has no "
+           "IDirect3DVolumeTexture9 object type, depth slices, or volume upload "
+           "(d3d9_core/d3d9_com are 2D-only); E_NOTIMPL");
     RET(D3DX_E_NOTIMPL,4);
 }
 
