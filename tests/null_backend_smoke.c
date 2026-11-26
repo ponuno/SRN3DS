@@ -263,7 +263,10 @@ int main(int argc,char **argv){
     rect[2]=rect[0];wr(&h,RECT,rect,16);assert(call(&h,surface,13,lock,3)==0x8876086cu);
     rect[0]=-1;rect[2]=5;wr(&h,RECT,rect,16);assert(call(&h,surface,13,lock,3)==0x8876086cu);
     set_rt[1]=surface;assert(call(&h,device,37,set_rt,2)==0x8876086cu);set_rt[1]=back;
-    uint32_t reset[]={PP};assert(call(&h,device,16,reset,1)==0x8876086cu); /* explicit resource alive */
+    /* Reset keeps explicit CPU-backed resources and their refcounts; only the
+     * device state and DEFAULT/GPU attachments are reset. */
+    uint32_t reset[]={PP};assert(call(&h,device,16,reset,1)==0);
+    assert(refs(&h,surface)==1);
     assert(unref(&h,surface)==0&&refs(&h,device)==1);
 
     /* One explicit non-lockable LDR target has a real core/native lifetime and

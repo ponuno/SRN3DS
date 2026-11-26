@@ -222,13 +222,14 @@ static void depth_flow(Harness *h,uint32_t device){
     assert(unref(h,back)==1);
     set_depth[0]=depth;assert(call(h,device,39,set_depth,1)==0);
 
-    /* Reset requires the explicit depth surface to be released first. */
+    /* Reset detaches the explicit depth surface; the COM object survives until
+     * the application releases it. */
     wr(h,PP,tesv_pp,14*4);uint32_t reset[]={PP};
-    assert(call(h,device,16,reset,1)==0x8876086cu);
+    assert(call(h,device,16,reset,1)==0);
     uint32_t detach2[]={0};assert(call(h,device,39,detach2,1)==0);
     assert(unref(h,depth)==0);
     assert(call(h,device,16,reset,1)==0);
-    /* Reset drops the binding; the new device starts without a depth surface. */
+    /* Reset drops the binding; the device starts without a depth surface. */
     get_depth[0]=OUT2;assert(call(h,device,40,get_depth,1)==0x88760866u&&rd(h,OUT2)==0);
 }
 

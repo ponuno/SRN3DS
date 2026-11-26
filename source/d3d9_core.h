@@ -439,6 +439,13 @@ int d9_set_back_buffer_info(D9Device *d,unsigned w,unsigned h,unsigned format);
  * promise is made.  A non-lockable back buffer keeps the previous
  * implicit-screen behaviour. */
 int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable);
+/* Reset the device in place for the same or a compatible presentation mode.
+ * Releases DEFAULT-pool GPU copies and explicit targets/depth, keeps
+ * SYSTEMMEM/CPU-only resources, evicts MANAGED GPU copies for rehydration, and
+ * restores every D3D default state field.  Locked resources make this fail
+ * before any mutation.  The back buffer is reused when the parameters match,
+ * otherwise it is recreated first. */
+int d9_reset_device_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable);
 /* Retained back-buffer render-target handle, or 0 when the back buffer is the
  * implicit screen.  The handle is owned by the device and must not be released
  * by the caller. */

@@ -128,6 +128,7 @@ static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
 static void trace_result(uint32_t value);
 static void trace_result_float(double value);
 static void capture_stop(void);
+static void bind_render_target(Obj *o);
 #define RET(v,n) do{uint32_t retval=(uint32_t)(v);trace_result(retval);c->r[0]=retval;c->r[4]+=4+4*(n);return;}while(0)
 static void d3d_log(const char *method,const char *reason);
 static uint32_t hr(int rc){return rc==D9_OK?OK:rc==D9_MEMORY?OUTMEM:rc==D9_UNSUPPORTED?UNAVAILABLE:rc==D9_BACKEND||rc==D9_RELEASE_FAILED?UNAVAILABLE:INVALID;}
@@ -662,47 +663,51 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
     d9_menu_shader_runtime_reset();
     memset(&g.constants_c8,0,sizeof g.constants_c8);upload_tev_constants();
     M32(out)=g.dev->guest;RET(OK,7);}
-static int explicit_resources(void){
-    for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->refs&&o->kind!=FACTORY&&o->kind!=DEVICE&&o->kind!=SWAPCHAIN&&!(o->kind==SURFACE&&o==g.back))return 1;}
-    return 0;
-}
 static void reset_device(CPU *c){uint32_t pp=A(1);
     if(!obj(A(0),DEVICE)||!ptr(pp,56)){d3d_log("Reset","invalid device or presentation parameters");RET(INVALID,2);}
     if(g.phase){d3d_log("Reset","Present must complete the active scene before Reset");RET(INVALID,2);}
     if(!g.owns_device){d3d_log("Reset","state reset is unavailable for a caller-adopted D9Device");RET(UNAVAILABLE,2);}
     const char *why=presentation_reason(ptr(pp,56));
-    if(why){d3d_log("Reset",why);RET(UNAVAILABLE,2);}
-    if(explicit_resources()){d3d_log("Reset","release all explicit resources before Reset");RET(INVALID,2);}
-    trace_detail("BackBuffer=%lux%lu Format=%lu",(unsigned long)M32(pp),(unsigned long)M32(pp+4),(unsigned long)M32(pp+8));
-    D9Device *replacement=d9_create_device(g.backend,g.backend_ctx,g.backend_limit);
-    if(!replacement){d3d_log("Reset","could not allocate replacement device state");RET(OUTMEM,2);}
-    d9_destroy_device(g.device);g.device=replacement;
-    (void)d9_set_tnl_proto(g.device,g.tnl_proto);
-    presentation_store(ptr(pp,56));
-    int bbrc=d9_set_back_buffer_info_ex(g.device,g.pp[0],g.pp[1],g.pp[2],g.pp[11]&1u);
-    if(bbrc){
-        g.back->handle=0;g.back->lockable=0;
-        d3d_log("Reset",bbrc==D9_MEMORY?
-            "the retained lockable back buffer does not fit the device memory budget":
-            bbrc==D9_UNSUPPORTED?
-            "the backend cannot allocate the retained lockable back buffer":
-            "back-buffer presentation metadata was rejected");
-        RET(bbrc==D9_MEMORY?OUTMEM:UNAVAILABLE,2);
+    if(why){d3d_fail("Reset",why,UNAVAILABLE);RET(UNAVAILABLE,2);}
+    if(g.recording_block){d3d_fail("Reset","EndStateBlock must close the active recording block before Reset",INVALID);RET(INVALID,2);}
+    for(unsigned i=0;i<g.next;++i)if(g.o[i].refs&&g.o[i].lock_guest){
+        d3d_fail("Reset","release locked resources before Reset",INVALID);RET(INVALID,2);
     }
+    uint32_t np[14];memcpy(np,ptr(pp,56),sizeof np);
+    if(!np[0])np[0]=D9_DISPLAY_WIDTH;
+    if(!np[1])np[1]=D9_DISPLAY_HEIGHT;
+    if(!np[2])np[2]=D9_X8R8G8B8;
+    if(!np[3])np[3]=1;
+    int rc=d9_reset_device_ex(g.device,np[0],np[1],np[2],np[11]&1u);
+    if(rc){
+        d3d_fail("Reset",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),2);
+    }
+    memcpy(g.pp,np,sizeof np);
+    trace_detail("BackBuffer=%lux%lu Format=%lu",(unsigned long)g.pp[0],
+                 (unsigned long)g.pp[1],(unsigned long)g.pp[2]);
+    bind(&g.depth,NULL);bind(&g.tex,NULL);bind(&g.tex1,NULL);
+    bind(&g.cube,NULL);bind(&g.cube1,NULL);bind(&g.volume,NULL);bind(&g.volume1,NULL);
+    bind(&g.vs,NULL);bind(&g.ps,NULL);bind(&g.declaration,NULL);
+    for(unsigned i=0;i<D9_MAX_STREAMS;++i){bind(&g.streams[i],NULL);g.offsets[i]=g.strides[i]=0;}
+    bind(&g.ib,NULL);
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
     g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.back->handle?1:0;
+    g.back->pitch=g.back->width*4;g.back->bytes=g.back->width*g.back->height*4;
+    bind_render_target(g.back);
+    (void)d9_set_render_target(g.device,0);
     free_palettes();g.current_palette=0;
     g.cursor_hotspot_x=g.cursor_hotspot_y=g.cursor_x=g.cursor_y=0;g.cursor_surface=0;g.cursor_shown=0;
-    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);memset(&g.constants_c8,0,sizeof g.constants_c8);g.clip_status_union=g.clip_status_intersection=0;
-    g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
-    /* Reset also discards every closure observation and material evidence. */
-    d9_menu_closure_reset();
-    d9_menu_shader_runtime_reset();
-    upload_tev_constants();
+    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;
+    memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);
+    memset(&g.constants_c8,0,sizeof g.constants_c8);g.clip_status_union=g.clip_status_intersection=0;
+    g.rt=g.back;default_viewport();default_gamma();
+    (void)d9_set_tnl_proto(g.device,g.tnl_proto);
+    d9_menu_closure_reset();d9_menu_shader_runtime_reset();upload_tev_constants();
 #if D9_CAPTURE_HOOK
     g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
 #endif
     M32(pp)=M32(pp+4)=M32(pp+12)=0;M32(pp+8)=0; /* D3D9 Reset writes back UNKNOWN/zero dimensions. */
+    g.last_diagnostic[0]=0;
     RET(OK,2);
 }
 static void device_display_mode(CPU *c){uint32_t out=A(2);

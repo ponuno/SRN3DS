@@ -1256,6 +1256,58 @@ Python environment failures.  ARM `-Mode com`: `.elf` 6,239,344 B SHA256
 926,744 B SHA256
 `aa90a4d081728375094a1838cd08f4048ef63294a4f686585fbaab71c90f45fe`;
 `.text` 908,156 B.  No frame is claimed.
+## 5.8 In-place device Reset (2026-11-26)
+
+`IDirect3DDevice9::Reset` (device slot 16) no longer replaces the whole
+`D9Device`.  It resets the existing device in place so resource objects and COM
+refcounts survive, which is what TESV needs for a presentation-state reset:
+
+- Presentation parameters are validated with `presentation_reason()` before any
+  mutation.  The bridge still has one display mode (400x240, X8R8G8B8/A8R8G8B8,
+  windowed, `D3DSWAPEFFECT_DISCARD`, no MSAA, no auto depth-stencil, interval
+  0/1, `LOCKABLE_BACKBUFFER` only), so any other size/format/flag set is a named
+  `D3DERR_NOTAVAILABLE` (or `D3DERR_INVALIDCALL` for locked resources) with no
+  state change.
+- A Reset while a scene is active, while a state block is recording, or while
+  any resource is locked is refused by name before core state changes.
+- `d9_reset_device_ex()` reuses the back buffer when the size/format/lockable
+  flag match, otherwise recreates the retained target first.  It then releases
+  every explicit target and depth attachment, invalidates DEFAULT-pool 2D,
+  cube and volume textures (their CPU store and the backend native are freed;
+  the COM objects and refcounts remain until the application releases them),
+  and evicts MANAGED 2D/cube/volume GPU copies while keeping their CPU stores.
+- MANAGED 2D textures now carry the cache key as a rehydrate token and are
+  recreated by `rehydrate_texture()` on the next `SetTexture`, `LockRect` or
+  unlock; cube and volume rehydration was already in place.  `lost` flags make
+  DEFAULT-pool objects fail with a named "release and recreate" diagnostic
+  instead of binding stale storage.
+- Every draw/state field is restored to creation defaults: `D9DrawState` for
+  both stages (render states, sampler, TSS), identity transforms, viewport and
+  scissor, material/lights/T&L, FVF/declaration, streams/indices, texture
+  bindings, shader constants, clip planes and `pixel_shader`.  COM also clears
+  its bindings, palettes, cursor, clear and constants state, resets the menu
+  closure/shader runtime and re-uploads TEV defaults.  DevCaps, SM3 and the T&L
+  prototype are unchanged.
+
+`tests/device_reset_smoke.c` covers a same-parameter Reset with non-default
+state cleared, MANAGED texture pixel rehydration, a bound DEFAULT render target
+released and no longer bindable, default viewport/scissor/matrix/material/FVF,
+invalid and non-DISCARD presentation refusals with no state change, a locked
+resource refusal, a supported present-flag change that recreates the lockable
+back buffer, repeated Reset, Present after Reset and preserved device/texture/
+buffer refcounts.  `null_backend` and `back_buffer_lockable` were updated for
+the new contract: explicit CPU-backed resources and explicit depth COM objects
+survive Reset, while the depth binding and explicit targets are dropped.
+
+- Targeted `device_reset,com,device_create,texture_residency,budget_trim,
+  render_texture,swap_chain`: **17 passed, 0 diagnostic, 0 failed**.
+- Full suite: **129 passed, 0 diagnostic, 0 failed**.
+- ARM `-Mode com`: `.elf` 6,247,100 B SHA256
+  `08a94660b68edd132d1c83b363289b913f81ce4958427d56706deb1e902cf642`;
+  `.3dsx` 929,496 B SHA256
+  `a03095099a1b3f9c44e2b5e6acd4651bebf315bdd3ad9bb25e1b330c8f2da3a8`;
+  `.text` 910,908 B.  Build-only evidence; no Azahar/hardware run or frame
+  claimed.
 
 ## 6. Deliberate non-goals
 
