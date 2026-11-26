@@ -136,7 +136,9 @@ To check a real traced run instead of trusting the table, run
 `tools/check_import_bindings.py <trace>` on stderr captured with
 `N3DS_IMPORT_TRACE=1`. It fails on a missing export, a wrapper/plain target
 where a hotpatch body is required, or (with `--require-shims`) a plain D3DX
-export that still points into the guest DLL.
+export that still points into the guest DLL. The trace also prints host-shim
+bindings (`-> fd... (host shim)`), so plain exports remain visible when the
+builtin resolver wins before PE module lookup.
 
 `pilot_vec3coord`/`pilot_vec3normal`/`pilot_vec3normalize` use a three-float
 output; the shared pilot runner selects that by case 6/7/8.

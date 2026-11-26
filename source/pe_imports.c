@@ -197,21 +197,29 @@ static int same_dll(const char *a,const char *b){
     while(*a && lower((unsigned char)*a)==lower((unsigned char)*b)){++a;++b;}
     return lower((unsigned char)*a)==lower((unsigned char)*b);
 }
+/* Diagnostic only: N3DS_IMPORT_TRACE=1 records every binding, including host
+ * shims resolved before the PE modules.  This is the first source of a guest
+ * function pointer, so the trace must not stop at module exports. */
+static int import_trace(void){
+    static int state;
+    if(!state){const char *v=getenv("N3DS_IMPORT_TRACE");state=(v&&v[0]&&strcmp(v,"0"))?2:1;}
+    return state==2;
+}
 uint32_t pe_link_resolve(const PeImport *entry,void *ctx) {
     PeLinker *l=ctx;if(!l || !entry || !entry->dll)return 0;
-    if(l->builtin){uint32_t addr=l->builtin(entry,l->builtin_ctx);if(addr)return addr;}
+    if(l->builtin){
+        uint32_t addr=l->builtin(entry,l->builtin_ctx);
+        if(addr){
+            if(import_trace())fprintf(stderr,"[import] %s!%s -> %08lx (host shim)\n",
+                entry->dll,entry->name?entry->name:"#ordinal",(unsigned long)addr);
+            return addr;
+        }
+    }
     for(size_t i=0;i<l->count;++i)if(l->modules[i].dll && same_dll(l->modules[i].dll,entry->dll)) {
         uint32_t addr=pe_export_find(l->memory,l->modules[i].image,entry->name,entry->ordinal);
         if(addr){
             uint32_t body=hotpatch_body(l->memory,l->modules[i].image,addr);
-            /* Diagnostic only: N3DS_IMPORT_TRACE=1 records every cross-module
-             * binding, which is the first source of a guest function pointer. */
-            static int trace_state;
-            if(!trace_state){
-                const char *v=getenv("N3DS_IMPORT_TRACE");
-                trace_state=(v&&v[0]&&strcmp(v,"0"))?2:1;
-            }
-            if(trace_state==2){
+            if(import_trace()){
                 if(body)fprintf(stderr,"[import] %s!%s -> %08lx (export %08lx hotpatch body)\n",
                     entry->dll,entry->name?entry->name:"#ordinal",(unsigned long)body,(unsigned long)addr);
                 else fprintf(stderr,"[import] %s!%s -> %08lx\n",

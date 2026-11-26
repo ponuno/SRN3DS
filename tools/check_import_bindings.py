@@ -9,6 +9,11 @@ after the plain-shim modules are integrated.
 Usage:
   python tools/check_import_bindings.py E:\\...\\trace.err
   python tools/check_import_bindings.py trace.err --require-shims
+
+The trace records PE module exports (hotpatch bodies) and, since the loader
+diagnostic change, bindings resolved by the host builtin before PE lookup
+(`(host shim)`). Both are parsed; a plain export is a failure under
+`--require-shims` only when it still points into the staged DLL.
 """
 import argparse
 import re

@@ -187,7 +187,10 @@ read stage without fake successes. *Not met.*
       pass 91 residency checks; GPU-only ETC1/SKTX registration and rehydrate
       tokens add 286 checks. Pool-aware core/COM wiring and direct SKTX upload
       add 108 runtime checks; MANAGED eviction/rehydrate, Reset preservation,
-      DISCARD and automatic guest drop remain pending.
+      DISCARD and automatic guest drop remain pending. TESV's D3DX9_42 texture
+      entry points now bind to host thunks: in-memory DDS image-info/create and
+      surface load are implemented, `D3DXCompileShader` refuses by name, while
+      file-path loads and cube/volume creation remain named `E_NOTIMPL`.
 - [~] A specialized ps_3_0 → PICA200 TEV translator for the measured LDR
       subset (`nop/mov/add/sub/mad/mul/dp3/lrp/texld/dcl/def`, 6 stages, 3 texture
       units); 19 real PS chunks translate after rejecting non-LDR literals,
