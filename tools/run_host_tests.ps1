@@ -649,7 +649,7 @@ foreach ($name in $tests.Keys) {
 }
 
 Write-Log "PYTHON tests"
-$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/shader_plan_merge_test.py", "tests/sm3_phase1_test.py")
+$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/shader_plan_merge_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py")
 if ($SkipPython) {
     $pyTests = @()
 } else {
