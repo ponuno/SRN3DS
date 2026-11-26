@@ -229,6 +229,7 @@ Add-Test "render_target" $common @("source/d3d9_core.c", "source/d3d9_texcache.c
 Add-Test "render_target_bounded" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_null.c", "tests/render_target_bounded_smoke.c") @()
 Add-Test "render_target_budget" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/render_target_budget_smoke.c") @()
 Add-Test "scaled_target_blit" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_null.c", "tests/scaled_target_blit_smoke.c") @()
+Add-Test "scaled_readback" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_null.c", "tests/scaled_readback_smoke.c") @()
 Add-Test "render_texture_sample" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/render_texture_sample_smoke.c") @()
 Add-Test "stretchrect" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/stretchrect_smoke.c") @()
 Add-Test "up_draw" $common ($d3dSources + @("tests/up_draw_smoke.c")) @()

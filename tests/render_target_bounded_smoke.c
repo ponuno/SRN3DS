@@ -24,6 +24,14 @@ static void set_cap_env(const char *v) {
     else unsetenv("TESV_D3D9_TARGET_NATIVE_MAX");
 #endif
 }
+static void set_scaled_readback_env(const char *v) {
+#ifdef _WIN32
+    _putenv_s("TESV_D3D9_SCALED_READBACK", v ? v : "");
+#else
+    if (v && *v) setenv("TESV_D3D9_SCALED_READBACK", v, 1);
+    else unsetenv("TESV_D3D9_SCALED_READBACK");
+#endif
+}
 
 typedef struct { uint32_t magic; unsigned w, h; size_t cost; } MockTarget;
 typedef struct {
@@ -165,6 +173,7 @@ static void check_target(D9Device *d, unsigned logical_w, unsigned logical_h,
 
 int main(void) {
     set_cap_env("512"); /* this regression pins the 512-cap path */
+    set_scaled_readback_env(NULL);
     Ctx c;
     memset(&c, 0, sizeof c);
     D9Device *d = d9_create_device(&ops_scaled, &c, 8u << 20);

@@ -27,6 +27,14 @@ static void set_cap_env(const char *v) {
     else unsetenv("TESV_D3D9_TARGET_NATIVE_MAX");
 #endif
 }
+static void set_scaled_readback_env(const char *v) {
+#ifdef _WIN32
+    _putenv_s("TESV_D3D9_SCALED_READBACK", v ? v : "");
+#else
+    if (v && *v) setenv("TESV_D3D9_SCALED_READBACK", v, 1);
+    else unsetenv("TESV_D3D9_SCALED_READBACK");
+#endif
+}
 
 static void fill_blocks(uint8_t *p, unsigned w, unsigned h) {
     for (unsigned y = 0; y < h; ++y) {
@@ -68,6 +76,7 @@ int main(void) {
     /* Default cap 256: 1024 and 512 logical targets both use 256x256 native
      * storage.  The pattern survives 1024->1024, 1024->512, 512->1024. */
     set_cap_env(NULL);
+    set_scaled_readback_env(NULL);
     d9_null_reset();
     D9Device *d = d9_create_device(d9_null_backend(), d9_null_context(), 32u << 20);
     assert(d);

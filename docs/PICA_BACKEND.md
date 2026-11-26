@@ -111,9 +111,10 @@ Host coverage: `pica_tev` **152 checks, 0 failures** (including the exact
 menu-light plan, fog/tint plans, third-texture/duplicate-sampler/c9/color1
 negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
 menu plan through `draw_menu`, `scaled_target_blit` pixel-checks scaled
-1024/512 logical StretchRect chains and the lossy lock refusal, and the full
-suite is **87 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
-(`.3dsx` 820,292 B, `.elf` 5,586,716 B).  No Azahar pixel run is claimed.
+1024/512 logical StretchRect chains, `scaled_readback` checks the env-gated
+nearest readback/writeback and default lossy refusal, and the full
+suite is **90 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
+(`.3dsx` 833,908 B, `.elf` 5,679,664 B).  No Azahar pixel run is claimed.
 
 ### Render-target texture handles
 
@@ -170,13 +171,27 @@ native-size-changing 512x256 -> 1024x512 bilinear path.  The citro3d draw path
 is structurally wired but has no ARM/Azahar pixel proof; the null path is the
 pixel-tested reference.
 
-Scaled `LockRect`/`UnlockRect` remain named refusals: the reason now names both
-sizes and says the scaled readback/writeback would be lossy.  A lockable
-explicit target whose native size would be smaller is refused at creation with
-a named `D9_UNSUPPORTED`.  Equal-size targets and the retained back buffer keep
-read/write support.  `GetRenderTargetData`/`UpdateSurface` are not implemented
-by this bridge (the COM slots use the generic unsupported handler), so no silent
-scaled copy path exists there.
+Scaled `LockRect`/`UnlockRect` are named refusals by default: the reason names
+both sizes and says the scaled readback/writeback is lossy.  A lockable explicit
+target whose native size would be smaller is also refused at creation with a
+named `D9_UNSUPPORTED`.  With `TESV_D3D9_SCALED_READBACK=1` (default off,
+captured at device creation) a lockable bounded target is accepted and:
+
+- `LockRect` reads the full native target through `target_read`, then
+  nearest-upscales to the requested logical rectangle.  A 1024-logical /
+  256-native target therefore exposes each native pixel as a 4x4 logical block.
+- `UnlockRect` reads the native target, samples the logical rectangle at native
+  pixel centres, and writes the full native target through `target_write`.
+  This is a documented nearest downscale and loses the other logical pixels.
+
+The null backend has real pixels; citro3d uses its `target_read`/`target_write`
+path (slow, measurement-only).  `tests/scaled_readback_smoke.c` checks the
+default-off refusal, lockable >512 creation refusal, 4x4 nearest upscale,
+write-back round-trip and the unaffected retained back buffer.  Equal-size
+targets and the retained back buffer keep their unscaled read/write path.
+`GetRenderTargetData`/`UpdateSurface` are not implemented by this bridge (the
+COM slots use the generic unsupported handler), so no silent scaled copy path
+exists there.
 
 ### Render-target budget
 

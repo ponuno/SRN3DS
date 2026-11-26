@@ -254,7 +254,7 @@ powershell -File tools\run_host_tests.ps1 `
   -OutDir C:\Users\vasya\Documents\Skyrim_N3DS_wt\menu-shader-vs\build_host_full_menu_abs
 ```
 
-Result: **87 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
+Result: **90 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
 hitting the documented guest memory gate (`Not enough memory to run
 application.`), not a rendering PASS.
 

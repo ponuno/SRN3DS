@@ -341,6 +341,11 @@ int d9_render_target_storage_info(D9Device *d,D9Handle h,unsigned *w,unsigned *h
  * at device creation from TESV_D3D9_TARGET_NATIVE_MAX (64..512, rounded down to
  * a power of two); default 256.  The retained back buffer is not capped. */
 unsigned d9_target_native_max(const D9Device *d);
+/* TESV_D3D9_SCALED_READBACK=1 (captured at device creation).  Off by default:
+ * scaled LockRect/UnlockRect are named lossy refusals.  On: LockRect reads
+ * native pixels and nearest-upscales to the logical rectangle; UnlockRect
+ * nearest-downscales the logical rectangle back into native storage. */
+int d9_scaled_readback_enabled(const D9Device *d);
 int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height);
 int d9_release_render_target(D9Device *d,D9Handle h);

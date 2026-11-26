@@ -27,6 +27,10 @@ static unsigned target_native_max_from_env(void){
     while((p<<1)<=v&&(p<<1)<=D9_TARGET_NATIVE_LIMIT)p<<=1;
     return p;
 }
+static int scaled_readback_from_env(void){
+    const char *s=getenv("TESV_D3D9_SCALED_READBACK");
+    return s&&strcmp(s,"1")==0;
+}
 typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
 typedef struct {
     D9Handle id;size_t offset,stride;
@@ -72,6 +76,7 @@ struct D9Device {
      * back_h. */
     D9Handle back_target;unsigned back_tex_w,back_tex_h;int back_lockable;
     unsigned target_native_max; /* env-selected cap for explicit targets, 64..512 */
+    int scaled_readback;       /* TESV_D3D9_SCALED_READBACK=1 */
     Depth depths[MAX_DEPTHS];D9Handle depth;
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
@@ -147,6 +152,7 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     if(!ops||!ops->texture_create||!ops->texture_upload||!ops->texture_delete||!ops->begin||!ops->draw||!ops->end||!limit)return NULL;
     D9Device *d=calloc(1,sizeof *d);if(!d)return NULL;d->ops=*ops;d->ctx=ctx;d->limit=limit;d->next=1;
     d->target_native_max=target_native_max_from_env();
+    d->scaled_readback=scaled_readback_from_env();
     D9TexCacheOps cache_ops={d,cache_release_guest,cache_release_gpu};
     if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEX_ENTRIES,&cache_ops,0,0)){
         free(d);return NULL;
@@ -820,10 +826,14 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
         set_diagnosis(d,why);
         return D9_UNSUPPORTED;
     }
-    if(lockable&&(nw<w||nh<h)){
-        char why[160];
-        snprintf(why,sizeof why,"CreateRenderTarget: lockable %ux%u would need %ux%u native scaled readback",w,h,nw,nh);
+    if(lockable&&(nw<w||nh<h)&&!d->scaled_readback){
+        char why[200];
+        snprintf(why,sizeof why,"CreateRenderTarget: lockable %ux%u would need %ux%u native scaled readback; set TESV_D3D9_SCALED_READBACK=1",w,h,nw,nh);
         set_diagnosis(d,why);
+        return D9_UNSUPPORTED;
+    }
+    if(lockable&&d->scaled_readback&&(nw<w||nh<h)&&!d->ops.target_write){
+        set_diagnosis(d,"CreateRenderTarget: scaled readback requires backend target_write");
         return D9_UNSUPPORTED;
     }
     size_t bytes=(size_t)nw*nh*4;if(budget_has_room(d,bytes))return D9_MEMORY;
@@ -930,14 +940,60 @@ int d9_render_target_storage_info(D9Device *d,D9Handle h,unsigned *w,unsigned *h
 unsigned d9_target_native_max(const D9Device *d){
     return d?d->target_native_max:0;
 }
+int d9_scaled_readback_enabled(const D9Device *d){
+    return d?d->scaled_readback:0;
+}
+static unsigned readback_nearest_native(unsigned logical_pos,unsigned logical_dim,unsigned native_dim){
+    if(!native_dim)return 0;
+    uint64_t v=((uint64_t)logical_pos*2u+1u)*(uint64_t)native_dim;
+    unsigned n=(unsigned)(v/((uint64_t)logical_dim*2u));
+    return n<native_dim?n:native_dim-1;
+}
+static unsigned writeback_native_start(unsigned logical_pos,unsigned logical_dim,unsigned native_dim){
+    if(!native_dim||!logical_dim)return 0;
+    if(native_dim>=logical_dim)return logical_pos;
+    return (unsigned)((uint64_t)logical_pos*native_dim/logical_dim);
+}
+static unsigned writeback_native_end(unsigned logical_end,unsigned logical_dim,unsigned native_dim){
+    if(!native_dim||!logical_dim)return 0;
+    if(native_dim>=logical_dim)return logical_end;
+    uint64_t v=(uint64_t)logical_end*native_dim;
+    return (unsigned)((v+logical_dim-1)/logical_dim);
+}
+static unsigned writeback_nearest_logical(unsigned native_pos,unsigned native_dim,unsigned logical_dim){
+    if(!native_dim)return 0;
+    uint64_t v=((uint64_t)native_pos*2u+1u)*(uint64_t)logical_dim;
+    unsigned l=(unsigned)(v/((uint64_t)native_dim*2u));
+    return l<logical_dim?l:logical_dim-1;
+}
 int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);if(!t||!d||!dst||!dst_pitch||d->scene)return D9_INVALID;
     if(t->native_w!=t->w||t->native_h!=t->h){
-        char why[200];
-        snprintf(why,sizeof why,"LockRect: bounded native target %ux%u is stored at %ux%u; scaled readback would be lossy and is not implemented",t->w,t->h,t->native_w,t->native_h);
-        set_diagnosis(d,why);
-        return D9_UNSUPPORTED;
+        if(!d->scaled_readback){
+            char why[220];
+            snprintf(why,sizeof why,"LockRect: bounded native target %ux%u is stored at %ux%u; scaled readback is lossy and disabled (set TESV_D3D9_SCALED_READBACK=1)",t->w,t->h,t->native_w,t->native_h);
+            set_diagnosis(d,why);
+            return D9_UNSUPPORTED;
+        }
+        if(!d->ops.target_read)return D9_BACKEND;
+        if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||dst_pitch<(size_t)w*4)
+            return D9_INVALID;
+        size_t npitch=(size_t)t->native_w*4,nbytes=npitch*t->native_h;
+        uint8_t *native=malloc(nbytes);if(!native)return D9_MEMORY;
+        if(d->ops.target_read(d->ctx,t->native,native,npitch,0,0,t->native_w,t->native_h)){
+            free(native);return D9_BACKEND;
+        }
+        for(unsigned yy=0;yy<height;++yy){
+            unsigned sy=readback_nearest_native(y+yy,t->h,t->native_h);
+            for(unsigned xx=0;xx<w;++xx){
+                unsigned sx=readback_nearest_native(x+xx,t->w,t->native_w);
+                memcpy((uint8_t *)dst+(size_t)yy*dst_pitch+(size_t)xx*4,
+                       native+(size_t)sy*npitch+(size_t)sx*4,4);
+            }
+        }
+        free(native);
+        return D9_OK;
     }
     if(!d->ops.target_read)return D9_BACKEND;
     if(x>t->w||y>t->h||w>t->w-x||height>t->h-y)return D9_INVALID;
@@ -948,10 +1004,39 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
     Target *t=target(d,h);
     if(!t||!d||!src||!src_pitch||d->scene||d->teardown)return D9_INVALID;
     if(t->native_w!=t->w||t->native_h!=t->h){
-        char why[200];
-        snprintf(why,sizeof why,"UnlockRect: bounded native target %ux%u is stored at %ux%u; scaled writeback would be lossy and is not implemented",t->w,t->h,t->native_w,t->native_h);
-        set_diagnosis(d,why);
-        return D9_UNSUPPORTED;
+        if(!d->scaled_readback){
+            char why[220];
+            snprintf(why,sizeof why,"UnlockRect: bounded native target %ux%u is stored at %ux%u; scaled writeback is lossy and disabled (set TESV_D3D9_SCALED_READBACK=1)",t->w,t->h,t->native_w,t->native_h);
+            set_diagnosis(d,why);
+            return D9_UNSUPPORTED;
+        }
+        if(!d->ops.target_read||!d->ops.target_write)return D9_BACKEND;
+        if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||src_pitch<(size_t)w*4)
+            return D9_INVALID;
+        size_t npitch=(size_t)t->native_w*4,nbytes=npitch*t->native_h;
+        uint8_t *native=malloc(nbytes);if(!native)return D9_MEMORY;
+        if(d->ops.target_read(d->ctx,t->native,native,npitch,0,0,t->native_w,t->native_h)){
+            free(native);return D9_BACKEND;
+        }
+        unsigned nx0=writeback_native_start(x,t->w,t->native_w);
+        unsigned nx1=writeback_native_end(x+w,t->w,t->native_w);
+        unsigned ny0=writeback_native_start(y,t->h,t->native_h);
+        unsigned ny1=writeback_native_end(y+height,t->h,t->native_h);
+        if(nx1>t->native_w)nx1=t->native_w;
+        if(ny1>t->native_h)ny1=t->native_h;
+        for(unsigned ny=ny0;ny<ny1;++ny){
+            unsigned ly=writeback_nearest_logical(ny,t->native_h,t->h);
+            if(ly<y||ly>=y+height)continue;
+            for(unsigned nx=nx0;nx<nx1;++nx){
+                unsigned lx=writeback_nearest_logical(nx,t->native_w,t->w);
+                if(lx<x||lx>=x+w)continue;
+                memcpy(native+(size_t)ny*npitch+(size_t)nx*4,
+                       (const uint8_t *)src+(size_t)(ly-y)*src_pitch+(size_t)(lx-x)*4,4);
+            }
+        }
+        int rc=d->ops.target_write(d->ctx,t->native,native,npitch,t->native_w,t->native_h);
+        free(native);
+        return rc?D9_BACKEND:D9_OK;
     }
     if(!d->ops.target_read||!d->ops.target_write)return D9_BACKEND;
     if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||src_pitch<(size_t)w*4)return D9_INVALID;
