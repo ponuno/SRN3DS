@@ -29,11 +29,17 @@ with sources. *Almost met; hardware budget unknown.*
       guest ABI, x87 handling, return convention.
 - [x] MSVC lazy-ILT thunk detected, verified byte-for-byte, real body resolved,
       bypass recorded in manifest and logs; unit tests cover malformed variants.
-- [x] Host differential check: 3/3 matrices for Transpose (53 insns) and
-      Multiply (217 insns); canaries and input immutability checked.
-- [x] ARM build and Azahar run: `D3DXMatrixMultiply: PASS (3/3)`, 2,480 KiB guest.
+- [x] Host differential check: 3/3 for all nine lazy-ILT exports
+      (`MatrixMultiply`, `MatrixTranspose`, `MatrixMultiplyTranspose`,
+      `PlaneTransform`, `Vec3TransformCoord`, `Vec3TransformNormal`,
+      `Vec3Normalize`, `PlaneNormalize`, `MatrixInverse`), plus the internal Vec3
+      helper and the `_CIsqrt`/`_finite` host shims; canaries, the out_len tail,
+      all 16 matrix floats and the determinant are checked.
+- [x] ARM TESV build with the 12-entry table (`d3dx12`/`d3dx13`); hashes are in
+      the artifact manifest. The only Azahar PASS is still the older
+      `D3DXMatrixMultiply` run; the full table has not been launched in Azahar.
 - [ ] Real New 3DS control run.
-- [ ] Scaling/Translation host+Azahar runs (same code path, not yet executed).
+- [ ] Azahar run of the nine-body table (desktop unavailable during this work).
 
 **Gate:** original user DLL correct on host and PASS (3/3) in Azahar. *Met for
 Multiply/Transpose in Azahar; hardware pending.*
