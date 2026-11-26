@@ -321,6 +321,9 @@ static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
     D9Citro *c=ctx;
     if(!c||!c->scene||!c->program_color_ready||!vertices||!clip||!state||
        !state->pixel_shader||!count||count%3)return -1;
+    if((state->pixel_shader->backend_flags&D9TEV_PLAN_MENU_TEXT)&&
+       (state->pixel_shader->stages!=1||state->pixel_shader->textures!=1||
+        !texture0||texture1))return -1;
     if(count>FRAME_VERTICES-c->cursor_color)return -1;
     memcpy(c->arena_color+c->cursor_color,vertices,count*sizeof *vertices);
     GSPGPU_FlushDataCache(c->arena_color+c->cursor_color,count*sizeof *vertices);

@@ -34,7 +34,8 @@
  * plans built here. */
 enum {
     D9TEV_PLAN_MENU_LIGHT = 1u << 0,
-    D9TEV_PLAN_MENU_FIXED = 1u << 1
+    D9TEV_PLAN_MENU_FIXED = 1u << 1,
+    D9TEV_PLAN_MENU_TEXT  = 1u << 2
 };
 
 /* GPU_TEVSRC */
@@ -151,6 +152,15 @@ typedef struct {
  * why when the program is outside the subset.  why may be NULL/0. */
 int d9_tev_translate_pixel(const uint32_t *code, size_t words,
                            D9TevProgram *out, char *why, size_t why_size);
+
+/* Certified menu-text plan: one stage, MODULATE(TEXTURE0, PRIMARY), one 2D
+ * sampler with texcoord0 and no constants.  The caller must have a real A8
+ * texture unit, exactly one texture and no pixel shader.  The POINT/CLAMP
+ * sampler comes from the draw state; this function only certifies the plan.
+ * Returns 0 on success; -1 writes a named reason into why. */
+int d9_tev_text_plan(D9TevProgram *out, int has_a8_unit,
+                     int has_second_texture, int has_pixel_shader,
+                     char *why, size_t why_size);
 
 /* Evaluate a translated program in software.  tex[unit][rgba] are the sampled
  * texels, stage_const[stage][rgba] the resolved per-stage constants (literal

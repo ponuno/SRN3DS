@@ -132,8 +132,20 @@ negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
 menu plan through `draw_menu`, `scaled_target_blit` pixel-checks scaled
 1024/512 logical StretchRect chains, `scaled_readback` checks the env-gated
 nearest readback/writeback and default lossy refusal, and the full
-suite is **114 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
-(`.3dsx` 898,380 B, `.elf` 6,088,360 B).  No Azahar pixel run is claimed.
+suite is **116 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
+(`.3dsx` 899,116 B, `.elf` 6,092,008 B).  No Azahar pixel run is claimed.
+
+### Menu text TEV plan
+
+`d9_tev_text_plan()` certifies the menu-text quad as one TEV stage:
+`MODULATE(TEXTURE0, PRIMARY)` for both RGB and alpha, one 2D sampler at
+`texcoord0`, vertex COLOR0, no constants and no second stage.  Sampler
+POINT/CLAMP is supplied by the menu-text draw state; the plan itself carries
+the sampler/texcoord indices.  The builder refuses a pixel shader, a second
+texture and a missing A8 texture unit by name; without an A8 upload path the
+text operation stops at the named A8 refusal instead of substituting RGBA8.
+`tev_text_plan` checks the plan and the PICA descriptor (`stage_count == 1`,
+TEXTURE0/PRIMARY, no stage 1, no constants); no pixel result is claimed.
 
 ### Render-target texture handles
 

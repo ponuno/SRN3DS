@@ -225,6 +225,65 @@ static int note_constant(Ctx *ctx, int reg) {
     return 0;
 }
 
+int d9_tev_text_plan(D9TevProgram *out, int has_a8_unit,
+                     int has_second_texture, int has_pixel_shader,
+                     char *why, size_t why_size) {
+    if (why && why_size) why[0] = 0;
+    if (!out) {
+        if (why && why_size) snprintf(why, why_size, "text TEV plan needs an output plan");
+        return -1;
+    }
+    memset(out, 0, sizeof *out);
+    if (has_pixel_shader) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "text TEV plan requires the fixed-function stage-0 path; a pixel shader owns the TEV state");
+        return -1;
+    }
+    if (has_second_texture) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "text TEV plan accepts exactly one texture unit");
+        return -1;
+    }
+    if (!has_a8_unit) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "text TEV plan requires an A8 texture unit");
+        return -1;
+    }
+
+    out->version = 0xFFFF0300u;
+    out->instructions = 1u;
+    out->stages = 1u;
+    out->stage_limit = D9TEV_MAX_STAGES;
+    out->backend_flags = D9TEV_PLAN_MENU_TEXT;
+    out->textures = 1u;
+    out->texture[0].texcoord_reg = 0u;
+    out->texture[0].sampler_reg = 0u;
+    out->texture[0].sampler_type = 2u;
+    out->inputs = 1u;
+    out->input[0].usage = D9TEV_USAGE_COLOR;
+    out->input[0].usage_index = 0u;
+    out->input[0].reg_index = 1u;
+    out->input[0].tev_source = D9TEV_SRC_PRIMARY;
+    out->uses_vertex_color = 1u;
+
+    D9TevStage *s = &out->stage[0];
+    s->func_rgb = s->func_a = D9TEV_FUNC_MODULATE;
+    s->src_rgb[0] = s->src_a[0] = D9TEV_SRC_TEX0;
+    s->op_rgb[0] = D9TEV_RGB_COLOR;
+    s->op_a[0] = D9TEV_A_ALPHA;
+    s->src_rgb[1] = s->src_a[1] = D9TEV_SRC_PRIMARY;
+    s->op_rgb[1] = D9TEV_RGB_COLOR;
+    s->op_a[1] = D9TEV_A_ALPHA;
+    s->src_rgb[2] = s->src_a[2] = D9TEV_SRC_PRIMARY;
+    s->op_rgb[2] = D9TEV_RGB_COLOR;
+    s->op_a[2] = D9TEV_A_ALPHA;
+    s->const_reg = 0xFFu;
+    return 0;
+}
+
 uint32_t d9_tev_pack_rgba8(const float rgba[4]) {
     uint32_t out = 0;
     for (int i = 0; i < 4; ++i) {

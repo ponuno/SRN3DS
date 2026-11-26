@@ -271,7 +271,8 @@ int d9_pica_tev_validate(const D9TevProgram *program,
                       "invalid external constant count %u", program->constants);
 
     int menu = (program->backend_flags &
-                (D9TEV_PLAN_MENU_LIGHT | D9TEV_PLAN_MENU_FIXED)) != 0;
+                (D9TEV_PLAN_MENU_LIGHT | D9TEV_PLAN_MENU_FIXED |
+                 D9TEV_PLAN_MENU_TEXT)) != 0;
     if (!menu) {
         if (program->textures > 1)
             return reject(reason, D9_PICA_TEV_TEXTURE_COUNT, why, why_size,
