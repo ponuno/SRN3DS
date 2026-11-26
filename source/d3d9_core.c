@@ -793,7 +793,9 @@ int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);if(!t||!d||!dst||!dst_pitch||d->scene)return D9_INVALID;
     if(t->native_w!=t->w||t->native_h!=t->h){
-        set_diagnosis(d,"LockRect: a bounded native render target cannot be read back without scaling");
+        char why[200];
+        snprintf(why,sizeof why,"LockRect: bounded native target %ux%u is stored at %ux%u; scaled readback would be lossy and is not implemented",t->w,t->h,t->native_w,t->native_h);
+        set_diagnosis(d,why);
         return D9_UNSUPPORTED;
     }
     if(!d->ops.target_read)return D9_BACKEND;
@@ -805,7 +807,9 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
     Target *t=target(d,h);
     if(!t||!d||!src||!src_pitch||d->scene||d->teardown)return D9_INVALID;
     if(t->native_w!=t->w||t->native_h!=t->h){
-        set_diagnosis(d,"UnlockRect: a bounded native render target cannot be written back without scaling");
+        char why[200];
+        snprintf(why,sizeof why,"UnlockRect: bounded native target %ux%u is stored at %ux%u; scaled writeback would be lossy and is not implemented",t->w,t->h,t->native_w,t->native_h);
+        set_diagnosis(d,why);
         return D9_UNSUPPORTED;
     }
     if(!d->ops.target_read||!d->ops.target_write)return D9_BACKEND;
@@ -898,18 +902,12 @@ int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
     Target *dt=dst?target(d,dst):(d->back_target?target(d,d->back_target):NULL);
     if((src&&!st)||(dst&&!dt))return D9_INVALID;
     if(src==dst||(st&&st==dt)){d->blit_error=D9_BLIT_SAME_SURFACE;return D9_INVALID;}
-    if((st&&st->id!=d->back_target&&(st->native_w!=st->w||st->native_h!=st->h))||
-       (dt&&dt->id!=d->back_target&&(dt->native_w!=dt->w||dt->native_h!=dt->h))){
-        d->blit_error=D9_BLIT_UNSUPPORTED;
-        set_diagnosis(d,"StretchRect: a bounded native target requires scaled blit support");
-        return D9_BACKEND;
-    }
     D9BlitRegion sreg={{0}},dreg={{0}};
     if(st){
         int retained=st->id==d->back_target;
         sreg.surface=(D9BlitSurface){st->native,
             retained?d->back_w:st->w,retained?d->back_h:st->h,st->format,
-            retained?d->back_tex_w:0,retained?d->back_tex_h:0};
+            retained?d->back_tex_w:st->native_w,retained?d->back_tex_h:st->native_h};
     }else{
         if(!d->back_valid)return D9_INVALID;
         sreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format,0,0};
@@ -918,7 +916,7 @@ int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
         int retained=dt->id==d->back_target;
         dreg.surface=(D9BlitSurface){dt->native,
             retained?d->back_w:dt->w,retained?d->back_h:dt->h,dt->format,
-            retained?d->back_tex_w:0,retained?d->back_tex_h:0};
+            retained?d->back_tex_w:dt->native_w,retained?d->back_tex_h:dt->native_h};
     }else{
         if(!d->back_valid)return D9_INVALID;
         dreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format,0,0};

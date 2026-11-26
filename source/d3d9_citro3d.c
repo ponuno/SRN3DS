@@ -409,6 +409,9 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
         return D9_BLIT_ARGUMENT;
     if(!src->surface.native)return D9_BLIT_BACK_BUFFER_SRC;
     if(dst->surface.format!=src->surface.format)return D9_BLIT_FORMAT;
+    if(src->x+src->width>src->surface.width||src->y+src->height>src->surface.height||
+       dst->x+dst->width>dst->surface.width||dst->y+dst->height>dst->surface.height)
+        return D9_BLIT_RECT;
     NativeTarget *native=dst->surface.native;
     C3D_RenderTarget *rt=native?native->target:c->target;
     C3D_Tex *stex=(C3D_Tex *)src->surface.native;
@@ -417,6 +420,12 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     unsigned shgt=src->surface.storage_height?src->surface.storage_height:src->surface.height;
     unsigned dw=dst->surface.storage_width?dst->surface.storage_width:dst->surface.width;
     unsigned dh=dst->surface.storage_height?dst->surface.storage_height:dst->surface.height;
+    /* The retained back buffer keeps its logical 400x240 content in a 512x256
+     * storage corner, so its UV denominator is the storage size.  An explicit
+     * bounded target fills the whole native storage from its logical surface,
+     * so its UV denominator is the larger logical size. */
+    unsigned uvw=src->surface.width>sw?src->surface.width:sw;
+    unsigned uvh=src->surface.height>shgt?src->surface.height:shgt;
     if(stex->width!=sw||stex->height!=shgt)return D9_BLIT_UNSUPPORTED;
     if(dst->surface.native&&(native->w!=dw||native->h!=dh))return D9_BLIT_UNSUPPORTED;
     if(c->cursor+6>FRAME_VERTICES)return D9_BLIT_BACKEND;
@@ -426,6 +435,16 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
         if(!C3D_FrameBegin(C3D_FRAME_SYNCDRAW))return D9_BLIT_BACKEND;
     }
     if(!C3D_FrameDrawOn(rt)){if(own_frame)C3D_FrameEnd(0);return D9_BLIT_BACKEND;}
+    if(dst->surface.native){
+        /* Explicit bounded target: draw into the whole native storage.  The
+         * retained back buffer is the opposite case (storage larger than the
+         * logical surface) and keeps its logical corner viewport. */
+        unsigned vw=dw,vh=dh;
+        if(vw>=dst->surface.width&&vh>=dst->surface.height){
+            vw=dst->surface.width;vh=dst->surface.height;
+        }
+        C3D_SetViewport(0,0,vw,vh);
+    }
     prepare_draw(c);
     float w=(float)dst->surface.width,h=(float)dst->surface.height;
     /* Same D3D-top-left -> rotated PICA clip mapping as d9_pica_transform()
@@ -459,10 +478,10 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     C3D_TexEnvFunc(env,C3D_Both,GPU_REPLACE);
     float x0=(float)dst->x,y0=(float)dst->y;
     float x1=(float)(dst->x+dst->width),y1=(float)(dst->y+dst->height);
-    float u0=(float)src->x/(float)sw;
-    float v0=(float)src->y/(float)shgt;
-    float u1=(float)(src->x+src->width)/(float)sw;
-    float v1=(float)(src->y+src->height)/(float)shgt;
+    float u0=(float)src->x/(float)uvw;
+    float v0=(float)src->y/(float)uvh;
+    float u1=(float)(src->x+src->width)/(float)uvw;
+    float v1=(float)(src->y+src->height)/(float)uvh;
     D9Vertex *v=c->arena+c->cursor;
     v[0]=(D9Vertex){x0,y0,0.0f,u0,v0};v[1]=(D9Vertex){x1,y0,0.0f,u1,v0};v[2]=(D9Vertex){x1,y1,0.0f,u1,v1};
     v[3]=v[0];v[4]=v[2];v[5]=(D9Vertex){x0,y1,0.0f,u0,v1};

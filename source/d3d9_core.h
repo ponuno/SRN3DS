@@ -88,8 +88,9 @@ typedef struct {
  * NULL selects the implicit back buffer.  width/height are the logical D3D
  * surface dimensions (the 400x240 presentation size for the back buffer);
  * storage_width/storage_height are the native texture dimensions when they
- * differ, e.g. 512x256 for the retained lockable back buffer.  Zero means the
- * logical dimensions. */
+ * differ, e.g. 512x256 for the retained lockable back buffer or 256x256 for a
+ * bounded 1024-logical target.  Zero means the logical dimensions.  A blit
+ * backend maps logical rectangles through this storage. */
 typedef struct {
     void *native;
     unsigned width,height,format;

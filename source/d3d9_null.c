@@ -193,15 +193,78 @@ static int null_target_write(void *ctx,void *native,const void *bgra,size_t pitc
         memcpy(t->pixels+(size_t)yy*w*4,(const uint8_t *)bgra+(size_t)yy*pitch,(size_t)w*4);
     ++s->target_writes;return 0;
 }
-static uint8_t *blit_pixels(const D9BlitSurface *surface,unsigned *w,unsigned *h){
+typedef struct {uint8_t *pixels;unsigned lw,lh,sw,sh;} BlitView;
+
+static int blit_view(const D9BlitSurface *surface,BlitView *view){
     if(surface->native){
-        NullTarget *t=surface->native;*w=t->w;*h=t->h;return t->pixels;
+        NullTarget *t=surface->native;
+        if(!t||!t->pixels||!surface->width||!surface->height)return D9_BLIT_ARGUMENT;
+        view->pixels=t->pixels;
+        view->lw=surface->width;
+        view->lh=surface->height;
+        view->sw=surface->storage_width?surface->storage_width:t->w;
+        view->sh=surface->storage_height?surface->storage_height:t->h;
+        if(!view->sw||!view->sh||view->sw>t->w||view->sh>t->h)return D9_BLIT_UNSUPPORTED;
+    }else{
+        view->pixels=g_present;
+        view->lw=surface->width;
+        view->lh=surface->height;
+        view->sw=view->lw;
+        view->sh=view->lh;
     }
-    *w=NULL_PRESENT_W;*h=NULL_PRESENT_H;return g_present;
+    return D9_BLIT_OK;
 }
-/* The null backend validates, counts and really copies a StretchRect.  The
- * implicit destination is a private 400x240 BGRA image, which is what the host
- * pixel tests read back through d9_null_present_pixels(). */
+static unsigned native_start(unsigned logical_pos,unsigned logical,unsigned native){
+    if(!logical||!native)return 0;
+    if(native>=logical)return logical_pos;
+    return (unsigned)((uint64_t)logical_pos*native/logical);
+}
+static unsigned native_end(unsigned logical_end,unsigned logical,unsigned native){
+    if(!logical||!native)return 0;
+    if(native>=logical)return logical_end;
+    uint64_t v=(uint64_t)logical_end*native;
+    return (unsigned)((v+logical-1)/logical);
+}
+static const uint8_t *blit_texel(const BlitView *view,unsigned x,unsigned y){
+    if(x>=view->sw)x=view->sw-1;
+    if(y>=view->sh)y=view->sh-1;
+    return view->pixels+((size_t)y*view->sw+x)*4;
+}
+static void blit_nearest(const BlitView *src,float x,float y,uint8_t out[4]){
+    int ix=(int)floorf(x),iy=(int)floorf(y);
+    if(ix<0)ix=0;if(iy<0)iy=0;
+    if(ix>=(int)src->sw)ix=(int)src->sw-1;
+    if(iy>=(int)src->sh)iy=(int)src->sh-1;
+    memcpy(out,blit_texel(src,(unsigned)ix,(unsigned)iy),4);
+}
+static void blit_bilinear(const BlitView *src,float x,float y,uint8_t out[4]){
+    float fx=x-0.5f,fy=y-0.5f;
+    int x0=(int)floorf(fx),y0=(int)floorf(fy);
+    float tx=fx-(float)x0,ty=fy-(float)y0;
+    int x1=x0+1,y1=y0+1;
+    if(x0<0)x0=0;if(y0<0)y0=0;
+    if(x1>=(int)src->sw)x1=(int)src->sw-1;
+    if(y1>=(int)src->sh)y1=(int)src->sh-1;
+    if(x0>=(int)src->sw)x0=(int)src->sw-1;
+    if(y0>=(int)src->sh)y0=(int)src->sh-1;
+    const uint8_t *p00=blit_texel(src,(unsigned)x0,(unsigned)y0);
+    const uint8_t *p10=blit_texel(src,(unsigned)x1,(unsigned)y0);
+    const uint8_t *p01=blit_texel(src,(unsigned)x0,(unsigned)y1);
+    const uint8_t *p11=blit_texel(src,(unsigned)x1,(unsigned)y1);
+    for(unsigned c=0;c<4;++c){
+        float top=(float)p00[c]*(1.0f-tx)+(float)p10[c]*tx;
+        float bot=(float)p01[c]*(1.0f-tx)+(float)p11[c]*tx;
+        float v=top*(1.0f-ty)+bot*ty;
+        if(v<0.0f)v=0.0f;if(v>255.0f)v=255.0f;
+        out[c]=(uint8_t)(v+0.5f);
+    }
+}
+/* The null backend validates, counts and really copies a StretchRect.  Logical
+ * rectangles are mapped through the native storage of bounded targets, so a
+ * 1024-logical/256-native target samples the same full-surface image that the
+ * viewport path renders.  The implicit destination is a private 400x240 BGRA
+ * image, which is what the host pixel tests read back through
+ * d9_null_present_pixels(). */
 static int null_target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src,unsigned filter){
     D9NullStats *s=stats(ctx);
     if(!dst||!src||!dst->width||!dst->height||!src->width||!src->height||filter>D9_FILTER_LINEAR){
@@ -213,17 +276,37 @@ static int null_target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion
     if(src->surface.format!=dst->surface.format){
         null_log("StretchRect","source and destination formats differ");return D9_BLIT_FORMAT;
     }
-    unsigned sw=0,sh=0,dw=0,dh=0;
-    uint8_t *sp=blit_pixels(&src->surface,&sw,&sh);
-    uint8_t *dp=blit_pixels(&dst->surface,&dw,&dh);
-    if(!sp||!dp||src->x>sw||src->y>sh||src->width>sw-src->x||src->height>sh-src->y||
-       dst->x>dw||dst->y>dh||dst->width>dw-dst->x||dst->height>dh-dst->y)
+    BlitView sv,dv;
+    int rc=blit_view(&src->surface,&sv);if(rc)return rc;
+    rc=blit_view(&dst->surface,&dv);if(rc)return rc;
+    if(src->x>sv.lw||src->y>sv.lh||src->width>sv.lw-src->x||src->height>sv.lh-src->y||
+       dst->x>dv.lw||dst->y>dv.lh||dst->width>dv.lw-dst->x||dst->height>dv.lh-dst->y)
         return D9_BLIT_RECT;
-    for(unsigned y=0;y<dst->height;++y){
-        unsigned sy=src->y+(unsigned)((uint64_t)y*src->height/dst->height);
-        for(unsigned x=0;x<dst->width;++x){
-            unsigned sx=src->x+(unsigned)((uint64_t)x*src->width/dst->width);
-            memcpy(dp+((size_t)(dst->y+y)*dw+dst->x+x)*4,sp+((size_t)sy*sw+sx)*4,4);
+    unsigned dx0=native_start(dst->x,dv.lw,dv.sw);
+    unsigned dx1=native_end(dst->x+dst->width,dv.lw,dv.sw);
+    unsigned dy0=native_start(dst->y,dv.lh,dv.sh);
+    unsigned dy1=native_end(dst->y+dst->height,dv.lh,dv.sh);
+    if(dx1>dv.sw)dx1=dv.sw;
+    if(dy1>dv.sh)dy1=dv.sh;
+    if(dx0>=dx1||dy0>=dy1)return D9_BLIT_RECT;
+    float dlx=dv.sw<dv.lw?(float)dv.lw/(float)dv.sw:1.0f;
+    float dly=dv.sh<dv.lh?(float)dv.lh/(float)dv.sh:1.0f;
+    float slx=sv.sw<sv.lw?(float)sv.lw/(float)sv.sw:1.0f;
+    float sly=sv.sh<sv.lh?(float)sv.lh/(float)sv.sh:1.0f;
+    for(unsigned ny=dy0;ny<dy1;++ny){
+        float logical_y=((float)ny+0.5f)*dly;
+        float vrel=(logical_y-(float)dst->y)/(float)dst->height;
+        if(vrel<0.0f)vrel=0.0f;if(vrel>1.0f)vrel=1.0f;
+        float src_y=((float)src->y+vrel*(float)src->height)/sly;
+        for(unsigned nx=dx0;nx<dx1;++nx){
+            float logical_x=((float)nx+0.5f)*dlx;
+            float urel=(logical_x-(float)dst->x)/(float)dst->width;
+            if(urel<0.0f)urel=0.0f;if(urel>1.0f)urel=1.0f;
+            float src_x=((float)src->x+urel*(float)src->width)/slx;
+            uint8_t out[4];
+            if(filter==D9_FILTER_LINEAR)blit_bilinear(&sv,src_x,src_y,out);
+            else blit_nearest(&sv,src_x,src_y,out);
+            memcpy(dv.pixels+((size_t)ny*dv.sw+nx)*4,out,4);
         }
     }
     ++s->blits;s->blit_pixels+=(unsigned long long)dst->width*dst->height;
@@ -232,7 +315,7 @@ static int null_target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion
     s->last_blit_filter=filter;
     s->last_blit_src_back=src->surface.native==NULL;
     s->last_blit_dst_back=dst->surface.native==NULL;
-    if(!dst->surface.native){s->present_valid=1;s->present_w=dw;s->present_h=dh;}
+    if(!dst->surface.native){s->present_valid=1;s->present_w=dv.lw;s->present_h=dv.lh;}
     return D9_BLIT_OK;
 }
 static int null_depth_clear(void *ctx,unsigned flags,uint32_t depth_stencil){

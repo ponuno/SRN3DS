@@ -110,9 +110,10 @@ texture units and materialises each stage constant from the c0..c8 float bank.
 Host coverage: `pica_tev` **152 checks, 0 failures** (including the exact
 menu-light plan, fog/tint plans, third-texture/duplicate-sampler/c9/color1
 negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
-menu plan through `draw_menu`, and the full suite is **86 passed, 1 diagnostic,
-0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
-(`.3dsx` 818,844 B, `.elf` 5,578,568 B).  No Azahar pixel run is claimed.
+menu plan through `draw_menu`, `scaled_target_blit` pixel-checks scaled
+1024/512 logical StretchRect chains and the lossy lock refusal, and the full
+suite is **87 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
+(`.3dsx` 820,292 B, `.elf` 5,586,716 B).  No Azahar pixel run is claimed.
 
 ### Render-target texture handles
 
@@ -157,11 +158,25 @@ native size is smaller than its logical size with a named `D9_UNSUPPORTED`
 (`target_viewport_scaled` in the diagnosis).  Equal-size targets and the
 retained back buffer keep the existing `target_viewport` path.
 
-Scaled `LockRect`/`UnlockRect` and `StretchRect` are named refusals rather than
-silently reading or copying logical pixels from smaller native storage.  A
-lockable explicit target whose native size would be smaller is refused at
-creation with a named `D9_UNSUPPORTED`.  Equal-size targets and the retained
-back buffer keep read/write/blit support.
+Scaled `StretchRect` is implemented over logical rectangles on both backends:
+the null backend performs a real CPU nearest/bilinear blit through the native
+pixel buffer, and citro3d draws a source texture quad into the destination
+target.  The source UV denominator is the logical size for an explicit bounded
+target and the storage size for the retained 400x240-in-512x256 corner.  The
+destination clip uses logical dimensions while the PICA viewport uses native
+storage, so 1024->1024, 1024->512 and 512->1024 all scale instead of clipping.
+`tests/scaled_target_blit_smoke.c` checks all three chains pixel by pixel and a
+native-size-changing 512x256 -> 1024x512 bilinear path.  The citro3d draw path
+is structurally wired but has no ARM/Azahar pixel proof; the null path is the
+pixel-tested reference.
+
+Scaled `LockRect`/`UnlockRect` remain named refusals: the reason now names both
+sizes and says the scaled readback/writeback would be lossy.  A lockable
+explicit target whose native size would be smaller is refused at creation with
+a named `D9_UNSUPPORTED`.  Equal-size targets and the retained back buffer keep
+read/write support.  `GetRenderTargetData`/`UpdateSurface` are not implemented
+by this bridge (the COM slots use the generic unsupported handler), so no silent
+scaled copy path exists there.
 
 ### Render-target budget
 
