@@ -152,7 +152,9 @@ MenuSwfRasterStatus menu_swf_raster_mesh(
     }
 
     uint32_t tri_count = mesh->index_count / 3u;
-    RasterTri tris[MENU_SWF_RASTER_MAX_TRIANGLES];
+    /* 1,536 * ~32 B is another console-stack overflow; the raster path is
+     * single-threaded, so the triangle scratch lives in static storage. */
+    static RasterTri tris[MENU_SWF_RASTER_MAX_TRIANGLES];
     uint32_t stored = 0;
     for (uint32_t i = 0; i < tri_count; ++i) {
         uint32_t ia = mesh->indices[i * 3 + 0];
