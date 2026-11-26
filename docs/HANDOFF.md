@@ -164,9 +164,13 @@ buffer and Present scales it to 400x240. With it, the host census now:
    match the engine's expectation with a scaled Present. Then stop the
    `BeginUsingRenderTargetGroup` recursion (return a hard failure or a valid
    group) and re-run the census until `SetTexture`/draw/`Present`.
-2. **Device run**: use `dist\Skyrim_N3DS_tesv_d3dx41\...3dsx` (or rebuild) with
-   the `tesv_caps_probe.flag`; diagnose the `0x30` NULL after shader creation
-   from `sdmc:/Skyrim_N3DS_stderr.log`.
+2. **Device run**: use `E:\azahar_run\Skyrim_N3DS_tesv_lazy_depth.3dsx` with
+   the `tesv_caps_probe.flag`. The `0x30` NULL is diagnosed in
+   `docs/DEVICE_BRINGUP.md`: the second renderer-init group was NULL after a
+   256x256 PICA render-target allocation failed, because every explicit target
+   also paid for a full-size depth attachment. Explicit targets now get
+   `DEPTH24_STENCIL8` lazily on `SetDepthStencilSurface`; the next log shows
+   either the next layer or the free-VRAM numbers.
 3. **Menu**: face-to-font mapping or the GDI/system-font provider, bitmap fill
    sampling, partial clip-mask tessellation; then a PICA path for the menu
    batch (TEV/vertex colour) and a real frame.

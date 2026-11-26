@@ -37,8 +37,57 @@ TESV_D3D9_SHADER_SKIP_PROBE=1 # code-less shader objects
 
 Every probe logs that it is measurement-only and not shippable. With the flag
 present the device passes the T&L and SM3 checks, creates the shader objects
-and then faults at `Guest fault at 00000030: unmapped guest memory` — a NULL
-renderer pointer past the shader layer, before a frame.
+and then faults at `Guest fault at 00000030: unmapped guest memory`.
+
+### The `0x30` fault is a VRAM allocation failure, not a NULL shader
+
+The last device log before the fault is:
+
+```text
+[d3d9-citro] CreateRenderTarget: 256x256 VRAM texture allocation failed
+[d3d9] CreateTexture: CreateRenderTarget: backend could not allocate a 256x256 native target
+[guest] unmapped addr=00000030 bytes=4 last_call=00c8fc90 irc_fn=00fb5e60 ...
+[guest] esp=1007fbac stack=541c26c0 00c7f10f ...
+```
+
+* `0x00c8fc90` is the `NiRenderTargetGroup` buffer getter
+  (`mov esi,ecx; mov ecx,[esi+0x30]`). The faulting call is the one from
+  `0x00c7f10a`, whose return address `0x00c7f10f` is in the stack dump.
+* Its `this` is `[esi+0x7c]`, the second group created by the renderer-init
+  helper `0x00c92330`. That helper returned NULL because the 256x256
+  `CreateTexture` (render-target texture) failed. The engine does not null
+  check this second group and calls the getter with `ecx=0`, which faults on
+  `[0+0x30]`.
+* `irc_fn=00fb5e60` is only the preceding six-byte constant getter
+  (`mov eax,0x01bbfbac; ret`); it is the last IR function entered, not the
+  faulting site.
+
+The host census takes the same route past this point because the null backend
+has no VRAM limit. On PICA every explicit target used to allocate colour
+**plus** a full-size `DEPTH24_STENCIL8` attachment. With the 256-per-axis
+native cap that is 512 KiB per target; the measured shadow/reflection set,
+the retained 512x256 back buffer, the 400x240 screen target and the libctru
+framebuffer banks exceed the 6 MiB PICA VRAM.
+
+### Lazy depth for explicit targets
+
+`D9Backend` gained the append-only `target_has_depth` / `target_depth_attach`
+pair. PICA now creates explicit colour targets **colour-only**
+(`C3D_RenderTargetCreateFromTex(..., -1)`) and attaches `DEPTH24_STENCIL8` only
+when a matching `SetDepthStencilSurface` is actually bound, outside
+`BeginScene`/`EndScene`. The retained back buffer still gets depth eagerly.
+A failed attach is a named `D9_MEMORY` refusal
+(`depth-stencil attachment allocation failed for the %ux%u target (VRAM)`) and
+leaves the previous binding intact; no NULL is masked. The backend logs
+`target WxH colour-only; vram free N KiB` and the same free value on attach or
+failure, so the next run shows the real VRAM headroom. `tests/pica_lazy_depth_smoke.c`
+covers colour-only creation, one on-demand attach, a VRAM-full named refusal,
+no re-attach, `Clear(Z)` and teardown. Host `pica_depth_attachment`,
+`render_target_budget` and `depth_target_matching` still pass.
+
+The measurement build `E:\azahar_run\Skyrim_N3DS_tesv_lazy_depth.3dsx` carries
+this change; the next Azahar run tells whether the 256x256 group now builds and
+which layer follows.
 
 `stderr` is mirrored to `sdmc:/Skyrim_N3DS_stderr.log` for these runs; the
 final `sdmc:/Skyrim_N3DS_tesv.log` carries `rc`, exit code/from and the

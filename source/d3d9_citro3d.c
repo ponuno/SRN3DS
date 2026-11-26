@@ -89,6 +89,8 @@ typedef struct {
     C3D_RenderTarget *target;
     C3D_Tex *blit_texture; /* 2D colour storage; cube-face views cannot be blit sources. */
     unsigned w,h,format;
+    int has_depth;     /* target owns a DEPTH24_STENCIL8 attachment */
+    int is_cube_face;  /* native is a NativeCubeFace, not a NativeTarget */
 } NativeTargetHead;
 typedef struct {NativeTargetHead head;C3D_Tex tex;NativeTex sample;} NativeTarget;
 typedef struct {NativeTargetHead head;NativeCube *cube;unsigned face,level;} NativeCubeFace;
@@ -513,33 +515,77 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
     NativeTarget *t=calloc(1,sizeof *t);if(!t)return -1;
     C3D_TexInitParams params={(u16)w,(u16)h,0,GPU_RGBA8,GPU_TEX_2D,true};
     if(!C3D_TexInitWithParams(&t->tex,NULL,params)){
-        fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u VRAM texture allocation failed\n",w,h);
+        fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u VRAM texture allocation failed "
+                "(vram free %u KiB)\n",w,h,(unsigned)(vramSpaceFree()>>10));
         free(t);return -1;
     }
     C3D_TexSetFilter(&t->tex,GPU_NEAREST,GPU_NEAREST);
     C3D_TexSetWrap(&t->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
-    /* The retained back buffer and every explicit LDR target need a real depth
-     * attachment: SetDepthStencilSurface/Clear(Z) and depth-tested draws must
-     * reach hardware, not a bookkeeping flag. */
-    t->head.target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,GPU_RB_DEPTH24_STENCIL8);
+    /* Colour-only target.  PICA VRAM is 6 MiB and every DEPTH24_STENCIL8
+     * attachment doubles an offscreen target's cost; the core attaches depth
+     * lazily when a matching D3D depth-stencil surface is actually bound.
+     * Render-target textures used only for sampling therefore spend no VRAM on
+     * depth they never touch. */
+    t->head.target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,-1);
     if(!t->head.target){
-        fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed\n",w,h);
+        fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed "
+                "(vram free %u KiB)\n",w,h,(unsigned)(vramSpaceFree()>>10));
         C3D_TexDelete(&t->tex);free(t);return -1;
     }
+    t->head.has_depth=0;
     /* VRAM starts with arbitrary bytes.  PICA depth 0 is "far" and the draws
-     * use GPU_GEQUAL, so a prime clear avoids depth-testing a fresh target
-     * against garbage.  This is a private frame: the target is not linked to
-     * either LCD, so FrameEnd performs no display transfer. */
+     * use GPU_GEQUAL, so a prime clear avoids sampling a fresh colour target's
+     * garbage.  A depth-less target has no depth to prime.  This is a private
+     * frame: the target is not linked to either LCD, so FrameEnd performs no
+     * display transfer. */
     if(C3D_FrameBegin(C3D_FRAME_SYNCDRAW)){
         if(C3D_FrameDrawOn(t->head.target))
-            C3D_RenderTargetClear(t->head.target,C3D_CLEAR_DEPTH|C3D_CLEAR_COLOR,0,0);
+            C3D_RenderTargetClear(t->head.target,C3D_CLEAR_COLOR,0,0);
         C3D_FrameEnd(0);
     }
+    fprintf(stderr,"[d3d9-citro] target %ux%u colour-only; vram free %u KiB\n",
+            w,h,(unsigned)(vramSpaceFree()>>10));
     /* Sampling view: same C3D_Tex data, separate filter/wrap state.  The
      * target's own C3D_Tex owns the storage; the view is never deleted. */
     t->sample.tex=t->tex;t->sample.levels=1;
     t->head.blit_texture=&t->tex;
     t->head.w=w;t->head.h=h;t->head.format=format;*native=t;return 0;
+}
+static int target_has_depth(void *ctx,void *native){
+    (void)ctx;NativeTargetHead *h=native;return h?h->has_depth:0;
+}
+/* Attach a DEPTH24_STENCIL8 attachment to an existing colour target.  Called
+ * by the core outside BeginScene/EndScene when a matching D3D depth surface is
+ * bound.  The colour storage (C3D_Tex) is reused; only the render-target view
+ * and its depth buffer are recreated.  Failure leaves the colour-only view
+ * live and is reported as a named VRAM refusal by the core. */
+static int target_depth_attach(void *ctx,void *native){
+    D9Citro *c=ctx;NativeTargetHead *h=native;
+    if(!c||!h)return -1;
+    if(h->has_depth)return 0;
+    if(h->is_cube_face){fprintf(stderr,"[d3d9-citro] target depth attach: cube face view is not a 2D target\n");return -1;}
+    if(c->scene){fprintf(stderr,"[d3d9-citro] target depth attach: inside a scene\n");return -1;}
+    NativeTarget *t=(NativeTarget *)native;
+    if(!t->tex.data)return -1;
+    C3D_FrameSync();
+    C3D_RenderTarget *rt=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,
+                                                       GPU_RB_DEPTH24_STENCIL8);
+    if(!rt){
+        fprintf(stderr,"[d3d9-citro] target depth attach: %ux%u DEPTH24_STENCIL8 allocation failed "
+                "(vram free %u KiB)\n",h->w,h->h,(unsigned)(vramSpaceFree()>>10));
+        return -1;
+    }
+    C3D_RenderTarget *old=h->target;
+    h->target=rt;h->has_depth=1;
+    if(old)C3D_RenderTargetDelete(old);
+    if(C3D_FrameBegin(C3D_FRAME_SYNCDRAW)){
+        if(C3D_FrameDrawOn(rt))
+            C3D_RenderTargetClear(rt,C3D_CLEAR_DEPTH,0,0);
+        C3D_FrameEnd(0);
+    }
+    fprintf(stderr,"[d3d9-citro] target %ux%u depth attached; vram free %u KiB\n",
+            h->w,h->h,(unsigned)(vramSpaceFree()>>10));
+    return 0;
 }
 static void *target_texture(void *ctx,void *native){
     (void)ctx;NativeTarget *t=native;if(!t)return NULL;
@@ -590,6 +636,7 @@ static int cube_face_create(void *ctx,void *native_cube,unsigned face,
     }
     unsigned edge=cube->edge>>level;if(!edge)edge=1;
     f->head.w=f->head.h=edge;f->head.format=cube->format;
+    f->head.has_depth=1;f->head.is_cube_face=1;
     f->cube=cube;f->face=face;f->level=level;
     /* Prime the private depth/colour view, matching the 2D target_create path.
      * The cube face is not linked to either LCD, so FrameEnd displays nothing. */
@@ -623,9 +670,10 @@ static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
     C3D_TexFlush(&t->tex);
     linearFree(tmp);return 0;
 }
-/* PICA target_create/render-target views always allocate DEPTH24_STENCIL8;
- * d9_set_depth_surface only validates the descriptor size. */
-static int depth_attachment_embedded(void *ctx){(void)ctx;return 1;}
+/* PICA target_create/render-target views allocate depth lazily; the
+ * d9_set_depth_surface path validates the descriptor size and calls
+ * target_depth_attach.  The core's per-target callbacks replace the old
+ * always-embedded depth policy. */
 /* Clear the depth attachment of the currently bound colour target.  PICA stores
  * depth and stencil in one DEPTH24_STENCIL8 buffer, so a depth clear writes the
  * packed word (and, with it, the stencil byte). */
@@ -772,4 +820,4 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
      * PROJECTION and SHADOW_CUBE only; there is no 3D texture mode, so volume
      * sampling is refused by name and the PICA backend also has no
      * texture_create_volume callback. */
-    NULL,depth_attachment_embedded};return &ops;}
+    NULL,NULL,target_has_depth,target_depth_attach};return &ops;}

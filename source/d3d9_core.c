@@ -43,6 +43,7 @@ typedef struct {
     D9Handle id;unsigned w,h,native_w,native_h,format,lockable;size_t bytes;void *native;
     int is_cube_face; /* native is a backend cube-face view, not a 2D target */
     D9Handle cube;unsigned cube_face,cube_level;
+    int has_depth;    /* native currently owns a depth-stencil attachment */
 } Target;
 typedef struct {D9Handle id;unsigned w,h,format;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
@@ -1442,6 +1443,51 @@ int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
     return D9_OK;
 }
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
+/* A backend either attaches depth to each colour target itself (PICA) or keeps
+ * separate depth objects (null backend).  The per-target pair is preferred:
+ * PICA creates explicit targets colour-only and allocates DEPTH24_STENCIL8 only
+ * when a matching depth surface is actually bound.  The older global
+ * depth_attachment_embedded callback stays supported for test/PICA-shape
+ * backends that model every target as always carrying depth. */
+static int backend_embeds_depth(const D9Device *d){
+    return d&&(d->ops.target_has_depth||d->ops.target_depth_attach||
+               d->ops.depth_attachment_embedded);
+}
+static int target_has_embedded_depth(const D9Device *d,const Target *t){
+    if(!d)return 0;
+    if(d->ops.target_has_depth)
+        return t?d->ops.target_has_depth(d->ctx,t->native):0;
+    return d->ops.depth_attachment_embedded&&
+           d->ops.depth_attachment_embedded(d->ctx);
+}
+/* Attach the depth-stencil attachment to a colour target on demand.  A
+ * matching SetDepthStencilSurface is the only trigger; targets created for
+ * sampling alone (render-target textures) never consume VRAM for depth they do
+ * not use.  A backend failure is a named allocation refusal, never a silent
+ * success. */
+static int target_ensure_depth(D9Device *d,Target *t){
+    if(!d||!t)return D9_OK;
+    if(!backend_embeds_depth(d))return D9_OK; /* separate depth descriptors */
+    if(target_has_embedded_depth(d,t)){t->has_depth=1;return D9_OK;}
+    if(!d->ops.target_depth_attach){
+        set_diagnosis(d,"this backend cannot attach a depth-stencil attachment "
+                        "after target creation");
+        return D9_UNSUPPORTED;
+    }
+    if(d->scene){
+        set_diagnosis(d,"a depth-stencil attachment cannot be added inside "
+                        "BeginScene/EndScene");
+        return D9_INVALID;
+    }
+    if(d->ops.target_depth_attach(d->ctx,t->native)){
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "depth-stencil attachment allocation failed for the %ux%u target (VRAM)",
+                 t->native_w,t->native_h);
+        return D9_MEMORY;
+    }
+    t->has_depth=1;
+    return D9_OK;
+}
 int d9_cube_face_target(D9Device *d,D9Handle h,unsigned face,unsigned level,
                         D9Handle *out){
     if(out)*out=0;
@@ -1513,7 +1559,7 @@ static unsigned bounded_native_dim(unsigned v,unsigned cap){
  * bounded=1 is an explicit render target or render-target texture; its logical
  * size is preserved while native storage is capped per axis. */
 static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,
-                         int bounded,D9Handle *out){
+                         int bounded,int want_depth,D9Handle *out){
     if(out)*out=0;
     if(!d||d->scene||d->teardown||!out||!d->next||w<8||h<8||w>1024||h>1024||
        (w&(w-1))||(h&(h-1))||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
@@ -1548,10 +1594,19 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
         return D9_BACKEND;
     }
     D9Handle id=d->next++;*slot=(Target){id,w,h,nw,nh,format,lockable?1:0,bytes,native};
-    d->target_used+=bytes;*out=id;return D9_OK;
+    d->target_used+=bytes;
+    if(want_depth){
+        int drc=target_ensure_depth(d,slot);
+        if(drc){
+            d->next=id;
+            destroy_target_slot(d,slot);
+            return drc;
+        }
+    }
+    *out=id;return D9_OK;
 }
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
-    return create_target(d,w,h,format,lockable,1,out);
+    return create_target(d,w,h,format,lockable,1,0,out);
 }
 int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
                              unsigned pool,unsigned usage,D9Handle *out){
@@ -1603,7 +1658,6 @@ static int apply_target_viewport(D9Device *d,Target *t){
     }
     return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,t->w,t->h)?D9_BACKEND:D9_OK;
 }
-static int backend_depth_embedded(const D9Device *d);
 int d9_set_render_target(D9Device *d,D9Handle h){
     if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
     /* Handle zero means the default back buffer: the retained target when
@@ -1619,11 +1673,15 @@ int d9_set_render_target(D9Device *d,D9Handle h){
         else if(d->back_valid){nw=d->back_w;nh=d->back_h;}
         else return D9_INVALID;
         Depth *s=depth_slot(d,d->depth);
-        if(!s||((s->w!=nw||s->h!=nh)&&!backend_depth_embedded(d))){
+        if(!s||((s->w!=nw||s->h!=nh)&&!backend_embeds_depth(d))){
             snprintf(d->diagnosis,sizeof d->diagnosis,
                      "SetRenderTarget: bound depth %ux%u does not match new target %ux%u",
                      s?s->w:0,s?s->h:0,nw,nh);
             return D9_INVALID;
+        }
+        if(t){
+            int drc=target_ensure_depth(d,t);
+            if(drc)return drc;
         }
     }
     void *native=t?t->native:NULL;
@@ -1793,7 +1851,7 @@ int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format
         tw=pow2_up(w);th=pow2_up(h);
         if(!tw||!th)return D9_UNSUPPORTED;
         /* Allocate first: an unsuccessful resize must leave the old surface live. */
-        int rc=create_target(d,tw,th,format,lockable,0,&fresh);
+        int rc=create_target(d,tw,th,format,lockable,0,1,&fresh);
         if(rc)return rc;
     }
     if(d->back_target)destroy_target_slot(d,target(d,d->back_target));
@@ -2490,13 +2548,20 @@ int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *v){
     unsigned lo,hi,*p=d?sampler_slot(stage?&d->second:&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
 int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
     if(!d||d->teardown||d->scene)return D9_INVALID;
-    if(d->ops.begin(d->ctx,argb))return D9_BACKEND;
-    d->scene=1;
     /* The default back buffer is the retained target when lockable. */
     int on_back=!d->target&&d->back_target;
     Target *t=d->target?target(d,d->target):
         (d->back_target?target(d,d->back_target):NULL);
-    if(d->target&&!t){d->ops.end(d->ctx);d->scene=0;return D9_INVALID;}
+    if(d->target&&!t)return D9_INVALID;
+    /* A depth surface bound before BeginScene attaches lazily to this colour
+     * target.  This is the last safe point: an attachment cannot be added once
+     * the frame is open. */
+    if(t&&d->depth){
+        int drc=target_ensure_depth(d,t);
+        if(drc)return drc;
+    }
+    if(d->ops.begin(d->ctx,argb))return D9_BACKEND;
+    d->scene=1;
     /* D3DSWAPEFFECT_DISCARD: a new frame may not inherit the previous one.
      * A retained back buffer is therefore cleared at every BeginScene (with the
      * queued Clear colour when the guest asked for one, zero otherwise); an
@@ -3156,13 +3221,9 @@ static int logical_dims(const D9Device *d,unsigned *w,unsigned *h){
     if(!d->back_valid)return D9_INVALID;
     *w=d->back_w;*h=d->back_h;return D9_OK;
 }
-/* PICA colour targets embed their depth-stencil attachment; a D3D depth
+/* PICA colour targets attach their depth-stencil on demand and a D3D depth
  * surface is only a size/formats descriptor.  Other backends keep separate
  * depth objects. */
-static int backend_depth_embedded(const D9Device *d){
-    return d&&d->ops.depth_attachment_embedded&&
-           d->ops.depth_attachment_embedded(d->ctx);
-}
 int d9_set_depth_surface(D9Device *d,D9Handle h){
     if(!d||d->teardown)return D9_INVALID;
     Depth *s=h?depth_slot(d,h):NULL;
@@ -3170,7 +3231,7 @@ int d9_set_depth_surface(D9Device *d,D9Handle h){
     if(s){
         unsigned w=0,height=0;
         if(logical_dims(d,&w,&height)||s->w!=w||s->h!=height){
-            if(backend_depth_embedded(d)){
+            if(backend_embeds_depth(d)){
                 set_diagnosis(d,"SetDepthStencilSurface: the depth-stencil size does not "
                                 "match the active render target's embedded depth attachment");
                 return D9_INVALID;
@@ -3179,6 +3240,12 @@ int d9_set_depth_surface(D9Device *d,D9Handle h){
                      "SetDepthStencilSurface: depth %ux%u does not match render target %ux%u",
                      s->w,s->h,w,height);
             return D9_INVALID;
+        }
+        Target *t=d->target?target(d,d->target):
+            (d->back_target?target(d,d->back_target):NULL);
+        if(t){
+            int drc=target_ensure_depth(d,t);
+            if(drc)return drc;
         }
     }
     d->depth=h;return D9_OK;
@@ -3199,6 +3266,14 @@ int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
         snprintf(d->diagnosis,sizeof d->diagnosis,
                  "Clear: depth %ux%u does not match render target %ux%u",
                  s->w,s->h,w,h);
+        return D9_INVALID;
+    }
+    Target *t=d->target?target(d,d->target):
+        (d->back_target?target(d,d->back_target):NULL);
+    if(t&&backend_embeds_depth(d)&&!target_has_embedded_depth(d,t)){
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "Clear: the %ux%u target has no depth-stencil attachment",
+                 t->native_w,t->native_h);
         return D9_INVALID;
     }
     uint32_t quant=(uint32_t)(z*16777215.0f+0.5f);

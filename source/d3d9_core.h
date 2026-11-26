@@ -322,6 +322,20 @@ typedef struct {
      * D3DERR_NOTAVAILABLE path.  NULL means separate depth objects (null
      * backend) and keeps the old policy. */
     int (*depth_attachment_embedded)(void *ctx);
+    /* Optional per-target lazy depth, appended after depth_attachment_embedded
+     * so every existing positional initializer keeps its meaning.  A backend
+     * that allocates depth on demand sets target_has_depth and
+     * target_depth_attach and leaves depth_attachment_embedded NULL: explicit
+     * colour targets are created without a depth attachment, so render-target
+     * textures created for sampling do not consume the N3DS 6 MiB VRAM budget
+     * for depth they never bind.  target_has_depth returns 1 when this native
+     * currently owns a depth-stencil attachment.  target_depth_attach creates
+     * it, returning 0 on success or non-zero on VRAM/allocation failure (the
+     * core reports a named D9_MEMORY refusal); it is only called outside
+     * BeginScene/EndScene.  NULL target_depth_attach keeps the legacy global
+     * depth_attachment_embedded policy. */
+    int (*target_has_depth)(void *ctx,void *native);
+    int (*target_depth_attach)(void *ctx,void *native);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
