@@ -86,7 +86,7 @@ Azahar install/run (SD card is `%APPDATA%\Azahar\sdmc`):
 
 - Latest ARM: `d3dx42`, `.3dsx` 2,349,980 B SHA256
   `804e704741bc9d31ef27cb329a0a45b89ed11f54da08694aab93d743caa20054`.
-- Host suite: **145 passed, 1 diagnostic, 0 failed** in 145 s warm.
+- Host suite: **146 passed, 1 diagnostic, 0 failed** in ~150 s warm.
   The diagnostic is `tesv_slice` (reporting a documented guest fault, not a
   render result).
 - No Azahar frame or pixel proof exists. The device boots far enough to load
