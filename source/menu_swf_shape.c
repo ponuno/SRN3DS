@@ -596,7 +596,8 @@ static int parse_shape_tag(const uint8_t *p, size_t len, uint8_t tag_code,
 
 /* Parse DefineFont2/3 glyph SHAPE records. */
 static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
-                          MenuSwfShapeResult *out, char *reason,
+                          MenuSwfShapeResult *out,
+                          const MenuSwfFontSink *events, char *reason,
                           size_t reason_cap) {
     Reader r = {p, len, 0};
     uint16_t font_id, num_glyphs;
@@ -607,7 +608,7 @@ static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
     r.off += name_len;
     if (rd_u16(&r, &num_glyphs)) return -1;
     if (num_glyphs > MENU_SWF_SHAPE_MAX_GLYPHS ||
-        out->glyph_total > MENU_SWF_SHAPE_MAX_GLYPHS - num_glyphs) {
+        (out && out->glyph_total > MENU_SWF_SHAPE_MAX_GLYPHS - num_glyphs)) {
         set_reason(reason, reason_cap, "swf shape: glyph limit %u exceeded",
                    MENU_SWF_SHAPE_MAX_GLYPHS);
         return -3;
@@ -646,8 +647,21 @@ static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
     size_t code_size = wide_codes ? 2u : 1u;
     if ((uint64_t)num_glyphs * code_size > len - code_table) return -1;
 
-    ++out->font_total;
-    ++out->stored_fonts;
+    MenuSwfShapeSink path_events;
+    memset(&path_events, 0, sizeof path_events);
+    if (events) {
+        path_events.user = events->user;
+        path_events.begin_path = events->begin_path;
+        path_events.line_to = events->line_to;
+        path_events.curve_to = events->curve_to;
+        path_events.end_path = events->end_path;
+    }
+
+    if (out) ++out->font_total;
+    if (out) ++out->stored_fonts;
+    if (events && events->begin_font)
+        events->begin_font(events->user, font_id, tag_code, num_glyphs,
+                           flags);
     for (uint32_t i = 0; i < num_glyphs; ++i) {
         uint64_t start64 = (uint64_t)offset_base + offsets[i];
         uint64_t end64 = i + 1 < num_glyphs
@@ -670,17 +684,37 @@ static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
         glyph.glyph_index = (uint16_t)i;
         glyph.code = (uint16_t)code;
         glyph.shape_offset = start;
+        if (events && events->begin_glyph)
+            events->begin_glyph(events->user, (uint16_t)i, (uint16_t)code,
+                                start);
         if (start < end) {
             GeomStats g;
             memset(&g, 0, sizeof g);
             StyleState styles;
             memset(&styles, 0, sizeof styles);
-            PathSink sink = {out->glyph_paths, MENU_SWF_SHAPE_MAX_GLYPH_PATHS,
-                             &out->glyph_path_used, &glyph.path_first,
-                             &glyph.stored_paths, &glyph.truncated};
+            uint32_t walk_used = 0, walk_first = 0, walk_stored = 0;
+            int walk_truncated = 0;
+            PathSink sink;
+            if (out) {
+                sink.pool = out->glyph_paths;
+                sink.cap = MENU_SWF_SHAPE_MAX_GLYPH_PATHS;
+                sink.used = &out->glyph_path_used;
+                sink.first = &glyph.path_first;
+                sink.stored = &glyph.stored_paths;
+                sink.truncated = &glyph.truncated;
+            } else {
+                sink.pool = NULL;
+                sink.cap = 0;
+                sink.used = &walk_used;
+                sink.first = &walk_first;
+                sink.stored = &walk_stored;
+                sink.truncated = &walk_truncated;
+            }
             int rc = parse_records(p, end, start, 3, 1, &styles, &g, &sink,
-                                   NULL, NULL, MENU_SWF_SHAPE_MAX_SEGMENTS,
-                                   reason, reason_cap);
+                                   events ? &path_events : NULL,
+                                   events ? events->user : NULL,
+                                   MENU_SWF_SHAPE_MAX_SEGMENTS, reason,
+                                   reason_cap);
             if (rc) return rc;
             glyph.path_count = g.path_count;
             glyph.point_count = g.point_count;
@@ -693,15 +727,18 @@ static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
                 glyph.bounds.ymax = g.ymax;
             }
         }
-        out->glyphs[out->stored_glyphs++] = glyph;
+        if (events && events->end_glyph) events->end_glyph(events->user);
+        if (out) out->glyphs[out->stored_glyphs++] = glyph;
     }
-    out->glyph_total += num_glyphs;
+    if (events && events->end_font) events->end_font(events->user);
+    if (out) out->glyph_total += num_glyphs;
     return 0;
 }
 
 typedef struct {
     MenuSwfShapeResult *out; /* NULL while streaming geometry only */
     const MenuSwfShapeSink *events;
+    const MenuSwfFontSink *font_events;
     void *user;
     uint32_t tags_seen;
 } ShapeContext;
@@ -747,7 +784,8 @@ static MenuSwfStatus walk_tags(ShapeContext *ctx, const uint8_t *p, size_t len,
             }
             return MENU_SWF_OK;
         }
-        if (code == 2 || code == 22 || code == 32 || code == 83) {
+        if ((code == 2 || code == 22 || code == 32 || code == 83) &&
+            (ctx->out || ctx->events)) {
             if (ctx->out) ++ctx->out->shape_total;
             int rc = parse_shape_tag(payload, tlen, (uint8_t)code, ctx->out,
                                      ctx->events, ctx->user, reason,
@@ -775,9 +813,10 @@ static MenuSwfStatus walk_tags(ShapeContext *ctx, const uint8_t *p, size_t len,
             MenuSwfStatus st = walk_tags(ctx, payload + 4, tlen - 4, depth + 1,
                                          reason, reason_cap);
             if (st != MENU_SWF_OK) return st;
-        } else if ((code == 48 || code == 75) && ctx->out) {
+        } else if ((code == 48 || code == 75) &&
+                   (ctx->out || ctx->font_events)) {
             int rc = parse_font_tag(payload, tlen, (uint8_t)code, ctx->out,
-                                    reason, reason_cap);
+                                    ctx->font_events, reason, reason_cap);
             if (rc == -3) return MENU_SWF_ERR_BUDGET;
             if (rc == -2) return MENU_SWF_ERR_NOTIMPL;
             if (rc) {
@@ -826,6 +865,30 @@ MenuSwfStatus menu_swf_shape_walk(const uint8_t *data, size_t size,
     ShapeContext ctx;
     memset(&ctx, 0, sizeof ctx);
     ctx.events = sink;
+    ctx.user = sink->user;
+    st = walk_tags(&ctx, view.body + view.tag_offset,
+                   view.body_len - view.tag_offset, 0, reason, reason_cap);
+    menu_swf_view_close(&view);
+    return st;
+}
+
+MenuSwfStatus menu_swf_shape_walk_fonts(const uint8_t *data, size_t size,
+                                        const MenuSwfFontSink *sink,
+                                        char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!sink) {
+        set_reason(reason, reason_cap,
+                   "swf shape: font walk needs a sink");
+        return MENU_SWF_ERR_ARGUMENT;
+    }
+
+    MenuSwfView view;
+    MenuSwfStatus st = menu_swf_view_open(data, size, &view, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
+
+    ShapeContext ctx;
+    memset(&ctx, 0, sizeof ctx);
+    ctx.font_events = sink;
     ctx.user = sink->user;
     st = walk_tags(&ctx, view.body + view.tag_offset,
                    view.body_len - view.tag_offset, 0, reason, reason_cap);

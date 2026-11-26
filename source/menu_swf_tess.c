@@ -8,8 +8,12 @@
 typedef struct {
     MenuSwfTessMesh *mesh;
     uint16_t shape_id;
+    uint16_t font_id;
+    uint16_t glyph_code;
     MenuSwfTessFillRule rule;
+    int glyph_mode;
     int in_shape;
+    int in_font;
     int shape_found;
     int in_path;
     int32_t start_x, start_y;
@@ -184,9 +188,15 @@ static void tess_begin_path(void *user, int32_t x, int32_t y, uint16_t fill0,
     c->in_path = 1;
     c->start_x = c->cur_x = x;
     c->start_y = c->cur_y = y;
-    c->fill0 = fill0;
-    c->fill1 = fill1;
-    c->line = line;
+    if (c->glyph_mode) {
+        c->fill0 = 1;
+        c->fill1 = 0;
+        c->line = 0;
+    } else {
+        c->fill0 = fill0;
+        c->fill1 = fill1;
+        c->line = line;
+    }
     add_bounds(c, x, y);
 }
 
@@ -216,6 +226,36 @@ static void tess_end_path(void *user) {
         (c->cur_x != c->start_x || c->cur_y != c->start_y))
         add_edge(c, c->cur_x, c->cur_y, c->start_x, c->start_y, 0);
     c->in_path = 0;
+}
+
+static void tess_begin_font(void *user, uint16_t font_id, uint8_t tag_code,
+                            uint16_t num_glyphs, uint8_t flags) {
+    (void)tag_code;
+    (void)num_glyphs;
+    (void)flags;
+    TessCtx *c = (TessCtx *)user;
+    c->in_font = (font_id == c->font_id);
+}
+
+static void tess_begin_glyph(void *user, uint16_t glyph_index, uint16_t code,
+                             uint32_t shape_offset) {
+    (void)glyph_index;
+    (void)shape_offset;
+    TessCtx *c = (TessCtx *)user;
+    c->in_shape = c->in_font && code == c->glyph_code && !c->shape_found;
+    if (c->in_shape) c->shape_found = 1;
+    c->in_path = 0;
+}
+
+static void tess_end_glyph(void *user) {
+    TessCtx *c = (TessCtx *)user;
+    c->in_shape = 0;
+    c->in_path = 0;
+}
+
+static void tess_end_font(void *user) {
+    TessCtx *c = (TessCtx *)user;
+    c->in_font = 0;
 }
 
 static int32_t edge_x_at(const MenuSwfTessEdge *e, int32_t y) {
@@ -449,61 +489,15 @@ static int check_buffers(const MenuSwfTessMesh *m, char *reason,
     return 0;
 }
 
-MenuSwfStatus menu_swf_tess_shape(const uint8_t *data, size_t size,
-                                  uint16_t shape_id,
-                                  MenuSwfTessFillRule fill_rule,
-                                  MenuSwfTessMesh *mesh, char *reason,
-                                  size_t reason_cap) {
-    if (reason && reason_cap) reason[0] = 0;
-    if (!data || !mesh) {
-        tess_reason(reason, reason_cap,
-                    "swf tess: needs SWF bytes and a mesh");
-        return MENU_SWF_ERR_ARGUMENT;
-    }
-    if (fill_rule != MENU_SWF_TESS_EVEN_ODD &&
-        fill_rule != MENU_SWF_TESS_NON_ZERO) {
-        tess_reason(reason, reason_cap, "swf tess: unknown fill rule %d",
-                    (int)fill_rule);
-        return MENU_SWF_ERR_ARGUMENT;
-    }
-    if (check_buffers(mesh, reason, reason_cap)) return MENU_SWF_ERR_ARGUMENT;
-
-    reset_output(mesh);
-    mesh->fill_rule = (uint8_t)fill_rule;
-
-    TessCtx c;
-    memset(&c, 0, sizeof c);
-    c.mesh = mesh;
-    c.shape_id = shape_id;
-    c.rule = fill_rule;
-    c.status = MENU_SWF_OK;
-    c.reason = reason;
-    c.reason_cap = reason_cap;
-
-    MenuSwfShapeSink sink;
-    memset(&sink, 0, sizeof sink);
-    sink.user = &c;
-    sink.begin_shape = tess_begin_shape;
-    sink.end_shape = tess_end_shape;
-    sink.begin_path = tess_begin_path;
-    sink.line_to = tess_line_to;
-    sink.curve_to = tess_curve_to;
-    sink.end_path = tess_end_path;
-
-    MenuSwfStatus st = menu_swf_shape_walk(data, size, &sink, reason,
-                                           reason_cap);
-    if (st != MENU_SWF_OK) {
-        reset_output(mesh);
-        return st;
-    }
-    if (c.status != MENU_SWF_OK) {
-        MenuSwfStatus failed = c.status;
+static MenuSwfStatus tess_finish(TessCtx *c, char *reason,
+                                 size_t reason_cap) {
+    MenuSwfTessMesh *mesh = c->mesh;
+    if (c->status != MENU_SWF_OK) {
+        MenuSwfStatus failed = c->status;
         reset_output(mesh);
         return failed;
     }
-    if (!c.shape_found) {
-        tess_reason(reason, reason_cap, "swf tess: shape %u not found",
-                    shape_id);
+    if (!c->shape_found) {
         reset_output(mesh);
         return MENU_SWF_ERR_ARGUMENT;
     }
@@ -532,11 +526,119 @@ MenuSwfStatus menu_swf_tess_shape(const uint8_t *data, size_t size,
     }
 
     for (uint32_t i = 0; i < style_count; ++i) {
-        if (tess_group(&c, styles[i])) {
-            MenuSwfStatus failed = c.status;
+        if (tess_group(c, styles[i])) {
+            MenuSwfStatus failed = c->status;
             reset_output(mesh);
             return failed;
         }
     }
     return MENU_SWF_OK;
+}
+
+static MenuSwfStatus tess_setup(const uint8_t *data, MenuSwfTessMesh *mesh,
+                                MenuSwfTessFillRule fill_rule, char *reason,
+                                size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!data || !mesh) {
+        tess_reason(reason, reason_cap,
+                    "swf tess: needs SWF bytes and a mesh");
+        return MENU_SWF_ERR_ARGUMENT;
+    }
+    if (fill_rule != MENU_SWF_TESS_EVEN_ODD &&
+        fill_rule != MENU_SWF_TESS_NON_ZERO) {
+        tess_reason(reason, reason_cap, "swf tess: unknown fill rule %d",
+                    (int)fill_rule);
+        return MENU_SWF_ERR_ARGUMENT;
+    }
+    if (check_buffers(mesh, reason, reason_cap)) return MENU_SWF_ERR_ARGUMENT;
+    reset_output(mesh);
+    mesh->fill_rule = (uint8_t)fill_rule;
+    return MENU_SWF_OK;
+}
+
+MenuSwfStatus menu_swf_tess_shape(const uint8_t *data, size_t size,
+                                  uint16_t shape_id,
+                                  MenuSwfTessFillRule fill_rule,
+                                  MenuSwfTessMesh *mesh, char *reason,
+                                  size_t reason_cap) {
+    MenuSwfStatus st = tess_setup(data, mesh, fill_rule, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
+
+    TessCtx c;
+    memset(&c, 0, sizeof c);
+    c.mesh = mesh;
+    c.shape_id = shape_id;
+    c.rule = fill_rule;
+    c.status = MENU_SWF_OK;
+    c.reason = reason;
+    c.reason_cap = reason_cap;
+
+    MenuSwfShapeSink sink;
+    memset(&sink, 0, sizeof sink);
+    sink.user = &c;
+    sink.begin_shape = tess_begin_shape;
+    sink.end_shape = tess_end_shape;
+    sink.begin_path = tess_begin_path;
+    sink.line_to = tess_line_to;
+    sink.curve_to = tess_curve_to;
+    sink.end_path = tess_end_path;
+
+    st = menu_swf_shape_walk(data, size, &sink, reason, reason_cap);
+    if (st != MENU_SWF_OK) {
+        reset_output(mesh);
+        return st;
+    }
+    if (!c.shape_found) {
+        tess_reason(reason, reason_cap, "swf tess: shape %u not found",
+                    shape_id);
+        reset_output(mesh);
+        return MENU_SWF_ERR_ARGUMENT;
+    }
+    return tess_finish(&c, reason, reason_cap);
+}
+
+MenuSwfStatus menu_swf_tess_glyph(const uint8_t *data, size_t size,
+                                  uint16_t font_id, uint16_t code,
+                                  MenuSwfTessFillRule fill_rule,
+                                  MenuSwfTessMesh *mesh, char *reason,
+                                  size_t reason_cap) {
+    MenuSwfStatus st = tess_setup(data, mesh, fill_rule, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
+
+    TessCtx c;
+    memset(&c, 0, sizeof c);
+    c.mesh = mesh;
+    c.font_id = font_id;
+    c.glyph_code = code;
+    c.rule = fill_rule;
+    c.glyph_mode = 1;
+    c.status = MENU_SWF_OK;
+    c.reason = reason;
+    c.reason_cap = reason_cap;
+
+    MenuSwfFontSink sink;
+    memset(&sink, 0, sizeof sink);
+    sink.user = &c;
+    sink.begin_font = tess_begin_font;
+    sink.begin_glyph = tess_begin_glyph;
+    sink.end_glyph = tess_end_glyph;
+    sink.end_font = tess_end_font;
+    sink.begin_path = tess_begin_path;
+    sink.line_to = tess_line_to;
+    sink.curve_to = tess_curve_to;
+    sink.end_path = tess_end_path;
+
+    st = menu_swf_shape_walk_fonts(data, size, &sink, reason, reason_cap);
+    if (st != MENU_SWF_OK) {
+        reset_output(mesh);
+        return st;
+    }
+    if (!c.shape_found) {
+        tess_reason(reason, reason_cap,
+                    "swf tess: glyph font %u code %u not found", font_id,
+                    code);
+        reset_output(mesh);
+        return MENU_SWF_ERR_ARGUMENT;
+    }
+    return tess_finish(&c, reason, reason_cap);
 }

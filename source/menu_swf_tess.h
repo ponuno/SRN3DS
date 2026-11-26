@@ -97,3 +97,14 @@ MenuSwfStatus menu_swf_tess_shape(const uint8_t *data, size_t size,
                                   MenuSwfTessFillRule fill_rule,
                                   MenuSwfTessMesh *mesh, char *reason,
                                   size_t reason_cap);
+
+/* Tessellate one DefineFont2/3 glyph SHAPE by font id and character code.
+ * Glyph coordinates stay in raw font units (Font3 uses 20x units); the caller
+ * applies layout scale/transform.  Glyph fills are tagged with style 1 and no
+ * stroke segments are emitted.  An unknown font/code is E_ARGUMENT.  Output
+ * and scratch buffers are the same caller-owned fields as the shape path. */
+MenuSwfStatus menu_swf_tess_glyph(const uint8_t *data, size_t size,
+                                  uint16_t font_id, uint16_t code,
+                                  MenuSwfTessFillRule fill_rule,
+                                  MenuSwfTessMesh *mesh, char *reason,
+                                  size_t reason_cap);

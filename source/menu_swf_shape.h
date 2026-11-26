@@ -114,6 +114,26 @@ typedef struct {
     void (*end_path)(void *user);
 } MenuSwfShapeSink;
 
+/* Streaming glyph geometry sink for menu_swf_shape_walk_fonts().  Glyph
+ * coordinates and path events use the same twip/20x units as the font SHAPE
+ * records.  `begin_font`/`end_font` frame every DefineFont2/3 tag;
+ * `begin_glyph`/`end_glyph` frame each glyph's contours. */
+typedef struct {
+    void *user;
+    void (*begin_font)(void *user, uint16_t font_id, uint8_t tag_code,
+                       uint16_t num_glyphs, uint8_t flags);
+    void (*begin_glyph)(void *user, uint16_t glyph_index, uint16_t code,
+                        uint32_t shape_offset);
+    void (*end_glyph)(void *user);
+    void (*end_font)(void *user);
+    void (*begin_path)(void *user, int32_t x, int32_t y, uint16_t fill0,
+                       uint16_t fill1, uint16_t line);
+    void (*line_to)(void *user, int32_t x, int32_t y);
+    void (*curve_to)(void *user, int32_t cx, int32_t cy, int32_t ax,
+                     int32_t ay);
+    void (*end_path)(void *user);
+} MenuSwfFontSink;
+
 /* Find a parsed shape by character id (NULL when absent). */
 const MenuSwfShapeSummary *menu_swf_shape_find(const MenuSwfShapeResult *result,
                                                uint16_t shape_id);
@@ -125,6 +145,13 @@ const MenuSwfShapeSummary *menu_swf_shape_find(const MenuSwfShapeResult *result,
 MenuSwfStatus menu_swf_shape_walk(const uint8_t *data, size_t size,
                                   const MenuSwfShapeSink *sink,
                                   char *reason, size_t reason_cap);
+
+/* Stream DefineFont2/3 glyph metadata and contours.  Shape tags are skipped.
+ * The same glyph/segment/limit and malformed-record refusals as the summary
+ * apply; DefineFont4 and AVM2 remain named refusals. */
+MenuSwfStatus menu_swf_shape_walk_fonts(const uint8_t *data, size_t size,
+                                        const MenuSwfFontSink *sink,
+                                        char *reason, size_t reason_cap);
 
 /* Parse all top-level and nested DefineShape tags and all DefineFont2/3 glyph
  * shapes.  Named refusals: unsupported fill/line type, bitmap fill without id,

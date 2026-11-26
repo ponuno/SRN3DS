@@ -575,7 +575,21 @@ static int parse_font(const uint8_t *p, size_t len, uint8_t font_type,
                        font_type);
             return -1;
         }
-        r.off += (size_t)f->kerning_count * 6u;
+        for (uint32_t i = 0; i < f->kerning_count; ++i) {
+            uint16_t code1, code2;
+            int16_t adjustment;
+            if (rd_u16(&r, &code1) || rd_u16(&r, &code2) ||
+                rd_s16(&r, &adjustment))
+                return -1;
+            if (i < MENU_SWF_DISPLAY_MAX_KERNING) {
+                f->kerning[i].code1 = code1;
+                f->kerning[i].code2 = code2;
+                f->kerning[i].adjustment = adjustment;
+                ++f->stored_kerning;
+            } else {
+                f->truncated = 1;
+            }
+        }
     }
     f->stored_glyphs = f->glyph_count < MENU_SWF_DISPLAY_MAX_GLYPHS
                            ? f->glyph_count

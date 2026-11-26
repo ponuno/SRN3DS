@@ -1,0 +1,592 @@
+/* Host test: bounded DefineFont3 glyph tessellation and text layout. */
+
+#include "menu_swf_text.h"
+#include "menu_swf_display.h"
+#include "menu_swf_shape.h"
+#include "menu_swf_tess.h"
+#include "menu_swf.h"
+#include "bsa_reader.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int checks;
+static int failures;
+
+static void check(int condition, const char *what) {
+    ++checks;
+    if (!condition) {
+        ++failures;
+        printf("FAIL: %s\n", what);
+    }
+}
+
+static void put_u16(uint8_t *p, uint16_t v) {
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void put_s16(uint8_t *p, int16_t v) {
+    put_u16(p, (uint16_t)v);
+}
+
+static void put_u32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+typedef struct {
+    uint8_t *p;
+    size_t cap;
+    size_t bit;
+    int ok;
+} BitW;
+
+static void bw_put(BitW *w, uint32_t v, unsigned n) {
+    for (unsigned i = 0; i < n; ++i) {
+        size_t bit = w->bit + i;
+        if ((bit >> 3) >= w->cap) {
+            w->ok = 0;
+            return;
+        }
+        unsigned value = (v >> (n - 1 - i)) & 1u;
+        uint8_t mask = (uint8_t)(0x80u >> (bit & 7));
+        if (value) w->p[bit >> 3] |= mask;
+        else w->p[bit >> 3] &= (uint8_t)~mask;
+    }
+    w->bit += n;
+}
+
+static void bw_signed(BitW *w, int32_t v, unsigned n) {
+    uint32_t mask = n == 32 ? 0xffffffffu : ((1u << n) - 1u);
+    bw_put(w, (uint32_t)v & mask, n);
+}
+
+static void bw_align(BitW *w) {
+    while (w->bit & 7u) bw_put(w, 0, 1);
+}
+
+static size_t rect_bytes(uint8_t *out, size_t cap, int32_t xmin, int32_t xmax,
+                         int32_t ymin, int32_t ymax) {
+    memset(out, 0, cap < 32 ? cap : 32);
+    BitW w = {out, cap, 0, 1};
+    bw_put(&w, 12, 5);
+    bw_signed(&w, xmin, 12);
+    bw_signed(&w, xmax, 12);
+    bw_signed(&w, ymin, 12);
+    bw_signed(&w, ymax, 12);
+    bw_align(&w);
+    return w.ok ? (w.bit + 7) / 8 : 0;
+}
+
+static void rec_move(BitW *w, int32_t x, int32_t y) {
+    bw_put(w, 0, 1); /* non-edge */
+    bw_put(w, 0, 1); /* no new styles */
+    bw_put(w, 0, 1); /* no line style */
+    bw_put(w, 0, 1); /* no fill1 */
+    bw_put(w, 1, 1); /* fill0 */
+    bw_put(w, 1, 1); /* move */
+    bw_put(w, 10, 5);
+    bw_signed(w, x, 10);
+    bw_signed(w, y, 10);
+    bw_put(w, 1, 1); /* fill style 1 */
+}
+
+static void rec_line(BitW *w, int32_t dx, int32_t dy) {
+    bw_put(w, 1, 1);  /* edge */
+    bw_put(w, 1, 1);  /* straight */
+    bw_put(w, 10, 4);
+    bw_put(w, 1, 1);  /* general */
+    bw_signed(w, dx, 12);
+    bw_signed(w, dy, 12);
+}
+
+static void rec_end(BitW *w) {
+    bw_put(w, 0, 6);
+    bw_align(w);
+}
+
+static size_t glyph_square(uint8_t *out, size_t cap) {
+    memset(out, 0, cap);
+    BitW w = {out, cap, 0, 1};
+    bw_put(&w, 1, 4);
+    bw_put(&w, 0, 4);
+    rec_move(&w, 0, 0);
+    rec_line(&w, 100, 0);
+    rec_line(&w, 0, 100);
+    rec_line(&w, -100, 0);
+    rec_line(&w, 0, -100);
+    rec_end(&w);
+    return w.ok ? (w.bit + 7) / 8 : 0;
+}
+
+static size_t glyph_triangle(uint8_t *out, size_t cap) {
+    memset(out, 0, cap);
+    BitW w = {out, cap, 0, 1};
+    bw_put(&w, 1, 4);
+    bw_put(&w, 0, 4);
+    rec_move(&w, 0, 0);
+    rec_line(&w, 100, 0);
+    rec_line(&w, -50, 100);
+    rec_line(&w, -50, -100);
+    rec_end(&w);
+    return w.ok ? (w.bit + 7) / 8 : 0;
+}
+
+static size_t glyph_empty(uint8_t *out, size_t cap) {
+    memset(out, 0, cap);
+    BitW w = {out, cap, 0, 1};
+    bw_put(&w, 1, 4);
+    bw_put(&w, 0, 4);
+    rec_move(&w, 0, 0);
+    rec_end(&w);
+    return w.ok ? (w.bit + 7) / 8 : 0;
+}
+
+static size_t build_font_tag(uint8_t *out, size_t cap) {
+    uint8_t g0[256], g1[256], g2[256], rb[32];
+    size_t n0 = glyph_square(g0, sizeof g0);
+    size_t n1 = glyph_triangle(g1, sizeof g1);
+    size_t n2 = glyph_empty(g2, sizeof g2);
+    memset(out, 0, cap);
+    size_t at = 0;
+    put_u16(out + at, 1);
+    at += 2;
+    out[at++] = 0x85; /* HasLayout | WideCodes | Bold */
+    out[at++] = 0;
+    const char *name = "TestFont";
+    out[at++] = 8;
+    memcpy(out + at, name, 8);
+    at += 8;
+    put_u16(out + at, 3);
+    at += 2;
+    size_t base = at;
+    size_t off0 = 8;
+    size_t off1 = off0 + n0;
+    size_t off2 = off1 + n1;
+    size_t code_off = off2 + n2;
+    put_u16(out + at, (uint16_t)off0);
+    at += 2;
+    put_u16(out + at, (uint16_t)off1);
+    at += 2;
+    put_u16(out + at, (uint16_t)off2);
+    at += 2;
+    put_u16(out + at, (uint16_t)code_off);
+    at += 2;
+    memcpy(out + at, g0, n0);
+    at += n0;
+    memcpy(out + at, g1, n1);
+    at += n1;
+    memcpy(out + at, g2, n2);
+    at += n2;
+    put_u16(out + at, 'A');
+    at += 2;
+    put_u16(out + at, 'V');
+    at += 2;
+    put_u16(out + at, ' ');
+    at += 2;
+    /* HasLayout: ascent, descent, leading, advances, bounds, kerning. */
+    put_u16(out + at, 800);
+    at += 2;
+    put_u16(out + at, 200);
+    at += 2;
+    put_s16(out + at, 0);
+    at += 2;
+    put_s16(out + at, 600);
+    at += 2;
+    put_s16(out + at, 600);
+    at += 2;
+    put_s16(out + at, 300);
+    at += 2;
+    size_t r0 = rect_bytes(rb, sizeof rb, 0, 100, 0, 100);
+    memcpy(out + at, rb, r0);
+    at += r0;
+    r0 = rect_bytes(rb, sizeof rb, 0, 100, 0, 100);
+    memcpy(out + at, rb, r0);
+    at += r0;
+    r0 = rect_bytes(rb, sizeof rb, 0, 0, 0, 0);
+    memcpy(out + at, rb, r0);
+    at += r0;
+    put_u16(out + at, 1); /* kerning count */
+    at += 2;
+    put_u16(out + at, 'A');
+    at += 2;
+    put_u16(out + at, 'V');
+    at += 2;
+    put_s16(out + at, -100);
+    at += 2;
+    (void)base;
+    return at;
+}
+
+static size_t make_swf(uint8_t *out, size_t cap, const uint8_t *payload,
+                       uint32_t len) {
+    uint8_t body[8192];
+    size_t at = 0;
+    body[at++] = 0;
+    put_u16(body + at, 0x1e00);
+    at += 2;
+    put_u16(body + at, 1);
+    at += 2;
+    int long_form = len >= 0x3f;
+    put_u16(body + at, (uint16_t)((75u << 6) | (long_form ? 0x3fu : len)));
+    at += 2;
+    if (long_form) {
+        put_u32(body + at, len);
+        at += 4;
+    }
+    memcpy(body + at, payload, len);
+    at += len;
+    put_u16(body + at, 0);
+    at += 2;
+    if (!at || cap < 8 + at) return 0;
+    memcpy(out, "FWS", 3);
+    out[3] = 10;
+    put_u32(out + 4, (uint32_t)(8 + at));
+    memcpy(out + 8, body, at);
+    return 8 + at;
+}
+
+typedef struct {
+    MenuSwfTextVertex vertices[8192];
+    uint32_t indices[24576];
+    MenuSwfTextGlyph glyphs[32];
+    MenuSwfTessVertex tvert[8192];
+    uint32_t tindices[24576];
+    uint16_t tfills[8192];
+    MenuSwfTessLine tlines[2048];
+    MenuSwfTessEdge tedges[4096];
+    uint32_t tactive[4096];
+    int32_t tbands[8192];
+} TextFixture;
+
+static void fixture_init(TextFixture *f, MenuSwfTextMesh *m) {
+    memset(m, 0, sizeof *m);
+    m->vertices = f->vertices;
+    m->vertex_capacity = 8192;
+    m->indices = f->indices;
+    m->index_capacity = 24576;
+    m->glyphs = f->glyphs;
+    m->glyph_capacity = 32;
+    m->glyph_tess.vertices = f->tvert;
+    m->glyph_tess.vertex_capacity = 8192;
+    m->glyph_tess.indices = f->tindices;
+    m->glyph_tess.index_capacity = 24576;
+    m->glyph_tess.triangle_fills = f->tfills;
+    m->glyph_tess.triangle_capacity = 8192;
+    m->glyph_tess.lines = f->tlines;
+    m->glyph_tess.line_capacity = 2048;
+    m->glyph_tess.edges = f->tedges;
+    m->glyph_tess.edge_capacity = 4096;
+    m->glyph_tess.active = f->tactive;
+    m->glyph_tess.active_capacity = 4096;
+    m->glyph_tess.bands = f->tbands;
+    m->glyph_tess.band_capacity = 8192;
+}
+
+static void style_identity(MenuSwfTextStyle *s) {
+    memset(s, 0, sizeof *s);
+    s->m00 = 65536;
+    s->m11 = 65536;
+    s->tx = 1000;
+    s->ty = 2000;
+    s->color = 0xFF112233u;
+}
+
+static void test_synthetic(void) {
+    uint8_t tag[2048], file[4096];
+    static TextFixture f;
+    MenuSwfTextMesh m;
+    MenuSwfTextStyle style;
+    char reason[BSA_REASON_MAX];
+
+    size_t tlen = build_font_tag(tag, sizeof tag);
+    size_t flen = make_swf(file, sizeof file, tag, (uint32_t)tlen);
+    check(flen > 0, "synthetic font fixture builds");
+
+    MenuSwfDisplaySummary *display =
+        (MenuSwfDisplaySummary *)malloc(sizeof *display);
+    check(display != NULL, "display summary allocation");
+    if (!display) return;
+    MenuSwfStatus st = menu_swf_display_summary(file, flen, display, reason,
+                                                sizeof reason);
+    check(st == MENU_SWF_OK, "synthetic display summary");
+    check(display->stored_fonts == 1 && display->fonts[0].glyph_count == 3,
+          "synthetic font glyph count");
+    check(display->fonts[0].stored_kerning == 1 &&
+              display->fonts[0].kerning[0].code1 == 'A' &&
+              display->fonts[0].kerning[0].code2 == 'V' &&
+              display->fonts[0].kerning[0].adjustment == -100,
+          "synthetic kerning table");
+    const MenuSwfFontSummary *font = &display->fonts[0];
+
+    fixture_init(&f, &m);
+    MenuSwfTessMesh glyph_mesh = m.glyph_tess;
+    st = menu_swf_tess_glyph(file, flen, font->font_id, 'A',
+                             MENU_SWF_TESS_NON_ZERO, &glyph_mesh, reason,
+                             sizeof reason);
+    check(st == MENU_SWF_OK, "synthetic glyph tess");
+    check(glyph_mesh.vertex_count == 4 && glyph_mesh.triangle_count == 2 &&
+              glyph_mesh.line_count == 0,
+          "synthetic glyph tess counts");
+    check(glyph_mesh.has_bounds && glyph_mesh.bounds.xmin == 0 &&
+              glyph_mesh.bounds.xmax == 100 &&
+              glyph_mesh.bounds.ymin == 0 && glyph_mesh.bounds.ymax == 100,
+          "synthetic glyph tess bounds");
+    check(glyph_mesh.triangle_fills[0] == 1, "synthetic glyph fill style");
+    st = menu_swf_tess_glyph(file, flen, font->font_id, ' ',
+                             MENU_SWF_TESS_NON_ZERO, &glyph_mesh, reason,
+                             sizeof reason);
+    check(st == MENU_SWF_OK && glyph_mesh.triangle_count == 0,
+          "synthetic empty glyph tess");
+    st = menu_swf_tess_glyph(file, flen, font->font_id, 'Z',
+                             MENU_SWF_TESS_NON_ZERO, &glyph_mesh, reason,
+                             sizeof reason);
+    check(st == MENU_SWF_ERR_ARGUMENT, "synthetic missing glyph tess");
+
+    fixture_init(&f, &m);
+    style_identity(&style);
+    const char *text = "AV A";
+    st = menu_swf_text_layout(file, flen, font, text, strlen(text), &style, &m,
+                              reason, sizeof reason);
+    check(st == MENU_SWF_OK, "synthetic text layout");
+    check(m.glyph_count == 4 && m.missing_glyphs == 0, "synthetic glyph count");
+    check(m.vertex_count == 11 && m.triangle_count == 5 &&
+              m.index_count == 15,
+          "synthetic vertex/triangle counts");
+    check(m.pen_x == 2000, "synthetic final pen");
+    check(m.has_bounds && m.bounds.xmin == 1000 && m.bounds.xmax == 2500 &&
+              m.bounds.ymin == 2000 && m.bounds.ymax == 2100,
+          "synthetic text bounds");
+    check(m.glyphs[0].code == 'A' && m.glyphs[0].x == 1000 &&
+              m.glyphs[0].pen_x == 0 && m.glyphs[0].advance == 600,
+          "synthetic first glyph placement");
+    check(m.glyphs[1].code == 'V' && m.glyphs[1].kerning == -100 &&
+              m.glyphs[1].x == 1500 && m.glyphs[1].pen_x == 500,
+          "synthetic kerning placement");
+    check(m.glyphs[2].code == ' ' && !m.glyphs[2].has_geometry &&
+              m.glyphs[2].vertex_count == 0 &&
+              m.glyphs[2].triangle_count == 0 && m.glyphs[2].advance == 300,
+          "synthetic empty glyph");
+    check(m.glyphs[0].triangle_first == 0 &&
+              m.glyphs[0].triangle_count == 2 &&
+              m.glyphs[1].triangle_first == 2 &&
+              m.glyphs[1].triangle_count == 1 &&
+              m.glyphs[3].triangle_first == 3 &&
+              m.glyphs[3].triangle_count == 2,
+          "synthetic glyph triangle ranges");
+    check(m.vertices[0].color == style.color, "synthetic vertex color");
+    int indices_ok = 1;
+    for (uint32_t i = 0; i < m.index_count; ++i)
+        if (m.indices[i] >= m.vertex_count) indices_ok = 0;
+    check(indices_ok, "synthetic indices in range");
+
+    /* Half scale plus translation: geometry and placements scale together. */
+    MenuSwfTextStyle half = style;
+    half.m00 = 32768;
+    half.m11 = 32768;
+    fixture_init(&f, &m);
+    st = menu_swf_text_layout(file, flen, font, "A", 1, &half, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_OK, "scaled text layout");
+    check(m.has_bounds && m.bounds.xmax == 1050 && m.bounds.ymax == 2050,
+          "scaled text bounds");
+
+    /* 90-degree rotation through the same 16.16 matrix. */
+    MenuSwfTextStyle rot;
+    memset(&rot, 0, sizeof rot);
+    rot.m01 = -65536;
+    rot.m10 = 65536;
+    rot.color = style.color;
+    fixture_init(&f, &m);
+    st = menu_swf_text_layout(file, flen, font, "A", 1, &rot, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_OK, "rotated text layout");
+    check(m.has_bounds && m.bounds.xmin == -100 && m.bounds.xmax == 0 &&
+              m.bounds.ymin == 0 && m.bounds.ymax == 100,
+          "rotated text bounds");
+
+    /* Unknown and empty glyphs keep their placements but no triangles. */
+    fixture_init(&f, &m);
+    st = menu_swf_text_layout(file, flen, font, "Z", 1, &style, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_OK && m.glyph_count == 1 && m.missing_glyphs == 1 &&
+              m.glyphs[0].missing &&
+              m.glyphs[0].glyph_index == MENU_SWF_TEXT_MISSING_GLYPH &&
+              m.vertex_count == 0 && m.pen_x == 0,
+          "unknown glyph placement");
+
+    fixture_init(&f, &m);
+    st = menu_swf_text_layout(file, flen, font, " ", 1, &style, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_OK && m.glyph_count == 1 && m.missing_glyphs == 0 &&
+              !m.glyphs[0].has_geometry && m.pen_x == 300,
+          "empty glyph placement");
+
+    /* Named overflow refusals. */
+    fixture_init(&f, &m);
+    m.vertex_capacity = 2;
+    st = menu_swf_text_layout(file, flen, font, "A", 1, &style, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET && reason[0], "text vertex overflow");
+
+    fixture_init(&f, &m);
+    m.index_capacity = 5;
+    st = menu_swf_text_layout(file, flen, font, "A", 1, &style, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET, "text index overflow");
+
+    fixture_init(&f, &m);
+    m.glyph_capacity = 1;
+    st = menu_swf_text_layout(file, flen, font, "AV", 2, &style, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET, "text glyph overflow");
+
+    fixture_init(&f, &m);
+    m.glyph_tess.vertex_capacity = 3;
+    st = menu_swf_text_layout(file, flen, font, "A", 1, &style, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET, "glyph tess scratch overflow");
+
+    fixture_init(&f, &m);
+    st = menu_swf_text_layout(file, flen, font, "x",
+                              MENU_SWF_TEXT_MAX_CHARS + 1, &style, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET, "text length overflow");
+
+    free(display);
+}
+
+static void test_real(const char *data_dir) {
+    const char *archives[2] = {"Update.bsa", "Skyrim - Interface.bsa"};
+    char path[1024];
+    BsaArchive *archive = NULL;
+    BsaMatch match;
+    for (unsigned i = 0; i < 2; ++i) {
+        int n = snprintf(path, sizeof path, "%s/%s", data_dir, archives[i]);
+        if (n < 0 || (size_t)n >= sizeof path) continue;
+        if (bsa_open_path(path, NULL, &archive, NULL, 0) == BSA_OK) {
+            if (bsa_find(archive, "interface/startmenu.swf", &match) == BSA_OK)
+                break;
+            bsa_close(archive);
+            archive = NULL;
+        }
+    }
+    if (!archive) {
+        printf("real: skip (StartMenu.swf not found under %s)\n", data_dir);
+        return;
+    }
+    uint32_t size = 0;
+    char reason[BSA_REASON_MAX];
+    check(bsa_unpacked_size(archive, &match.entry, &size, reason,
+                            sizeof reason) == BSA_OK,
+          "real StartMenu size");
+    uint8_t *bytes = (uint8_t *)malloc(size ? size : 1);
+    size_t got = 0;
+    if (bytes)
+        check(bsa_read(archive, &match.entry, bytes, size, &got, reason,
+                       sizeof reason) == BSA_OK && got == size,
+              "real StartMenu read");
+    bsa_close(archive);
+    if (!bytes) return;
+
+    MenuSwfDisplaySummary *display =
+        (MenuSwfDisplaySummary *)malloc(sizeof *display);
+    static TextFixture f;
+    MenuSwfTextMesh m;
+    MenuSwfTextStyle style;
+    check(display != NULL, "real display allocation");
+    if (!display) {
+        free(bytes);
+        return;
+    }
+    MenuSwfStatus st = menu_swf_display_summary(bytes, got, display, reason,
+                                                sizeof reason);
+    check(st == MENU_SWF_OK, "real display summary");
+    if (st == MENU_SWF_OK) {
+        const MenuSwfFontSummary *font = NULL;
+        for (uint32_t i = 0; i < display->stored_fonts; ++i)
+            if (display->fonts[i].glyph_count == 243) {
+                font = &display->fonts[i];
+                break;
+            }
+        check(font != NULL, "real 243-glyph font found");
+        if (font) {
+            check(font->stored_kerning == 94, "real 94 kerning records");
+            char text[8];
+            size_t text_len = 0;
+            const uint16_t codes[4] = {33, 34, 35, 36};
+            for (unsigned i = 0; i < 4; ++i) text[text_len++] = (char)codes[i];
+
+            fixture_init(&f, &m);
+            style_identity(&style);
+            style.tx = 0;
+            style.ty = 0;
+            st = menu_swf_text_layout(bytes, got, font, text, text_len, &style,
+                                      &m, reason, sizeof reason);
+            check(st == MENU_SWF_OK, "real text layout");
+            if (st == MENU_SWF_OK) {
+                printf("real: text glyphs=%u vertices=%u triangles=%u "
+                       "missing=%u pen=%d kerning=%u\n",
+                       m.glyph_count, m.vertex_count, m.triangle_count,
+                       m.missing_glyphs, m.pen_x, font->stored_kerning);
+                printf("real: first glyph code=%u index=%u x=%d y=%d "
+                       "advance=%d tris=%u bounds=%d,%d,%d,%d\n",
+                       m.glyphs[0].code, m.glyphs[0].glyph_index,
+                       m.glyphs[0].x, m.glyphs[0].y, m.glyphs[0].advance,
+                       m.glyphs[0].triangle_count, m.glyphs[0].bounds.xmin,
+                       m.glyphs[0].bounds.xmax, m.glyphs[0].bounds.ymin,
+                       m.glyphs[0].bounds.ymax);
+                check(m.glyph_count == 4 && m.missing_glyphs == 0,
+                      "real four glyph placements");
+                check(m.vertex_count > 0 && m.triangle_count > 0,
+                      "real glyph triangles");
+                check(m.glyphs[0].has_geometry, "real first glyph geometry");
+                check(m.font_id == font->font_id && m.em_square == 1024 &&
+                          m.shape_scale == 20,
+                      "real font metrics");
+            } else {
+                printf("real: text failed: %s\n", reason);
+            }
+
+            if (font->stored_kerning) {
+                uint16_t c1 = font->kerning[0].code1;
+                uint16_t c2 = font->kerning[0].code2;
+                if (c1 < 256 && c2 < 256) {
+                    char pair[2] = {(char)c1, (char)c2};
+                    fixture_init(&f, &m);
+                    st = menu_swf_text_layout(bytes, got, font, pair, 2,
+                                              &style, &m, reason,
+                                              sizeof reason);
+                    check(st == MENU_SWF_OK && m.glyph_count == 2,
+                          "real kerning pair layout");
+                    if (st == MENU_SWF_OK)
+                        check(m.glyphs[1].kerning ==
+                                  font->kerning[0].adjustment,
+                              "real kerning applied");
+                }
+            }
+        }
+    } else {
+        printf("real: display failed: %s\n", reason);
+    }
+    free(display);
+    free(bytes);
+}
+
+int main(int argc, char **argv) {
+    printf("menu SWF text tests\n");
+    test_synthetic();
+    const char *real = argc > 1 ? argv[1] : getenv("SKYRIM_N3DS_REAL_DATA");
+    if (real && real[0]) {
+        if (!strcmp(real, "1")) real = "F:\\Skyrim\\Data";
+        test_real(real);
+    } else {
+        printf("real: skip (pass a Data directory or SKYRIM_N3DS_REAL_DATA=1)\n");
+    }
+    printf("menu SWF text: %d checks, %d failures\n", checks, failures);
+    return failures ? 1 : 0;
+}

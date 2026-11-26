@@ -20,6 +20,7 @@
 #define MENU_SWF_DISPLAY_MAX_SPRITES 128u
 #define MENU_SWF_DISPLAY_MAX_GLYPHS 256u
 #define MENU_SWF_DISPLAY_MAX_FONTS 2u
+#define MENU_SWF_DISPLAY_MAX_KERNING 256u
 #define MENU_SWF_DISPLAY_NAME_MAX 48u
 #define MENU_SWF_DISPLAY_SPRITE_DEPTH 16u
 
@@ -106,6 +107,12 @@ typedef struct {
 } MenuSwfGlyph;
 
 typedef struct {
+    uint16_t code1;
+    uint16_t code2;
+    int16_t adjustment;
+} MenuSwfKerning;
+
+typedef struct {
     uint16_t font_id;
     uint16_t glyph_count;
     uint16_t stored_glyphs;
@@ -119,12 +126,14 @@ typedef struct {
     int32_t descent;
     int32_t leading;
     uint16_t kerning_count;
+    uint16_t stored_kerning;
     uint32_t offset_table_base;
     uint32_t code_table_offset;
     uint32_t trailing_bytes;
     char name[64];
     int truncated;
     MenuSwfGlyph glyphs[MENU_SWF_DISPLAY_MAX_GLYPHS];
+    MenuSwfKerning kerning[MENU_SWF_DISPLAY_MAX_KERNING];
 } MenuSwfFontSummary;
 
 typedef struct {

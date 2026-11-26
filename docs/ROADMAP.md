@@ -197,6 +197,11 @@ read stage without fake successes. *Not met.*
       StartMenu: 27/27 shapes, 71,605 vertices, 35,759 triangles, 11 lines,
       3,118 curve segments. CPU geometry only; no raster, atlas or draw.
       See `docs/MENU_SWF.md`.
+- [x] Bounded DefineFont3 glyph tessellation and simple Latin-1 text layout:
+      advance+kerning placement, 16.16 transform, ARGB vertices, per-glyph
+      triangle ranges; real codes 33..36 produce 2,818 vertices / 1,408
+      triangles with the 94-pair kerning table. Empty and unknown glyphs are
+      explicit; no raster, atlas or GFx draw. See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer
