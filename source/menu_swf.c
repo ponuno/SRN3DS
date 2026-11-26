@@ -199,6 +199,195 @@ static int parse_import_assets(const uint8_t *payload, size_t len,
     return off == len ? 0 : -1;
 }
 
+static int import_copy(char *dst, size_t cap, const uint8_t *src, size_t len) {
+    if (!cap || len >= cap) return -1;
+    if (len) memcpy(dst, src, len);
+    dst[len] = 0;
+    return 0;
+}
+
+/* 0 = parsed, -1 = malformed, -3 = named BUDGET. */
+static int parse_import_record(const uint8_t *payload, size_t len,
+                               int version2, MenuSwfImportAssets *out) {
+    memset(out, 0, sizeof *out);
+    size_t off = 0;
+    const uint8_t *url = NULL;
+    size_t url_len = 0;
+    if (read_string(payload, len, &off, &url, &url_len)) return -1;
+    if (import_copy(out->url, sizeof out->url, url, url_len)) return -3;
+    if (version2) {
+        if (len - off < 2) return -1;
+        off += 2;
+    }
+    if (len - off < 2) return -1;
+    uint32_t count = get_u16(payload + off);
+    off += 2;
+    out->symbol_total = count;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (len - off < 2) return -1;
+        uint16_t id = get_u16(payload + off);
+        off += 2;
+        const uint8_t *name = NULL;
+        size_t name_len = 0;
+        if (read_string(payload, len, &off, &name, &name_len)) return -1;
+        if (out->symbol_count >= MENU_SWF_MAX_IMPORT_SYMBOLS) {
+            out->truncated = 1;
+            return -3;
+        }
+        MenuSwfImportSymbol *symbol = &out->symbols[out->symbol_count];
+        if (import_copy(symbol->name, sizeof symbol->name, name, name_len))
+            return -3;
+        symbol->id = id;
+        for (uint32_t j = 0; j < out->symbol_count; ++j)
+            if (out->symbols[j].id == id) return -1;
+        ++out->symbol_count;
+    }
+    return off == len ? 0 : -1;
+}
+
+typedef struct {
+    MenuSwfImportList *list;
+    uint32_t tags_seen;
+} ImportContext;
+
+static MenuSwfStatus import_stream(ImportContext *ctx, const uint8_t *p,
+                                   size_t len, unsigned depth,
+                                   char *reason, size_t reason_cap) {
+    if (depth > MENU_SWF_MAX_SPRITE_DEPTH) {
+        set_reason(reason, reason_cap,
+                   "swf imports: sprite depth exceeds %u",
+                   MENU_SWF_MAX_SPRITE_DEPTH);
+        return MENU_SWF_ERR_TAG;
+    }
+    size_t off = 0;
+    for (;;) {
+        if (off >= len) {
+            set_reason(reason, reason_cap, "swf imports: missing End tag");
+            return MENU_SWF_ERR_END;
+        }
+        if (len - off < 2) {
+            set_reason(reason, reason_cap,
+                       "swf imports: truncated tag header");
+            return MENU_SWF_ERR_TRUNCATED;
+        }
+        uint16_t header = get_u16(p + off);
+        off += 2;
+        unsigned code = header >> 6;
+        uint32_t tlen = header & 0x3fu;
+        if (tlen == 0x3fu) {
+            if (len - off < 4) {
+                set_reason(reason, reason_cap,
+                           "swf imports: truncated long tag header");
+                return MENU_SWF_ERR_TRUNCATED;
+            }
+            tlen = get_u32(p + off);
+            off += 4;
+        }
+        if (tlen > len - off) {
+            set_reason(reason, reason_cap,
+                       "swf imports: tag %u length exceeds stream", code);
+            return MENU_SWF_ERR_TAG;
+        }
+        const uint8_t *payload = p + off;
+        off += tlen;
+        if (++ctx->tags_seen > MENU_SWF_MAX_TAGS) {
+            set_reason(reason, reason_cap,
+                       "swf imports: tag limit %u exceeded",
+                       MENU_SWF_MAX_TAGS);
+            return MENU_SWF_ERR_BUDGET;
+        }
+        if (code == 0) {
+            if (tlen) {
+                set_reason(reason, reason_cap,
+                           "swf imports: End tag has payload bytes");
+                return MENU_SWF_ERR_FORMAT;
+            }
+            return MENU_SWF_OK;
+        }
+        if (code == 57 || code == 71) {
+            MenuSwfImportList *list = ctx->list;
+            ++list->total;
+            if (list->count >= list->capacity) {
+                list->truncated = 1;
+                set_reason(reason, reason_cap,
+                           "swf imports: capacity %u exceeded",
+                           list->capacity);
+                return MENU_SWF_ERR_BUDGET;
+            }
+            MenuSwfImportAssets item;
+            int rc = parse_import_record(payload, tlen, code == 71, &item);
+            if (rc == -3) {
+                set_reason(reason, reason_cap,
+                           "swf imports: URL/symbol string or symbol capacity exceeded");
+                return MENU_SWF_ERR_BUDGET;
+            }
+            if (rc) {
+                set_reason(reason, reason_cap,
+                           "swf: malformed ImportAssets%u tag",
+                           code == 71 ? 2 : 1);
+                return MENU_SWF_ERR_FORMAT;
+            }
+            for (uint32_t i = 0; i < list->count; ++i)
+                for (uint32_t j = 0; j < item.symbol_count; ++j)
+                    for (uint32_t k = 0; k < list->items[i].symbol_count; ++k)
+                        if (list->items[i].symbols[k].id == item.symbols[j].id) {
+                            set_reason(reason, reason_cap,
+                                       "swf imports: duplicate imported id %u",
+                                       item.symbols[j].id);
+                            return MENU_SWF_ERR_FORMAT;
+                        }
+            list->items[list->count++] = item;
+        } else if (code == 39) {
+            if (tlen < 4) {
+                set_reason(reason, reason_cap,
+                           "swf imports: short DefineSprite");
+                return MENU_SWF_ERR_FORMAT;
+            }
+            MenuSwfStatus st = import_stream(ctx, payload + 4, tlen - 4,
+                                             depth + 1, reason, reason_cap);
+            if (st != MENU_SWF_OK) return st;
+        }
+    }
+}
+
+MenuSwfStatus menu_swf_collect_imports(const uint8_t *data, size_t size,
+                                       MenuSwfImportList *list,
+                                       char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!list || (list->capacity && !list->items))
+        return MENU_SWF_ERR_ARGUMENT;
+    list->count = 0;
+    list->total = 0;
+    list->truncated = 0;
+    MenuSwfView view;
+    MenuSwfStatus st = menu_swf_view_open(data, size, &view, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
+    ImportContext ctx;
+    memset(&ctx, 0, sizeof ctx);
+    ctx.list = list;
+    st = import_stream(&ctx, view.body + view.tag_offset,
+                       view.body_len - view.tag_offset, 0, reason, reason_cap);
+    menu_swf_view_close(&view);
+    return st;
+}
+
+const MenuSwfImportAssets *menu_swf_find_import(
+    const MenuSwfImportList *list, uint16_t id,
+    const MenuSwfImportSymbol **symbol) {
+    if (symbol) *symbol = NULL;
+    if (!list || !list->items) return NULL;
+    uint32_t count = list->count < list->capacity ? list->count : list->capacity;
+    for (uint32_t i = 0; i < count; ++i) {
+        for (uint32_t j = 0; j < list->items[i].symbol_count; ++j) {
+            if (list->items[i].symbols[j].id == id) {
+                if (symbol) *symbol = &list->items[i].symbols[j];
+                return &list->items[i];
+            }
+        }
+    }
+    return NULL;
+}
+
 static int parse_define_font_name(const uint8_t *payload, size_t len,
                                   MenuSwfSummary *s) {
     if (len < 3) return -1;

@@ -311,6 +311,79 @@ static void test_import_assets2(void) {
           "ImportAssets2 symbol");
 }
 
+static void test_structured_imports(void) {
+    uint8_t body[512], file[1024], payload[256];
+    char reason[BSA_REASON_MAX];
+    MenuSwfStatus st;
+    size_t at = frame_prefix(body);
+    size_t len = build_import(payload, sizeof payload);
+    at = put_tag(body, sizeof body, at, 57, payload, (uint32_t)len, 0);
+    len = build_import2(payload, sizeof payload);
+    at = put_tag(body, sizeof body, at, 71, payload, (uint32_t)len, 0);
+    at = put_tag(body, sizeof body, at, 0, NULL, 0, 0);
+    size_t flen = make_fws(file, sizeof file, body, at);
+    check(flen > 0, "structured import fixture builds");
+
+    MenuSwfImportAssets items[4];
+    MenuSwfImportList list = {items, 4, 0, 0, 0};
+    check(menu_swf_collect_imports(file, flen, &list, reason, sizeof reason) ==
+              MENU_SWF_OK,
+          "structured import collection");
+    check(list.count == 2 && list.total == 2 &&
+              !strcmp(items[0].url, "gfxfontlib.swf") &&
+              items[0].symbol_count == 1 && items[0].symbols[0].id == 3 &&
+              !strcmp(items[0].symbols[0].name, "$EverywhereFont") &&
+              !strcmp(items[1].url, "gfxfontlib.swf") &&
+              items[1].symbol_count == 1 && items[1].symbols[0].id == 34,
+          "ImportAssets/ImportAssets2 URL and symbol fields");
+    const MenuSwfImportSymbol *symbol = NULL;
+    const MenuSwfImportAssets *asset = menu_swf_find_import(&list, 34, &symbol);
+    check(asset == &items[1] && symbol && symbol->id == 34,
+          "structured import find by id");
+    check(menu_swf_find_import(&list, 99, &symbol) == NULL && !symbol,
+          "missing structured import id");
+
+    MenuSwfImportList no_capacity = {NULL, 0, 0, 0, 0};
+    check(menu_swf_collect_imports(file, flen, &no_capacity, reason,
+                                   sizeof reason) == MENU_SWF_ERR_BUDGET &&
+              no_capacity.total == 1 && no_capacity.truncated,
+          "structured import capacity refusal");
+
+    check(menu_swf_collect_imports(file, flen - 1, &list, reason,
+                                   sizeof reason) != MENU_SWF_OK,
+          "truncated structured import stream refused");
+
+    uint8_t sprite[256];
+    put_u16(sprite, 1);
+    size_t sprite_len = 4;
+    len = build_import2(payload, sizeof payload);
+    sprite_len = put_tag(sprite, sizeof sprite, sprite_len, 71, payload,
+                         (uint32_t)len, 0);
+    sprite_len = put_tag(sprite, sizeof sprite, sprite_len, 0, NULL, 0, 0);
+    at = frame_prefix(body);
+    at = put_tag(body, sizeof body, at, 39, sprite, (uint32_t)sprite_len, 0);
+    at = put_tag(body, sizeof body, at, 0, NULL, 0, 0);
+    flen = make_fws(file, sizeof file, body, at);
+    st = menu_swf_collect_imports(file, flen, &list, reason, sizeof reason);
+    check(st == MENU_SWF_OK && list.count == 1 && list.total == 1 &&
+              list.items[0].symbols[0].id == 34,
+          "structured imports recurse into DefineSprite");
+
+    at = frame_prefix(body);
+    len = build_import(payload, sizeof payload);
+    at = put_tag(body, sizeof body, at, 57, payload, (uint32_t)len, 0);
+    len = build_import2(payload, sizeof payload);
+    size_t import2_id = strlen("gfxfontlib.swf") + 1 + 2 + 2;
+    put_u16(payload + import2_id, 3);
+    at = put_tag(body, sizeof body, at, 71, payload, (uint32_t)len, 0);
+    at = put_tag(body, sizeof body, at, 0, NULL, 0, 0);
+    flen = make_fws(file, sizeof file, body, at);
+    check(menu_swf_collect_imports(file, flen, &list, reason,
+                                   sizeof reason) == MENU_SWF_ERR_FORMAT &&
+              strstr(reason, "duplicate imported id 3"),
+          "duplicate structured import id is fatal");
+}
+
 static void test_container_errors(void) {
     uint8_t body[256], file[1024];
     char reason[BSA_REASON_MAX];
@@ -516,6 +589,27 @@ static void test_real(const char *data_dir) {
                 strstr(s.names[i].name, "Futura"))
                 named_font = 1;
         check(named_font, "real font name visible in the bounded name list");
+
+        MenuSwfImportAssets import_items[4];
+        MenuSwfImportList imports = {import_items, 4, 0, 0, 0};
+        st = menu_swf_collect_imports(bytes, got, &imports, reason,
+                                      sizeof reason);
+        check(st == MENU_SWF_OK && imports.count == 2,
+              "real structured font imports");
+        if (st == MENU_SWF_OK) {
+            const MenuSwfImportSymbol *medium = NULL, *regular = NULL;
+            check(menu_swf_find_import(&imports, 34, &medium) &&
+                      !strcmp(medium->name, "$EverywhereMediumFont"),
+                  "real imported font id 34");
+            check(menu_swf_find_import(&imports, 41, &regular) &&
+                      !strcmp(regular->name, "$EverywhereFont"),
+                  "real imported font id 41");
+            for (uint32_t i = 0; i < imports.count; ++i)
+                printf("real: import[%u] url='%s' id=%u symbol='%s'\n",
+                       i, import_items[i].url,
+                       import_items[i].symbols[0].id,
+                       import_items[i].symbols[0].name);
+        }
     } else {
         printf("real: summary failed: %s\n", reason);
     }
@@ -526,6 +620,7 @@ int main(int argc, char **argv) {
     printf("menu SWF summary tests\n");
     test_synthetic_summary();
     test_import_assets2();
+    test_structured_imports();
     test_container_errors();
     test_tag_errors();
 

@@ -75,10 +75,14 @@ Masters: `Skyrim.esm` 249,371,467 B `bc84992a...a5b6ed`;
 - `startmenu.swf`: 1,186 tags; 47 exports; imports `gfxfontlib.swf` symbols
   `$EverywhereMediumFont` (id 34) and `$EverywhereFont` (id 41); defines one
   local font id 1 “Futura Condensed” (243 glyphs).
-- `fonts_en.swf`: 12 `DefineFont3` + 12 `DefineFontName`; supplies both imported
-  fonts.
-- Font resolution: `$EverywhereMediumFont` → id 3 “Futura Condensed Medium”
-  (187 glyphs); `$EverywhereFont` → id 1 “Futura Condensed Light” (187).
+- `fonts_en.swf`: 12 `DefineFont3` + 12 `DefineFontName`; ten definitions fit
+  the bounded 256-glyph/256-kerning summary.  Its usable DefineFont ids are
+  1/3/5/7/9/11/13/15/19/23; ids 17 and 21 each have 621 kerning records and are
+  skipped explicitly.
+- Exact-id import resolution: StartMenu ids **34/41 are absent** from
+  `fonts_en.swf`, so the real text records remain named refusals.  The earlier
+  name-based census (`$EverywhereMediumFont` -> id 3, `$EverywhereFont` -> id 1)
+  is **not** a valid import resolution and is not used by the renderer.
 - `sharedcomponents.swf` is **not** statically imported by `startmenu.swf`.
 - `titles.swf` belongs to the separate title-sequence menu.
 - `Translate_ENGLISH.txt`: UTF-16LE BOM, CRLF, 20,356 B,

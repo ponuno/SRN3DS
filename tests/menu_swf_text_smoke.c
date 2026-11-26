@@ -265,6 +265,50 @@ static size_t put_tag(uint8_t *out, size_t cap, size_t at, unsigned code,
     return at + len;
 }
 
+static size_t make_two_font_swf(uint8_t *out, size_t cap,
+                                const uint8_t *font0, uint32_t font0_len,
+                                const uint8_t *font1, uint32_t font1_len) {
+    uint8_t body[8192];
+    size_t at = 0;
+    body[at++] = 0;
+    put_u16(body + at, 0x1e00);
+    at += 2;
+    put_u16(body + at, 1);
+    at += 2;
+    at = put_tag(body, sizeof body, at, 75, font0, font0_len);
+    at = put_tag(body, sizeof body, at, 75, font1, font1_len);
+    at = put_tag(body, sizeof body, at, 0, NULL, 0);
+    if (!at || cap < 8 + at) return 0;
+    memcpy(out, "FWS", 3);
+    out[3] = 10;
+    put_u32(out + 4, (uint32_t)(8 + at));
+    memcpy(out + 8, body, at);
+    return 8 + at;
+}
+
+static size_t make_nested_font_swf(uint8_t *out, size_t cap,
+                                   const uint8_t *font, uint32_t font_len) {
+    uint8_t body[8192], sprite[2048];
+    size_t sprite_len = 4;
+    put_u16(sprite, 1);
+    sprite_len = put_tag(sprite, sizeof sprite, sprite_len, 75, font, font_len);
+    sprite_len = put_tag(sprite, sizeof sprite, sprite_len, 0, NULL, 0);
+    size_t at = 0;
+    body[at++] = 0;
+    put_u16(body + at, 0x1e00);
+    at += 2;
+    put_u16(body + at, 1);
+    at += 2;
+    at = put_tag(body, sizeof body, at, 39, sprite, (uint32_t)sprite_len);
+    at = put_tag(body, sizeof body, at, 0, NULL, 0);
+    if (!at || cap < 8 + at) return 0;
+    memcpy(out, "FWS", 3);
+    out[3] = 10;
+    put_u32(out + 4, (uint32_t)(8 + at));
+    memcpy(out + 8, body, at);
+    return 8 + at;
+}
+
 static size_t make_edit_swf(uint8_t *out, size_t cap,
                             const uint8_t *font, uint32_t font_len,
                             const uint8_t *edit, uint32_t edit_len) {
@@ -559,6 +603,7 @@ static void test_synthetic(void) {
 
 static void test_edit_text(void) {
     uint8_t font_tag[2048], edit_tag[2048], file[8192];
+    uint8_t two_file[10000], nested_file[4096], oversized[4096], malformed[2048];
     size_t font_len = build_font_tag(font_tag, sizeof font_tag);
     uint16_t flags = 0x0001u | 0x0004u | 0x0010u | 0x0020u |
                      0x0040u | 0x0080u | 0x0100u;
@@ -610,6 +655,124 @@ static void test_edit_text(void) {
         return;
     }
     const MenuSwfFontSummary *font = &display->fonts[0];
+
+    MenuSwfFontSummary font_items[4];
+    MenuSwfFontList font_list = {.items = font_items, .capacity = 4};
+    st = menu_swf_display_collect_fonts(file, file_len, &font_list, reason,
+                                        sizeof reason);
+    check(st == MENU_SWF_OK && font_list.count == 1 &&
+              font_items[0].font_id == 1,
+          "caller-owned DefineFont collection");
+
+    size_t nested_len = make_nested_font_swf(nested_file, sizeof nested_file,
+                                             font_tag, (uint32_t)font_len);
+    st = menu_swf_display_collect_fonts(nested_file, nested_len, &font_list,
+                                        reason, sizeof reason);
+    check(st == MENU_SWF_OK && font_list.count == 1 && font_list.total == 1,
+          "DefineFont collector recurses into DefineSprite");
+    st = menu_swf_display_collect_fonts(file, file_len, &font_list, reason,
+                                        sizeof reason);
+    check(st == MENU_SWF_OK && font_list.count == 1,
+          "top-level font collection restored after nested fixture");
+
+    MenuSwfFontSummary parsed_font;
+    st = menu_swf_display_parse_font(font_tag, font_len, 3, &parsed_font,
+                                     reason, sizeof reason);
+    check(st == MENU_SWF_OK && parsed_font.font_id == 1 &&
+              parsed_font.glyph_count == 3,
+          "single DefineFont payload parse");
+    st = menu_swf_display_parse_font(font_tag, font_len - 1, 3, &parsed_font,
+                                     reason, sizeof reason);
+    check(st == MENU_SWF_ERR_FORMAT && reason[0],
+          "malformed DefineFont payload is named FORMAT");
+
+    MenuSwfFontList no_font_capacity = {0};
+    st = menu_swf_display_collect_fonts(file, file_len, &no_font_capacity, reason,
+                                        sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET && no_font_capacity.total == 1 &&
+              no_font_capacity.truncated,
+          "DefineFont collector capacity refusal");
+
+    size_t two_len = make_two_font_swf(two_file, sizeof two_file,
+                                       font_tag, (uint32_t)font_len,
+                                       font_tag, (uint32_t)font_len);
+    MenuSwfFontSummary duplicate_items[2];
+    MenuSwfFontList duplicates = {
+        .items = duplicate_items, .capacity = 2};
+    st = menu_swf_display_collect_fonts(two_file, two_len, &duplicates, reason,
+                                        sizeof reason);
+    check(st == MENU_SWF_ERR_FORMAT && strstr(reason, "duplicate DefineFont id"),
+          "duplicate DefineFont id is fatal");
+
+    memcpy(malformed, font_tag, font_len);
+    malformed[2] &= (uint8_t)~0x04u; /* Font3 requires WideCodes */
+    size_t malformed_len = make_swf(two_file, sizeof two_file, malformed,
+                                    (uint32_t)font_len);
+    st = menu_swf_display_collect_fonts(two_file, malformed_len, &font_list,
+                                        reason, sizeof reason);
+    check(st == MENU_SWF_ERR_FORMAT && strstr(reason, "WideCodes"),
+          "malformed DefineFont is fatal to collection");
+    st = menu_swf_display_collect_fonts(file, file_len, &font_list, reason,
+                                        sizeof reason);
+    check(st == MENU_SWF_OK && font_list.count == 1,
+          "font collector resets cleanly after refusal");
+
+    memcpy(oversized, font_tag, font_len);
+    put_u16(oversized, 17);
+    put_u16(oversized + font_len - 8, MENU_SWF_DISPLAY_MAX_KERNING + 1u);
+    size_t oversized_len = font_len;
+    for (uint32_t i = 1; i <= MENU_SWF_DISPLAY_MAX_KERNING; ++i) {
+        put_u16(oversized + oversized_len, 'A');
+        put_u16(oversized + oversized_len + 2, 'V');
+        put_s16(oversized + oversized_len + 4, 0);
+        oversized_len += 6;
+    }
+    two_len = make_two_font_swf(two_file, sizeof two_file,
+                                font_tag, (uint32_t)font_len,
+                                oversized, (uint32_t)oversized_len);
+    MenuSwfFontSummary skip_items[4];
+    MenuSwfFontList skipped = {.items = skip_items, .capacity = 4};
+    st = menu_swf_display_collect_fonts(two_file, two_len, &skipped, reason,
+                                        sizeof reason);
+    check(st == MENU_SWF_OK && skipped.count == 1 && skipped.total == 2 &&
+              skipped.skipped == 1 && skipped.truncated &&
+              strstr(skipped.skip_reason, "id 17"),
+          "oversized unrelated DefineFont is skipped, not fatal");
+
+    MenuSwfImportSymbol import_symbol = {1, "SameName"};
+    MenuSwfImportAssets import_asset;
+    memset(&import_asset, 0, sizeof import_asset);
+    strcpy(import_asset.url, "gfxfontlib.swf");
+    import_asset.symbols[0] = import_symbol;
+    import_asset.symbols[1] = (MenuSwfImportSymbol){34, "OtherName"};
+    import_asset.symbol_count = import_asset.symbol_total = 2;
+    MenuSwfImportAssets import_items[1] = {import_asset};
+    MenuSwfImportList import_list = {import_items, 1, 1, 1, 0};
+    const MenuSwfFontSummary *resolved = NULL;
+    st = menu_swf_display_resolve_import_font(
+        &import_list, &font_list, 1, "Interface/fonts_en.swf", &resolved,
+        reason, sizeof reason);
+    check(st == MENU_SWF_OK && resolved == &font_items[0],
+          "import font resolves by exact id");
+    resolved = NULL;
+    st = menu_swf_display_resolve_import_font(
+        &import_list, &font_list, 34, "Interface/fonts_en.swf", &resolved,
+        reason, sizeof reason);
+    check(st == MENU_SWF_ERR_NOTIMPL && !resolved &&
+              strstr(reason, "imported font id 34 is not present in Interface/fonts_en.swf"),
+          "missing import font id is named, not name-substituted");
+
+    MenuSwfFontSummary wrong_items[1] = {font_items[0]};
+    wrong_items[0].font_id = 34; /* same name, wrong id */
+    MenuSwfFontList wrong_fonts = {
+        .items = wrong_items, .capacity = 1, .count = 1, .total = 1};
+    st = menu_swf_display_resolve_import_font(
+        &import_list, &wrong_fonts, 1, "Interface/fonts_en.swf", &resolved,
+        reason, sizeof reason);
+    check(st == MENU_SWF_ERR_NOTIMPL &&
+              strstr(reason, "imported font id 1 is not present in Interface/fonts_en.swf"),
+          "import resolver never substitutes by font name");
+
     static TextFixture fixture;
     MenuSwfTextMesh mesh;
     MenuSwfTextStyle style;
@@ -864,21 +1027,31 @@ static void test_real(const char *data_dir) {
                   "real 22 DefineEditText definitions");
             if (st == MENU_SWF_OK) {
                 uint32_t nonempty = 0, chars = 0;
+                int plain_ok = 1;
+                char plain[MENU_SWF_TEXT_MAX_CHARS + 1];
                 for (uint32_t i = 0; i < edit_list.count; ++i) {
                     const MenuSwfEditText *e = &edit_items[i];
-                    if (e->initial_text_length) ++nonempty;
-                    chars += e->initial_text_length;
+                    size_t plain_len = 0;
+                    st = menu_swf_text_edit_plain(e, plain, sizeof plain,
+                                                  &plain_len, reason,
+                                                  sizeof reason);
+                    if (st != MENU_SWF_OK) plain_ok = 0;
+                    if (plain_len) ++nonempty;
+                    chars += (uint32_t)plain_len;
                     printf("real: edit id=%u flags=%04x font=%u height=%u "
                            "bounds=%d,%d,%d,%d align=%u var='%s' len=%u "
-                           "text='%.*s'\n",
+                           "text='%.*s' plain_len=%u\n",
                            e->character_id, e->flags, e->font_id,
                            e->font_height, e->bounds[0], e->bounds[1],
                            e->bounds[2], e->bounds[3], e->alignment,
                            e->variable_name, e->initial_text_length,
-                           (int)e->initial_text_length, e->initial_text);
+                           (int)e->initial_text_length, e->initial_text,
+                           (unsigned)plain_len);
                 }
                 printf("real: edit_text definitions=%u nonempty=%u chars=%u\n",
                        edit_list.count, nonempty, chars);
+                check(plain_ok && nonempty == 3 && chars == 72,
+                      "real three plain edit-text sources total 72 chars");
             } else {
                 printf("real: edit-text collect failed: %s (%s)\n",
                        menu_swf_status_name(st), reason);

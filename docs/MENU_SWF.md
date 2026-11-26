@@ -1,12 +1,15 @@
 # MENU_SWF — bounded StartMenu.swf summary
 
-Status: the SWF **container, tag stream, flattened display list, DefineEditText
-parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch and a host CPU ->
-COM indexed menu submission** are implemented.  Real StartMenu text sources
-are counted, but their imported `gfxfontlib.swf` fonts are unavailable and are
-named refusals rather than substituted.  This is still not a menu frame:
-mask/clip rendering, AVM/AS2, full GFx text/assets, per-fill gradient/style
-reproduction and PICA sampling remain open.
+Status: the SWF **container, tag stream, structured font imports, exact-id font
+resolution, flattened display list, solid fill colours, DefineEditText
+parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch and host CPU ->
+COM indexed/UP menu submission** are implemented.  Real StartMenu declares
+imported font ids 34/41 from `gfxfontlib.swf`; that URL is absent and the
+`Interface/fonts_en.swf` fallback contains neither id, so all 57 text records are
+named refusals rather than name-substituted.  An exact-id match is wired through
+edit layout/tessellation into the COM geometry batch.  This is still not a menu
+frame: gradient/bitmap fill sampling, mask/clip rendering, AVM/AS2, full GFx
+text/assets and PICA sampling remain open.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -15,8 +18,8 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 
 | File | Purpose |
 |---|---|
-| `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, tag walk (including DefineSprite nesting), bounded summary |
-| `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, DefineFont2/3 metrics/kerning and caller-owned DefineEditText collection |
+| `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, recursive tag walk, bounded summary and structured ImportAssets/ImportAssets2 URL + id/symbol collection |
+| `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, caller-owned DefineFont2/3 collection, exact-id imported-font resolution and DefineEditText collection |
 | `source/menu_swf_display_list.h` / `.c` | First-frame flattened display list with recursive sprite expansion, accumulated 16.16 matrices/colour transforms, clip depth and cycle/depth limits |
 | `source/menu_swf_clip.h` / `.c` | Clip-depth mask pairs/rectangles, active-mask lists, intersection, fully-clipped flags and rectangle mask quads |
 | `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, retained solid RGBA/gradient stops+matrix/bitmap ids, streaming geometry sink, and DefineFont2/3 glyph SHAPE contours/bounds |
@@ -38,7 +41,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
 | `tests/menu_swf_fill_smoke.c` | Synthetic solid RGBA/loops, CXFORM, mirroring, gradient and bitmap refusals; optional real fill census and per-vertex colours |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
-| `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: flattened records -> shape tessellation + DefineEditText source census/import-font refusals -> local-font control glyph -> bounded COM DrawPrimitiveUP chunks; no frame claim |
+| `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: URL/fallback font load, exact-id resolve/refusals, solid-fill shape batch + resolved edit-text tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
 | `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
 | `tests/menu_indexed_draw_smoke.c` | Core recording backend: exact compact vertices/indices, >4,095-index batch, 32-bit and 65,536-vertex fallbacks, named expansion limit and DevCaps 0x00082000 |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
@@ -103,6 +106,37 @@ Tag stream:
 Retail `DefineFontName` carries a copyright string after the font name; the
 font name is kept and the trailing bytes are ignored.  `ImportAssets2` is the
 retail variant of `ImportAssets` (two reserved bytes before the symbol count).
+
+### Structured import records and exact-id font resolution
+
+`menu_swf_collect_imports()` preserves each `ImportAssets` (57) /
+`ImportAssets2` (71) URL with its ordered `UI16 id -> symbol-name` list.  It
+walks nested `DefineSprite` tags, supports short/long tag headers and enforces
+16 import records, 64 symbols per record, 256 URL bytes and 96 symbol-name
+bytes.  Missing fields are `TRUNCATED`/`FORMAT`; duplicate imported ids,
+malformed records and trailing payload bytes are `FORMAT`; caller/string
+capacity overflow is a named `BUDGET` refusal.  `menu_swf_find_import()` looks
+up only the numeric import id.
+
+`menu_swf_display_collect_fonts()` walks top-level/nested `DefineFont2` (48)
+and `DefineFont3` (75) tags into a caller-owned `MenuSwfFontList`.  Malformed
+fonts, duplicate stored ids and caller capacity overflow are fatal named
+refusals.  An unrelated font whose glyph/kerning table exceeds the bounded
+summary is skipped and recorded in `skipped`/`skip_reason`, allowing later
+candidate ids to remain searchable.
+
+`menu_swf_display_resolve_import_font()` requires **exact equality** between the
+imported symbol id and a candidate `DefineFont` id.  Symbol/font names are
+diagnostic only.  A miss returns `MENU_SWF_ERR_NOTIMPL` and the reason
+`imported font id N is not present in <candidate_source>` plus symbol/URL
+context; no same-name font is substituted.
+
+The real e2e loader searches `Update.bsa`, `Skyrim - Interface.bsa`, then loose
+`Data/Interface`.  It tries the declared URL first and, when that file is
+absent, `Interface/fonts_en.swf`.  Multiple import URLs are not merged into one
+candidate namespace.  For an exact-id match, nonempty DefineEditText sources
+are laid out with the edit font height, tessellated, transformed by the display
+record and appended to the white-A8 geometry batch before COM submission.
 
 No AVM action payload is decoded.  `DoAction` is counted only.
 
@@ -638,15 +672,31 @@ id=86  "$Loading downloadable content..."        32 chars
 id=95  "Start a New Game?"                       17 chars
 display-list text records=57; nonempty record instances=3
 explicit source lines=3; source glyph slots=72
-imported font ids=34 ($EverywhereMediumFont), 41 ($EverywhereFont)
-resolved real-text glyphs=0; real-text vertices added to COM=0
+import url=gfxfontlib.swf id=34 symbol=$EverywhereMediumFont
+import url=gfxfontlib.swf id=41 symbol=$EverywhereFont
+font source=Skyrim - Interface.bsa!interface/fonts_en.swf bytes=417809 fallback=1
+candidate DefineFont3 ids=1,3,5,7,9,11,13,15,19,23 (10 stored)
+skipped DefineFont3 ids=17 (Falmer, 28 glyphs, 621 kerning),
+                      21 (Mage Script, 29 glyphs, 621 kerning)
+resolved records=0; resolved real-text glyphs=0; real-text vertices added=0
 ```
 
-Both imported fonts come from `gfxfontlib.swf`.  That file is absent from
-`Update.bsa`, `Skyrim - Interface.bsa` and the loose `Data/Interface` directory,
-so all 57 records receive a named unknown-font refusal.  The only local font is
-id 1 `Futura Condensed`; it is **not** substituted for the imported fonts.  The
-existing local-font `!` remains a control for the raster/atlas/batch/COM path.
+Both imported fonts come from `gfxfontlib.swf`.  That URL is absent from
+`Update.bsa`, `Skyrim - Interface.bsa` and loose `Data/Interface`.  The fallback
+`fonts_en.swf` is present in `Skyrim - Interface.bsa` (417,809 B, SHA-256
+`97e45bbdfe5e030ec48f652204686862b3791dcf69b1e43151330cb2c838f331`) and
+contains 12 DefineFont3 definitions.  Ten fit the 256-glyph/256-kerning summary
+limits; ids 17 and 21 each have 621 kerning records and are explicitly skipped.
+The usable ids are 1/3/5/7/9/11/13/15/19/23, so **neither imported id 34 nor 41
+is present**.  All 57 records therefore receive the exact named refusal
+`imported font id 34/41 is not present in Skyrim - Interface.bsa!interface/fonts_en.swf`
+with symbol/URL context.
+
+The local StartMenu font id 1 `Futura Condensed` (243 glyphs) and fallback
+same/similar-name fonts such as ids 1/3/5 are **not** substituted.  The e2e has
+an exact-id resolved-text path into layout/tessellation/COM, but the retail
+census does not exercise it; measured resolved real-text output remains zero.
+The existing local-font `!` remains the raster/atlas/batch/COM control.
 
 ## 16. Tests
 
@@ -655,16 +705,16 @@ Synthetic-only:
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
   -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
-  -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
+  -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
 Result: `menu_swf_batch` **21 checks, 0 failures**; `menu_swf_fill` **32
 checks, 0 failures**; `menu_swf_atlas` **27
 checks, 0 failures**; `menu_swf_raster` **44 checks, 0 failures**;
-`menu_swf_text` **63 checks, 0 failures**; `menu_swf_tess` **47 checks, 0
+`menu_swf_text` **76 checks, 0 failures**; `menu_swf_tess` **47 checks, 0
 failures**; `menu_swf_shape` **28 checks, 0 failures**; `menu_swf_clip` **17
 checks, 0 failures**; `menu_swf_display_list` **15 checks, 0 failures**;
-`menu_swf_display` **38 checks, 0 failures**; `menu_swf` **86 checks, 0
+`menu_swf_display` **38 checks, 0 failures**; `menu_swf` **95 checks, 0
 failures**; `menu_bsa` **277 checks, 0 failures**.
 
 Real read-only:
@@ -673,16 +723,16 @@ Real read-only:
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
   -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
-  -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
+  -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
 Result: `menu_swf_batch` **34 checks, 0 failures**; `menu_swf_fill` **43
 checks, 0 failures**; `menu_swf_atlas` **37
 checks, 0 failures**; `menu_swf_raster` **60 checks, 0 failures**;
-`menu_swf_text` **79 checks, 0 failures**; `menu_swf_tess` **55 checks, 0
+`menu_swf_text` **93 checks, 0 failures**; `menu_swf_tess` **55 checks, 0
 failures**; `menu_swf_shape` **40 checks, 0 failures**; `menu_swf_clip` **24
 checks, 0 failures**; `menu_swf_display_list` **23 checks, 0 failures**;
-`menu_swf_display` **57 checks, 0 failures**; `menu_swf` **102 checks, 0
+`menu_swf_display` **57 checks, 0 failures**; `menu_swf` **114 checks, 0
 failures**; `menu_bsa` **286 checks, 0 failures**.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
@@ -690,7 +740,9 @@ long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
 ImportAssets2, DefineFontName, truncated tag/long header, tag length past the
 body, missing End, nonzero End, ZWS `E_NOTIMPL`, bad CWS zlib header, declared
 output mismatch, trailing compressed bytes, oversized declared size and null
-input.  The display test adds PlaceObject2 move/update, RemoveObject2,
+input.  Structured-import coverage preserves both tag variants and URLs,
+recurses into sprites, finds numeric ids and refuses capacity, truncation and
+duplicate ids.  The display test adds PlaceObject2 move/update, RemoveObject2,
 PlaceObject3 class name + opaque filter list, PlaceObject3 blend/cache/visible,
 clip-action presence, sprite frames, DefineFont3 codes/advances/bounds and the
 named DefineFont4/AVM2/filter-then-field refusals.  The shape test adds a
@@ -707,8 +759,12 @@ shape; the real check tessellates all 27 shapes.  The text test adds a 3-glyph
 font with an A/V kerning pair, direct glyph tessellation, placement/colour and
 half-scale layout, an empty space glyph, an unknown code, and vertex/index/
 glyph/scratch/length overflow; the real check lays out four StartMenu glyphs
-and verifies one real kerning pair, collects all 22 DefineEditText definitions
-and reports the missing imported fonts.  DefineEditText synthetic coverage adds
+and verifies one real kerning pair, collects all 22 DefineEditText definitions,
+verifies the three plain sources total 72 chars and reports the missing imported
+fonts.  Caller-owned font collection is tested for single-tag parsing, nested
+DefineSprite recursion, malformed/duplicate/capacity refusals and a skipped
+257-pair oversized font; resolver tests prove exact-id success and named misses
+without same-name substitution.  DefineEditText synthetic coverage adds
 field parsing, caller-owned collection, WordWrap, Multiline/leading,
 Left/Right/Center/Justify, HTML plain extraction, empty bounds,
 Password/unknown-font/glyph/variable/capacity refusals and retail
@@ -750,21 +806,24 @@ CPU layers and the real COM demo.  It reads the winning
 2. classifies every record as sprite, mask/clip, shape, DefineEditText or
    unknown character;
 3. tessellates every unmasked shape record with its accumulated 16.16 matrix,
-   appends transformed triangle-list vertices/indices and counts skipped stroke
-   segments;
-4. collects all DefineEditText definitions, extracts bounded plain sources and
-   counts nonempty record instances/glyph slots; imported font ids 34/41 are
-   named refusals because `gfxfontlib.swf` is unavailable, with no local-font
-   substitution;
+   appends solid-fill triangle-list vertices/indices with parsed RGBA * record
+   CXFORM and counts skipped stroke segments;
+4. collects structured ImportAssets2 records, tries the declared font URL then
+   `Interface/fonts_en.swf`, collects candidate DefineFont2/3 definitions and
+   resolves imported ids exactly; missing ids are named refusals with no
+   local/name substitution, while an exact match lays out/tessellates nonempty
+   edit text into the combined geometry batch;
 5. lays out one synthetic string (`"!"`) using the local 243-glyph DefineFont3,
    rasterises its 159 triangles, packs the used A8 rectangle beside one white
    texel and appends the resulting control text quad;
-6. creates/uploads the 64x64 A8 atlas through `d3d9_menu_text`, submits the
-   combined indexed batch as one 16-bit `DrawIndexedPrimitiveUP` (the mock
-   backend provides the indexed callback) and verifies FVF `0x142`,
-   POINT/NONE/CLAMP, MODULATE(TEXTURE,DIFFUSE), A8 identity/upload/lock bytes,
-   indexed draw/vertex/index counts and named empty / bad-index refusals.  A
-   backend without the callback keeps the 4,095-index `DrawPrimitiveUP` chunks.
+6. creates/uploads the 64x64 A8 atlas through `d3d9_menu_text`, uses one
+   16-bit `DrawIndexedPrimitiveUP` when the callback is available and the source
+   has at most 65,536 vertices, otherwise keeps 4,095-index `DrawPrimitiveUP`
+   chunks; verifies FVF `0x142`, POINT/NONE/CLAMP,
+   MODULATE(TEXTURE,DIFFUSE), A8 identity/upload/lock bytes, compact indexed
+   counts or expanded UP counts, and named empty / bad-index refusals.  The
+   indexed assertions remain active once the parallel vertex-dedup fix brings
+   the retail batch under the 16-bit range.
 
 Measured real result (2026-11-26):
 
@@ -774,7 +833,9 @@ records=216 sprites=71 sprite_records=106 shape_definitions=27
 shape_records=53 text_records=57 mask_records=0 unsupported_records=0
 edit_text_definitions=22 edit_text_ids=22 nonempty_definitions=3
 source_records=57 nonempty_records=3 source_lines=3 source_glyph_slots=72
-refused_records=57 refused_font_mask=00000204 resolved_text_glyphs=0
+refused_records=57 resolved_records=0 layout_records=0
+refused_font_mask=00000204 resolved_text_glyphs=0 missing_glyphs=0
+real_text_vertices=0 real_text_indices=0
 empty_shapes=0 degenerate_shapes=0 strokes_skipped=182
 tessellated_vertices=57480 triangles=28718
 shape_colour_vertices=57480/57480
@@ -788,14 +849,19 @@ FVF=0x142 A8=64x64 control_text_quads=1; 52 checks, 0 failures
 ```
 
 The 57 real text records produce three nonempty plain sources (72 source glyph
-slots), but all reference imported fonts 34/41 from the unavailable
-`gfxfontlib.swf`; they are named refusals and add zero real-text glyphs/vertices.
-The single local-font `!` control exercises the raster/atlas/batch/COM path.
-Shape fills use the atlas's white texel and the record CXFORM multiplied by the
-parsed solid-fill RGBA; gradient and bitmap fills are named refusals, and the
-182 stroke segments are counted and skipped.  The host mock
-`Present` only closes the COM scene state machine so releases are not deferred.
-No pixel readback, GPU/PICA sampling, visual equivalence or frame is claimed.
+slots), but all reference imported fonts 34/41.  The declared `gfxfontlib.swf`
+URL is absent and the `fonts_en.swf` fallback has neither exact id, so all 57
+are named refusals and add zero real-text glyphs/vertices.  The exact-id
+resolved-text layout/tessellation path is wired but not exercised by this retail
+census.  The single local-font `!` control exercises the raster/atlas/batch/COM
+path.  Shape fills use the atlas's white texel and the parsed solid-fill RGBA
+multiplied by the record CXFORM; gradient and bitmap fills are named refusals,
+and the 182 stroke segments are counted and skipped.  On this pre-dedup HEAD the
+86,158-vertex batch exceeds the 16-bit indexed range, so the preserved UP path
+submits 22 chunks; after dedup brings it under 65,536 vertices the same test
+takes the strict indexed branch.  The host mock `Present` only closes the COM
+scene state machine so releases are not deferred.  No pixel readback, GPU/PICA
+sampling, visual equivalence or frame is claimed.
 
 Verification:
 
@@ -824,12 +890,14 @@ Verification:
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
    the menu's script behaviour.  `DoAction`/clip-action payloads are not
    executed.
-3. **Atlas cache/real GFx fonts** — `gfxfontlib.swf` (imported font ids 34/41),
-   `fonts_en.swf`/`fonts_console.swf`, `FontConfig.txt`, texture
-   cache/rehydration, richer shaping (ligatures, bidi, fallback fonts), HTML
-   style spans and text metrics beyond advance+kerning.  The host COM demo can
-   create/upload an A8 atlas and draw the combined shape/control-text batch;
-   there is no persistent cache, PICA A8 sampling or real GFx text object yet.
+3. **Atlas cache/real GFx fonts** — `gfxfontlib.swf` (imported font ids 34/41)
+   is absent and the `fonts_en.swf` fallback lacks those exact ids; no name
+   substitution is performed.  `fonts_en.swf`/`fonts_console.swf`,
+   `FontConfig.txt`, texture cache/rehydration, richer shaping (ligatures,
+   bidi, fallback fonts), HTML style spans and text metrics beyond
+   advance+kerning remain.  The host COM demo can create/upload an A8 atlas and
+   draw the combined shape/control-text batch; there is no persistent cache,
+   PICA A8 sampling or real GFx text object yet.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
 5. **Draw path** - real GFx display list/masks, dynamic vertex buffer/FVF,
@@ -939,9 +1007,11 @@ frame.
   vertices / 1,408 triangles with no missing glyphs, applying the 94-pair
   kerning table; the first glyph's outline bounds are `570,4460,-15440,250`.
 * DefineEditText parsing collects 22 definitions.  Three nonempty plain sources
-  yield 72 source glyph slots across three record instances, but imported fonts
-  34/41 require the unavailable `gfxfontlib.swf`; all 57 records are named
-  refusals and no local-font substitution or real-text COM vertices are claimed.
+  yield 72 source glyph slots across three record instances.  Structured imports
+  declare ids 34/41 from `gfxfontlib.swf`; the URL is absent and the
+  `fonts_en.swf` fallback lacks both exact ids, so all 57 records are named
+  refusals.  No local/name substitution or real-text COM vertices are claimed;
+  the exact-id resolved-text path is implemented but not exercised by this data.
 * The bounded A8 rasteriser puts code 33 into 32x32 coverage with sum **41,464**
   over 182 pixels (used rect `12,1..20,31`) and into 64x64 with sum **178,003**
   over 726 pixels (used rect `24,1..40,63`); the advance 5,040 is preserved.

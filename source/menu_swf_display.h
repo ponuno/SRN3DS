@@ -139,6 +139,16 @@ typedef struct {
     MenuSwfKerning kerning[MENU_SWF_DISPLAY_MAX_KERNING];
 } MenuSwfFontSummary;
 
+typedef struct {
+    MenuSwfFontSummary *items; /* caller-owned */
+    uint32_t capacity;
+    uint32_t count;
+    uint32_t total;
+    uint32_t skipped; /* oversized definitions recorded in skip_reason */
+    char skip_reason[BSA_REASON_MAX];
+    int truncated;
+} MenuSwfFontList;
+
 typedef enum {
     MENU_SWF_EDIT_TEXT_ALIGN_LEFT = 0,
     MENU_SWF_EDIT_TEXT_ALIGN_RIGHT = 1,
@@ -234,3 +244,28 @@ MenuSwfStatus menu_swf_display_collect_edit_texts(
 
 const MenuSwfEditText *menu_swf_display_find_edit_text(
     const MenuSwfEditTextList *list, uint16_t character_id);
+
+/* Parse one DefineFont2/3 tag payload into a caller-owned summary. */
+MenuSwfStatus menu_swf_display_parse_font(
+    const uint8_t *payload, size_t len, uint8_t font_type,
+    MenuSwfFontSummary *out, char *reason, size_t reason_cap);
+
+/* Collect all top-level/nested DefineFont2/3 definitions from one SWF into a
+ * caller-owned list.  Duplicate ids and malformed tags are FORMAT; caller
+ * capacity is a named BUDGET refusal.  Oversized unrelated definitions are
+ * skipped and recorded in skipped/skip_reason so later exact ids remain
+ * searchable. */
+MenuSwfStatus menu_swf_display_collect_fonts(
+    const uint8_t *data, size_t size, MenuSwfFontList *list,
+    char *reason, size_t reason_cap);
+
+const MenuSwfFontSummary *menu_swf_display_find_font(
+    const MenuSwfFontList *list, uint16_t font_id);
+
+/* Resolve an imported symbol by exact DefineFont id.  Names are diagnostic
+ * only.  A missing id is NOTIMPL with
+ * "imported font id N is not present in <candidate_source>". */
+MenuSwfStatus menu_swf_display_resolve_import_font(
+    const MenuSwfImportList *imports, const MenuSwfFontList *candidates,
+    uint16_t imported_id, const char *candidate_source,
+    const MenuSwfFontSummary **out, char *reason, size_t reason_cap);

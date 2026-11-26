@@ -2,11 +2,15 @@
  *
  * The first flattened display-list frame is tessellated record by record.  An
  * unmasked shape becomes transformed triangle-list geometry.  DefineEditText
- * records are parsed and their plain sources counted; unavailable imported
- * fonts are named refusals rather than substituted.  One local DefineFont3
- * glyph (!) remains as a raster/atlas/batch/COM control beside a white A8
- * texel.  The combined indexed batch is submitted through d3d9_menu_text in
- * bounded DrawPrimitiveUP chunks.  Fill styles/gradients, masks, AVM and visual
+ * records are parsed and their plain sources counted.  Structured imports try
+ * the declared URL, then the documented Interface/fonts_en.swf fallback, and
+ * resolve DefineFont ids exactly (never by name).  The retail ids 34/41 are
+ * absent from the fallback, so they remain named refusals.  An exact-id match
+ * lays out/tessellates real edit text into the combined geometry batch.  Solid
+ * shape fills keep their parsed RGBA colours.  One local Font3 glyph (!)
+ * remains as a raster/atlas/batch/COM control beside a white A8 texel.  The
+ * combined batch uses compact indexed submission when available, otherwise
+ * bounded DrawPrimitiveUP chunks.  Gradients, masks, AVM and visual
  * equivalence are deliberately outside this smoke.
  */
 
@@ -33,6 +37,7 @@
 #define E2E_MAX_BATCH_VERTICES 262144u
 #define E2E_MAX_BATCH_INDICES 786432u
 #define E2E_DRAW_MAX_INDICES 4095u /* 1,365 triangles, d3d9_menu_text limit */
+#define E2E_INDEXED_MAX_VERTICES 65536u
 #define E2E_SCRATCH_ADDR 0x10100000u
 #define E2E_SCRATCH_BYTES 0x300000u
 #define E2E_OUT_ADDR 0x10010400u
@@ -40,6 +45,9 @@
 #define E2E_RASTER_SIZE 64u
 #define E2E_GLYPH_CODE 33u
 #define E2E_WHITE_GLYPH 0xffffu
+#define E2E_MAX_FONT_CANDIDATES 32u
+#define E2E_MAX_TEXT_VERTICES 65536u
+#define E2E_MAX_TEXT_INDICES 196608u
 
 static int checks;
 static int failures;
@@ -86,12 +94,23 @@ static void tess_fixture_init(MenuSwfTessMesh *mesh) {
 }
 
 typedef struct {
-    MenuSwfTextVertex vertices[8192];
-    uint32_t indices[24576];
-    MenuSwfTextGlyph glyphs[4];
+    MenuSwfTextVertex vertices[E2E_MAX_TEXT_VERTICES];
+    uint32_t indices[E2E_MAX_TEXT_INDICES];
+    MenuSwfTextGlyph glyphs[MENU_SWF_TEXT_MAX_GLYPHS];
 } TextFixture;
 
 static TextFixture text_fixture;
+
+static void text_fixture_init(MenuSwfTextMesh *mesh) {
+    memset(mesh, 0, sizeof *mesh);
+    mesh->vertices = text_fixture.vertices;
+    mesh->vertex_capacity = E2E_MAX_TEXT_VERTICES;
+    mesh->indices = text_fixture.indices;
+    mesh->index_capacity = E2E_MAX_TEXT_INDICES;
+    mesh->glyphs = text_fixture.glyphs;
+    mesh->glyph_capacity = MENU_SWF_TEXT_MAX_GLYPHS;
+    tess_fixture_init(&mesh->glyph_tess);
+}
 
 typedef struct {
     uint32_t records;
@@ -117,6 +136,13 @@ typedef struct {
     uint32_t text_source_lines;
     uint32_t text_source_chars;
     uint32_t text_refused_records;
+    uint32_t text_resolved_records;
+    uint32_t text_layout_records;
+    uint32_t text_real_glyphs;
+    uint32_t text_missing_glyphs;
+    uint32_t text_real_vertices;
+    uint32_t text_real_indices;
+    uint32_t text_real_triangles;
     uint32_t text_refused_font_mask;
     uint32_t avm_tags;
     uint32_t glyph_tess_vertices;
@@ -130,11 +156,146 @@ typedef struct {
 } PipelineStats;
 
 
-static const MenuSwfFontSummary *find_font(const MenuSwfDisplaySummary *display,
-                                          uint16_t font_id) {
-    for (uint32_t i = 0; i < display->stored_fonts; ++i)
-        if (display->fonts[i].font_id == font_id) return &display->fonts[i];
+static int transform_text_point(const MenuSwfDisplayListRecord *record,
+                                const MenuSwfTextVertex *point,
+                                int32_t *out_x, int32_t *out_y) {
+    /* Edit layout is produced in local pixels.  The display matrix maps twips
+     * to screen pixels, so multiply local points by 20 without forming a
+     * potentially overflowing 64-bit triple product. */
+    int64_t x0 = (int64_t)record->matrix.m00 * point->x;
+    int64_t x1 = (int64_t)record->matrix.m01 * point->y;
+    int64_t y0 = (int64_t)record->matrix.m10 * point->x;
+    int64_t y1 = (int64_t)record->matrix.m11 * point->y;
+    int64_t x20 = (x0 / 65536 + x1 / 65536 + record->matrix.tx / 20) * 20 +
+                  x0 % 65536 + x1 % 65536 + record->matrix.tx % 20;
+    int64_t y20 = (y0 / 65536 + y1 / 65536 + record->matrix.ty / 20) * 20 +
+                  y0 % 65536 + y1 % 65536 + record->matrix.ty % 20;
+    int64_t rx = x20 >= 0 ? (x20 + 10) / 20 : -((-x20 + 10) / 20);
+    int64_t ry = y20 >= 0 ? (y20 + 10) / 20 : -((-y20 + 10) / 20);
+    if (rx < INT32_MIN || rx > INT32_MAX || ry < INT32_MIN || ry > INT32_MAX)
+        return -1;
+    *out_x = (int32_t)rx;
+    *out_y = (int32_t)ry;
+    return 0;
+}
+
+static uint32_t multiply_color(uint32_t a, uint32_t b) {
+    uint32_t out = 0;
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        uint32_t av = (a >> shift) & 0xffu;
+        uint32_t bv = (b >> shift) & 0xffu;
+        out |= ((av * bv + 127u) / 255u) << shift;
+    }
+    return out;
+}
+
+static uint8_t color_channel(int32_t mult, int32_t add) {
+    int32_t value = (255 * mult + add * 256) / 256;
+    if (value < 0) value = 0;
+    if (value > 255) value = 255;
+    return (uint8_t)value;
+}
+
+static uint32_t record_color(const MenuSwfDisplayListRecord *record) {
+    uint32_t r = color_channel(record->color.mult[0], record->color.add[0]);
+    uint32_t g = color_channel(record->color.mult[1], record->color.add[1]);
+    uint32_t b = color_channel(record->color.mult[2], record->color.add[2]);
+    uint32_t a = color_channel(record->color.mult[3], record->color.add[3]);
+    return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+static uint8_t *load_disk_asset(const char *path, size_t *out_size) {
+    FILE *file = fopen(path, "rb");
+    if (!file) return NULL;
+    if (fseek(file, 0, SEEK_END)) {
+        fclose(file);
+        return NULL;
+    }
+    long end = ftell(file);
+    if (end < 0 || (unsigned long)end > MENU_SWF_MAX_DECLARED ||
+        fseek(file, 0, SEEK_SET)) {
+        fclose(file);
+        return NULL;
+    }
+    size_t size = (size_t)end;
+    uint8_t *bytes = malloc(size ? size : 1);
+    if (!bytes) {
+        fclose(file);
+        return NULL;
+    }
+    size_t got = fread(bytes, 1, size, file);
+    fclose(file);
+    if (got != size) {
+        free(bytes);
+        return NULL;
+    }
+    *out_size = size;
+    return bytes;
+}
+
+static uint8_t *load_bsa_asset(const char *data_dir, const char *relative,
+                               size_t *out_size, char *source, size_t source_cap) {
+    const char *archives[2] = {"Update.bsa", "Skyrim - Interface.bsa"};
+    char path[1024];
+    for (unsigned i = 0; i < 2; ++i) {
+        int n = snprintf(path, sizeof path, "%s/%s", data_dir, archives[i]);
+        if (n < 0 || (size_t)n >= sizeof path) continue;
+        BsaArchive *archive = NULL;
+        if (bsa_open_path(path, NULL, &archive, NULL, 0) != BSA_OK) continue;
+        BsaMatch match;
+        if (bsa_find(archive, relative, &match) == BSA_OK) {
+            uint32_t size = 0;
+            char reason[BSA_REASON_MAX];
+            if (bsa_unpacked_size(archive, &match.entry, &size, reason,
+                                  sizeof reason) == BSA_OK) {
+                uint8_t *bytes = malloc(size ? size : 1);
+                size_t got = 0;
+                if (bytes && bsa_read(archive, &match.entry, bytes, size, &got,
+                                      reason, sizeof reason) == BSA_OK &&
+                    got == size) {
+                    bsa_close(archive);
+                    *out_size = size;
+                    snprintf(source, source_cap, "%s!%s", archives[i], relative);
+                    return bytes;
+                }
+                free(bytes);
+            }
+        }
+        bsa_close(archive);
+    }
     return NULL;
+}
+
+static uint8_t *load_swf_asset(const char *data_dir, const char *relative,
+                               size_t *out_size, char *source, size_t source_cap) {
+    uint8_t *bytes = load_bsa_asset(data_dir, relative, out_size, source,
+                                    source_cap);
+    if (bytes) return bytes;
+    char path[1024];
+    int n = snprintf(path, sizeof path, "%s/%s", data_dir, relative);
+    if (n < 0 || (size_t)n >= sizeof path) return NULL;
+    bytes = load_disk_asset(path, out_size);
+    if (bytes) snprintf(source, source_cap, "disk!%s", relative);
+    return bytes;
+}
+
+static uint8_t *load_import_font_source(const char *data_dir,
+                                        const char *url, size_t *out_size,
+                                        char *source, size_t source_cap,
+                                        int *used_fallback) {
+    char relative[BSA_PATH_MAX];
+    const char *base = strrchr(url ? url : "", '/');
+    base = base ? base + 1 : (url ? url : "");
+    if (!base[0]) base = "gfxfontlib.swf";
+    snprintf(relative, sizeof relative, "interface/%s", base);
+    uint8_t *bytes = load_swf_asset(data_dir, relative, out_size, source,
+                                    source_cap);
+    *used_fallback = 0;
+    if (bytes) return bytes;
+    bytes = load_swf_asset(data_dir, "interface/fonts_en.swf", out_size,
+                           source, source_cap);
+    *used_fallback = bytes != NULL;
+    return bytes;
 }
 
 static int append_shape_batch(const MenuSwfDisplayListRecord *record,
@@ -199,6 +360,56 @@ static int append_shape_batch(const MenuSwfDisplayListRecord *record,
     *index_count += br.index_count;
     stats->shape_batch_vertices += br.vertex_count;
     stats->shape_batch_indices += br.index_count;
+    return 0;
+}
+
+static int append_text_mesh(const MenuSwfDisplayListRecord *record,
+                            const MenuSwfTextMesh *mesh,
+                            MenuSwfBatchVertex *vertices,
+                            uint32_t *vertex_count, uint32_t *indices,
+                            uint32_t *index_count, PipelineStats *stats,
+                            char *reason, size_t reason_cap) {
+    if ((mesh->index_count % 3u) != 0 ||
+        mesh->triangle_count != mesh->index_count / 3u) {
+        snprintf(reason, reason_cap, "edit text %u did not produce triangles",
+                 record->character_id);
+        return -1;
+    }
+    for (uint32_t i = 0; i < mesh->index_count; ++i) {
+        if (mesh->indices[i] >= mesh->vertex_count) {
+            snprintf(reason, reason_cap, "edit text %u has an out-of-range index",
+                     record->character_id);
+            return -1;
+        }
+    }
+    if (!mesh->triangle_count) return 0;
+    if (mesh->vertex_count > E2E_MAX_BATCH_VERTICES - *vertex_count ||
+        mesh->index_count > E2E_MAX_BATCH_INDICES - *index_count) {
+        snprintf(reason, reason_cap,
+                 "combined batch limit %u vertices/%u indices exceeded",
+                 E2E_MAX_BATCH_VERTICES, E2E_MAX_BATCH_INDICES);
+        return -1;
+    }
+
+    uint32_t base = *vertex_count;
+    uint32_t color = multiply_color(mesh->style.color, record_color(record));
+    for (uint32_t i = 0; i < mesh->vertex_count; ++i) {
+        MenuSwfBatchVertex *dst = &vertices[base + i];
+        if (transform_text_point(record, &mesh->vertices[i], &dst->x, &dst->y)) {
+            snprintf(reason, reason_cap, "edit text %u transformed point overflow",
+                     record->character_id);
+            return -1;
+        }
+        dst->u = dst->v = 0; /* patched to the reserved white A8 texel */
+        dst->color = color;
+    }
+    for (uint32_t i = 0; i < mesh->index_count; ++i)
+        indices[*index_count + i] = base + mesh->indices[i];
+    *vertex_count += mesh->vertex_count;
+    *index_count += mesh->index_count;
+    stats->text_real_vertices += mesh->vertex_count;
+    stats->text_real_indices += mesh->index_count;
+    stats->text_real_triangles += mesh->triangle_count;
     return 0;
 }
 
@@ -475,7 +686,7 @@ static void run_com_batch(MenuSwfBatchVertex *vertices, uint32_t vertex_count,
           "A8 atlas UnlockRect");
 
     check(com_call(&demo, demo.device, 41, NULL, 0) == 0, "BeginScene");
-    if (text.indexed) {
+    if (text.indexed && vertex_count <= E2E_INDEXED_MAX_VERTICES) {
         status = menu_text_draw_batch(&text, vertices, vertex_count,
                                       indices, index_count);
         check(status == MENU_TEXT_DRAW_OK && mock.indexed_draw_calls == 1,
@@ -623,21 +834,32 @@ static void run_real(const char *data_dir) {
         return;
     }
 
+    uint8_t *font_source = NULL;
+    size_t font_source_bytes = 0;
+    char font_source_name[256] = "";
+    int font_source_fallback = 0;
+
     MenuSwfDisplayListRecord *records = calloc(
         MENU_SWF_DISPLAY_LIST_MAX_RECORDS, sizeof *records);
     MenuSwfShapeResult *shapes = calloc(1, sizeof *shapes);
     MenuSwfDisplaySummary *display = calloc(1, sizeof *display);
     MenuSwfEditText *edit_items = calloc(MENU_SWF_DISPLAY_MAX_EDIT_TEXTS,
                                          sizeof *edit_items);
+    MenuSwfImportAssets *import_items = calloc(4, sizeof *import_items);
+    MenuSwfFontSummary *font_items = calloc(E2E_MAX_FONT_CANDIDATES,
+                                            sizeof *font_items);
     MenuSwfBatchVertex *batch_vertices = malloc(
         E2E_MAX_BATCH_VERTICES * sizeof *batch_vertices);
     uint32_t *batch_indices = malloc(E2E_MAX_BATCH_INDICES * sizeof *batch_indices);
-    check(records && shapes && display && edit_items && batch_vertices &&
-              batch_indices,
+    check(records && shapes && display && edit_items && import_items &&
+              font_items && batch_vertices && batch_indices,
           "real pipeline buffer allocation");
-    if (!records || !shapes || !display || !edit_items || !batch_vertices ||
-        !batch_indices)
+    if (!records || !shapes || !display || !edit_items || !import_items ||
+        !font_items || !batch_vertices || !batch_indices)
         goto done;
+
+    MenuSwfFontList font_list = {
+        .items = font_items, .capacity = E2E_MAX_FONT_CANDIDATES};
 
     MenuSwfDisplayListResult list_result;
     st = menu_swf_display_list_build(
@@ -685,6 +907,90 @@ static void run_real(const char *data_dir) {
         ++failures;
         goto done;
     }
+
+    MenuSwfImportList import_list = {import_items, 4, 0, 0, 0};
+    st = menu_swf_collect_imports(swf, swf_bytes, &import_list, reason,
+                                  sizeof reason);
+    check(st == MENU_SWF_OK && import_list.count == 2,
+          "real structured ImportAssets records");
+    if (st != MENU_SWF_OK) {
+        printf("real: import collect refused: %s (%s)\n",
+               menu_swf_status_name(st), reason);
+        ++failures;
+        goto done;
+    }
+    for (uint32_t i = 0; i < import_list.count; ++i) {
+        for (uint32_t j = 0; j < import_items[i].symbol_count; ++j)
+            printf("real: import url='%s' id=%u symbol='%s'\n",
+                   import_items[i].url, import_items[i].symbols[j].id,
+                   import_items[i].symbols[j].name);
+    }
+    int single_import_url = import_list.count > 0;
+    for (uint32_t i = 1; i < import_list.count; ++i)
+        if (strcmp(import_items[i].url, import_items[0].url)) single_import_url = 0;
+    check(single_import_url, "retail font imports share one candidate source URL");
+    if (!single_import_url) {
+        printf("real: font refusal: multiple import URLs require separate candidate sources\n");
+        ++failures;
+        goto done;
+    }
+
+    font_source = load_import_font_source(
+        data_dir, import_items[0].url, &font_source_bytes, font_source_name,
+        sizeof font_source_name, &font_source_fallback);
+    check(font_source != NULL, "imported font source or documented fallback loaded");
+    if (!font_source) {
+        printf("real: no URL font source and Interface/fonts_en.swf fallback is absent\n");
+        ++failures;
+        goto done;
+    }
+    st = menu_swf_display_collect_fonts(font_source, font_source_bytes,
+                                        &font_list, reason, sizeof reason);
+    check(st == MENU_SWF_OK && font_list.count > 0,
+          "fallback DefineFont2/3 collection");
+    if (st != MENU_SWF_OK) {
+        printf("real: fallback font collect refused: %s (%s)\n",
+               menu_swf_status_name(st), reason);
+        ++failures;
+        goto done;
+    }
+    printf("real: font_source='%s' bytes=%u fallback=%d fonts=%u skipped=%u\n",
+           font_source_name, (unsigned)font_source_bytes, font_source_fallback,
+           font_list.count, font_list.skipped);
+    if (font_list.skipped)
+        printf("real: skipped_font_reason='%s'\n", font_list.skip_reason);
+    for (uint32_t i = 0; i < font_list.count; ++i)
+        printf("real: candidate_font id=%u type=%u glyphs=%u name='%s'\n",
+               font_items[i].font_id, font_items[i].font_type,
+               font_items[i].glyph_count, font_items[i].name);
+    for (uint32_t i = 0; i < import_list.count; ++i) {
+        for (uint32_t j = 0; j < import_items[i].symbol_count; ++j) {
+            uint16_t id = import_items[i].symbols[j].id;
+            const MenuSwfFontSummary *resolved = NULL;
+            MenuSwfStatus rst = menu_swf_display_resolve_import_font(
+                &import_list, &font_list, id, font_source_name, &resolved,
+                reason, sizeof reason);
+            printf("real: resolve id=%u status=%s resolved=%u reason='%s'\n",
+                   id, menu_swf_status_name(rst), resolved != NULL, reason);
+        }
+    }
+
+    check(font_source_fallback == 1 && font_list.count == 10 &&
+              font_list.skipped == 2 && font_list.truncated,
+          "documented fonts_en fallback collected with oversized fonts skipped");
+    const MenuSwfFontSummary *medium = NULL, *regular = NULL;
+    check(menu_swf_display_resolve_import_font(
+              &import_list, &font_list, 34, font_source_name, &medium,
+              reason, sizeof reason) == MENU_SWF_ERR_NOTIMPL &&
+              !medium &&
+              strstr(reason, "imported font id 34 is not present in"),
+          "imported font id 34 missing by exact id");
+    check(menu_swf_display_resolve_import_font(
+              &import_list, &font_list, 41, font_source_name, &regular,
+              reason, sizeof reason) == MENU_SWF_ERR_NOTIMPL &&
+              !regular &&
+              strstr(reason, "imported font id 41 is not present in"),
+          "imported font id 41 missing by exact id");
 
     PipelineStats stats;
     memset(&stats, 0, sizeof stats);
@@ -780,9 +1086,68 @@ static void run_real(const char *data_dir) {
                     if (plain[j] == '\n') ++stats.text_source_lines;
                 stats.text_source_chars += (uint32_t)len;
             }
-            if (!find_font(display, edit->font_id)) {
+            const MenuSwfFontSummary *resolved_font = NULL;
+            MenuSwfStatus resolve_status = menu_swf_display_resolve_import_font(
+                &import_list, &font_list, edit->font_id, font_source_name,
+                &resolved_font, reason, sizeof reason);
+            if (resolve_status != MENU_SWF_OK || !resolved_font) {
+                uint32_t font_bit = 1u << (edit->font_id & 31u);
+                if (!(stats.text_refused_font_mask & font_bit))
+                    printf("real: font refusal: %s\n", reason);
                 ++stats.text_refused_records;
-                stats.text_refused_font_mask |= 1u << (edit->font_id & 31u);
+                stats.text_refused_font_mask |= font_bit;
+            } else {
+                ++stats.text_resolved_records;
+                if (len) {
+                    MenuSwfTextMesh resolved_text;
+                    text_fixture_init(&resolved_text);
+                    MenuSwfTextStyle text_style;
+                    memset(&text_style, 0, sizeof text_style);
+                    int64_t style_scale;
+                    if (edit->has_font && edit->font_height) {
+                        int64_t denom = 20LL * resolved_font->em_square *
+                                        resolved_font->shape_scale;
+                        style_scale = ((int64_t)edit->font_height * 65536LL +
+                                       denom / 2) / denom;
+                    } else {
+                        style_scale = 65536LL / resolved_font->shape_scale;
+                    }
+                    text_style.m00 = text_style.m11 = (int32_t)style_scale;
+                    if (edit->has_text_color) {
+                        text_style.color = (edit->color[3] << 24) |
+                                           (edit->color[0] << 16) |
+                                           (edit->color[1] << 8) |
+                                           edit->color[2];
+                    } else {
+                        text_style.color = 0xffffffffu;
+                    }
+                    st = menu_swf_text_layout_edit(
+                        font_source, font_source_bytes, resolved_font, edit,
+                        &text_style, &resolved_text, reason, sizeof reason);
+                    if (st != MENU_SWF_OK) {
+                        printf("real: record=%u edit=%u font=%u resolved text "
+                               "refused: %s (%s)\n",
+                               i, record->character_id, edit->font_id,
+                               menu_swf_status_name(st), reason);
+                        ++stats.text_refused_records;
+                        stats.text_refused_font_mask |=
+                            1u << (edit->font_id & 31u);
+                        continue;
+                    }
+                    ++stats.text_layout_records;
+                    stats.text_real_glyphs += resolved_text.glyph_count;
+                    stats.text_missing_glyphs += resolved_text.missing_glyphs;
+                    if (append_text_mesh(record, &resolved_text, batch_vertices,
+                                         &vertex_count, batch_indices,
+                                         &index_count, &stats, reason,
+                                         sizeof reason)) {
+                        printf("real: record=%u edit=%u text append refused: %s\n",
+                               i, record->character_id, reason);
+                        ++failures;
+                        cpu_ok = 0;
+                        break;
+                    }
+                }
             }
         } else {
             ++stats.unsupported_records;
@@ -799,9 +1164,13 @@ static void run_real(const char *data_dir) {
               stats.text_nonempty_records == 3 &&
               stats.text_source_lines == 3 && stats.text_source_chars == 72 &&
               stats.text_refused_records == 57 &&
+              stats.text_resolved_records == 0 &&
+              stats.text_layout_records == 0 && stats.text_real_glyphs == 0 &&
+              stats.text_missing_glyphs == 0 && stats.text_real_vertices == 0 &&
+              stats.text_real_indices == 0 && stats.text_real_triangles == 0 &&
               (stats.text_refused_font_mask & (1u << 2)) &&
               (stats.text_refused_font_mask & (1u << 9)),
-          "real edit-text sources counted and imported fonts refused by name");
+          "real edit-text sources counted and imported fonts refused by exact id");
     if (!cpu_ok) goto done;
 
     const MenuSwfFontSummary *font = NULL;
@@ -818,16 +1187,7 @@ static void run_real(const char *data_dir) {
     }
 
     MenuSwfTextMesh text;
-    memset(&text, 0, sizeof text);
-    text.vertices = text_fixture.vertices;
-    text.vertex_capacity = sizeof text_fixture.vertices /
-                           sizeof text_fixture.vertices[0];
-    text.indices = text_fixture.indices;
-    text.index_capacity = sizeof text_fixture.indices /
-                          sizeof text_fixture.indices[0];
-    text.glyphs = text_fixture.glyphs;
-    text.glyph_capacity = sizeof text_fixture.glyphs /
-                          sizeof text_fixture.glyphs[0];
+    text_fixture_init(&text);
     MenuSwfTessMesh glyph_scratch;
     tess_fixture_init(&glyph_scratch);
     text.glyph_tess = glyph_scratch;
@@ -928,9 +1288,11 @@ static void run_real(const char *data_dir) {
     uint32_t white_u = white->u + white->uw / 2u;
     uint32_t white_v = white->v + white->vh / 2u;
 
-    /* Shape vertices were appended before the atlas existed.  Patch only the
-     * reserved UVs; positions/colours/indices are already final. */
-    for (uint32_t i = 0; i < stats.shape_batch_vertices; ++i) {
+    /* Shape and resolved edit-text vertices were appended before the atlas
+     * existed.  Patch only their reserved UVs; positions/colours/indices are
+     * already final. */
+    for (uint32_t i = 0;
+         i < stats.shape_batch_vertices + stats.text_real_vertices; ++i) {
         batch_vertices[i].u = white_u;
         batch_vertices[i].v = white_v;
     }
@@ -1000,12 +1362,17 @@ static void run_real(const char *data_dir) {
     printf("real: edit_text_definitions=%u edit_text_ids=%u "
            "nonempty_definitions=%u source_records=%u nonempty_records=%u "
            "source_lines=%u source_glyph_slots=%u refused_records=%u "
-           "refused_font_mask=%08x resolved_text_glyphs=0\n",
+           "resolved_records=%u layout_records=%u refused_font_mask=%08x "
+           "resolved_text_glyphs=%u missing_glyphs=%u real_text_vertices=%u "
+           "real_text_indices=%u\n",
            stats.text_definitions, stats.text_ids,
            stats.text_nonempty_definitions, stats.text_source_records,
            stats.text_nonempty_records, stats.text_source_lines,
            stats.text_source_chars, stats.text_refused_records,
-           stats.text_refused_font_mask);
+           stats.text_resolved_records, stats.text_layout_records,
+           stats.text_refused_font_mask, stats.text_real_glyphs,
+           stats.text_missing_glyphs, stats.text_real_vertices,
+           stats.text_real_indices);
     printf("real: empty_shapes=%u degenerate_shapes=%u strokes_skipped=%u\n",
            stats.empty_shape_records, stats.degenerate_shape_records,
            stats.stroke_segments);
@@ -1034,6 +1401,9 @@ done:
     free(batch_indices);
     free(batch_vertices);
     free(display);
+    free(font_source);
+    free(font_items);
+    free(import_items);
     free(edit_items);
     free(shapes);
     free(records);

@@ -21,6 +21,10 @@
 #define MENU_SWF_MAX_SPRITE_DEPTH 16u
 #define MENU_SWF_MAX_NAMES 64u
 #define MENU_SWF_NAME_MAX 96u
+#define MENU_SWF_MAX_IMPORT_ASSETS 16u
+#define MENU_SWF_MAX_IMPORT_SYMBOLS 64u
+#define MENU_SWF_IMPORT_URL_MAX 256u
+#define MENU_SWF_IMPORT_NAME_MAX 96u
 
 typedef enum {
     MENU_SWF_FWS = 0,       /* uncompressed */
@@ -63,6 +67,27 @@ typedef struct {
     uint8_t kind;            /* MenuSwfNameKind */
     char name[MENU_SWF_NAME_MAX];
 } MenuSwfName;
+
+typedef struct {
+    uint16_t id;
+    char name[MENU_SWF_IMPORT_NAME_MAX];
+} MenuSwfImportSymbol;
+
+typedef struct {
+    char url[MENU_SWF_IMPORT_URL_MAX];
+    MenuSwfImportSymbol symbols[MENU_SWF_MAX_IMPORT_SYMBOLS];
+    uint32_t symbol_count;
+    uint32_t symbol_total;
+    int truncated;
+} MenuSwfImportAssets;
+
+typedef struct {
+    MenuSwfImportAssets *items; /* caller-owned */
+    uint32_t capacity;
+    uint32_t count;
+    uint32_t total;
+    int truncated;
+} MenuSwfImportList;
 
 typedef struct {
     MenuSwfHeader header;
@@ -135,3 +160,16 @@ void menu_swf_view_close(MenuSwfView *view);
 MenuSwfStatus menu_swf_summary(const uint8_t *data, size_t size,
                                MenuSwfSummary *out, char *reason,
                                size_t reason_cap);
+
+/* Collect structured ImportAssets/ImportAssets2 records, preserving each URL
+ * with its id->symbol list.  Caller-owned storage; malformed tags are FORMAT,
+ * missing/truncated fields are TRUNCATED/FORMAT and capacity/string overflow is
+ * a named BUDGET refusal. */
+MenuSwfStatus menu_swf_collect_imports(const uint8_t *data, size_t size,
+                                       MenuSwfImportList *list,
+                                       char *reason, size_t reason_cap);
+
+/* Find the import record/symbol that declares `id`. */
+const MenuSwfImportAssets *menu_swf_find_import(
+    const MenuSwfImportList *list, uint16_t id,
+    const MenuSwfImportSymbol **symbol);

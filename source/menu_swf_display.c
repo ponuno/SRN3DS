@@ -778,6 +778,198 @@ static int parse_font(const uint8_t *p, size_t len, uint8_t font_type,
     return 0;
 }
 
+MenuSwfStatus menu_swf_display_parse_font(
+    const uint8_t *payload, size_t len, uint8_t font_type,
+    MenuSwfFontSummary *out, char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!payload || !out || (font_type != 2 && font_type != 3))
+        return MENU_SWF_ERR_ARGUMENT;
+    memset(out, 0, sizeof *out);
+    if (parse_font(payload, len, font_type, out, reason, reason_cap)) {
+        if (!reason || !reason[0])
+            set_reason(reason, reason_cap,
+                       "swf: malformed DefineFont%u tag", font_type);
+        memset(out, 0, sizeof *out);
+        return MENU_SWF_ERR_FORMAT;
+    }
+    if (out->truncated) {
+        set_reason(reason, reason_cap,
+                   "swf: DefineFont%u id %u exceeds bounded glyph/kerning tables",
+                   font_type, out->font_id);
+        memset(out, 0, sizeof *out);
+        return MENU_SWF_ERR_BUDGET;
+    }
+    return MENU_SWF_OK;
+}
+
+typedef struct {
+    MenuSwfFontList *list;
+    uint32_t tags_seen;
+} FontCollectContext;
+
+static MenuSwfStatus font_collect_stream(FontCollectContext *ctx,
+                                         const uint8_t *p, size_t len,
+                                         unsigned depth,
+                                         char *reason, size_t reason_cap) {
+    if (depth > MENU_SWF_DISPLAY_SPRITE_DEPTH) {
+        set_reason(reason, reason_cap,
+                   "swf fonts: sprite depth exceeds %u",
+                   MENU_SWF_DISPLAY_SPRITE_DEPTH);
+        return MENU_SWF_ERR_TAG;
+    }
+    size_t off = 0;
+    for (;;) {
+        if (off >= len) {
+            set_reason(reason, reason_cap, "swf fonts: missing End tag");
+            return MENU_SWF_ERR_END;
+        }
+        if (len - off < 2) {
+            set_reason(reason, reason_cap,
+                       "swf fonts: truncated tag header");
+            return MENU_SWF_ERR_TRUNCATED;
+        }
+        uint16_t header = (uint16_t)(p[off] | ((uint16_t)p[off + 1] << 8));
+        off += 2;
+        unsigned code = header >> 6;
+        uint32_t tlen = header & 0x3fu;
+        if (tlen == 0x3fu) {
+            if (len - off < 4) {
+                set_reason(reason, reason_cap,
+                           "swf fonts: truncated long tag header");
+                return MENU_SWF_ERR_TRUNCATED;
+            }
+            tlen = (uint32_t)p[off] | ((uint32_t)p[off + 1] << 8) |
+                   ((uint32_t)p[off + 2] << 16) |
+                   ((uint32_t)p[off + 3] << 24);
+            off += 4;
+        }
+        if (tlen > len - off) {
+            set_reason(reason, reason_cap,
+                       "swf fonts: tag %u length exceeds stream", code);
+            return MENU_SWF_ERR_TAG;
+        }
+        const uint8_t *payload = p + off;
+        off += tlen;
+        if (++ctx->tags_seen > MENU_SWF_MAX_TAGS) {
+            set_reason(reason, reason_cap,
+                       "swf fonts: tag limit %u exceeded",
+                       MENU_SWF_MAX_TAGS);
+            return MENU_SWF_ERR_BUDGET;
+        }
+        if (code == 0) {
+            if (tlen) {
+                set_reason(reason, reason_cap,
+                           "swf fonts: End tag has payload bytes");
+                return MENU_SWF_ERR_FORMAT;
+            }
+            return MENU_SWF_OK;
+        }
+        if (code == 48 || code == 75) {
+            MenuSwfFontList *list = ctx->list;
+            ++list->total;
+            if (list->count >= list->capacity) {
+                list->truncated = 1;
+                set_reason(reason, reason_cap,
+                           "swf fonts: capacity %u exceeded", list->capacity);
+                return MENU_SWF_ERR_BUDGET;
+            }
+            MenuSwfFontSummary font;
+            MenuSwfStatus st = menu_swf_display_parse_font(
+                payload, tlen, code == 75 ? 3 : 2, &font, reason, reason_cap);
+            if (st == MENU_SWF_ERR_BUDGET) {
+                ++list->skipped;
+                list->truncated = 1;
+                if (!list->skip_reason[0])
+                    snprintf(list->skip_reason, sizeof list->skip_reason,
+                             "%s", reason ? reason : "oversized DefineFont");
+                continue;
+            }
+            if (st != MENU_SWF_OK) return st;
+            for (uint32_t i = 0; i < list->count; ++i) {
+                if (list->items[i].font_id == font.font_id) {
+                    set_reason(reason, reason_cap,
+                               "swf fonts: duplicate DefineFont id %u",
+                               font.font_id);
+                    return MENU_SWF_ERR_FORMAT;
+                }
+            }
+            list->items[list->count++] = font;
+        } else if (code == 39) {
+            if (tlen < 4) {
+                set_reason(reason, reason_cap,
+                           "swf fonts: short DefineSprite");
+                return MENU_SWF_ERR_FORMAT;
+            }
+            MenuSwfStatus st = font_collect_stream(
+                ctx, payload + 4, tlen - 4, depth + 1, reason, reason_cap);
+            if (st != MENU_SWF_OK) return st;
+        }
+    }
+}
+
+MenuSwfStatus menu_swf_display_collect_fonts(
+    const uint8_t *data, size_t size, MenuSwfFontList *list,
+    char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!list || (list->capacity && !list->items))
+        return MENU_SWF_ERR_ARGUMENT;
+    list->count = 0;
+    list->total = 0;
+    list->skipped = 0;
+    list->skip_reason[0] = 0;
+    list->truncated = 0;
+    MenuSwfView view;
+    MenuSwfStatus st = menu_swf_view_open(data, size, &view, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
+    FontCollectContext ctx;
+    memset(&ctx, 0, sizeof ctx);
+    ctx.list = list;
+    st = font_collect_stream(&ctx, view.body + view.tag_offset,
+                             view.body_len - view.tag_offset, 0, reason,
+                             reason_cap);
+    menu_swf_view_close(&view);
+    return st;
+}
+
+const MenuSwfFontSummary *menu_swf_display_find_font(
+    const MenuSwfFontList *list, uint16_t font_id) {
+    if (!list || !list->items) return NULL;
+    uint32_t count = list->count < list->capacity ? list->count : list->capacity;
+    for (uint32_t i = 0; i < count; ++i)
+        if (list->items[i].font_id == font_id) return &list->items[i];
+    return NULL;
+}
+
+MenuSwfStatus menu_swf_display_resolve_import_font(
+    const MenuSwfImportList *imports, const MenuSwfFontList *candidates,
+    uint16_t imported_id, const char *candidate_source,
+    const MenuSwfFontSummary **out, char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (out) *out = NULL;
+    if (!imports || !candidates || !candidate_source)
+        return MENU_SWF_ERR_ARGUMENT;
+    const MenuSwfImportSymbol *symbol = NULL;
+    const MenuSwfImportAssets *asset = menu_swf_find_import(
+        imports, imported_id, &symbol);
+    if (!asset || !symbol) {
+        set_reason(reason, reason_cap,
+                   "swf: imported font id %u is not declared by this movie",
+                   imported_id);
+        return MENU_SWF_ERR_NOTIMPL;
+    }
+    const MenuSwfFontSummary *font = menu_swf_display_find_font(
+        candidates, imported_id);
+    if (!font) {
+        set_reason(reason, reason_cap,
+                   "swf: imported font id %u is not present in %s "
+                   "(symbol %s, URL %s)",
+                   imported_id, candidate_source, symbol->name, asset->url);
+        return MENU_SWF_ERR_NOTIMPL;
+    }
+    if (out) *out = font;
+    return MENU_SWF_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* Tag walk                                                            */
 /* ------------------------------------------------------------------ */
