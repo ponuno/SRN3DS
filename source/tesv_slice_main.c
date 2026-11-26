@@ -170,6 +170,8 @@ out:
             fclose(f);
         }
     }
+    fprintf(stderr,"[d3dx] D3DXCompileShader entries: %u\n",
+            d3dx_surface_compile_shader_calls());
     win32_memory_report(stderr);
     d3dx_surface_shutdown();
     d3dx_texture_shims_uninstall();
