@@ -18,13 +18,15 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_tess.h` / `.c` | Bounded even-odd/non-zero tessellation of one shape or DefineFont2/3 glyph into caller-owned vertex/index/triangle-style pools plus separate stroked line segments |
 | `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement, glyph tessellation through `menu_swf_tess`, 16.16 transform, ARGB vertices and per-glyph triangle ranges |
 | `source/menu_swf_raster.h` / `.c` | Bounded A8 coverage rasterisation of tessellated glyph triangles with 4x4 subpixel samples, caller buffers, 16.16-quantised matrix/pen and named refusals |
+| `source/menu_swf_atlas.h` / `.c` | Deterministic shelf packing of A8 coverage rectangles into a caller atlas, zero-filled padding, per-glyph rect/UV and named refusals |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_display_smoke.c` | Synthetic PlaceObject2/3, RemoveObject2, sprite, ShowFrame and DefineFont3 fixtures; optional real display/font summary |
 | `tests/menu_swf_shape_smoke.c` | Synthetic rectangle/curve/two-style/glyph shapes plus truncation, bitmap-id, segment-limit and AVM2/DefineFont4 refusals; optional real shape/glyph summary |
 | `tests/menu_swf_tess_smoke.c` | Synthetic square in both orientations, even-odd hole, non-zero star/nested contours, curve, multiple styles, stroked square, empty contour, overflow and missing-shape refusals; optional real tessellation summary |
 | `tests/menu_swf_text_smoke.c` | Synthetic 3-glyph font with kerning, direct glyph tessellation, placement/transform/colour, empty/unknown glyph and overflow; optional real StartMenu text |
 | `tests/menu_swf_raster_smoke.c` | Synthetic square/triangle exact coverage, hole rules, subpixel/rotation/mirror/clip, empty glyph and named refusals; optional real code-33 32x32 and 64x64 coverage |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text` and `menu_swf_raster`; `menu_bsa` now links `menu_swf.c` |
+| `tests/menu_swf_atlas_smoke.c` | Synthetic varied-size pack/determinism/UV/composition/overflow/empty cases; optional real codes 33..36 coverage-sum comparison |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster` and `menu_swf_atlas`; `menu_bsa` now links `menu_swf.c` |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -319,7 +321,7 @@ any compatible `MenuSwfTessMesh`) into a caller-owned A8 coverage buffer:
   `MENU_SWF_RASTER_ERR_SCALE`.
 * The target is validated before any write: zero size, `stride < width` or a
   NULL pixel buffer is `ERR_TOO_SMALL`; dimensions over 4096, stride over
-  1 MiB, more than 1,024 triangles or transformed coordinates over the safe
+  1 MiB, more than 1,536 triangles or transformed coordinates over the safe
   range are `ERR_OVERFLOW`.  Non-finite matrix terms are `ERR_NAN`.
 * The buffer is cleared (width bytes per row, honouring stride) and only
   `width x height` is written.  The result reports the used rectangle
@@ -342,36 +344,76 @@ The coverage sums stay below `width * height * 255` and the used rectangles
 stay inside the target.  This is CPU coverage data, not a rendered frame,
 texture upload or atlas entry.
 
-## 10. Tests
+## 10. A8 atlas packing
+
+`menu_swf_atlas_pack()` packs the used rectangles of raster coverage bitmaps:
+
+* The order is deterministic: descending height, descending width, ascending
+  glyph index, then input order.  A simple shelf/row packer places each rect
+  at the current shelf cursor, advances by `w + 1`, and starts a new shelf at
+  `previous_shelf_y + shelf_height + 1`.  There is a 1px gap between rects and
+  no rotation.
+* A glyph larger than the atlas is `ERR_TOO_LARGE`; failure to fit a shelf is
+  `ERR_OVERFLOW`; more than 512 glyphs or too small an entry array is
+  `ERR_TOO_MANY`.  Planning happens before any atlas/entry write, so a refusal
+  leaves both untouched.
+* Empty glyphs (width 0 or height 0) get a zero rect, `has_rect=0` and zero
+  UVs; they consume no space and are counted separately.
+* On success the full `width x height` atlas is cleared (stride padding
+  untouched), coverage rows are copied into each rect, and all bytes outside
+  rects remain zero.  Guard bytes outside the atlas are never touched.
+* Per-glyph entries carry `(x,y,w,h)` and 16.16 UVs normalized to the atlas,
+  computed as differences so `u+uw`/`v+vh` are exact at the right/bottom edge.
+  The result reports used height, occupied glyph pixels (padding excluded),
+  16.16 occupancy over `width * used_height`, and placed/empty counts.
+* No allocation, upload, texture object, cache or GPU call is involved.
+
+Measured real pack of codes 33..36 into 256x256 (coverage from the 64x64
+raster pass):
+
+```text
+real: atlas used_height=62 occupied=8618 occupancy16=35584 placed=4 empty=0
+real: glyph 33 rect=69,0,16,62  sum=178003
+real: glyph 34 rect=86,0,62,56  sum=681816
+real: glyph 35 rect=0,0,36,62   sum=302803
+real: glyph 36 rect=37,0,31,62  sum=226181
+```
+
+Every atlas-rect coverage sum equals the corresponding raster sum.  Occupancy
+is 8,618 glyph pixels over `256 * 62`, i.e. 35,584 in 16.16 (about 54.3%).  The
+rectangle order reflects height/width sorting (35, 36, 33 at height 62, then
+34 at height 56), not input order.
+
+## 11. Tests
 
 Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: `menu_swf_raster` **44 checks, 0 failures**; `menu_swf_text` **33
-checks, 0 failures**; `menu_swf_tess` **47 checks, 0 failures**;
-`menu_swf_shape` **28 checks, 0 failures**; `menu_swf_display` **38 checks, 0
-failures**; `menu_swf` **86 checks, 0 failures**; `menu_bsa` **277 checks, 0
-failures**.
+Result: `menu_swf_atlas` **27 checks, 0 failures**; `menu_swf_raster` **44
+checks, 0 failures**; `menu_swf_text` **33 checks, 0 failures**;
+`menu_swf_tess` **47 checks, 0 failures**; `menu_swf_shape` **28 checks, 0
+failures**; `menu_swf_display` **38 checks, 0 failures**; `menu_swf` **86
+checks, 0 failures**; `menu_bsa` **277 checks, 0 failures**.
 
 Real read-only:
 
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: `menu_swf_raster` **60 checks, 0 failures**; `menu_swf_text` **46
-checks, 0 failures**; `menu_swf_tess` **55 checks, 0 failures**;
-`menu_swf_shape` **40 checks, 0 failures**; `menu_swf_display` **57 checks, 0
-failures**; `menu_swf` **102 checks, 0 failures**; `menu_bsa` **286 checks, 0
-failures**.
+Result: `menu_swf_atlas` **37 checks, 0 failures**; `menu_swf_raster` **60
+checks, 0 failures**; `menu_swf_text` **46 checks, 0 failures**;
+`menu_swf_tess` **55 checks, 0 failures**; `menu_swf_shape` **40 checks, 0
+failures**; `menu_swf_display` **57 checks, 0 failures**; `menu_swf` **102
+checks, 0 failures**; `menu_bsa` **286 checks, 0 failures**.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
 long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
@@ -396,15 +438,19 @@ and verifies one real kerning pair.  The raster test adds exact full-coverage
 2x2 and 16x16 squares, a sampled triangle (coverage sum 573), subpixel,
 90-degree, mirror and border-clipping cases, a non-zero vs even-odd hole,
 empty-mesh advance and NaN/overflow/scale/negative-scale/too-small refusals;
-the real check rasterises code 33 at 32x32 and 64x64.
+the real check rasterises code 33 at 32x32 and 64x64.  The atlas test packs 12
+varied synthetic glyphs twice and in reversed order (byte-identical), verifies
+rects/UVs/no overlap/zero padding/guards, empty glyphs, too-large/overflow/
+too-many/short-stride refusals without mutation, and compares real 33..36
+atlas sums against their raster sums.
 
 Full host suite with the main-tree generated slice and IR container:
-**101 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_raster`
-contributes 44 synthetic checks, `menu_swf_text` 33, `menu_swf_tess` 47,
-`menu_swf_shape` 28, `menu_swf_display` 38 and `menu_swf` 86; no real-data
-checks are run in that suite.
+**104 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_atlas`
+contributes 27 synthetic checks, `menu_swf_raster` 44, `menu_swf_text` 33,
+`menu_swf_tess` 47, `menu_swf_shape` 28, `menu_swf_display` 38 and `menu_swf`
+86; no real-data checks are run in that suite.
 
-## 11. What remains
+## 12. What remains
 
 1. **Renderable display list** — bounded state, shape geometry and triangle
    tessellation exist, but this is not a GFx display list: sprite/movie-clip
@@ -413,17 +459,17 @@ checks are run in that suite.
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
    the menu's script behaviour.  `DoAction`/clip-action payloads are not
    executed.
-3. **Atlas and upload** — `fonts_en.swf`/`fonts_console.swf`,
-   `FontConfig.txt`, glyph atlas packing, texture upload/cache, richer shaping
+3. **Atlas upload/cache** — `fonts_en.swf`/`fonts_console.swf`,
+   `FontConfig.txt`, texture object/upload, cache/rehydration, richer shaping
    (ligatures, bidi, fallback fonts) and text metrics beyond advance+kerning.
-   Glyph coverage exists only in caller A8 buffers; no atlas, texture or cache
-   entry has been created.
+   The CPU A8 atlas exists in caller memory; no texture, upload or cache entry
+   has been created.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
 5. **Draw path** — GFx batch contract, dynamic vertex buffer/FVF,
    `SetTextureStageState`, TEV/PICA submission and the first real frame.
 
-## 12. Integration
+## 13. Integration
 
 ```c
 /* r came from menu_bsa_resolve_startmenu(&heap, ...). */
@@ -435,6 +481,9 @@ MenuSwfTessMesh glyph_tess;    /* one glyph for rasterisation */
 MenuSwfTextMesh text;          /* output and one-glyph scratch are caller-owned */
 MenuSwfRasterTarget raster;    /* width/height/stride/A8 pixels */
 MenuSwfRasterResult coverage;
+MenuSwfAtlasTarget atlas;      /* width/height/stride/A8 pixels */
+MenuSwfAtlasEntry atlas_entries[glyph_count];
+MenuSwfAtlasResult atlas_result;
 char reason[BSA_REASON_MAX];
 const uint8_t *bytes = guest_ptr(heap.memory, r.guest_address, r.size);
 MenuSwfStatus st = menu_swf_summary(bytes, r.size, &summary, reason,
@@ -458,20 +507,25 @@ if (st == MENU_SWF_OK)
 if (st == MENU_SWF_OK)
     (void)menu_swf_raster_mesh(&glyph_tess, &raster_xf, &raster, &coverage,
                                reason, sizeof reason);
+/* After collecting the per-glyph coverage sources: */
+if (st == MENU_SWF_OK)
+    (void)menu_swf_atlas_pack(atlas_glyphs, glyph_count, &atlas,
+                              atlas_entries, glyph_count, &atlas_result,
+                              reason, sizeof reason);
 if (st == MENU_SWF_OK) {
     /* Gate the future GFx loader with display.top, display.sprites[],
      * display.fonts[].glyphs, shapes/ shape_paths, tess/ triangles,
-     * text/ placements+triangles and coverage/ used rect. Do not report this
-     * as a rendered movie. */
+     * text/ placements+triangles, coverage/ used rect and atlas/ entries.
+     * Do not report this as a rendered movie. */
 }
 heap_free(&heap, r.guest_address);
 ```
 
-The summary/display/shape/tess/text/raster structures are metadata, CPU
-geometry and A8 coverage only.  They must not be reported as a parsed movie,
-renderable display list or frame.
+The summary/display/shape/tess/text/raster/atlas structures are metadata, CPU
+geometry and A8 coverage/atlas memory only.  They must not be reported as a
+parsed movie, renderable display list or frame.
 
-## 13. Honest claim
+## 14. Honest claim
 
 * StartMenu.swf is validated as one CWS/zlib stream with the declared size,
   frame header and complete top-level tag stream through End.
@@ -491,5 +545,8 @@ renderable display list or frame.
 * The bounded A8 rasteriser puts code 33 into 32x32 coverage with sum **41,464**
   over 182 pixels (used rect `12,1..20,31`) and into 64x64 with sum **178,003**
   over 726 pixels (used rect `24,1..40,63`); the advance 5,040 is preserved.
-* No AVM action is executed, no atlas or texture upload/cache is built, and no
+* The bounded atlas packs real codes 33..36 into 256x256 with used height
+  **62**, **8,618** occupied glyph pixels, occupancy **35,584/65,536**, and
+  exact atlas-rect coverage sums matching the raster outputs.
+* No AVM action is executed, no texture upload/cache is built, and no
   frame/pixel/Azahar/hardware result is claimed.

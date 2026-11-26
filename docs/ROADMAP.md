@@ -207,6 +207,11 @@ read stage without fake successes. *Not met.*
       named NaN/overflow/scale/too-small refusals into caller buffers. Real
       code 33: 32x32 sum 41,464; 64x64 sum 178,003. No atlas, upload, cache,
       GPU or frame. See `docs/MENU_SWF.md`.
+- [x] Bounded A8 atlas packing: deterministic height/width/glyph-index shelf
+      order, 1px gaps, zero padding, exact 16.16 UVs, no-overlap and
+      too-large/overflow/too-many refusals. Real codes 33..36: used height 62,
+      8,618 occupied pixels, occupancy 35,584/65,536, rect sums identical to
+      raster. No upload, cache, GPU or frame. See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer
