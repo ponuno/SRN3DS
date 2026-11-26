@@ -672,6 +672,19 @@ int main(void) {
         memset(g_atlas_pixels, 0xFF, sizeof g_atlas_pixels);
         fprintf(stderr, "MENU_DEBUG_WHITE: atlas filled with opaque coverage\n");
     }
+    FILE *solid_flag = fopen("sdmc:/menu_debug_solid.flag", "r");
+    if (solid_flag) {
+        fclose(solid_flag);
+        setenv("MENU_DEBUG_SOLID", "1", 1);
+        fprintf(stderr, "MENU_DEBUG_SOLID: TEV ignores the atlas (vertex colour only)\n");
+    }
+    if (cpu_ok) {
+        unsigned nonzero = 0;
+        for (unsigned i = 0; i < sizeof g_atlas_pixels; ++i)
+            if (g_atlas_pixels[i]) ++nonzero;
+        fprintf(stderr, "ATLAS nonzero=%u white17=%u\n", nonzero,
+                (unsigned)g_atlas_pixels[17]);
+    }
 
     D9Citro *gpu = NULL;
     D9Device *device = NULL;
