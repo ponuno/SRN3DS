@@ -42,11 +42,18 @@ Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
   `[sync] Sleep 28 ms from 006f40cf thread=11`. There is no fault message; a
   100M-step run does not write a profile, so the next step is to identify that
   spin (likely a guest thread waiting on a lock the main thread never releases)
-  before the next fault can be named.
-- `tools/ir_pack.py` on the 90,900-function profile reached 69 GiB private
-  commit in its final phase and starved the desktop; it was stopped after the
-  container, index and report were already written and CRC-valid. Do not rerun
-  it blindly; cap memory or pack a smaller corpus.
+  before the next fault can be named. The trace before the spin contains 878
+  `CreateVertexShader` (558 ok, 320 x `0x8876086a`), 40 `CreatePixelShader`
+  (all ok), 372 `CreateVertexDeclaration` (364 ok, 8 x `0x8876086c`), 64
+  `SetVertexShader`/`SetPixelShader`, one 512x1024 depth/target pair and the
+  repeated `Present` cycle. The earlier `549a9038` guest OOM did not recur; a
+  300M-step run later ended with host `0xC0000374` heap corruption instead.
+- The earlier 69 GiB `tools/ir_pack.py` blow-up was duplicate promotion in the
+  closure queue: every decoded edge appended another copy of the same pre-entry
+  leader. `8db224e` keeps one closure copy per leader and orders it before the
+  excluded discovery range. A clean 90,900-function pack now finishes at
+  64,445,696 B (index 3,636,000 / data 60,809,632) with 982 `PREENTRY` entries;
+  `E:\census_ir2\ir_container\tesv.irc` is that file.
 - `TESV_HANG_WATCHDOG_MS=<ms>` (host slice only, default off) arms after the
   first real Present and dumps every thread, wait set, stack, IR block, sync
   objects, CS owners and the Interlocked ring before exiting 70. The menu hang
