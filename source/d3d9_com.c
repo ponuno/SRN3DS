@@ -215,6 +215,63 @@ static void addref(CPU *c){Obj *o=obj(A(0),0);if(!o)RET(0,1);retain(o);RET(o->re
 static void release_fn(CPU *c){Obj *o=obj(A(0),0);if(!o)RET(0,1);
     if(o->refs==1&&o->lock_guest)rt_unimpl(c,A(0),"last Release while resource locked");
     unsigned n=o->refs-1;release(o);RET(n,1);}
+/* Host-ABI entry points used by the D3DX texture shims.  They share the
+ * validated COM resource path: the same usage/pool/layout checks, D9Device
+ * texture creation and lock/upload/unlock sequencing. */
+uint32_t d9_com_host_create_texture(uint32_t device,unsigned w,unsigned h,
+                                    unsigned levels,unsigned usage,unsigned format,
+                                    unsigned pool,uint32_t *out_texture){
+    if(out_texture)*out_texture=0;
+    if(!g.mem||!g.device||!out_texture||g.phase)return INVALID;
+    if(!obj(device,DEVICE)){d3d_fail("CreateTexture","invalid device object",INVALID);return INVALID;}
+    if(usage&~0x00220200u){d3d_fail("CreateTexture",
+        "autogen, render-target, depth-stencil and non-DYNAMIC texture usages are not implemented",UNAVAILABLE);return UNAVAILABLE;}
+    if(pool>2){d3d_fail("CreateTexture","invalid pool",UNAVAILABLE);return UNAVAILABLE;}
+    size_t pitch,bytes;
+    if(d9_texture_layout(w,h,format,&pitch,&bytes)){
+        d3d_fail("CreateTexture",
+            "texture format/dimensions are not implemented by the D3D9 bridge",INVALID);return INVALID;}
+    if(g.next>=MAX_OBJECTS)return OUTMEM;
+    D9Handle handle;int rc=d9_create_texture_ex(g.device,w,h,format,levels,pool,usage,0,&handle);
+    if(rc){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+            "CreateTexture: %s",d9_last_draw_diagnostic(g.device));
+        return hr(rc);
+    }
+    Obj *o=new_obj(TEX);
+    if(!o){d9_release_texture(g.device,handle);return OUTMEM;}
+    o->handle=handle;o->width=w;o->height=h;o->bytes=(unsigned)bytes;o->pitch=(unsigned)pitch;
+    o->format=format;o->usage=usage;o->pool=pool;retain(g.dev);
+    *out_texture=o->guest;g.last_diagnostic[0]=0;return OK;
+}
+uint32_t d9_com_host_upload_texture_level(uint32_t texture,unsigned level,
+                                          const void *src,size_t src_pitch,
+                                          size_t src_bytes){
+    Obj *o=obj(texture,TEX);
+    if(!o||!g.device||!src||!src_pitch||g.phase)return INVALID;
+    unsigned w,h;size_t pitch,bytes;
+    if(d9_texture_level_info(g.device,o->handle,level,&w,&h,&pitch,&bytes))return INVALID;
+    unsigned bb=d9_bc_block_bytes(o->format);
+    size_t rows=bb?(size_t)((h+3u)/4u):(size_t)h;
+    size_t row=bb?(size_t)((w+3u)/4u)*bb:(size_t)w*4u;
+    if(!rows||src_pitch<row)return INVALID;
+    if(src_bytes&&((rows-1u)>((SIZE_MAX-row)/src_pitch)||
+       (rows-1u)*src_pitch+row>src_bytes))return INVALID;
+    if((rows-1u)>(SIZE_MAX-row)/pitch||(rows-1u)*pitch+row>bytes)return INVALID;
+    void *dst=NULL;size_t unlocked_pitch=0;
+    int rc=d9_texture_lock_level_ex(g.device,o->handle,level,&dst,&unlocked_pitch,0);
+    if(rc)return hr(rc);
+    for(size_t y=0;y<rows;++y)
+        memcpy((uint8_t *)dst+y*pitch,(const uint8_t *)src+y*src_pitch,row);
+    rc=d9_texture_unlock_level(g.device,o->handle,level);
+    if(rc)return hr(rc);
+    g.last_diagnostic[0]=0;return OK;
+}
+uint32_t d9_com_host_release(uint32_t object){
+    Obj *o=obj(object,0);
+    if(!o)return INVALID;
+    release(o);return OK;
+}
 /* IUnknown, requested concrete interface, plus resource/base-texture ancestors. */
 static const uint8_t guids[][16]={
     {0,0,0,0,0,0,0,0,0xc0,0,0,0,0,0,0,0x46},
@@ -847,14 +904,13 @@ static void surface_container(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(2)
     }
     RET(NOINTERFACE,3);
 }
-static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
-    if(!o||o->kind!=SURFACE||!ptr(locked,8))return D9_INVALID;
+static int lock_surface_rect(Obj *o,const int32_t r[4],unsigned flags,
+                             unsigned *pitch_out,uint32_t *address_out,unsigned *rows_out){
+    if(!o||o->kind!=SURFACE||!g.mem||!r||!pitch_out||!address_out||!rows_out)return D9_INVALID;
     if(o==g.back&&(!pp_probe()||!o->pixels))return D9_BACKEND;
-    if(o->lock_guest||g.phase||(rect&&(flags&0x2000)))return D9_INVALID;
+    if(o->lock_guest||g.phase)return D9_INVALID;
     if(o->handle&&(!o->lockable||!(flags&0x10u)||(flags&~0x8010u)))return D9_INVALID; /* explicit targets are read-only */
     if(!o->handle&&(flags&~0xc810u))return D9_INVALID;
-    int32_t r[4]={0,0,(int32_t)o->width,(int32_t)o->height};
-    if(rect){if(!ptr(rect,16))return D9_INVALID;memcpy(r,ptr(rect,16),16);}
     if(r[0]<0||r[1]<0||r[2]<=r[0]||r[3]<=r[1]||(uint64_t)r[2]>o->width||(uint64_t)r[3]>o->height)return D9_INVALID;
     unsigned x=(unsigned)r[0],y=(unsigned)r[1],row_bytes=((unsigned)r[2]-x)*4,rows=(unsigned)r[3]-y;
     size_t offset=(size_t)y*o->pitch+x*4,span=(size_t)(rows-1)*o->pitch+row_bytes;
@@ -871,7 +927,17 @@ static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
     }
     o->lock_guest=address;o->lock_bytes=(unsigned)span;o->readonly=!!(flags&0x10);
     o->lock_rows=rows;o->lock_pitch=o->pitch;o->lock_row_bytes=row_bytes;
-    M32(locked)=o->pitch;M32(locked+4)=address;return D9_OK;
+    *pitch_out=o->pitch;*address_out=address;*rows_out=rows;return D9_OK;
+}
+static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
+    if(!o||o->kind!=SURFACE||!ptr(locked,8))return D9_INVALID;
+    if(rect&&(flags&0x2000))return D9_INVALID;
+    int32_t r[4]={0,0,(int32_t)o->width,(int32_t)o->height};
+    if(rect){if(!ptr(rect,16))return D9_INVALID;memcpy(r,ptr(rect,16),16);}
+    uint32_t address=0;unsigned pitch=0,rows=0;
+    int rc=lock_surface_rect(o,r,flags,&pitch,&address,&rows);
+    if(!rc){M32(locked)=pitch;M32(locked+4)=address;}
+    return rc;
 }
 static int unlock_surface(Obj *o){
     if(!o||o->kind!=SURFACE||!o->lock_guest)return D9_INVALID;
@@ -893,6 +959,28 @@ static void surface_lock(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
     RET(hr(rc),4);
 }
 static void surface_unlock(CPU *c){Obj *o=obj(A(0),SURFACE);if(!o)RET(INVALID,1);RET(hr(unlock_surface(o)),1);}
+/* Host-facing surface access used by d3dx_surface_shims.c.  Rectangles arrive
+ * as host int32_t[4] and no guest stack slot is involved. */
+GuestMemory *d9_com_memory(void){return g.mem;}
+int d9_com_surface_info(uint32_t surface,D9ComSurfaceInfo *out){
+    Obj *o=obj(surface,SURFACE);
+    if(!o||!out)return -1;
+    out->width=o->width;out->height=o->height;out->format=o->format;
+    out->pool=o->pool;out->usage=o->usage;out->pitch=o->pitch;
+    out->render_target=o->handle!=0;out->lockable=o->lockable!=0;
+    return 0;
+}
+int d9_com_surface_lock(uint32_t surface,const int32_t rect[4],unsigned flags,
+                        unsigned *pitch,uint32_t *address,unsigned *rows){
+    Obj *o=obj(surface,SURFACE);
+    if(!o||!pitch||!address||!rows)return D9_INVALID;
+    int32_t whole[4]={0,0,(int32_t)o->width,(int32_t)o->height};
+    return lock_surface_rect(o,rect?rect:whole,flags,pitch,address,rows);
+}
+int d9_com_surface_unlock(uint32_t surface){
+    Obj *o=obj(surface,SURFACE);
+    return o?unlock_surface(o):D9_INVALID;
+}
 static void surface_dc(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
     if(!o||!ptr(out,4))RET(INVALID,2);M32(out)=0;
     d3d_log("GetDC","GDI device contexts are not implemented for D3D9 surfaces");RET(UNAVAILABLE,2);
@@ -1445,7 +1533,7 @@ const char *d9_com_last_shader_rejection(void){return g.last_shader_rejection;}
 const char *d9_com_last_stretch_reject(void){return g.last_stretch_rejection;}
 static int dll_name(const char *s){static const char name[]="d3d9.dll";if(!s)return 0;for(unsigned i=0;i<sizeof name;++i){unsigned a=(unsigned char)s[i];if(a>='A'&&a<='Z')a+=32;if(a!=(unsigned char)name[i])return 0;if(!a)return 1;}return 0;}
 uint32_t d9_com_resolve(const PeImport *e,void *ctx){(void)ctx;
-    if(!g.mem||!e||!dll_name(e->dll)||!e->name)return 0;
+    if(!g.mem||!e||!e->name||!dll_name(e->dll))return 0;
     if(!strcmp(e->name,"Direct3DCreate9"))return THUNK+I_direct_create*4;
     if(!strcmp(e->name,"D3DPERF_SetOptions"))return THUNK+I_d3dperf_set_options*4;
     if(!strcmp(e->name,"D3DPERF_BeginEvent"))return THUNK+I_d3dperf_begin*4;

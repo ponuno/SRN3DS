@@ -8,6 +8,8 @@
 #include "rt_prof.h"
 #include "d3d9_com.h"
 #include "d3d9_null.h"
+#include "d3dx_texture_shims.h"
+#include "d3dx_surface_shims.h"
 #include "ir_core.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
@@ -75,8 +77,9 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
     add_dll(&b, "X3DAudio1_7.dll", 0x0a000000u, root, "C:/Windows/SysWOW64");
     add_dll(&b, "steam_api.dll", 0x0b000000u, root, "E:/SteamLibrary/steamapps/common/Skyrim");
 #endif
-    FnModule tables[3] = {{"tesv", g_fn_table_tesv, g_fn_count_tesv}, {"d3d9", NULL, 0},
-                          {"d3dx", NULL, 0}};
+    FnModule tables[6] = {{"tesv", g_fn_table_tesv, g_fn_count_tesv}, {"d3d9", NULL, 0},
+                          {"d3dx", NULL, 0}, {"d3dx-texture", NULL, 0},
+                          {"d3dx-surface", NULL, 0}};
     unsigned table_count = 1;
     /* The D3D9 bridge answers the guest's renderer queries truthfully even in a
      * headless diagnostic build: one 400x240x32 adapter, SM2-only caps. */
@@ -91,6 +94,21 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
         if (d9_null_register() != 0) printf("d3d9: null backend not installed\n");
     } else {
         printf("d3d9: COM bridge unavailable; D3D9 imports stay unresolved\n");
+    }
+    /* Plain D3DX exports get host thunks instead of the real 0x080b... bodies.
+     * Both modules append to the win32 extra-resolver chain, so the D3D9
+     * bridge resolver stays primary and the d3dx hotpatch path is untouched.
+     * Texture creation needs the D3D9 session; surface/shader work must check
+     * it per call, so both installs follow d9_com_init(). */
+    if (d3dx_texture_shims_install(&b.memory) == 0) {
+        tables[table_count++] = d3dx_texture_shims_module();
+        printf("d3dx: DDS image-info and texture shims registered\n");
+    }
+    if (d3dx_surface_init(&b.memory) == 0) {
+        tables[table_count++] = d3dx_surface_module();
+        printf("d3dx: surface/shader shims registered\n");
+    } else {
+        printf("d3dx: surface/shader shims unavailable (D3D9 session missing)\n");
     }
     /* The import linker resolves a validated MSVC hotpatch export to its real
      * body, so that body must be dispatchable.  Link the generated D3DX table
@@ -153,6 +171,8 @@ out:
         }
     }
     win32_memory_report(stderr);
+    d3dx_surface_shutdown();
+    d3dx_texture_shims_uninstall();
     d9_com_shutdown();
     n3ds_boot_destroy(&b);
     return rc;

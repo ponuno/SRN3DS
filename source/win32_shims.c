@@ -196,6 +196,9 @@ static uint8_t tls_used[TLS_SLOTS];
 static const PeLinker *process_linker;
 static PeImportResolve external_resolver;
 static void *external_context;
+#define MAX_EXTRA_RESOLVERS 4
+static PeImportResolve extra_resolvers[MAX_EXTRA_RESOLVERS];
+static void *extra_context[MAX_EXTRA_RESOLVERS];
 #define MAX_TRAPS 1024
 static struct { char text[192]; } traps[MAX_TRAPS];
 static unsigned trap_count;
@@ -287,8 +290,14 @@ void win32_shutdown(void) {
     mappings_shutdown();
     va_shutdown();
     heap_destroy(&heap);mem=NULL;process_linker=NULL;external_resolver=NULL;external_context=NULL;
+    memset(extra_resolvers,0,sizeof extra_resolvers);memset(extra_context,0,sizeof extra_context);
 }
 void win32_set_external_resolver(PeImportResolve r,void *ctx){external_resolver=r;external_context=ctx;}
+void win32_add_external_resolver(PeImportResolve r,void *ctx){
+    if(!r)return;
+    for(unsigned i=0;i<MAX_EXTRA_RESOLVERS;++i)if(extra_resolvers[i]==r&&extra_context[i]==ctx)return;
+    for(unsigned i=0;i<MAX_EXTRA_RESOLVERS;++i)if(!extra_resolvers[i]){extra_resolvers[i]=r;extra_context[i]=ctx;return;}
+}
 void win32_set_linker(const PeLinker *linker){process_linker=linker;}
 static uint32_t arg(CPU *c,unsigned n) {return M32(c->r[4]+4+n*4);}
 static void result(CPU *c,uint32_t v,unsigned slots) {c->r[0]=v;c->r[4]+=4+slots*4;}
@@ -2884,6 +2893,8 @@ uint32_t win32_resolve(const PeImport *e,void *ctx){
     }
     uint32_t ext=external_resolver?external_resolver(e,external_context):0;
     if(ext)return ext;
+    for(unsigned i=0;i<MAX_EXTRA_RESOLVERS;++i)
+        if(extra_resolvers[i]&&(ext=extra_resolvers[i](e,extra_context[i]))!=0)return ext;
     if(!trap_enabled)return 0;
     if(trap_count>=MAX_TRAPS)return 0;
     char text[192];

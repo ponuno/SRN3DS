@@ -9,6 +9,11 @@ int win32_init(GuestMemory *m,uint32_t heap_bytes,const char *game_root);
 void win32_shutdown(void);
 void win32_set_linker(const PeLinker *linker);
 void win32_set_external_resolver(PeImportResolve resolver,void *ctx);
+/* Additional resolvers are consulted after the primary external resolver and
+ * before the unresolved-import trap.  Duplicate (function, context) pairs are
+ * ignored.  Used by host ABI modules such as d3dx_texture_shims that must not
+ * displace the D3D9 bridge. */
+void win32_add_external_resolver(PeImportResolve resolver,void *ctx);
 /* Diagnostic mode: bind unknown imports to a trap that faults on call with the
  * exact dll!name. Never returns a fake success; unknown slots still fail. */
 void win32_set_unresolved_trap(int enabled);
