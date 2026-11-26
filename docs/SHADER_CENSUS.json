@@ -1,0 +1,287 @@
+{
+  "archives": [
+    "Skyrim - Shaders.bsa"
+  ],
+  "chunk_kinds": {
+    "ps": 9621,
+    "vs": 854
+  },
+  "chunks": 10475,
+  "coverage": {
+    "ps_software_chunks": 9586,
+    "ps_software_hashes": 6335,
+    "ps_tev_direct_chunks": 16,
+    "ps_tev_direct_hashes": 7,
+    "ps_tev_menu_light_chunks": 1,
+    "ps_tev_menu_light_hashes": 1,
+    "ps_tev_prebake_chunks": 18,
+    "ps_tev_prebake_hashes": 7,
+    "vs_pica_chunks": 757,
+    "vs_pica_hashes": 276,
+    "vs_software_chunks": 97,
+    "vs_software_hashes": 33
+  },
+  "distinct_hashes": 6659,
+  "distinct_versions": {
+    "ps_3_0": 6350,
+    "vs_3_0": 309
+  },
+  "generated_for": "F:\\Skyrim\\Data",
+  "notable": {
+    "menu.composite.ps (copy)": {
+      "bytes": 184,
+      "class": "tev_direct",
+      "instructions": 1,
+      "key": "0x00000000",
+      "package": "shadersfx\\imagespace002.fxp",
+      "plan": {
+        "constants": [],
+        "expandable": [],
+        "family": "generic",
+        "kind": "tev",
+        "stages": 1,
+        "textures": 1
+      },
+      "refusal": "",
+      "sha1": "c99c2cafbbfb2bec25745071be4c7657ea584aea",
+      "sha256": "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de"
+    },
+    "menu.logo.ps (p1200005)": {
+      "bytes": 852,
+      "class": "tev_menu_light",
+      "instructions": 20,
+      "key": "0x01200005",
+      "package": "shadersfx\\lighting\\059\\p1200005.fxp",
+      "plan": {
+        "constants": [
+          3,
+          4,
+          7
+        ],
+        "expandable": [],
+        "family": "menu_light",
+        "kind": "tev",
+        "stages": 5,
+        "textures": 2
+      },
+      "refusal": "",
+      "sha1": "fc143f74d6aa2b4b55ff39f0b4221c5495751850",
+      "sha256": "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"
+    }
+  },
+  "opcode_hash_histogram": {
+    "abs": 614,
+    "add": 6530,
+    "cmp": 5347,
+    "defi": 3309,
+    "dp2add": 11,
+    "dp3": 6450,
+    "dp4": 6360,
+    "else": 2197,
+    "endif": 2197,
+    "endrep": 3309,
+    "exp": 120,
+    "frc": 161,
+    "ifc": 2197,
+    "log": 120,
+    "lrp": 4194,
+    "mad": 6626,
+    "max": 562,
+    "min": 217,
+    "mov": 6583,
+    "mova": 120,
+    "mul": 6549,
+    "nrm": 5958,
+    "pow": 4128,
+    "rcp": 6211,
+    "rep": 3309,
+    "rsq": 6152,
+    "sge": 22,
+    "sincos": 4,
+    "slt": 34,
+    "texkill": 215,
+    "texld": 6332,
+    "texldl": 1
+  },
+  "opcode_histogram": {
+    "abs": 1436,
+    "add": 60538,
+    "cmp": 61621,
+    "defi": 3309,
+    "dp2add": 18,
+    "dp3": 75894,
+    "dp4": 19935,
+    "else": 2203,
+    "endif": 2206,
+    "endrep": 3311,
+    "exp": 360,
+    "frc": 175,
+    "ifc": 2206,
+    "log": 120,
+    "lrp": 5985,
+    "mad": 112474,
+    "max": 1077,
+    "min": 265,
+    "mov": 52651,
+    "mova": 120,
+    "mul": 165253,
+    "nrm": 15355,
+    "pow": 9205,
+    "rcp": 30875,
+    "rep": 3311,
+    "rsq": 17211,
+    "sge": 22,
+    "sincos": 4,
+    "slt": 79,
+    "texkill": 215,
+    "texld": 31645,
+    "texldl": 18
+  },
+  "packages": 122,
+  "ps": {
+    "chunks": 9621,
+    "classes": {
+      "chunk_fraction": {
+        "dataflow": 0.0084,
+        "def_literal_out_of_range": 0.9374,
+        "input_not_a_colour_varying": 0.0001,
+        "multiple_output_writes (2)": 0.0002,
+        "non_uniform_swizzle": 0.0005,
+        "tev_direct": 0.0017,
+        "tev_menu_light": 0.0001,
+        "tev_prebake": 0.0019,
+        "unsupported_opcode": 0.0497
+      },
+      "chunks": {
+        "dataflow": 81,
+        "def_literal_out_of_range": 9019,
+        "input_not_a_colour_varying": 1,
+        "multiple_output_writes (2)": 2,
+        "non_uniform_swizzle": 5,
+        "tev_direct": 16,
+        "tev_menu_light": 1,
+        "tev_prebake": 18,
+        "unsupported_opcode": 478
+      },
+      "hash_fraction": {
+        "dataflow": 0.0061,
+        "def_literal_out_of_range": 0.971,
+        "input_not_a_colour_varying": 0.0002,
+        "multiple_output_writes (2)": 0.0002,
+        "non_uniform_swizzle": 0.0003,
+        "tev_direct": 0.0011,
+        "tev_menu_light": 0.0002,
+        "tev_prebake": 0.0011,
+        "unsupported_opcode": 0.0198
+      },
+      "hashes": {
+        "dataflow": 39,
+        "def_literal_out_of_range": 6166,
+        "input_not_a_colour_varying": 1,
+        "multiple_output_writes (2)": 1,
+        "non_uniform_swizzle": 2,
+        "tev_direct": 7,
+        "tev_menu_light": 1,
+        "tev_prebake": 7,
+        "unsupported_opcode": 126
+      }
+    },
+    "constant_histogram": {
+      "0": 6,
+      "1": 1
+    },
+    "distinct_hashes": 6350,
+    "stage_histogram": {
+      "1": 6,
+      "2": 1
+    },
+    "texture_histogram": {
+      "0": 4,
+      "1": 3
+    },
+    "top_refusals": {
+      "dataflow": 39,
+      "def_literal_out_of_range": 6166,
+      "dp4_basis_requires_prebake": 7,
+      "input_not_a_colour_varying": 1,
+      "multiple_output_writes (2)": 1,
+      "non_uniform_swizzle": 2,
+      "unsupported_opcode": 126
+    }
+  },
+  "ps_def_range_potential": {
+    "chunks": {
+      "dataflow": 11,
+      "tev_direct": 1,
+      "tev_prebake": 10,
+      "unsupported_opcode": 8997
+    },
+    "hashes": {
+      "dataflow": 10,
+      "tev_direct": 1,
+      "tev_prebake": 2,
+      "unsupported_opcode": 6153
+    },
+    "note": "Upper bound only: these PS are refused today because a def literal is outside the RGBA8 [0,1] TEV range.  The potential class re-runs the planner with clamped literals; no such plan is emitted or drawn."
+  },
+  "vs": {
+    "chunks": 854,
+    "classes": {
+      "chunk_fraction": {
+        "pica_vs": 0.8864,
+        "too_many_vs_varyings (8 > 7)": 0.096,
+        "too_many_vs_varyings (9 > 7)": 0.0176
+      },
+      "chunks": {
+        "pica_vs": 757,
+        "too_many_vs_varyings (8 > 7)": 82,
+        "too_many_vs_varyings (9 > 7)": 15
+      },
+      "hash_fraction": {
+        "pica_vs": 0.8932,
+        "too_many_vs_varyings (8 > 7)": 0.0841,
+        "too_many_vs_varyings (9 > 7)": 0.0227
+      },
+      "hashes": {
+        "pica_vs": 276,
+        "too_many_vs_varyings (8 > 7)": 26,
+        "too_many_vs_varyings (9 > 7)": 7
+      }
+    },
+    "constant_histogram": {
+      "2": 6,
+      "3": 3,
+      "4": 2,
+      "5": 5,
+      "6": 12,
+      "7": 8,
+      "8": 18,
+      "9": 38,
+      "10": 42,
+      "11": 15,
+      "12": 36,
+      "13": 24,
+      "14": 33,
+      "15": 7,
+      "16": 22,
+      "17": 4,
+      "18": 1
+    },
+    "distinct_hashes": 309,
+    "expandable": 95,
+    "input_usage": {
+      "binormal": 37,
+      "blendindices": 97,
+      "blendweight": 97,
+      "color": 153,
+      "normal": 136,
+      "position": 276,
+      "tangent": 25,
+      "texcoord": 260
+    },
+    "top_refusals": {
+      "too_many_vs_varyings (8 > 7)": 26,
+      "too_many_vs_varyings (9 > 7)": 7
+    }
+  }
+}

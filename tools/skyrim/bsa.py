@@ -203,6 +203,12 @@ class BsaArchive:
 
     # -- construction -----------------------------------------------------
 
+    def close(self) -> None:
+        """Close the backing file (safe to call more than once)."""
+        handle = getattr(self, "_file", None)
+        if handle is not None and hasattr(handle, "close") and not handle.closed:
+            handle.close()
+
     def _read_exact(self, n: int) -> bytes:
         data = self._file.read(n)
         if len(data) != n:
