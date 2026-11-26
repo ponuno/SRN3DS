@@ -62,7 +62,8 @@ links from it.
 - Do not run the full suite per iteration. Use `-Only a,b,c`; run the full
   suite once before the final commit of a layer.
 - ARM: `-NoClean -Jobs 8` is safe (shader/bin2s dependencies are explicit in
-  the Makefile). Full clean only when flags or generated inputs change.
+  the Makefile). Measured full `-Mode com -Jobs 8` build: **12 s** (was ~2 min).
+  Full clean only when flags or generated inputs change.
 - The cache is content-addressed and safe to share between worktrees. Delete
   `E:\host_objcache` to force a clean rebuild.
 
