@@ -484,6 +484,10 @@ static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
     apply_state(&draw_state,1);
     if(texture0)configure_native_texture(texture0,&draw_state);
     if(texture1)configure_native_texture(texture1,&draw_state);
+    /* The generic draw path binds its unit explicitly; the menu path used to
+     * rely on the TEV apply doing it, so the A8 atlas never reached unit 0. */
+    if(native0)C3D_TexBind(0,&native0->tex);
+    if(native1)C3D_TexBind(1,&native1->tex);
     d9_pica_citro3d_restore_tev();
     if(d9_pica_citro3d_apply_tev_ex(state->pixel_shader,
                                     native0?&native0->tex:NULL,
