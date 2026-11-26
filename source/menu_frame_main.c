@@ -53,7 +53,17 @@ static void counted_draw_elements(GPU_Primitive_t primitive, int count,
 #define CHECK(condition, what) do { \
     ++g_checks; \
     if (!(condition)) { ++g_errors; fprintf(stderr, "FAIL: %s\n", what); } \
+    fflush(stderr); \
 } while (0)
+
+/* A crash must not hide the last reached phase: the stage file is written
+ * with fopen/fclose on every step and survives whatever terminates the app. */
+static void stage(const char *name) {
+    fprintf(stderr, "STAGE %s\n", name);
+    fflush(stderr);
+    FILE *f = fopen("sdmc:/menu_frame_stage.txt", "w");
+    if (f) { fprintf(f, "%s\n", name); fclose(f); }
+}
 
 #define BATCH_VERTEX_CAP 160000u
 #define BATCH_INDEX_CAP 100000u
@@ -550,15 +560,21 @@ int main(void) {
     consoleInit(GFX_BOTTOM, NULL);
     osSetSpeedupEnable(true);
     FILE *stderr_log = freopen("sdmc:/Skyrim_N3DS_stderr.log", "w", stderr);
+    /* freopen makes stderr fully buffered; a crash or a block before the final
+     * fflush() would otherwise leave an empty log. */
+    setvbuf(stderr, NULL, _IONBF, 0);
     fprintf(stderr, "StartMenu PICA frame runner: build-only until Azahar pixels are archived\n");
     fprintf(stderr, "input=sdmc:/Skyrim/Data/Update.bsa!interface/startmenu.swf\n");
     if (!stderr_log) fprintf(stderr, "stderr redirect unavailable\n");
+    stage("start");
 
     char reason[BSA_REASON_MAX] = {0};
     size_t swf_size = 0;
     uint32_t swf_crc = 0;
+    stage("load_startmenu");
     uint8_t *swf = load_startmenu(&swf_size, &swf_crc, reason, sizeof reason);
     CHECK(swf != NULL, "real Update.bsa StartMenu loads");
+    stage("load_startmenu_done");
     if (!swf) fprintf(stderr, "MENU_INPUT_FAIL: %s\n", reason);
     if (swf)
         fprintf(stderr, "MENU_INPUT bytes=%u crc32=%08lx\n", (unsigned)swf_size,
@@ -567,8 +583,11 @@ int main(void) {
     MenuSwfAtlasTarget atlas;
     uint32_t vertex_count = 0, index_count = 0;
     MenuFrameStats stats;
+    stage("build_menu");
     int cpu_ok = swf && !build_menu(swf, swf_size, &atlas, &vertex_count,
                                     &index_count, &stats, reason, sizeof reason);
+    stage(cpu_ok ? "build_menu_done" : "build_menu_failed");
+    fprintf(stderr, "MENU_BUILD vertices=%u indices=%u\n", vertex_count, index_count);
     free(swf);
 
     D9Citro *gpu = NULL;
@@ -581,12 +600,15 @@ int main(void) {
     int com_attempted = 0;
     uint32_t expected_index_hash = 0;
     if (cpu_ok) {
+        stage("gpu_open");
         gpu = d9_citro_open();
         CHECK(gpu != NULL, "real Citro3D/PICA backend opens");
+        stage("device_create");
         device = gpu ? d9_create_device(d9_citro_backend(), gpu, 8u << 20) : NULL;
         CHECK(device != NULL, "core adopts the real PICA backend");
         if (device) {
             com_attempted = 1;
+            stage("com_init");
             if (!d9_com_demo_init(&demo, device)) {
                 CHECK(demo.menu_indexed, "COM device exposes indexed menu callback");
                 uint32_t caps_ptr = CAPS_OUT;
@@ -606,6 +628,7 @@ int main(void) {
                     fprintf(stderr, "MENU_A8_FAIL: %s (%s)\n",
                             menu_text_draw_status_name(ts), text.reason);
                 text_ready = ts == MENU_TEXT_DRAW_OK;
+                stage(text_ready ? "atlas_ready" : "atlas_failed");
             } else {
                 fprintf(stderr, "MENU_COM_FAIL: %s\n", demo.message);
             }
@@ -627,18 +650,23 @@ int main(void) {
         }
         uint32_t clear = 0xff101820u;
         uint32_t clear_args[6] = {0, 0, 1, clear, 0x3f800000u, 0};
+        stage("clear_begin");
         if (!com_call(&demo, demo.device, 43, clear_args, 6) &&
             !com_call(&demo, demo.device, 41, NULL, 0)) {
+            stage("draw");
             MenuTextDrawStatus ts = menu_text_draw_batch(
                 &text, g_batch_vertices, vertex_count, g_batch_indices, index_count);
+            stage(ts == MENU_TEXT_DRAW_OK ? "draw_ok" : "draw_failed");
             CHECK(ts == MENU_TEXT_DRAW_OK, "one real indexed menu draw submits");
             if (ts != MENU_TEXT_DRAW_OK)
                 fprintf(stderr, "MENU_DRAW_FAIL: %s (%s)\n",
                         menu_text_draw_status_name(ts), text.reason);
             submitted = ts == MENU_TEXT_DRAW_OK;
             uint32_t present_args[4] = {0, 0, 0, 0};
+            stage("present");
             presented = !com_call(&demo, demo.device, 42, NULL, 0) &&
                         !com_call(&demo, demo.device, 17, present_args, 4);
+            stage(presented ? "present_ok" : "present_failed");
             CHECK(presented, "COM EndScene and PICA Present complete");
         } else {
             fprintf(stderr, "MENU_BEGIN_FAIL: %s\n", demo.message);
@@ -690,6 +718,7 @@ int main(void) {
     fprintf(stderr, "scope=real StartMenu shapes + local '!' A8 control; imported text glyphs=0; "
                     "no visual/frame claim without an archived Azahar screenshot\n");
     fflush(stderr);
+    stage("waiting_start");
 
     while (aptMainLoop()) {
         hidScanInput();
