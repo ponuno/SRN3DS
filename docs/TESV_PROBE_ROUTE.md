@@ -706,6 +706,58 @@ admitted, a later 68-byte descriptor copy reads a NULL table slot. It is not a
 `CreateCubeTexture` HRESULT and not a PICA cube-callback refusal. The env remains
 measurement-only and not shippable; no cube or frame is claimed.
 
+### Cube descriptor-slot probe (2026-11-26)
+
+Base: branch head `47a256f`. Added the separate env-gated
+`TESV_CUBE_DESC_PROBE=1` helper `n3ds_cube_desc_probe()` and
+`tools/instrument_cube_desc.py`. The tool instruments a disposable generated
+slice copy immediately after the `L_CED041` and `L_CED160` slot computations;
+it found 7 and 8 copies respectively in `gen01`. The checked-in generated
+sources are untouched. `tests/tesv_cube_desc_probe_smoke.c` covers default-off
+silence, the enabled NULL-slot dump, the first eight base dwords, and the
+`0x16` sentinel comparison. Targeted `tesv_cube_desc_probe,adapter` reported
+**12 passed, 0 failed** with `-TestTimeoutSec 300`.
+
+The instrumented slice build took **163.961826 s** and reported **10 passed,
+1 expected diagnostic, 0 failed**. The census took **112.7162557 s**, exit `1`,
+with a 2,000,000,000-step budget and the usual SM3/HDR-fallback/budget64 env plus
+`TESV_CUBE_DESC_PROBE=1`. Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_slot_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_slot_census.out`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_slot_census.run.txt`
+
+The exact slot dump was:
+
+```text
+[cube-desc] arg=408486b0 index=2 base=40848c04 slot=00000000
+slot_null=yes base_null=no index_eq_0x16=no index_ge_0x16=no
+source_obj=548b6a50 source_index=00000002 source_ok=yes
+[cube-desc] base8=00000000 00000000 00000000 00000000
+                 00000000 00000000 00000000 00000000
+```
+
+This rules out an out-of-range or sentinel index: `index=2` is below `0x16`,
+and the source object at `0x548b6a50` also supplies `2` from `+0x10`. The index
+is initialized by the `f_CD2EA0`/`f_CD2F16`/`f_CD2F4D` family, while the
+renderer constructor `f_CD2620` sets the `+0x624` default sentinel to `0x16`.
+
+The NULL is instead the local base array at `[esp+0x18]`. It points into the
+guest stack (`0x40848c04`), and all eight inspected dwords are zero. Static
+disassembly finds no write to `[esp+0x18]` in `f_CECDC0` before the read at
+`0x00ced04b`; the first write is at `0x00ced42e`, after the fault. Therefore
+this is an uninitialized stack/base-slot path, not a missing `0x71` format
+record and not an invalid index. Expanding usage-0 `CheckDeviceFormat` to
+TEXTURE/SURFACE was not added because the measured dump excludes case (a).
+
+The behavior is unchanged: `CreateCubeTexture` is still absent, all cube/depth/
+scene/shader/texture/draw/Present counts remain zero, and the first fatal event
+is still `0x00ced19d rep movsd` with `ESI=0`, count `0x11`, address `0`. The next
+blocker is to initialize or validate the `f_CECDC0` `[esp+0x18]` base array
+before `0x00ced04b`; the index itself is already populated correctly. This is a
+guest stack-slot/path-precondition issue, not a D3D9 format capability or cube
+create HRESULT. The probe is measurement-only; no cube or frame is claimed.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the

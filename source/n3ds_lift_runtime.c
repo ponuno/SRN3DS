@@ -331,6 +331,33 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
 void n3ds_trace_u32(const char *tag, uint32_t value) {
     fprintf(stderr, "[trace] %s=0x%08x\n", tag ? tag : "value", value);
 }
+void n3ds_cube_desc_probe(uint32_t arg, uint32_t index, uint32_t base, uint32_t slot) {
+    static unsigned emitted;
+    if (!env_flag("TESV_CUBE_DESC_PROBE", 0) || emitted >= 32u) return;
+    ++emitted;
+    uint32_t source = 0, source_index = 0;
+    int source_ok = 0;
+    if (memory && !guest_read32(memory, arg + 0x604u, &source) && source)
+        source_ok = !guest_read32(memory, source + 0x10u, &source_index);
+    fprintf(stderr,
+            "[cube-desc] arg=%08x index=%u base=%08x slot=%08x slot_null=%s "
+            "base_null=%s index_eq_0x16=%s index_ge_0x16=%s "
+            "source_obj=%08x source_index=%08x source_ok=%s\n",
+            arg, index, base, slot, slot ? "no" : "yes",
+            base ? "no" : "yes", index == 0x16u ? "yes" : "no",
+            index >= 0x16u ? "yes" : "no", source, source_index,
+            source_ok ? "yes" : "no");
+    if (memory && base) {
+        uint32_t words[8];
+        int ok = !guest_read(memory, base, words, sizeof words);
+        fprintf(stderr, "[cube-desc] base8=");
+        for (unsigned i = 0; i < 8; ++i)
+            fprintf(stderr, "%s%08x", i ? " " : "", ok ? words[i] : 0);
+        fprintf(stderr, "%s\n", ok ? "" : " unreadable");
+    } else {
+        fprintf(stderr, "[cube-desc] base8=unreadable\n");
+    }
+}
 
 void n3ds_trace_cstr(const char *tag, uint32_t ptr) {
     char text[260];

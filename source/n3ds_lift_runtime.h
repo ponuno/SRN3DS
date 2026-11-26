@@ -29,6 +29,8 @@ const char *n3ds_lift_fault(void);
 /* Bounded guest tracing helpers used only by diagnostic generated slices. */
 void n3ds_trace_cstr(const char *tag, uint32_t ptr);
 void n3ds_trace_u32(const char *tag, uint32_t value);
+/* Measurement-only dump for the NiDX9TextureBufferData descriptor slot. */
+void n3ds_cube_desc_probe(uint32_t arg, uint32_t index, uint32_t base, uint32_t slot);
 void n3ds_lift_exit(uint32_t code) __attribute__((noreturn));
 int n3ds_lift_self_test(void);
 
