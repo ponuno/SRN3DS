@@ -122,7 +122,7 @@ static void trace_enter(const char *method,unsigned kind,unsigned slot,CPU *c){
     uint32_t caller=M32(c->r[4]);
     fprintf(stderr,"[d3d9-trace] %s::%s slot=%u this=0x%08lx caller=%08lx args=[0x%08lx 0x%08lx 0x%08lx 0x%08lx 0x%08lx 0x%08lx 0x%08lx]\n",
         kind?interface_name(kind):"export",method,slot,(unsigned long)trace_arg(c,0),(unsigned long)caller,(unsigned long)trace_arg(c,1),(unsigned long)trace_arg(c,2),(unsigned long)trace_arg(c,3),
-        (unsigned long)trace_arg(c,4),(unsigned long)trace_arg(c,5),(unsigned long)trace_arg(c,6));
+        (unsigned long)trace_arg(c,4),(unsigned long)trace_arg(c,5),(unsigned long)trace_arg(c,6),(unsigned long)trace_arg(c,7));
 }
 static void trace_result(uint32_t value){
     if(!g.trace)return;
