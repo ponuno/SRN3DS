@@ -121,3 +121,11 @@ Exact shim/renderer work:
 - `fxambblowingfogmenu.nif` is a name-based candidate, not confirmed from an
   ESM weather record.
 - No frame, pixel proof or hardware run is claimed here.
+
+## Runtime follow-up
+
+`docs/MENU_BSA_RUNTIME.md` implements and validates the read-only path:
+a bounded C BSA reader, the measured Interface-then-Update order,
+`Interface/StartMenu.swf` copied into guest memory within a byte budget, and
+SWF FWS/CWS/ZWS header checks.  It still does not decompress the GFx body or
+draw the menu.

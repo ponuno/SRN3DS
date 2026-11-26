@@ -171,6 +171,10 @@ read stage without fake successes. *Not met.*
       fonts, translations, logo/fog NIFs and DDS; BSA/SWF census tests pass. First
       UI-side blocker is the GFx dynamic vertex-buffer/FVF path and
       `SetTextureStageState`. See `docs/MENU_ASSET_CLOSURE.md`.
+- [x] Bounded C BSA v104/v105 reader and a runtime `Interface/StartMenu.swf`
+      resolver with the measured Interface-then-Update order, SWF header checks,
+      guest-memory budget and named refusals; synthetic and real read-only tests
+      pass. This is asset loading, not GFx draw. See `docs/MENU_BSA_RUNTIME.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer
