@@ -153,17 +153,17 @@ int main(void){
 
     /* 512x512 descriptor exists, but cannot bind to the 1024 target. */
     uint32_t d512s8=make_depth(&h,device,512,512,D9_D24S8,0,0,0,0);
-    assert(bind_depth(&h,device,d512s8,0x8876086au));
+    assert(bind_depth(&h,device,d512s8,0x8876086cu));
     assert(strstr(d9_com_last_diagnostic(),"does not match"));
     got=get_depth(&h,device);assert(got==d1024s8);assert(unref(&h,got)==2);
 
     /* Switching targets under an incompatible bound depth is refused, and the
      * old target stays selected. */
     uint32_t rt512=make_rt(&h,device,512,512);
-    assert(set_target(&h,device,rt512,0x8876086au));
+    assert(set_target(&h,device,rt512,0x8876086cu));
     assert(strstr(d9_com_last_diagnostic(),"does not match"));
     got=get_target(&h,device);assert(got==rt1024);assert(unref(&h,got)==2);
-    assert(set_target(&h,device,0,0x8876086au)); /* back buffer is 400x240 */
+    assert(set_target(&h,device,0,0x8876086cu)); /* back buffer is 400x240 */
 
     /* Unbind, then the 512 target and its own descriptor work. */
     assert(bind_depth(&h,device,0,0));

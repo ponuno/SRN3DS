@@ -1619,8 +1619,10 @@ int d9_set_render_target(D9Device *d,D9Handle h){
         else return D9_INVALID;
         Depth *s=depth_slot(d,d->depth);
         if(!s||((s->w!=nw||s->h!=nh)&&!backend_depth_embedded(d))){
-            set_diagnosis(d,"SetRenderTarget: the bound depth-stencil surface does not match the new render target size");
-            return D9_UNSUPPORTED;
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "SetRenderTarget: bound depth %ux%u does not match new target %ux%u",
+                     s?s->w:0,s?s->h:0,nw,nh);
+            return D9_INVALID;
         }
     }
     void *native=t?t->native:NULL;
@@ -3168,15 +3170,17 @@ int d9_set_depth_surface(D9Device *d,D9Handle h){
     Depth *s=h?depth_slot(d,h):NULL;
     if(h&&!s)return D9_INVALID;
     if(s){
-        unsigned w,height;
+        unsigned w=0,height=0;
         if(logical_dims(d,&w,&height)||s->w!=w||s->h!=height){
             if(backend_depth_embedded(d)){
                 set_diagnosis(d,"SetDepthStencilSurface: the depth-stencil size does not "
                                 "match the active render target's embedded depth attachment");
                 return D9_INVALID;
             }
-            set_diagnosis(d,"SetDepthStencilSurface: the depth-stencil size does not match the active render target");
-            return D9_UNSUPPORTED;
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "SetDepthStencilSurface: depth %ux%u does not match render target %ux%u",
+                     s->w,s->h,w,height);
+            return D9_INVALID;
         }
     }
     d->depth=h;return D9_OK;
@@ -3192,7 +3196,13 @@ int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
     if(!isfinite(z)||z<0.0f||z>1.0f)return D9_INVALID;
     Depth *s=depth_slot(d,d->depth);
     if(!s)return D9_INVALID;
-    unsigned w,h;if(logical_dims(d,&w,&h)||w!=s->w||h!=s->h)return D9_UNSUPPORTED;
+    unsigned w=0,h=0;
+    if(logical_dims(d,&w,&h)||w!=s->w||h!=s->h){
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "Clear: depth %ux%u does not match render target %ux%u",
+                 s->w,s->h,w,h);
+        return D9_INVALID;
+    }
     uint32_t quant=(uint32_t)(z*16777215.0f+0.5f);
     if(quant>0xffffffu)quant=0xffffffu;
     uint32_t packed=quant|((stencil&0xffu)<<24);

@@ -1409,6 +1409,31 @@ PICA-shaped backend without `draw_volume`.
   `.text` 918,412 B.  Build-only evidence; no Azahar/hardware run or frame
   claimed.
 
+### Render-target / depth-stencil pairing
+
+* The device presentation parameters remain `400x240`, no auto-depth.  Explicit
+  `CreateDepthStencilSurface` resources are descriptors of the single PICA
+  `DEPTH24_STENCIL8` attachment; binding requires the exact active-target size.
+* A size mismatch is `D3DERR_INVALIDCALL` (`0x8876086C`), not
+  `D3DERR_NOTAVAILABLE` (`0x8876086A`).  The same applies to `SetRenderTarget`
+  while an incompatible depth is bound and to `Clear` on a mismatched pair.
+  The diagnostic names both sizes, the previous pair stays bound and no
+  refcount changes.
+* Census state: the engine creates a `512x1024` depth from its `Ni2DBuffer`
+  render-target group while the active color target is the implicit `400x240`
+  back buffer.  No `512x1024` D3D9 color surface is created (`CreateTexture`/
+  `CreateRenderTarget` never receives that size).  All 4662
+  `SetDepthStencilSurface` calls now return `INVALIDCALL`, but the engine's
+  `NiDX9Renderer::BeginUsingRenderTargetGroup` (`0xcd98a0`) self-calls at
+  `0xcd99c0` on the empty default group (surface array `[+0x10] == 0`) until
+  the 64 KiB worker stack overflows at `0x1d1ffffc`.  The HRESULT change does
+  not remove that engine fallback.
+* The `400x240` back buffer is **not** silently resized to `512x1024`.  The
+  next blocker is the missing `512x1024` `Ni2DBuffer` color render target /
+  group registration; supporting it requires a real render-target surface or
+  an explicit named refusal at the buffer/device boundary.  No frame is
+  claimed.
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.

@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef __3DS__
+#include <unistd.h>
 #include <3ds.h>
 #include <unistd.h>
 #include "d3d9_citro3d.h"

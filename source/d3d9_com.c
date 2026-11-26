@@ -880,7 +880,8 @@ static void set_render_target(CPU *c){Obj *o=obj(A(2),SURFACE);
     if(g.clear_pending&&g.clear_target!=h){d3d_log("SetRenderTarget","queued Clear belongs to the previous render target");RET(INVALID,3);}
     int rc=d9_set_render_target(g.device,h);
     if(rc){
-        if(rc==D9_UNSUPPORTED)d3d_fail("SetRenderTarget",d9_last_draw_diagnostic(g.device),UNAVAILABLE);
+        const char *why=d9_last_draw_diagnostic(g.device);
+        if(why&&*why)d3d_fail("SetRenderTarget",why,hr(rc));
         RET(hr(rc),3);
     }
     bind_render_target(o?o:g.back);

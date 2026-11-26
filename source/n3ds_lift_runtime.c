@@ -297,6 +297,46 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
                         esp,(unsigned)st[0],(unsigned)st[1],(unsigned)st[2],
                         (unsigned)st[3],(unsigned)st[4],(unsigned)st[5]);
                 if(env_flag("TESV_FAULT_REGS",0)){
+                    /* The guest stack is below esp here; scan the mapped words
+                     * above it for return addresses inside the TESV image. */
+                    unsigned shown=0;
+                    for(unsigned k=0;k<4096u&&shown<24u;++k){
+                        uint32_t a=esp+4u+4u*k,v=0;
+                        if(guest_read32(memory,a,&v))break;
+                        if(v>=0x00400000u&&v<0x0106a310u){
+                            fprintf(stderr,"[guest] ret[%08x]=%08x\n",
+                                    (unsigned)a,(unsigned)v);
+                            ++shown;
+                        }
+                    }
+                    uint32_t ebp=c->r[5],vt=0,next=0,method=0;
+                    if(!guest_read32(memory,ebp,&vt)&&vt){
+                        (void)guest_read32(memory,vt+0x64,&method);
+                        (void)guest_read32(memory,ebp+0x628,&next);
+                        fprintf(stderr,"[guest] recursion ebp=%08x vt=%08x "
+                                "method64=%08x next628=%08x\n",
+                                (unsigned)ebp,(unsigned)vt,(unsigned)method,
+                                (unsigned)next);
+                        uint32_t gw=0,gh=0,arr=0,s0=0,s0w=0,s0h=0,s0vt=0;
+                        (void)guest_read32(memory,next+8,&gw);
+                        (void)guest_read32(memory,next+0xc,&gh);
+                        (void)guest_read32(memory,next+0x10,&arr);
+                        if(arr){
+                            (void)guest_read32(memory,arr,&s0);
+                            if(s0){
+                                (void)guest_read32(memory,s0+8,&s0w);
+                                (void)guest_read32(memory,s0+0xc,&s0h);
+                                (void)guest_read32(memory,s0,&s0vt);
+                            }
+                        }
+                        fprintf(stderr,"[guest] group=%08x %ux%u arr=%08x "
+                                "s0=%08x %ux%u vt=%08x\n",
+                                (unsigned)next,(unsigned)gw,(unsigned)gh,
+                                (unsigned)arr,(unsigned)s0,(unsigned)s0w,
+                                (unsigned)s0h,(unsigned)s0vt);
+                    }
+                }
+                if(env_flag("TESV_FAULT_REGS",0)){
                     uint32_t ecx=c->r[1];
                     /* CPU has no architectural EIP.  Report the last dispatched
                      * guest target; instrumented slices can refine this with
