@@ -88,6 +88,16 @@ words. This gate therefore still fails in the honest path; passing it requires
 the real bounded SM3 execution path (VS family, material preconditions, PICA
 texture units/vertex colour/constants), not a caps edit.
 
+### Measurement-only post-SM3 census
+
+`TESV_D3D9_SM3_GATE_PROBE=1` is a diagnostic, not a shipping path. The slice
+byte-verifies `00c6e22d` (`83 3D 9C 74 BA 01 07`, `cmp [01ba749c],7`) and
+`00c6e23b` (`7D 0A`, `jge 00c6e247`), then changes only the conditional jump to
+`EB 0A` for the rest of that run. `GetDeviceCaps` and both version words stay
+VS/PS 2.0. It exists solely to record the first post-gate D3D9 calls (shader
+creates, depth, draws, `Present`) and is refused if the bytes differ. Do not
+combine its output with a rendering claim.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
