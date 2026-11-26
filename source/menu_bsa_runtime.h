@@ -34,6 +34,7 @@
 typedef enum {
     MENU_BSA_OK = 0,
     MENU_BSA_MISSING,
+    MENU_BSA_ACCESS,
     MENU_BSA_CORRUPT,
     MENU_BSA_UNSUPPORTED,
     MENU_BSA_BUDGET,
@@ -53,7 +54,8 @@ typedef struct {
     uint8_t signature[3];
     uint8_t version;
     uint32_t declared_bytes; /* SWF's own uncompressed total size */
-    uint32_t stored_bytes;   /* bytes present in the archive entry */
+    uint32_t file_bytes;     /* size of the SWF file in the BSA entry, before
+                                any internal CWS/ZWS decompression */
 } MenuSwfHeader;
 
 typedef struct {
@@ -91,11 +93,11 @@ int menu_bsa_sources_init(MenuBsaSources *out, const char *data_dir,
                           char *reason, size_t reason_cap);
 
 /* Parse and validate only the 8-byte SWF header plus the CWS zlib prefix.
- * `stored_bytes` is the complete stored entry size (not just the header
- * prefix).  FWS and CWS pass; ZWS and unknown signatures return
- * BSA_ERR_UNSUPPORTED with a named reason. */
+ * `file_bytes` is the complete SWF file size inside the BSA entry (the BSA
+ * record's unpacked size, still CWS-compressed internally).  FWS and CWS pass;
+ * ZWS and unknown signatures return BSA_ERR_UNSUPPORTED with a named reason. */
 BsaStatus menu_swf_header_parse(const uint8_t *data, size_t available,
-                                uint32_t stored_bytes, MenuSwfHeader *out,
+                                uint32_t file_bytes, MenuSwfHeader *out,
                                 char *reason, size_t reason_cap);
 
 /* Resolve `virtual_path` through `sources` in order and copy the winning
@@ -104,13 +106,17 @@ BsaStatus menu_swf_header_parse(const uint8_t *data, size_t available,
  *
  * Refusals are explicit:
  *   MENU_BSA_MISSING        no source contains the path
- *   MENU_BSA_CORRUPT        any searched archive is present but unreadable,
- *                           or the winning entry fails its bounds/size checks
+ *   MENU_BSA_ACCESS         a present archive could not be opened or read
+ *                           (EACCES/EBUSY/IO); never silently skipped
+ *   MENU_BSA_CORRUPT        a searched archive is present but fails its format,
+ *                           bounds or size checks, or the winning entry fails
  *   MENU_BSA_UNSUPPORTED    SWF container compression/signature unsupported
  *   MENU_BSA_BUDGET         entry or SWF exceeds `budget_bytes`
  *   MENU_BSA_GUEST_MEMORY   the guest heap cannot provide the block
  *
- * `budget_bytes` bounds both the archive entry's unpacked size and the guest
+ * `budget_bytes` bounds the archive entry's unpacked size, its stored
+ * (compressed) size and the guest allocation.  A compressed entry whose stored
+ * bytes exceed the caller budget is refused before any large temporary
  * allocation.  It is not a GFx decoded-movie budget. */
 MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
                                const MenuBsaSource *sources, size_t source_count,

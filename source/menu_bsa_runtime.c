@@ -14,6 +14,7 @@ const char *menu_bsa_status_name(MenuBsaStatus status) {
     switch (status) {
     case MENU_BSA_OK: return "ok";
     case MENU_BSA_MISSING: return "missing";
+    case MENU_BSA_ACCESS: return "archive access error";
     case MENU_BSA_CORRUPT: return "corrupt";
     case MENU_BSA_UNSUPPORTED: return "unsupported";
     case MENU_BSA_BUDGET: return "over budget";
@@ -46,6 +47,12 @@ static uint32_t get_u32(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+static MenuBsaStatus map_archive_status(BsaStatus st, MenuBsaStatus fallback) {
+    if (st == BSA_ERR_BUDGET) return MENU_BSA_BUDGET;
+    if (st == BSA_ERR_ACCESS || st == BSA_ERR_IO) return MENU_BSA_ACCESS;
+    return fallback;
+}
+
 int menu_bsa_sources_init(MenuBsaSources *out, const char *data_dir,
                           char *reason, size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
@@ -69,17 +76,21 @@ int menu_bsa_sources_init(MenuBsaSources *out, const char *data_dir,
 }
 
 BsaStatus menu_swf_header_parse(const uint8_t *data, size_t available,
-                                uint32_t stored_bytes, MenuSwfHeader *out,
+                                uint32_t file_bytes, MenuSwfHeader *out,
                                 char *reason, size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
-    if (!data || !out) return BSA_ERR_ARGUMENT;
+    if (!data || !out) {
+        set_reason(reason, reason_cap,
+                   "swf: header parse needs data and an output header");
+        return BSA_ERR_ARGUMENT;
+    }
     memset(out, 0, sizeof *out);
-    if (available < 8 || stored_bytes < 8) {
+    if (available < 8 || file_bytes < 8) {
         set_reason(reason, reason_cap, "swf: header is shorter than 8 bytes");
         return BSA_ERR_TRUNCATED;
     }
     memcpy(out->signature, data, 3);
-    out->stored_bytes = stored_bytes;
+    out->file_bytes = file_bytes;
     out->version = data[3];
     out->declared_bytes = get_u32(data + 4);
     if (!memcmp(data, "FWS", 3)) {
@@ -109,17 +120,17 @@ BsaStatus menu_swf_header_parse(const uint8_t *data, size_t available,
         return BSA_ERR_FORMAT;
     }
     if (out->format == MENU_SWF_FWS) {
-        if (out->declared_bytes != stored_bytes) {
+        if (out->declared_bytes != file_bytes) {
             set_reason(reason, reason_cap,
                        "swf: FWS declares %u bytes but stores %u",
-                       out->declared_bytes, stored_bytes);
+                       out->declared_bytes, file_bytes);
             return BSA_ERR_FORMAT;
         }
         return BSA_OK;
     }
     /* CWS: the body is zlib.  Only the two-byte zlib prefix is inspected; the
      * GFx body is deliberately not decompressed here. */
-    if (available < 10 || stored_bytes < 10) {
+    if (available < 10 || file_bytes < 10) {
         set_reason(reason, reason_cap, "swf: CWS body lacks a zlib prefix");
         return BSA_ERR_TRUNCATED;
     }
@@ -188,6 +199,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
         opt.verify_embedded_names = options->verify_embedded_names;
     }
     if (opt.max_unpacked_bytes > budget_bytes) opt.max_unpacked_bytes = budget_bytes;
+    if (opt.max_stored_bytes > budget_bytes) opt.max_stored_bytes = budget_bytes;
 
     BsaArchive *archives[MENU_BSA_MAX_SOURCES];
     memset(archives, 0, sizeof archives);
@@ -209,7 +221,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
             continue; /* absent optional archive, e.g. Update.bsa */
         }
         if (st != BSA_OK) {
-            result_fail(out, MENU_BSA_CORRUPT,
+            result_fail(out, map_archive_status(st, MENU_BSA_CORRUPT),
                         "archive '%s' (%s): %s: %s", name, src->path,
                         bsa_status_name(st), archive_reason);
             goto done;
@@ -217,7 +229,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
         st = bsa_find(archives[i], virtual_path, &match);
         if (st == BSA_ERR_NOT_FOUND) continue;
         if (st != BSA_OK) {
-            result_fail(out, MENU_BSA_CORRUPT,
+            result_fail(out, map_archive_status(st, MENU_BSA_CORRUPT),
                         "archive '%s': lookup of '%s': %s", name,
                         virtual_path, bsa_status_name(st));
             goto done;
@@ -258,7 +270,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
             goto done;
         }
         if (st != BSA_OK) {
-            result_fail(out, MENU_BSA_CORRUPT,
+            result_fail(out, map_archive_status(st, MENU_BSA_CORRUPT),
                         "'%s' in %s: %s: %s", virtual_path, name,
                         bsa_status_name(st), entry_reason);
             goto done;
@@ -276,8 +288,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
         st = bsa_read_prefix(archives[winner], &match.entry, prefix, want,
                              &prefix_len, entry_reason, sizeof entry_reason);
         if (st != BSA_OK) {
-            result_fail(out, st == BSA_ERR_BUDGET ? MENU_BSA_BUDGET
-                                                  : MENU_BSA_CORRUPT,
+            result_fail(out, map_archive_status(st, MENU_BSA_CORRUPT),
                         "'%s' prefix: %s: %s", virtual_path,
                         bsa_status_name(st), entry_reason);
             goto done;
@@ -286,7 +297,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
                                    entry_reason, sizeof entry_reason);
         if (st != BSA_OK) {
             result_fail(out, st == BSA_ERR_UNSUPPORTED ? MENU_BSA_UNSUPPORTED
-                                                       : MENU_BSA_CORRUPT,
+                                                       : map_archive_status(st, MENU_BSA_CORRUPT),
                         "'%s': %s", virtual_path, entry_reason);
             goto done;
         }
@@ -310,8 +321,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
                       entry_reason, sizeof entry_reason);
         if (st != BSA_OK || got != unpacked) {
             heap_free(heap, addr);
-            result_fail(out, st == BSA_ERR_BUDGET ? MENU_BSA_BUDGET
-                                                  : MENU_BSA_CORRUPT,
+            result_fail(out, map_archive_status(st, MENU_BSA_CORRUPT),
                         "'%s' read: %s: %s", virtual_path,
                         bsa_status_name(st), entry_reason);
             goto done;

@@ -37,6 +37,7 @@
 typedef enum {
     BSA_OK = 0,
     BSA_ERR_ARGUMENT,
+    BSA_ERR_ACCESS,
     BSA_ERR_IO,
     BSA_ERR_NOT_FOUND,
     BSA_ERR_MAGIC,
@@ -115,6 +116,8 @@ BsaStatus bsa_open_path(const char *path, const BsaOptions *options,
 void bsa_close(BsaArchive *archive);
 const BsaHeader *bsa_header(const BsaArchive *archive);
 uint32_t bsa_file_count(const BsaArchive *archive);
+/* Diagnostic: bytes currently charged to the archive's index budget. */
+size_t bsa_index_bytes(const BsaArchive *archive);
 
 /* Case- and separator-insensitive lookup ("interface/StartMenu.swf" works).
  * Returns BSA_ERR_NOT_FOUND without touching `out` when absent. */

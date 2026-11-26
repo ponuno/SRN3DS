@@ -126,13 +126,21 @@ Safety and bounded behaviour:
   64-bit hash fields are kept opaque; no hash algorithm was guessed;
 * duplicate canonical paths are refused;
 * configurable caps: folders, files, name bytes, index bytes, one stored
-  payload, one unpacked payload;
+  payload, one unpacked payload.  Temporary folder-record and name-block
+  buffers release their index-budget charge before the permanent name index and
+  hash table are allocated;
+* embedded-name prefix offsets are accumulated in 64-bit arithmetic and a
+  payload start above the format's 32-bit file-offset field is refused, not
+  truncated;
+* the embedded-name-only path re-checks every length and the final name bytes
+  on the second pass, so a changed archive cannot overrun the first-pass total;
 * raw inflate supports stored, fixed-Huffman and dynamic-Huffman deflate blocks,
   verifies the zlib CMF/FLG header and the Adler-32, rejects preset dictionaries,
   reserved block types, bad distances, truncated streams and output overruns;
 * for a compressed prefix read the whole stored entry is read into a temporary
-  buffer bounded by `max_stored_bytes` (default 64 MiB).  This is a deliberate,
-  documented limit, not streaming inflate.
+  buffer bounded by `max_stored_bytes` (default 64 MiB).  The runtime resolver
+  lowers that cap to its `budget_bytes`; this is a deliberate, documented limit,
+  not streaming inflate.
 
 Named statuses include `BSA_ERR_MAGIC`, `BSA_ERR_VERSION`, `BSA_ERR_BOUNDS`,
 `BSA_ERR_COUNT`, `BSA_ERR_NAME`, `BSA_ERR_DUPLICATE`, `BSA_ERR_UNSUPPORTED`,
@@ -167,7 +175,8 @@ Algorithm:
 2. Look up the canonical path case-insensitively.  Remember the **last** source
    that contains it.  Neither source containing it is `MENU_BSA_MISSING`.
 3. Read only the winning entry.  `MENU_BSA_BUDGET` is returned if the unpacked
-   entry or the guest block exceeds `budget_bytes`.
+   entry, its stored (compressed) bytes or the guest block exceed
+   `budget_bytes`.
 4. Read 16 prefix bytes, validate the SWF header, then allocate `heap_alloc`
    and read the full stored bytes directly into guest memory.
 5. Fill the result with the guest address, size, winning archive, CRC-32 and
@@ -185,20 +194,33 @@ SWF header handling:
 A short header, a bad zlib prefix, a version outside 1..32, or an FWS
 declared-size mismatch is a named refusal, never a partial success.
 
+`MenuSwfHeader.file_bytes` is the SWF file length inside the BSA entry
+(BSA-unpacked, still CWS-compressed internally).  `declared_bytes` is the
+movie's own uncompressed size.  `MenuBsaResult.stored_size` separately reports
+the BSA record's stored (possibly BSA-compressed) size.
+
 Refusal mapping:
 
 | Status | Meaning |
 |---|---|
 | `MENU_BSA_MISSING` | no source contains the path |
-| `MENU_BSA_CORRUPT` | any searched archive is present but unreadable, or the winning entry fails a bounds/size/inflate check |
+| `MENU_BSA_ACCESS` | a present archive could not be opened or read (EACCES/EBUSY/IO); never silently skipped |
+| `MENU_BSA_CORRUPT` | a searched archive is present but fails a format/bounds/size check, or the winning entry fails |
 | `MENU_BSA_UNSUPPORTED` | ZWS/unknown SWF signature, unsupported version |
 | `MENU_BSA_BUDGET` | entry or guest allocation exceeds the caller's budget |
 | `MENU_BSA_GUEST_MEMORY` | the guest heap cannot provide/back the block |
 | `MENU_BSA_BAD_ARGUMENT` | missing heap/source/path/budget |
 
 Corruption in an earlier archive is a hard refusal even when a later archive
-contains the path.  This is deliberate: the resolver cannot prove that the
-corrupt archive would not have shadowed the later one.
+contains the path.  A present-but-unopenable archive is also a hard refusal
+(`MENU_BSA_ACCESS`), not an absent optional archive: it must not silently fall
+back to `Skyrim - Interface.bsa`.
+
+`budget_bytes` bounds the entry's unpacked size, the stored (compressed) bytes
+needed for that entry, and the guest allocation.  A compressed entry whose stored
+payload exceeds the caller budget is refused before a temporary allocation, so a
+16-byte SWF header request cannot trigger a 64 MiB malloc.  This is a storage
+budget, not a decoded-GFx budget.
 
 ## 6. Tests
 
@@ -210,7 +232,7 @@ powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: **262 checks, 0 failures** (host `PASS`).
+Result: **277 checks, 0 failures** (host `PASS`).
 
 With the installed data read-only:
 
@@ -221,7 +243,7 @@ powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: **271 checks, 0 failures**, including:
+Result: **286 checks, 0 failures**, including:
 
 ```
 real: Update.bsa Interface\StartMenu.swf 60284 bytes crc32=0x6910248f CWS v10 declared=144628
@@ -239,11 +261,13 @@ The synthetic coverage is:
   bad zlib header, Adler mismatch and bounded prefix/full output;
 * bad magic, unsupported version, truncation, folder/file count limits, index
   budget, per-file budget, out-of-range record, zero folder-name length and
-  duplicate path;
+  duplicate path; tight index budget after temporary blocks are released;
 * FWS/CWS/ZWS, unknown signature, short header, version 0/99, FWS declared-size
   mismatch and CWS bad zlib prefix;
-* resolver: base-only, Update override, missing, corrupt, budget, ZWS,
-  guest-heap exhaustion, absent archive, guest byte comparison and block free.
+* resolver: base-only, Update override, missing, present-but-unopenable
+  (`MENU_BSA_ACCESS`, no fallback), corrupt, budget, compressed stored-payload
+  budget, ZWS, guest-heap exhaustion, absent archive, guest byte comparison and
+  block free.
 
 The real compressed check is a known DDS in `Skyrim - Textures.bsa`; it exercises
 dynamic-Huffman inflate and embedded-name verification on retail data.

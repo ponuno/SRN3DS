@@ -1,5 +1,6 @@
 #include "bsa_reader.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +60,7 @@ const char *bsa_status_name(BsaStatus status) {
     switch (status) {
     case BSA_OK: return "ok";
     case BSA_ERR_ARGUMENT: return "bad argument";
+    case BSA_ERR_ACCESS: return "cannot open archive";
     case BSA_ERR_IO: return "I/O error";
     case BSA_ERR_NOT_FOUND: return "not found";
     case BSA_ERR_MAGIC: return "not a BSA";
@@ -99,7 +101,10 @@ static uint64_t get_u64(const uint8_t *p) {
 static BsaStatus read_exact(const BsaArchive *a, uint64_t offset, void *dst,
                             size_t bytes, char *reason, size_t reason_cap) {
     if (!bytes) return BSA_OK;
-    if (!dst) return BSA_ERR_ARGUMENT;
+    if (!dst) {
+        set_reason(reason, reason_cap, "read destination is null");
+        return BSA_ERR_ARGUMENT;
+    }
     if (offset > a->size || (uint64_t)bytes > a->size - offset) {
         set_reason(reason, reason_cap,
                    "read %llu..%llu is outside the %llu-byte archive",
@@ -129,6 +134,16 @@ static void *index_alloc(BsaArchive *a, size_t bytes) {
 
 static BsaStatus alloc_failure(const BsaArchive *a) {
     return a->alloc_budget ? BSA_ERR_BUDGET : BSA_ERR_IO;
+}
+
+/* Temporary parser blocks (folder records, name block) are charged while they
+ * are live and released before the next allocation.  Accounting the release is
+ * what keeps a tight max_index_bytes usable. */
+static void index_free(BsaArchive *a, void *p, size_t bytes) {
+    if (!p) return;
+    free(p);
+    if (a->index_bytes >= bytes) a->index_bytes -= bytes;
+    else a->index_bytes = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -438,8 +453,12 @@ static BsaStatus inflate_raw(const uint8_t *src, size_t src_len,
 BsaStatus bsa_inflate_zlib(const uint8_t *src, size_t src_len,
                            uint8_t *dst, size_t cap, size_t *out_len,
                            int allow_partial, char *reason, size_t reason_cap) {
-    if (!src || src_len < 6 || (!dst && cap) || !out_len)
+    if (reason && reason_cap) reason[0] = 0;
+    if (!src || src_len < 6 || (!dst && cap) || !out_len) {
+        set_reason(reason, reason_cap,
+                   "inflate needs a zlib stream, output pointer and length");
         return BSA_ERR_ARGUMENT;
+    }
     unsigned cmf = src[0], flg = src[1];
     if ((cmf & 0x0f) != 8 || ((cmf << 8) | flg) % 31 != 0) {
         set_reason(reason, reason_cap, "zlib: bad CMF/FLG header");
@@ -627,7 +646,7 @@ static BsaStatus entry_prefix(const BsaArchive *a, const BsaEntry *entry,
         set_reason(reason, reason_cap, "entry record was modified");
         return BSA_ERR_ARGUMENT;
     }
-    uint32_t off = entry->offset;
+    uint64_t off = entry->offset;
     uint32_t len = entry->stored_size;
     if (a->header.embedded_names) {
         if (!len) {
@@ -638,7 +657,8 @@ static BsaStatus entry_prefix(const BsaArchive *a, const BsaEntry *entry,
         BsaStatus st = read_exact(a, off, head, 1, reason, reason_cap);
         if (st != BSA_OK) return st;
         uint32_t name_len = head[0];
-        if (!name_len || name_len >= BSA_PATH_MAX || 1u + name_len > len) {
+        if (!name_len || name_len >= BSA_PATH_MAX ||
+            (uint64_t)1u + name_len > len) {
             set_reason(reason, reason_cap,
                        "bad embedded name length %u (stored %u)", name_len, len);
             return BSA_ERR_NAME;
@@ -681,7 +701,13 @@ static BsaStatus entry_prefix(const BsaArchive *a, const BsaEntry *entry,
     } else {
         *unpacked = len;
     }
-    *payload_off = off;
+    if (off > UINT32_MAX) {
+        set_reason(reason, reason_cap,
+                   "payload offset %llu exceeds the 32-bit archive offset field",
+                   (unsigned long long)off);
+        return BSA_ERR_BOUNDS;
+    }
+    *payload_off = (uint32_t)off;
     *payload_len = len;
     if (*unpacked > a->opt.max_unpacked_bytes) {
         set_reason(reason, reason_cap,
@@ -711,11 +737,11 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
     if (h->folder_count && !records) return alloc_failure(a);
     BsaStatus st = read_exact(a, folder_records_at, records,
                               (size_t)h->folder_count * 16u, reason, reason_cap);
-    if (st != BSA_OK) { free(records); return st; }
+    if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
 
     a->folder_names = (char *)index_alloc(a, (size_t)h->total_folder_name_length + 1u);
     if (h->total_folder_name_length && !a->folder_names) {
-        free(records);
+        index_free(a, records, (size_t)h->folder_count * 16u);
         return alloc_failure(a);
     }
     uint32_t folder_name_bytes = 0;
@@ -724,24 +750,24 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
     for (uint32_t i = 0; i < h->folder_count; ++i) {
         uint8_t name_len_byte;
         st = read_exact(a, cursor, &name_len_byte, 1, reason, reason_cap);
-        if (st != BSA_OK) { free(records); return st; }
+        if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
         ++cursor;
         uint32_t name_len = name_len_byte;
         if (!name_len || name_len >= BSA_PATH_MAX) {
             set_reason(reason, reason_cap,
                        "folder %u has invalid name length %u", i, name_len);
-            free(records);
+            index_free(a, records, (size_t)h->folder_count * 16u);
             return BSA_ERR_NAME;
         }
         if (folder_name_bytes + name_len > h->total_folder_name_length) {
             set_reason(reason, reason_cap,
                        "folder %u name runs past the declared name block", i);
-            free(records);
+            index_free(a, records, (size_t)h->folder_count * 16u);
             return BSA_ERR_FORMAT;
         }
         char raw[BSA_PATH_MAX];
         st = read_exact(a, cursor, raw, name_len, reason, reason_cap);
-        if (st != BSA_OK) { free(records); return st; }
+        if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
         cursor += name_len;
         folder_name_bytes += name_len;
         if (raw[name_len - 1] == 0) name_len--;
@@ -763,13 +789,13 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
             set_reason(reason, reason_cap,
                        "folder %u count %u exceeds the %u remaining files",
                        i, count, h->file_count - entry_index);
-            free(records);
+            index_free(a, records, (size_t)h->folder_count * 16u);
             return BSA_ERR_COUNT;
         }
         for (uint32_t j = 0; j < count; ++j) {
             uint8_t rec[16];
             st = read_exact(a, cursor, rec, 16, reason, reason_cap);
-            if (st != BSA_OK) { free(records); return st; }
+            if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
             cursor += 16;
             BsaEntryInternal *e = &a->entries[entry_index];
             e->hash = get_u64(rec);
@@ -779,7 +805,7 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
             ++entry_index;
         }
     }
-    free(records);
+    index_free(a, records, (size_t)h->folder_count * 16u);
     if (folder_name_bytes != h->total_folder_name_length) {
         set_reason(reason, reason_cap,
                    "folder names consume %u bytes, header says %u",
@@ -803,7 +829,7 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
         if (!block) return alloc_failure(a);
         st = read_exact(a, cursor, block, h->total_file_name_length,
                         reason, reason_cap);
-        if (st != BSA_OK) { free(block); return st; }
+        if (st != BSA_OK) { index_free(a, block, h->total_file_name_length); return st; }
         cursor += h->total_file_name_length;
     } else if (h->file_count && !h->embedded_names) {
         set_reason(reason, reason_cap,
@@ -814,7 +840,7 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
     if (block) {
         st = build_normal_names(a, block, h->total_file_name_length,
                                 reason, reason_cap);
-        free(block);
+        index_free(a, block, h->total_file_name_length);
         if (st != BSA_OK) return st;
     } else if (h->file_count) {
         /* Embedded-name-only archive: scan the bounded prefixes.  A path may
@@ -859,6 +885,12 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
             st = read_exact(a, e->offset, head, 1, reason, reason_cap);
             if (st != BSA_OK) return st;
             uint32_t len = head[0];
+            if (!len || len >= BSA_PATH_MAX ||
+                (uint64_t)1u + len > e->stored_size) {
+                set_reason(reason, reason_cap,
+                           "record %u embedded name changed to length %u", i, len);
+                return BSA_ERR_NAME;
+            }
             char raw[BSA_PATH_MAX];
             st = read_exact(a, (uint64_t)e->offset + 1u, raw, len,
                             reason, reason_cap);
@@ -867,6 +899,11 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
             raw[len] = 0;
             char canon[BSA_PATH_MAX];
             size_t canon_len = canonical_path(raw, canon, sizeof canon);
+            if (!canon_len || (uint64_t)out + canon_len + 1u > total) {
+                set_reason(reason, reason_cap,
+                           "record %u embedded name changed between reads", i);
+                return BSA_ERR_NAME;
+            }
             e->name_offset = out;
             memcpy(a->names + out, canon, canon_len);
             out += (uint32_t)canon_len;
@@ -970,7 +1007,11 @@ BsaStatus bsa_open_reader(BsaReadAt read_at, void *ctx, uint64_t size,
                           const BsaOptions *options, BsaArchive **out,
                           char *reason, size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
-    if (!read_at || !out || !size) return BSA_ERR_ARGUMENT;
+    if (!read_at || !out || !size) {
+        set_reason(reason, reason_cap,
+                   "open needs a reader, a non-zero size and an output pointer");
+        return BSA_ERR_ARGUMENT;
+    }
     *out = NULL;
     BsaArchive *a = (BsaArchive *)calloc(1, sizeof *a);
     if (!a) return BSA_ERR_IO;
@@ -1016,7 +1057,11 @@ static int file_read_at(void *ctx, uint64_t offset, void *dst, size_t bytes) {
 BsaStatus bsa_open_memory(const void *data, size_t size,
                           const BsaOptions *options, BsaArchive **out,
                           char *reason, size_t reason_cap) {
-    if (!data || !size || size > UINT32_MAX) return BSA_ERR_ARGUMENT;
+    if (!data || !size || size > UINT32_MAX) {
+        set_reason(reason, reason_cap,
+                   "memory archive needs a non-empty 32-bit-sized buffer");
+        return BSA_ERR_ARGUMENT;
+    }
     MemoryContext *ctx = (MemoryContext *)calloc(1, sizeof *ctx);
     if (!ctx) return BSA_ERR_IO;
     ctx->data = (const uint8_t *)data;
@@ -1031,15 +1076,26 @@ BsaStatus bsa_open_memory(const void *data, size_t size,
 BsaStatus bsa_open_path(const char *path, const BsaOptions *options,
                         BsaArchive **out, char *reason, size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
-    if (!path || !out) return BSA_ERR_ARGUMENT;
+    if (!path || !out) {
+        set_reason(reason, reason_cap, "open needs a path and an output pointer");
+        return BSA_ERR_ARGUMENT;
+    }
     *out = NULL;
+    errno = 0;
     FILE *file = fopen(path, "rb");
     if (!file) {
-        set_reason(reason, reason_cap, "cannot open '%s'", path);
-        return BSA_ERR_NOT_FOUND;
+        int e = errno;
+        if (e == ENOENT || e == ENOTDIR) {
+            set_reason(reason, reason_cap, "'%s' does not exist", path);
+            return BSA_ERR_NOT_FOUND;
+        }
+        set_reason(reason, reason_cap, "cannot open '%s': %s (errno %d)",
+                   path, strerror(e), e);
+        return BSA_ERR_ACCESS;
     }
     if (BSA_FSEEK(file, 0, SEEK_END) != 0) {
         fclose(file);
+        set_reason(reason, reason_cap, "cannot seek '%s'", path);
         return BSA_ERR_IO;
     }
     int64_t end = BSA_FTELL(file);
@@ -1049,7 +1105,11 @@ BsaStatus bsa_open_path(const char *path, const BsaOptions *options,
         return BSA_ERR_TRUNCATED;
     }
     FileContext *ctx = (FileContext *)calloc(1, sizeof *ctx);
-    if (!ctx) { fclose(file); return BSA_ERR_IO; }
+    if (!ctx) {
+        fclose(file);
+        set_reason(reason, reason_cap, "out of memory opening '%s'", path);
+        return BSA_ERR_IO;
+    }
     ctx->file = file;
     BsaStatus st = bsa_open_reader(file_read_at, ctx, (uint64_t)end, options,
                                    out, reason, reason_cap);
@@ -1079,6 +1139,10 @@ uint32_t bsa_file_count(const BsaArchive *archive) {
     return archive ? archive->header.file_count : 0;
 }
 
+size_t bsa_index_bytes(const BsaArchive *archive) {
+    return archive ? archive->index_bytes : 0;
+}
+
 BsaStatus bsa_find(const BsaArchive *archive, const char *path, BsaMatch *out) {
     if (!archive || !path || !out || !archive->table) return BSA_ERR_ARGUMENT;
     char canon[BSA_PATH_MAX];
@@ -1106,7 +1170,11 @@ BsaStatus bsa_find(const BsaArchive *archive, const char *path, BsaMatch *out) {
 
 BsaStatus bsa_unpacked_size(const BsaArchive *archive, const BsaEntry *entry,
                             uint32_t *out, char *reason, size_t reason_cap) {
-    if (!archive || !entry || !out) return BSA_ERR_ARGUMENT;
+    if (!archive || !entry || !out) {
+        set_reason(reason, reason_cap,
+                   "unpacked-size query needs an archive, entry and output");
+        return BSA_ERR_ARGUMENT;
+    }
     uint32_t off, len, unpacked;
     BsaStatus st = entry_prefix(archive, entry, &off, &len, &unpacked,
                                 reason, reason_cap);
@@ -1143,7 +1211,11 @@ static BsaStatus read_payload(const BsaArchive *archive, const BsaEntry *entry,
 BsaStatus bsa_read_prefix(const BsaArchive *archive, const BsaEntry *entry,
                           uint8_t *dst, size_t cap, size_t *out_len,
                           char *reason, size_t reason_cap) {
-    if (!archive || !entry || (!dst && cap) || !out_len) return BSA_ERR_ARGUMENT;
+    if (!archive || !entry || (!dst && cap) || !out_len) {
+        set_reason(reason, reason_cap,
+                   "prefix read needs an archive, entry, destination and length");
+        return BSA_ERR_ARGUMENT;
+    }
     *out_len = 0;
     uint32_t off = 0, len = 0, unpacked = 0;
     BsaStatus st = entry_prefix(archive, entry, &off, &len, &unpacked,
@@ -1176,7 +1248,11 @@ BsaStatus bsa_read_prefix(const BsaArchive *archive, const BsaEntry *entry,
 BsaStatus bsa_read(const BsaArchive *archive, const BsaEntry *entry,
                    uint8_t *dst, size_t cap, size_t *out_len,
                    char *reason, size_t reason_cap) {
-    if (!archive || !entry || (!dst && cap) || !out_len) return BSA_ERR_ARGUMENT;
+    if (!archive || !entry || (!dst && cap) || !out_len) {
+        set_reason(reason, reason_cap,
+                   "read needs an archive, entry, destination and length");
+        return BSA_ERR_ARGUMENT;
+    }
     *out_len = 0;
     uint8_t *stored = NULL;
     uint32_t stored_len = 0, unpacked = 0;

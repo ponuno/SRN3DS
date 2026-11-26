@@ -15,6 +15,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 static int checks;
 static int failures;
 
@@ -623,6 +627,27 @@ static void test_bsa_embedded_and_errors(void) {
     check(bsa_open_memory(blob, dup_built.len, NULL, &a, reason,
                           sizeof reason) == BSA_ERR_DUPLICATE,
           "duplicate path refused");
+
+    /* M2: folder-record and name-block temporaries must be released from the
+     * index budget before the name index and hash table are charged. */
+    check(build_bsa(blob, sizeof blob, files, nfiles, 104, 0, 0, 1,
+                    &built) != 0,
+          "index-accounting BSA builds");
+    a = NULL;
+    check(bsa_open_memory(blob, built.len, NULL, &a, reason, sizeof reason) ==
+              BSA_OK,
+          "index-accounting BSA opens");
+    size_t final_index = a ? bsa_index_bytes(a) : 0;
+    if (a) bsa_close(a);
+    a = NULL;
+    check(final_index > 0, "index bytes are reported");
+    BsaOptions tight;
+    bsa_options_default(&tight);
+    tight.max_index_bytes = (uint32_t)final_index;
+    check(bsa_open_memory(blob, built.len, &tight, &a, reason,
+                          sizeof reason) == BSA_OK,
+          "temporary index blocks release their budget");
+    if (a) bsa_close(a);
 }
 
 static void test_swf_header(void) {
@@ -638,13 +663,13 @@ static void test_swf_header(void) {
                                 sizeof reason) == BSA_OK,
           "FWS header accepted");
     check(h.format == MENU_SWF_FWS && h.version == 10 &&
-              h.declared_bytes == flen,
+              h.declared_bytes == flen && h.file_bytes == flen,
           "FWS fields");
     check(menu_swf_header_parse(cws, clen, (uint32_t)clen, &h, reason,
                                 sizeof reason) == BSA_OK,
           "CWS header accepted without body decompression");
     check(h.format == MENU_SWF_CWS && h.version == 10 &&
-              h.declared_bytes == 108,
+              h.declared_bytes == 108 && h.file_bytes == clen,
           "CWS fields");
     check(menu_swf_header_parse(zws, zlen, (uint32_t)zlen, &h, reason,
                                 sizeof reason) == BSA_ERR_UNSUPPORTED &&
@@ -696,12 +721,13 @@ static int write_file(const char *path, const uint8_t *data, size_t len) {
 }
 
 static void test_runtime(void) {
-    uint8_t base_swf[1024], ovr_swf[1024], zws_swf[256];
+    uint8_t base_swf[1024], ovr_swf[1024], zws_swf[256], comp_swf[1024];
     uint8_t text[64], base_blob[65536], ovr_blob[65536], miss_blob[65536];
-    uint8_t zws_blob[65536], corrupt_blob[64], got[4096];
+    uint8_t zws_blob[65536], comp_blob[65536], corrupt_blob[64], got[4096];
     size_t base_swf_len = make_cws(base_swf, sizeof base_swf, 0x11, 180);
     size_t ovr_swf_len = make_cws(ovr_swf, sizeof ovr_swf, 0x77, 240);
     size_t zws_len = make_zws(zws_swf, sizeof zws_swf, 40);
+    size_t comp_swf_len = make_cws(comp_swf, sizeof comp_swf, 0x44, 64);
     memset(text, 0x2e, sizeof text);
 
     TestFile base_files[] = {
@@ -717,7 +743,10 @@ static void test_runtime(void) {
     TestFile zws_files[] = {
         {"interface\\startmenu.swf", zws_swf, zws_len}
     };
-    BuiltBsa base_built, ovr_built, miss_built, zws_built;
+    TestFile comp_files[] = {
+        {"interface\\startmenu.swf", comp_swf, comp_swf_len}
+    };
+    BuiltBsa base_built, ovr_built, miss_built, zws_built, comp_built;
     check(build_bsa(base_blob, sizeof base_blob, base_files, 2, 104, 0, 0, 1,
                     &base_built) != 0, "runtime base BSA builds");
     check(build_bsa(ovr_blob, sizeof ovr_blob, ovr_files, 1, 104, 0, 0, 1,
@@ -726,6 +755,8 @@ static void test_runtime(void) {
                     &miss_built) != 0, "runtime missing BSA builds");
     check(build_bsa(zws_blob, sizeof zws_blob, zws_files, 1, 104, 0, 0, 1,
                     &zws_built) != 0, "runtime ZWS BSA builds");
+    check(build_bsa(comp_blob, sizeof comp_blob, comp_files, 1, 104, 1, 0, 1,
+                    &comp_built) != 0, "runtime compressed BSA builds");
 
     check(write_file("bsa_test_base.bsa", base_blob, base_built.len),
           "write base fixture");
@@ -735,6 +766,10 @@ static void test_runtime(void) {
           "write missing fixture");
     check(write_file("bsa_test_zws.bsa", zws_blob, zws_built.len),
           "write ZWS fixture");
+    check(write_file("bsa_test_compressed.bsa", comp_blob, comp_built.len),
+          "write compressed fixture");
+    check(write_file("bsa_test_locked.bsa", base_blob, base_built.len),
+          "write locked fixture");
     memcpy(corrupt_blob, base_blob, sizeof corrupt_blob);
     memcpy(corrupt_blob, "NOPE", 4);
     check(write_file("bsa_test_corrupt.bsa", corrupt_blob, sizeof corrupt_blob),
@@ -801,6 +836,53 @@ static void test_runtime(void) {
     check(st == MENU_BSA_BUDGET && r.guest_address == 0,
           "entry budget refusal");
 
+    /* M1: a compressed entry's stored payload cannot exceed the caller budget,
+     * so a 16-byte header prefix cannot cause a 64 MiB temporary allocation. */
+    MenuBsaSource comp_src[1] = {
+        {"bsa_test_compressed.bsa", "Skyrim - Interface.bsa"}
+    };
+    uint32_t tight_budget = (uint32_t)comp_swf_len + 8u;
+    st = menu_bsa_resolve_startmenu(&heap, comp_src, 1, tight_budget, &r);
+    check(st == MENU_BSA_BUDGET && r.guest_address == 0,
+          "compressed stored payload bounded by caller budget");
+    st = menu_bsa_resolve_startmenu(&heap, comp_src, 1, 256u * 1024u, &r);
+    check(st == MENU_BSA_OK && r.size == comp_swf_len, "compressed entry resolves");
+    if (st == MENU_BSA_OK) {
+        check(guest_read(&mem, r.guest_address, got, r.size) == 0 &&
+                  !memcmp(got, comp_swf, r.size),
+              "compressed entry bytes in guest memory");
+        heap_free(&heap, r.guest_address);
+    }
+
+    /* H1: a present but unopenable archive is an access error, not "missing":
+     * resolution must not silently continue into Update.bsa. */
+#ifdef _WIN32
+    HANDLE locked = CreateFileA("bsa_test_locked.bsa", GENERIC_READ, 0, NULL,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    check(locked != INVALID_HANDLE_VALUE, "exclusive archive fixture opens");
+    if (locked != INVALID_HANDLE_VALUE) {
+        BsaArchive *locked_archive = NULL;
+        char locked_reason[BSA_REASON_MAX] = "";
+        check(bsa_open_path("bsa_test_locked.bsa", NULL, &locked_archive,
+                            locked_reason, sizeof locked_reason) ==
+                  BSA_ERR_ACCESS,
+              "present-but-locked archive is BSA_ERR_ACCESS");
+        check(strstr(locked_reason, "cannot open") != NULL,
+              "access refusal has a named reason");
+        MenuBsaSource locked_pair[2] = {
+            {"bsa_test_locked.bsa", "Skyrim - Interface.bsa"},
+            {"bsa_test_override.bsa", "Update.bsa"}
+        };
+        st = menu_bsa_resolve_startmenu(&heap, locked_pair, 2, 256u * 1024u,
+                                        &r);
+        check(st == MENU_BSA_ACCESS && r.guest_address == 0,
+              "unopenable base is refused without an Update fallback");
+        check(strstr(r.reason, "cannot open") != NULL,
+              "resolver access refusal is named");
+        CloseHandle(locked);
+    }
+#endif
+
     MenuBsaSource zws_pair[1] = {
         {"bsa_test_zws.bsa", "Skyrim - Interface.bsa"}
     };
@@ -832,6 +914,8 @@ static void test_runtime(void) {
     remove("bsa_test_override.bsa");
     remove("bsa_test_missing.bsa");
     remove("bsa_test_zws.bsa");
+    remove("bsa_test_compressed.bsa");
+    remove("bsa_test_locked.bsa");
     remove("bsa_test_corrupt.bsa");
 }
 
