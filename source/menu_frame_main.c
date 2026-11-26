@@ -65,6 +65,8 @@ static void stage(const char *name) {
     if (f) { fprintf(f, "%s\n", name); fclose(f); }
 }
 
+#define PHASE(name) do { fprintf(stderr, "PHASE %s\n", name); fflush(stderr); } while (0)
+
 #define BATCH_VERTEX_CAP 160000u
 #define BATCH_INDEX_CAP 100000u
 #define TEXT_VERTEX_CAP 4096u
@@ -297,16 +299,20 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
                       uint32_t *out_vertices, uint32_t *out_indices,
                       MenuFrameStats *stats, char *reason, size_t reason_cap) {
     MenuSwfSummary summary;
+    PHASE("summary");
     MenuSwfStatus status = menu_swf_summary(swf, swf_size, &summary, reason, reason_cap);
     CHECK(status == MENU_SWF_OK, "real StartMenu container parses");
     if (status != MENU_SWF_OK) return -1;
+    PHASE("summary_done");
 
     MenuSwfDisplayListResult list;
+    PHASE("display_list");
     status = menu_swf_display_list_build(swf, swf_size, g_records,
                                          sizeof g_records / sizeof g_records[0],
                                          &list, reason, reason_cap);
     CHECK(status == MENU_SWF_OK && !list.truncated, "real display list flattens");
     if (status != MENU_SWF_OK || list.truncated) return -1;
+    PHASE("display_list_done");
 
     MenuSwfShapeResult *shapes = calloc(1, sizeof *shapes);
     MenuSwfDisplaySummary *display = calloc(1, sizeof *display);
@@ -315,16 +321,20 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
         snprintf(reason, reason_cap, "shape/display allocation failed");
         return -1;
     }
+    PHASE("shape_summary");
     status = menu_swf_shape_summary(swf, swf_size, shapes, reason, reason_cap);
     CHECK(status == MENU_SWF_OK && !shapes->truncated, "real shape/font geometry parses");
     if (status != MENU_SWF_OK || shapes->truncated) {
         free(shapes); free(display); return -1;
     }
+    PHASE("shape_summary_done");
+    PHASE("display_summary");
     status = menu_swf_display_summary(swf, swf_size, display, reason, reason_cap);
     CHECK(status == MENU_SWF_OK && !display->truncated, "real display/font metrics parse");
     if (status != MENU_SWF_OK || display->truncated) {
         free(shapes); free(display); return -1;
     }
+    PHASE("display_summary_done");
 
     MenuSwfEditTextList edits = {g_edits, MENU_SWF_DISPLAY_MAX_EDIT_TEXTS, 0, 0, 0};
     status = menu_swf_display_collect_edit_texts(swf, swf_size, &edits, reason, reason_cap);
@@ -334,13 +344,19 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
     status = menu_swf_collect_imports(swf, swf_size, &imports, reason, reason_cap);
     CHECK(status == MENU_SWF_OK && imports.count == 2, "two structured font imports");
     if (status != MENU_SWF_OK) { free(shapes); free(display); return -1; }
+    PHASE("metadata_done");
 
     memset(stats, 0, sizeof *stats);
     stats->records = list.record_count;
     stats->sprites = list.sprite_count;
     uint32_t vertex_count = 0, index_count = 0;
     char plain[MENU_SWF_TEXT_MAX_CHARS + 1];
+    PHASE("shape_loop");
     for (uint32_t i = 0; i < list.record_count; ++i) {
+        if ((i & 7u) == 0) {
+            fprintf(stderr, "PHASE shape_loop record=%u/%u\n", i, list.record_count);
+            fflush(stderr);
+        }
         const MenuSwfDisplayListRecord *record = &g_records[i];
         if (record->is_sprite) { ++stats->sprite_records; continue; }
         if (record->has_clip_depth) { ++stats->mask_records; continue; }
@@ -389,6 +405,7 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
     CHECK(stats->tess_vertices == 57480 && stats->tess_triangles == 28718 &&
               stats->shape_vertices == 57480 && stats->shape_indices == 86154,
           "real shape tessellation/batch counts are unchanged");
+    PHASE("shape_loop_done");
 
     const MenuSwfFontSummary *font = NULL;
     for (uint32_t i = 0; i < display->stored_fonts; ++i)
@@ -407,6 +424,7 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
     CHECK(status == MENU_SWF_OK && text.glyph_count == 1 &&
               !text.missing_glyphs && text.triangle_count == 159,
           "local '!' control lays out with 159 triangles");
+    PHASE("text_done");
     if (status != MENU_SWF_OK || text.glyph_count != 1 || text.missing_glyphs ||
         text.triangle_count != 159) { free(shapes); free(display); return -1; }
     stats->glyph_tess_vertices = text.glyph_tess.vertex_count;
@@ -435,6 +453,7 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
         reason, reason_cap);
     CHECK(raster_status == MENU_SWF_RASTER_OK && raster_result.has_coverage,
           "local '!' control rasterises to A8");
+    PHASE("raster_done");
     if (raster_status != MENU_SWF_RASTER_OK || !raster_result.has_coverage) {
         free(shapes); free(display); return -1;
     }
@@ -458,6 +477,7 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
         atlas_glyphs, 2, atlas, entries, 2, &atlas_result, reason, reason_cap);
     CHECK(atlas_status == MENU_SWF_ATLAS_OK && atlas_result.placed_glyphs == 2,
           "control glyph and white texel pack into 64x64 A8");
+    PHASE("atlas_done");
     if (atlas_status != MENU_SWF_ATLAS_OK) { free(shapes); free(display); return -1; }
     const MenuSwfAtlasEntry *white = NULL;
     for (unsigned i = 0; i < 2; ++i)
@@ -503,6 +523,7 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
           "combined real batch is 57,484 vertices / 86,160 indices / 28,720 triangles");
     *out_vertices = vertex_count;
     *out_indices = index_count;
+    PHASE("build_menu_done");
     fprintf(stderr, "MENU_CPU records=%u sprites=%u shapes=%u text=%u text_glyphs=0 "
                     "tess_vertices=%u triangles=%u shape_batch=%u/%u control=%u/%u "
                     "batch=%u/%u/%u atlas=%ux%u tags=%u\n",
