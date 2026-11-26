@@ -892,3 +892,19 @@ frame.
   counted, not silently rendered.
 * No AVM action is executed, no texture cache or real GFx draw/frame is built,
   and no frame/pixel/Azahar/hardware result is claimed.
+
+## 17. SWF bitmap tags (2026-11-26)
+
+`source/menu_swf_bitmap.[ch]` decodes `DefineBitsLossless` (20) formats 3/4/5
+and `DefineBitsLossless2` (36) formats 3/5 from the shared
+`bsa_inflate_zlib_exact()` inflater. PIX15 is big-endian
+`0RRRRRGGGGGBBBBB`; PIX24 is a 4-byte `0RGB` word, not three packed bytes;
+palette rows are 4-byte aligned. `DefineBitsLossless2` ARGB is returned
+premultiplied (`premultiplied_alpha=1`), the palette path is straight alpha.
+Bad headers/formats/palette indices/zlib/output sizes are named refusals, and
+the output is written only after validation. JPEG tags (6/21/35/90) are a named
+`JPEG bitmap decode is not implemented` refusal.
+
+Real `Update.bsa` StartMenu has no bitmap tags (`total=0`), so the logo and
+background are not bitmap characters in this asset. Synthetic coverage is in
+`tests/menu_swf_bitmap_smoke.c` (23 checks) plus 27 real-data checks.

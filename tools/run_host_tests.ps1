@@ -330,6 +330,7 @@ Add-Test "menu_swf" $common @("source/bsa_reader.c", "source/menu_swf.c", "tests
 Add-Test "menu_swf_display" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "tests/menu_swf_display_smoke.c") @()
 Add-Test "menu_swf_display_list" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "tests/menu_swf_display_list_smoke.c") @()
 Add-Test "menu_swf_clip" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "source/menu_swf_clip.c", "tests/menu_swf_clip_smoke.c") @()
+Add-Test "menu_swf_bitmap" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_bitmap.c", "tests/menu_swf_bitmap_smoke.c") @()
 Add-Test "menu_swf_shape" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "tests/menu_swf_shape_smoke.c") @()
 Add-Test "menu_swf_tess" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "tests/menu_swf_tess_smoke.c") @()
 Add-Test "menu_swf_text" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "tests/menu_swf_text_smoke.c") @()
