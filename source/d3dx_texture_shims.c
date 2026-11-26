@@ -1,5 +1,6 @@
 #include "d3dx_texture_shims.h"
 #include "d3d9_com.h"
+#include "d3d9_bc.h"
 #include "win32_shims.h"
 
 #include <stdarg.h>
@@ -12,9 +13,11 @@
 #define D3DX_E_NOTIMPL 0x80004001u
 #define D3DX_D3DERR_INVALIDCALL 0x8876086cu
 #define D3DX_D3DERR_NOTAVAILABLE 0x8876086au
-#define D3DX_D3DERR_OUTOFMEMORY 0x8876017cu
+#define D3DX_D3DERR_OUTOFVIDEOMEMORY 0x8876017cu
 #define D3DXERR_INVALIDDATA 0x88760b59u
 #define D3DX_DEFAULT 0xffffffffu
+#define D3DX_FROM_FILE 0xfffffffdu
+#define D3DX_FILTER_MASK 0x000f0000u /* MIRROR/WRAP bits, ignored without resize */
 
 #define D3DX_FILETYPE_DDS 4u
 #define D3DRTYPE_TEXTURE 3u
@@ -204,6 +207,47 @@ static int parse_checked(const char *who,const uint8_t *p,size_t n,DdsImage *d){
     return rc;
 }
 
+static const char *path_reason(int rc){
+    switch(rc){
+    case WIN32_GUEST_PATH_NO_ROOT:return "the win32 sandbox root is not initialized";
+    case WIN32_GUEST_PATH_EMPTY:return "the path is empty";
+    case WIN32_GUEST_PATH_TOO_LONG:return "the path is longer than 259 bytes";
+    case WIN32_GUEST_PATH_OUTSIDE:return "the path is outside the sandbox game root";
+    default:return "the path is invalid";
+    }
+}
+
+/* Copy a bounded guest path with distinct reasons for NULL, unreadable memory
+ * and a missing terminator.  Returns 0 on success. */
+static int read_guest_path(uint32_t address,char out[260],const char *who){
+    if(!address){reject("%s: source path is NULL",who);return -1;}
+    if(!g.memory||!guest_ptr(g.memory,address,1)){
+        reject("%s: source path pointer is outside guest memory",who);return -1;
+    }
+    for(unsigned i=0;i<260u;++i){
+        if(address>UINT32_MAX-i){
+            reject("%s: source path wraps the guest address space",who);return -1;
+        }
+        const char *p=guest_ptr(g.memory,address+i,1);
+        if(!p){
+            reject("%s: source path is not fully readable in guest memory",who);return -1;
+        }
+        out[i]=*p;
+        if(!*p)return 0;
+    }
+    reject("%s: source path is longer than 259 bytes",who);
+    return -1;
+}
+
+/* Real D3DX filter values: NONE=1, POINT=2, LINEAR=3, TRIANGLE=4, BOX=5,
+ * optionally ORed with MIRROR/WRAP bits (0x000F0000).  D3DX_DEFAULT is -1.
+ * Zero is not a valid D3DX filter. */
+static int filter_valid(uint32_t filter){
+    if(filter==D3DX_DEFAULT)return 1;
+    uint32_t base=filter&0x0fu, extra=filter&~0x0fu;
+    return base>=1u&&base<=5u&&!(extra&~D3DX_FILTER_MASK);
+}
+
 static void write_image_info(uint8_t *info,const DdsImage *d,const char *who){
     wr32(info+0,d->width);wr32(info+4,d->height);wr32(info+8,d->depth);
     wr32(info+12,d->mips);wr32(info+16,d->format);wr32(info+20,d->resource);
@@ -216,11 +260,38 @@ static void write_image_info(uint8_t *info,const DdsImage *d,const char *who){
                 d->width,d->height,d->depth,d->mips,format_name(d->format));
 }
 
-/* Create and fill an IDirect3DTexture9 from an already-parsed DDS.  Every
- * rejection happens before d9_com_host_create_texture(); any failure after
- * creation releases the texture.  *out is only written on success. */
-static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t *p,
-                                   size_t size,DdsImage *d,uint32_t *out){
+/* Decode one BC level (DXT1/3/5) into top-first A8R8G8B8 bytes (B,G,R,A). */
+static int decode_bc_level(unsigned format,const uint8_t *src,size_t src_pitch,
+                           unsigned w,unsigned h,uint8_t *dst){
+    unsigned bb=bc_bytes(format);
+    if(!bb||!src||!dst||!src_pitch)return -1;
+    for(unsigned by=0;by<(h+3u)/4u;++by)
+        for(unsigned bx=0;bx<(w+3u)/4u;++bx){
+            uint8_t rgba[64];
+            if(d9_bc_decode_block(format,src+(size_t)by*src_pitch+bx*bb,bb,rgba))
+                return -1;
+            for(unsigned y=0;y<4u;++y)
+                for(unsigned x=0;x<4u;++x){
+                    unsigned px=bx*4u+x,py=by*4u+y;
+                    if(px>=w||py>=h)continue;
+                    const uint8_t *s=rgba+(y*4u+x)*4u;
+                    uint8_t *o=dst+((size_t)py*w+px)*4u;
+                    o[0]=s[2];o[1]=s[1];o[2]=s[0];o[3]=s[3];
+                }
+        }
+    return 0;
+}
+
+/* Create and fill an IDirect3DTexture9 from an already-parsed DDS.  The output
+ * format is either the file format or, when a BC file was requested as
+ * A8R8G8B8, the decoded RGBA8 form.  pool/usage are passed to the bridge;
+ * levels is the file's mip count (validated by the caller).  Every rejection
+ * happens before d9_com_host_create_texture(); any failure after creation
+ * releases the texture.  *out is only written on success. */
+static uint32_t create_2d_from_dds_ex(const char *who,uint32_t device,const uint8_t *p,
+                                      size_t size,const DdsImage *d,unsigned out_format,
+                                      unsigned pool,unsigned usage,unsigned levels,
+                                      uint32_t *out){
     if(d->resource==D3DRTYPE_CUBETEXTURE||d->resource==D3DRTYPE_VOLUMETEXTURE){
         reject("%s: %s DDS needs IDirect3D%sTexture9, which the D3D9 bridge does not "
                "implement (d3d9_core/d3d9_com expose 2D textures only); E_NOTIMPL",
@@ -231,6 +302,22 @@ static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t
     if(!texture_format_supported(d->format)){
         reject("%s: DDS format %s is not implemented by the D3D9 bridge",
                who,format_name(d->format));
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    int decode_bc=out_format==D3DFMT_A8R8G8B8&&bc_bytes(d->format);
+    if(out_format!=d->format&&!decode_bc){
+        reject("%s: requested format %s cannot be produced from DDS format %s",
+               who,format_name(out_format),format_name(d->format));
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(pool!=D9_POOL_MANAGED&&pool!=D9_POOL_SYSTEMMEM){
+        reject("%s: only D3DPOOL_MANAGED (1) and D3DPOOL_SYSTEMMEM (2) are "
+               "implemented; got %u",who,pool);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(usage&~0x200u){
+        reject("%s: only usage 0 and D3DUSAGE_DYNAMIC (0x200) are implemented; "
+               "got 0x%lx",who,(unsigned long)usage);
         return D3DX_D3DERR_NOTAVAILABLE;
     }
     unsigned max_mips=1,w=d->width,h=d->height;
@@ -244,7 +331,7 @@ static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t
                "the D3D9 bridge only creates pow2 textures",who,d->width,d->height);
         return D3DX_D3DERR_NOTAVAILABLE;
     }
-    if(bc_bytes(d->format)&&(w<8u||h<8u)){
+    if(!decode_bc&&bc_bytes(d->format)&&(w<8u||h<8u)){
         reject("%s: compressed base level %ux%u "
                "is below the D3D9 bridge's 8x8 floor",who,d->width,d->height);
         return D3DX_D3DERR_NOTAVAILABLE;
@@ -254,6 +341,11 @@ static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t
         reject("%s: %u mip levels do not fit %ux%u",who,
                d->mips,d->width,d->height);
         return D3DXERR_INVALIDDATA;
+    }
+    if(levels!=d->mips){
+        reject("%s: internal mip selection %u does not match the %u file levels",
+               who,levels,d->mips);
+        return D3DX_D3DERR_NOTAVAILABLE;
     }
     /* Validate the entire mip chain before creating any resource. */
     size_t offset=d->data_offset;w=d->width;h=d->height;
@@ -268,9 +360,8 @@ static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t
         if(w>1)w>>=1;if(h>1)h>>=1;
     }
     uint32_t texture=0;
-    /* D3DX uses D3DPOOL_MANAGED, usage 0 for file-created textures. */
-    uint32_t hr=d9_com_host_create_texture(device,d->width,d->height,d->mips,0,d->format,
-                                           D9_POOL_MANAGED,&texture);
+    uint32_t hr=d9_com_host_create_texture(device,d->width,d->height,d->mips,usage,
+                                           out_format,pool,&texture);
     if(hr){
         reject("%s: %s",who,d9_com_last_diagnostic());
         return hr;
@@ -279,7 +370,31 @@ static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t
     for(unsigned i=0;i<d->mips;++i){
         size_t pitch=0,bytes=0;
         if(level_layout(d->format,w,h,&pitch,&bytes)){ /* validated above */ }
-        hr=d9_com_host_upload_texture_level(texture,i,p+offset,pitch,bytes);
+        uint8_t *decoded=NULL;
+        const void *upload=p+offset;
+        size_t upload_pitch=pitch,upload_bytes=bytes;
+        if(decode_bc){
+            uint64_t decoded_bytes=(uint64_t)w*h*4u;
+            if(decoded_bytes>UINT32_MAX){
+                d9_com_host_release(texture);
+                reject("%s: decoded level %u is too large",who,i);
+                return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+            }
+            decoded=malloc((size_t)decoded_bytes);
+            if(!decoded){
+                d9_com_host_release(texture);
+                reject("%s: out of host memory for decoded level %u",who,i);
+                return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+            }
+            if(decode_bc_level(d->format,p+offset,pitch,w,h,decoded)){
+                free(decoded);d9_com_host_release(texture);
+                reject("%s: DDS level %u could not be decoded to A8R8G8B8",who,i);
+                return D3DXERR_INVALIDDATA;
+            }
+            upload=decoded;upload_pitch=(size_t)w*4u;upload_bytes=(size_t)decoded_bytes;
+        }
+        hr=d9_com_host_upload_texture_level(texture,i,upload,upload_pitch,upload_bytes);
+        free(decoded);
         if(hr){
             reject("%s: level %u upload failed (%s)",who,i,d9_com_last_diagnostic());
             d9_com_host_release(texture);
@@ -289,21 +404,36 @@ static uint32_t create_2d_from_dds(const char *who,uint32_t device,const uint8_t
         if(w>1)w>>=1;if(h>1)h>>=1;
     }
     *out=texture;
-    fprintf(stderr,"[d3dx] %s: %ux%u %s, %u level(s)\n",
-            who,d->width,d->height,format_name(d->format),d->mips);
+    if(decode_bc)
+        fprintf(stderr,"[d3dx] %s: %ux%u %s decoded to A8R8G8B8, %u level(s)\n",
+                who,d->width,d->height,format_name(d->format),d->mips);
+    else
+        fprintf(stderr,"[d3dx] %s: %ux%u %s, %u level(s), pool=%u usage=0x%lx\n",
+                who,d->width,d->height,format_name(d->format),d->mips,pool,
+                (unsigned long)usage);
+    return D3DX_OK;
+}
+
+/* Resolve a guest path to a host path below the sandbox root. */
+static uint32_t sandbox_host(const char *who,const char *guest_path,char host[640]){
+    int rc=win32_guest_path(guest_path,host,640);
+    if(rc){
+        reject("%s(\"%s\"): %s",who,guest_path,path_reason(rc));
+        return D3DX_D3DERR_INVALIDCALL;
+    }
     return D3DX_OK;
 }
 
 /* Read a guest-named file through the win32 sandbox mapping.  The returned
- * buffer belongs to the caller; failures never write it. */
+ * buffer belongs to the caller; failures never write it.  Used only when the
+ * whole payload is needed (texture creation); image info uses the 128-byte
+ * header reader below. */
 static uint32_t read_sandbox_file(const char *who,const char *guest_path,
                                   uint8_t **out,size_t *out_size){
     *out=NULL;*out_size=0;
     char host[640];
-    if(win32_guest_path(guest_path,host,sizeof host)){
-        reject("%s(\"%s\"): path is outside the sandbox game root",who,guest_path);
-        return D3DX_D3DERR_INVALIDCALL;
-    }
+    uint32_t path_hr=sandbox_host(who,guest_path,host);
+    if(path_hr)return path_hr;
     FILE *f=fopen(host,"rb");
     if(!f){
         reject("%s(\"%s\"): cannot open the file inside the sandbox "
@@ -336,7 +466,7 @@ static uint32_t read_sandbox_file(const char *who,const char *guest_path,
     if(!buffer){
         fclose(f);
         reject("%s(\"%s\"): out of host memory for %ld bytes",who,guest_path,length);
-        return D3DX_D3DERR_OUTOFMEMORY;
+        return D3DX_D3DERR_OUTOFVIDEOMEMORY;
     }
     size_t got=fread(buffer,1,(size_t)length,f);
     int read_failed=ferror(f)||got!=(size_t)length;
@@ -348,6 +478,36 @@ static uint32_t read_sandbox_file(const char *who,const char *guest_path,
         return D3DXERR_INVALIDDATA;
     }
     *out=buffer;*out_size=(size_t)length;
+    return D3DX_OK;
+}
+
+/* D3DXGetImageInfo only needs the fixed 128-byte DDS header.  This avoids
+ * buffering the whole file and keeps a correct header readable even when the
+ * payload is larger than the 64 MiB texture-creation limit. */
+static uint32_t read_sandbox_header(const char *who,const char *guest_path,
+                                    uint8_t header[128]){
+    memset(header,0,128);
+    char host[640];
+    uint32_t path_hr=sandbox_host(who,guest_path,host);
+    if(path_hr)return path_hr;
+    FILE *f=fopen(host,"rb");
+    if(!f){
+        reject("%s(\"%s\"): cannot open the file inside the sandbox "
+               "(missing, unreadable, or not a regular file)",who,guest_path);
+        return D3DXERR_INVALIDDATA;
+    }
+    size_t got=fread(header,1,128u,f);
+    int failed=ferror(f);
+    fclose(f);
+    if(failed){
+        reject("%s(\"%s\"): cannot read the 128-byte DDS header",who,guest_path);
+        return D3DXERR_INVALIDDATA;
+    }
+    if(got<128u){
+        reject("%s(\"%s\"): file is only %lu bytes, shorter than the 128-byte "
+               "DDS header",who,guest_path,(unsigned long)got);
+        return D3DXERR_INVALIDDATA;
+    }
     return D3DX_OK;
 }
 
@@ -383,7 +543,8 @@ static void shim_create_tex_mem(CPU *c){
     if(parse_checked("D3DXCreateTextureFromFileInMemory",p,size,&d))
         RET(D3DXERR_INVALIDDATA,4);
     uint32_t texture=0;
-    uint32_t hr=create_2d_from_dds("D3DXCreateTextureFromFileInMemory",device,p,size,&d,&texture);
+    uint32_t hr=create_2d_from_dds_ex("D3DXCreateTextureFromFileInMemory",device,p,size,&d,
+                                      d.format,D9_POOL_MANAGED,0,d.mips,&texture);
     if(hr)RET(hr,4);
     *out_guest=texture;
     g.last_error[0]=0;
@@ -401,20 +562,17 @@ static void shim_get_image_info_file_a(CPU *c){
         RET(D3DX_D3DERR_INVALIDCALL,2);
     }
     memset(info,0,28);
-    const char *path=(A(0)&&g.memory)?guest_cstr(g.memory,A(0),260):NULL;
-    if(!path){
-        reject("D3DXGetImageInfoFromFileA: source path is null, unterminated, "
-               "or longer than 259 bytes");
+    char path[260];
+    if(read_guest_path(A(0),path,"D3DXGetImageInfoFromFileA")){
         RET(D3DX_D3DERR_INVALIDCALL,2);
     }
-    uint8_t *buffer=NULL;size_t size=0;
-    uint32_t hr=read_sandbox_file("D3DXGetImageInfoFromFileA",path,&buffer,&size);
+    uint8_t header[128];
+    uint32_t hr=read_sandbox_header("D3DXGetImageInfoFromFileA",path,header);
     if(hr)RET(hr,2);
     DdsImage d;
-    int prc=parse_checked("D3DXGetImageInfoFromFileA",buffer,size,&d);
-    if(prc){free(buffer);RET(D3DXERR_INVALIDDATA,2);}
+    if(parse_checked("D3DXGetImageInfoFromFileA",header,sizeof header,&d))
+        RET(D3DXERR_INVALIDDATA,2);
     write_image_info(info,&d,"D3DXGetImageInfoFromFileA");
-    free(buffer);
     g.last_error[0]=0;
     RET(D3DX_OK,2);
 }
@@ -423,28 +581,34 @@ static void shim_create_tex_ex_a(CPU *c){
     uint32_t device=A(0);
     uint32_t width=A(2),height=A(3),mip_levels=A(4),usage=A(5),format=A(6),pool=A(7);
     uint32_t filter=A(8),mip_filter=A(9),color_key=A(10),info_addr=A(11),out=A(13);
-    /* A(12) is PALETTEENTRY*.  It is deliberately ignored: only non-paletted
-     * 32-bit/BC formats reach the create path.  The real D3DX9_42 export has
-     * 14 arguments and a `ret 0x38` epilogue (verified from the DLL), so the
-     * shim must pop 14 slots, not 13. */
+    /* A(12) is PALETTEENTRY*; ignored because only non-paletted formats reach
+     * the create path.  The real D3DX9_42 export has 14 arguments and a
+     * `ret 0x38` epilogue (verified from the DLL). */
     uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
     if(!out_guest){
         reject("D3DXCreateTextureFromFileExA: invalid output texture pointer");
         RET(D3DX_D3DERR_INVALIDCALL,14);
     }
     *out_guest=0;
-    if(width||height||mip_levels||usage||format||pool!=D9_POOL_MANAGED){
-        reject("D3DXCreateTextureFromFileExA: only the file-derived subset is implemented "
-               "(Width=0, Height=0, MipLevels=0, Usage=0, Format=D3DFMT_UNKNOWN, "
-               "Pool=D3DPOOL_MANAGED); got %lux%lu, mips=%lu, usage=0x%lx, format=%lu, pool=%lu",
-               (unsigned long)width,(unsigned long)height,(unsigned long)mip_levels,
-               (unsigned long)usage,(unsigned long)format,(unsigned long)pool);
+    if(usage!=0u&&usage!=0x200u){
+        reject("D3DXCreateTextureFromFileExA: only Usage=0 or D3DUSAGE_DYNAMIC "
+               "(0x200) are implemented; got 0x%lx",(unsigned long)usage);
         RET(D3DX_D3DERR_NOTAVAILABLE,14);
     }
-    if((filter!=D3DX_DEFAULT&&filter!=0u)||(mip_filter!=D3DX_DEFAULT&&mip_filter!=0u)){
-        reject("D3DXCreateTextureFromFileExA: Filter/MipFilter must be D3DX_DEFAULT "
-               "(0xffffffff) or 0 because no resize/filter path exists; got 0x%lx/0x%lx",
-               (unsigned long)filter,(unsigned long)mip_filter);
+    if(pool!=D9_POOL_MANAGED&&pool!=D9_POOL_SYSTEMMEM){
+        reject("D3DXCreateTextureFromFileExA: only Pool=D3DPOOL_MANAGED (1) or "
+               "D3DPOOL_SYSTEMMEM (2) are implemented; got %lu",(unsigned long)pool);
+        RET(D3DX_D3DERR_NOTAVAILABLE,14);
+    }
+    if(mip_levels!=0u&&mip_levels!=D3DX_FROM_FILE){
+        reject("D3DXCreateTextureFromFileExA: MipLevels must be 0 or "
+               "D3DX_FROM_FILE (-3); got 0x%lx",(unsigned long)mip_levels);
+        RET(D3DX_D3DERR_NOTAVAILABLE,14);
+    }
+    if(!filter_valid(filter)||!filter_valid(mip_filter)){
+        reject("D3DXCreateTextureFromFileExA: Filter/MipFilter must be "
+               "D3DX_DEFAULT (-1) or 1..5 with optional MIRROR/WRAP bits; got "
+               "0x%lx/0x%lx",(unsigned long)filter,(unsigned long)mip_filter);
         RET(D3DX_D3DERR_NOTAVAILABLE,14);
     }
     if(color_key){
@@ -457,21 +621,42 @@ static void shim_create_tex_ex_a(CPU *c){
         reject("D3DXCreateTextureFromFileExA: invalid D3DXIMAGE_INFO output pointer");
         RET(D3DX_D3DERR_INVALIDCALL,14);
     }
-    const char *path=(A(1)&&g.memory)?guest_cstr(g.memory,A(1),260):NULL;
-    if(!path){
-        reject("D3DXCreateTextureFromFileExA: source path is null, unterminated, "
-               "or longer than 259 bytes");
+    char path[260];
+    if(read_guest_path(A(1),path,"D3DXCreateTextureFromFileExA")){
         RET(D3DX_D3DERR_INVALIDCALL,14);
     }
     uint8_t *buffer=NULL;size_t size=0;
     uint32_t hr=read_sandbox_file("D3DXCreateTextureFromFileExA",path,&buffer,&size);
     if(hr)RET(hr,14);
     DdsImage d;
-    int prc=parse_checked("D3DXCreateTextureFromFileExA",buffer,size,&d);
-    if(prc){free(buffer);RET(D3DXERR_INVALIDDATA,14);}
+    if(parse_checked("D3DXCreateTextureFromFileExA",buffer,size,&d)){
+        free(buffer);RET(D3DXERR_INVALIDDATA,14);
+    }
+    /* Width/Height are allowed to be zero (take the file size) or must name
+     * exactly the file dimensions: there is no resize path. */
+    if((width&&width!=d.width)||(height&&height!=d.height)){
+        reject("D3DXCreateTextureFromFileExA: requested %lux%lu does not match the "
+               "file's %ux%u; resizing is not implemented",
+               (unsigned long)width,(unsigned long)height,d.width,d.height);
+        free(buffer);RET(D3DX_D3DERR_NOTAVAILABLE,14);
+    }
+    unsigned out_format=d.format;
+    if(format){
+        if(format==d.format)out_format=d.format;
+        else if(format==D3DFMT_A8R8G8B8&&bc_bytes(d.format))out_format=D3DFMT_A8R8G8B8;
+        else{
+            reject("D3DXCreateTextureFromFileExA: requested format %s cannot be "
+                   "produced from DDS format %s",
+                   format_name(format),format_name(d.format));
+            free(buffer);RET(D3DX_D3DERR_NOTAVAILABLE,14);
+        }
+    }
     if(info)write_image_info(info,&d,"D3DXCreateTextureFromFileExA");
     uint32_t texture=0;
-    hr=create_2d_from_dds("D3DXCreateTextureFromFileExA",device,buffer,size,&d,&texture);
+    /* MipLevels=0 and D3DX_FROM_FILE both use the DDS chain: this bridge has no
+     * mip generator, so generating missing levels would be a fake success. */
+    hr=create_2d_from_dds_ex("D3DXCreateTextureFromFileExA",device,buffer,size,&d,
+                             out_format,pool,usage,d.mips,&texture);
     free(buffer);
     if(hr)RET(hr,14);
     *out_guest=texture;

@@ -243,7 +243,16 @@ static int mapping_close(uint32_t h);
 int win32_init(GuestMemory *m,uint32_t bytes,const char *game_root) {
     if(mem || !m || !game_root || !*game_root || strlen(game_root)>=sizeof root || !bytes)return -1;
     if(heap_create(&heap,m,0x20000000u,bytes))return -1;
-    mem=m;strcpy(root,game_root);strcpy(cwd,game_root);last_error=0;start_tick=tick();
+    mem=m;strcpy(root,game_root);
+    /* Normalise trailing separators (C:\Games\Skyrim\ -> C:\Games\Skyrim).
+     * Keep a drive root (C:\) and '/' intact; path_for_impl also accepts a
+     * separator-terminated root defensively. */
+    size_t root_len=strlen(root);
+    while(root_len>1 && (root[root_len-1]=='/'||root[root_len-1]=='\\')){
+        if(root_len==3 && root[1]==':')break;
+        root[--root_len]=0;
+    }
+    strcpy(cwd,root);last_error=0;start_tick=tick();
     memset(tls_used,0,sizeof tls_used);memset(tls_values,0,sizeof tls_values);
     if(win32_user_init(m)){mem=NULL;return -1;}
     if(win32_thread_init(m)){win32_user_shutdown();mem=NULL;return -1;}
@@ -1304,7 +1313,7 @@ static int path_for_impl(const char *name,char *out,size_t cap) {
     }
     size_t len=strlen(base);if(len+2>=cap)return -1;
     memcpy(out,base,len);
-    if(out[len-1]!='/'&&out[len-1]!='\\')out[len++]='/';
+    if(len&&out[len-1]!='/'&&out[len-1]!='\\')out[len++]='/';
     (void)virtual_root;
     const char *p=relative;
     while(*p) {
@@ -1315,7 +1324,8 @@ static int path_for_impl(const char *name,char *out,size_t cap) {
     }
     out[len]=0;
     size_t rl=strlen(root);
-    if(strncmp(out,root,rl)||(out[rl]&&out[rl]!='/'))return -1;
+    int root_sep=rl&&(root[rl-1]=='/'||root[rl-1]=='\\');
+    if(strncmp(out,root,rl)||(!root_sep&&out[rl]&&out[rl]!='/'))return -1;
     return 0;
 }
 static int path_for(const char *name,char *out,size_t cap) {
@@ -1332,8 +1342,12 @@ static int path_for(const char *name,char *out,size_t cap) {
 }
 static FILE *file_for(uint32_t h){return h>=0x100 && h<0x100+MAX_FILES?files[h-0x100]:NULL;}
 int win32_guest_path(const char *guest_name,char *out,size_t capacity){
-    if(!mem||!root[0]||!cwd[0]||!guest_name||!out||capacity<2u)return -1;
-    return path_for(guest_name,out,capacity);
+    if(!mem||!root[0]||!cwd[0])return WIN32_GUEST_PATH_NO_ROOT;
+    if(!guest_name||!*guest_name)return WIN32_GUEST_PATH_EMPTY;
+    if(!out||capacity<2u)return WIN32_GUEST_PATH_INVALID;
+    size_t guest_len=strlen(guest_name);
+    if(guest_len>=260u||strlen(root)+guest_len+2u>capacity)return WIN32_GUEST_PATH_TOO_LONG;
+    return path_for(guest_name,out,capacity)?WIN32_GUEST_PATH_OUTSIDE:WIN32_GUEST_PATH_OK;
 }
 static FindState *find_for(uint32_t h){
     uint32_t i=h-FIND_HANDLE_BASE;

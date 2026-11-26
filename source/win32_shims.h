@@ -17,7 +17,15 @@ int win32_add_external_resolver(PeImportResolve resolver,void *ctx);
 /* Map a guest relative path (or a recognised C:\Skyrim\ virtual root) to the
  * configured sandbox root.  Rejects '..', empty segments, drive/absolute paths
  * outside the virtual root, and any result that escapes `root`.  Returns 0 and
- * writes a NUL-terminated host path, or -1 before win32_init()/on rejection. */
+ * writes a NUL-terminated host path, or one of WIN32_GUEST_PATH_* below. */
+enum {
+    WIN32_GUEST_PATH_OK = 0,
+    WIN32_GUEST_PATH_NO_ROOT = -1,   /* win32_init() has not configured a root */
+    WIN32_GUEST_PATH_EMPTY = -2,
+    WIN32_GUEST_PATH_TOO_LONG = -3,
+    WIN32_GUEST_PATH_OUTSIDE = -4,
+    WIN32_GUEST_PATH_INVALID = -5
+};
 int win32_guest_path(const char *guest_name,char *out,size_t capacity);
 /* Diagnostic mode: bind unknown imports to a trap that faults on call with the
  * exact dll!name. Never returns a fake success; unknown slots still fail. */

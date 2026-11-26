@@ -9,10 +9,12 @@
  *   D3DXGetImageInfoFromFileInMemory      DDS header -> D3DXIMAGE_INFO
  *   D3DXCreateTextureFromFileInMemory     DDS -> IDirect3DTexture9 via the
  *                                        existing d3d9_com/d3d9_core path
- *   D3DXGetImageInfoFromFileA            sandboxed file read -> same parser
- *   D3DXCreateTextureFromFileExA         file-derived subset only; the real
- *                                        ABI has 14 args (pPalette at A(12))
- *                                        and a `ret 0x38` epilogue
+ *   D3DXGetImageInfoFromFileA            sandboxed 128-byte header -> parser
+ *   D3DXCreateTextureFromFileExA         TESV tuple: dims from file,
+ *                                        Mip -3/0, usage 0x200, A8R8G8B8,
+ *                                        pool 1/2; BC1/3/5 -> A8 decode.
+ *                                        Real ABI has 14 args (pPalette at
+ *                                        A(12)) and `ret 0x38`.
  *
  * Named unsupported (never a fake success):
  *   D3DXCreateCubeTextureFromFileInMemory

@@ -126,6 +126,19 @@ static size_t make_dxt1_dds(uint8_t *b,unsigned w,unsigned h,unsigned seed){
     for(size_t k=0;k<bytes;++k)b[off+k]=(uint8_t)(seed+k);
     return off+bytes;
 }
+/* Solid red DXT1, one 4x4 block per 8x8 quadrant.  The decoded A8R8G8B8
+ * word is 0xFFFF0000 (memory bytes B=0,G=0,R=255,A=255). */
+static size_t make_dxt1_red_dds(uint8_t *b,unsigned w,unsigned h){
+    size_t off=dds_header(b,w,h,1,0x4u,FMT_DXT1,0,0,0,0,0,0,1);
+    unsigned blocks=((w+3u)/4u)*((h+3u)/4u);
+    for(unsigned i=0;i<blocks;++i){
+        uint8_t *p=b+off+(size_t)i*8u;
+        p[0]=0x00;p[1]=0xf8; /* c0 = 0xF800 red */
+        p[2]=p[3]=0;         /* c1 = black */
+        p[4]=p[5]=p[6]=p[7]=0; /* every index selects c0 */
+    }
+    return off+(size_t)blocks*8u;
+}
 
 static uint32_t resolve(const char *name){
     PeImport e={.dll="d3dx9_42.dll",.name=name};
@@ -149,18 +162,24 @@ static int sandbox_write(const char *name,const void *data,size_t bytes){
     int ok=fwrite(data,1,bytes,f)==bytes;
     if(fclose(f))ok=0;return ok?0:-1;
 }
-static int sandbox_write_oversize(const char *name){
+static int sandbox_write_oversize(const char *name,const uint8_t *header,size_t header_bytes){
     char path[640];if(sandbox_path(path,sizeof path,name))return -1;
     FILE *f=fopen(path,"wb");if(!f)return -1;
-    int ok=fseek(f,(long)(64u<<20),SEEK_SET)==0;
+    int ok=header_bytes&&fwrite(header,1,header_bytes,f)==header_bytes;
+    if(ok)ok=fseek(f,(long)(64u<<20),SEEK_SET)==0;
     if(ok)ok=fputc(0,f)!=EOF;
     if(fclose(f))ok=0;return ok?0:-1;
 }
 static void sandbox_remove(void){
-    static const char *const files[]={"menu.dds","bad.dds","cube.dds","volume.dds","huge.dds"};
+    static const char *const files[]={"menu.dds","dxt1.dds","bad.dds","cube.dds",
+                                      "volume.dds","huge.dds",
+                                      "Data/Textures/menu.dds"};
     for(unsigned i=0;i<sizeof files/sizeof files[0];++i){
         char path[640];if(!sandbox_path(path,sizeof path,files[i]))TEST_UNLINK(path);
     }
+    char path[640];
+    if(!sandbox_path(path,sizeof path,"Data/Textures"))TEST_RMDIR(path);
+    if(!sandbox_path(path,sizeof path,"Data"))TEST_RMDIR(path);
     TEST_RMDIR(sandbox);
 }
 static void set_guest_path(Harness *h,const char *path){
@@ -175,21 +194,46 @@ int main(void){
     assert(!d9_com_init(&h.memory,NULL));
     assert(!d9_null_register());
     const char *tmp=getenv("TEMP");if(!tmp||!*tmp)tmp=getenv("TMP");assert(tmp&&*tmp);
+    char host_check[640];
+    /* No sandbox root yet: the path API must say exactly that, not "outside". */
+    assert(win32_guest_path("menu.dds",host_check,sizeof host_check)==
+           WIN32_GUEST_PATH_NO_ROOT);
     snprintf(sandbox,sizeof sandbox,"%s/n3ds_d3dx_file_%ld",tmp,(long)TEST_PID());
     (void)TEST_MKDIR(sandbox);
-    assert(!win32_init(&h.memory,0x10000,sandbox));
+    {char d[640];assert(!sandbox_path(d,sizeof d,"Data"));(void)TEST_MKDIR(d);
+     assert(!sandbox_path(d,sizeof d,"Data/Textures"));(void)TEST_MKDIR(d);}
+    /* A trailing separator is the real TESV install root shape; win32_init()
+     * normalises it and path_for_impl() also tolerates it defensively. */
+    {char root_sep[520];snprintf(root_sep,sizeof root_sep,"%s/",sandbox);
+     assert(!win32_init(&h.memory,0x10000,root_sep));}
+    assert(win32_guest_path("menu.dds",host_check,sizeof host_check)==WIN32_GUEST_PATH_OK);
+    {char expected[640];snprintf(expected,sizeof expected,"%s/menu.dds",sandbox);
+     assert(!strcmp(host_check,expected));}
+    assert(win32_guest_path("Data/Textures/menu.dds",host_check,sizeof host_check)==
+           WIN32_GUEST_PATH_OK);
+    assert(win32_guest_path("",host_check,sizeof host_check)==WIN32_GUEST_PATH_EMPTY);
+    {char long_path[400];memset(long_path,'a',sizeof long_path-1);long_path[sizeof long_path-1]=0;
+     assert(win32_guest_path(long_path,host_check,sizeof host_check)==
+            WIN32_GUEST_PATH_TOO_LONG);}
+    assert(win32_guest_path("..\\escape.dds",host_check,sizeof host_check)==
+           WIN32_GUEST_PATH_OUTSIDE);
     assert(!d3dx_texture_shims_install(&h.memory));
 
-    /* Synthetic sandbox inputs: valid 2-mip A8R8G8B8, junk, cube/volume
-     * headers and an oversized file (size is checked before reading). */
+    /* Synthetic sandbox inputs: valid 2-mip A8R8G8B8, known red DXT1, junk,
+     * cube/volume headers, a subdirectory file and an oversized valid DDS. */
     menu_dds_size=make_a8r8g8b8_dds(menu_dds,8,8,2,0x20);
     assert(!sandbox_write("menu.dds",menu_dds,menu_dds_size));
+    assert(!sandbox_write("Data/Textures/menu.dds",menu_dds,menu_dds_size));
+    {uint8_t dxt[4096];size_t n=make_dxt1_red_dds(dxt,8,8);
+     assert(!sandbox_write("dxt1.dds",dxt,n));}
     {const uint8_t junk[64]="this is not a DDS file";assert(!sandbox_write("bad.dds",junk,sizeof junk));}
     {uint8_t filebuf[256];size_t n=dds_header(filebuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200u,1);
      assert(!sandbox_write("cube.dds",filebuf,n));
      n=dds_header(filebuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200000u,4);
-     assert(!sandbox_write("volume.dds",filebuf,n));}
-    assert(!sandbox_write_oversize("huge.dds"));
+     assert(!sandbox_write("volume.dds",filebuf,n));
+     /* The header is valid even though the payload exceeds the create limit. */
+     n=dds_header(filebuf,8,8,1,0x41u,0,32,0x00ff0000u,0x0000ff00u,0x000000ffu,0xff000000u,0,1);
+     assert(!sandbox_write_oversize("huge.dds",filebuf,n));}
     static const FnEntry probe[]={{PROBE_FN,guest_dispatch_probe}};
     FnModule modules[3]={{"probe",probe,1},d3dx_texture_shims_module(),d9_com_module()};
     assert(!n3ds_lift_bind_modules(&h.memory,modules,3));
@@ -375,6 +419,18 @@ int main(void){
     assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
     assert(rd(&h,INFO+0)==8&&rd(&h,INFO+16)==FMT_A8R8G8B8);
 
+    /* Subdirectories are ordinary relative paths below the root. */
+    set_guest_path(&h,"Data\\Textures\\menu.dds");
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
+    assert(rd(&h,INFO+0)==8&&rd(&h,INFO+12)==2);
+    set_guest_path(&h,"C:\\Skyrim\\Data\\Textures\\menu.dds");
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
+    assert(rd(&h,INFO+0)==8&&rd(&h,INFO+16)==FMT_A8R8G8B8);
+
+    set_guest_path(&h,"dxt1.dds");
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
+    assert(rd(&h,INFO+0)==8&&rd(&h,INFO+12)==1&&rd(&h,INFO+16)==FMT_DXT1);
+
     set_guest_path(&h,"missing.dds");
     assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
     assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDDATA);
@@ -393,96 +449,175 @@ int main(void){
     set_guest_path(&h,"bad.dds");
     assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
     assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDDATA);
-    assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"not a DDS"));
+    assert(rd(&h,INFO)==0);
+    assert(strstr(d3dx_texture_shims_last_error(),"not a DDS")||
+           strstr(d3dx_texture_shims_last_error(),"shorter than the 128-byte"));
 
+    /* Image info reads only the 128-byte header: a 64 MiB+1 file with a valid
+     * header must still report metadata. */
     set_guest_path(&h,"huge.dds");
     assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDDATA);
-    assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"64 MiB"));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
+    assert(rd(&h,INFO+0)==8&&rd(&h,INFO+4)==8&&rd(&h,INFO+8)==1);
+    assert(rd(&h,INFO+12)==1&&rd(&h,INFO+16)==FMT_A8R8G8B8);
+    assert(rd(&h,INFO+24)==4&&!*d3dx_texture_shims_last_error());
+
+    /* Path reasons are distinct. */
+    set_guest_path(&h,"");
+    assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDCALL);
+    assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"empty"));
+    {char long_path[300];memset(long_path,'a',sizeof long_path-1);long_path[sizeof long_path-1]=0;
+     assert(strlen(long_path)==299);
+     assert(!guest_write(&h.memory,DATA,long_path,sizeof long_path));
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDCALL);
+     assert(strstr(d3dx_texture_shims_last_error(),"longer than 259"));}
+    {char no_nul[260];memset(no_nul,'b',sizeof no_nul);
+     assert(!guest_write(&h.memory,DATA,no_nul,sizeof no_nul));
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileA",gi,2)==HR_INVALIDCALL);
+     assert(strstr(d3dx_texture_shims_last_error(),"longer than 259"));}
+    {uint32_t bad_ptr[2]={0x70000000u,INFO};
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileA",bad_ptr,2)==HR_INVALIDCALL);
+     assert(strstr(d3dx_texture_shims_last_error(),"outside guest memory"));}
+    {uint32_t null_path[2]={0,INFO};
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileA",null_path,2)==HR_INVALIDCALL);
+     assert(strstr(d3dx_texture_shims_last_error(),"NULL"));}
 
     {uint32_t np[2]={0,INFO};assert(shim_call(&h,"D3DXGetImageInfoFromFileA",np,2)==HR_INVALIDCALL);}
 
     /* 7b. D3DXCreateTextureFromFileExA: 14 real arguments (pPalette at A(12),
      *     ppTexture at A(13)); ret 0x38 verified from D3DX9_42.dll. */
-    uint32_t exa_base[14]={h.device,DATA,0,0,0,0,0,1,
-                          0xffffffffu,0xffffffffu,0,INFO,SCRATCH+0x700u,OUT};
+    uint32_t exa_default[14]={h.device,DATA,0,0,0,0,0,1,
+                              0xffffffffu,0xffffffffu,0,INFO,0,OUT};
     set_guest_path(&h,"menu.dds");
     assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_OK);
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_OK);
     uint32_t file_tex=rd(&h,OUT);assert(file_tex);
     assert(rd(&h,INFO+0)==8&&rd(&h,INFO+4)==8&&rd(&h,INFO+12)==2);
     assert(rd(&h,INFO+16)==FMT_A8R8G8B8&&rd(&h,INFO+24)==4);
     assert(call(&h,file_tex,13,NULL,0)==2);
-    uint32_t fl[]={0,OUT2,0,0};assert(call(&h,file_tex,19,fl,4)==HR_OK);
-    assert(rd(&h,OUT2)==32&&guest_ptr(&h.memory,rd(&h,OUT2+4),256));
-    assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),256),menu_dds+128,256));
-    uint32_t lvl0=0;assert(call(&h,file_tex,20,&lvl0,1)==HR_OK);
+    {uint32_t desc[]={0,OUT2};assert(call(&h,file_tex,17,desc,2)==HR_OK);
+     assert(rd(&h,OUT2+0)==FMT_A8R8G8B8&&rd(&h,OUT2+8)==0&&rd(&h,OUT2+12)==D9_POOL_MANAGED);}
+    {uint32_t fl[]={0,OUT2,0,0};assert(call(&h,file_tex,19,fl,4)==HR_OK);
+     assert(rd(&h,OUT2)==32&&!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),256),menu_dds+128,256));
+     uint32_t lvl=0;assert(call(&h,file_tex,20,&lvl,1)==HR_OK);}
     assert(call(&h,file_tex,2,NULL,0)==0);
 
-    /* Filter=0 and MipFilter=0 are accepted as the no-resize alternative. */
-    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[8]=0;exa[9]=0;
+    /* The exact TESV loose-texture tuple: dimensions from image info,
+     * MipLevels=D3DX_FROM_FILE, D3DUSAGE_DYNAMIC, A8R8G8B8, SYSTEMMEM,
+     * pSrcInfo/pPalette = NULL. */
+    uint32_t tesv[14]={h.device,DATA,8,8,0xfffffffd,0x200,FMT_A8R8G8B8,2,
+                       0xffffffffu,0xffffffffu,0,0,0,OUT};
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",tesv,14)==HR_OK);
+    uint32_t tesv_tex=rd(&h,OUT);assert(tesv_tex);
+    {uint32_t desc[]={0,OUT2};assert(call(&h,tesv_tex,17,desc,2)==HR_OK);
+     assert(rd(&h,OUT2+0)==FMT_A8R8G8B8&&rd(&h,OUT2+8)==0x200);
+     assert(rd(&h,OUT2+12)==D9_POOL_SYSTEMMEM&&rd(&h,OUT2+24)==8&&rd(&h,OUT2+28)==8);}
+    assert(call(&h,tesv_tex,13,NULL,0)==2);
+    {uint32_t fl[]={0,OUT2,0,0};assert(call(&h,tesv_tex,19,fl,4)==HR_OK);
+     assert(rd(&h,OUT2)==32&&!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),256),menu_dds+128,256));
+     uint32_t lvl=0;assert(call(&h,tesv_tex,20,&lvl,1)==HR_OK);
+     fl[0]=1;assert(call(&h,tesv_tex,19,fl,4)==HR_OK);
+     assert(rd(&h,OUT2)==16&&!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),64),menu_dds+128+256,64));
+     lvl=1;assert(call(&h,tesv_tex,20,&lvl,1)==HR_OK);}
+    assert(call(&h,tesv_tex,2,NULL,0)==0);
+
+    /* DXT1 file requested as A8R8G8B8 must be decoded, not faked. */
+    set_guest_path(&h,"dxt1.dds");
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",tesv,14)==HR_OK);
+    uint32_t dxt_tex=rd(&h,OUT);assert(dxt_tex);
+    assert(call(&h,dxt_tex,13,NULL,0)==1);
+    {uint32_t desc[]={0,OUT2};assert(call(&h,dxt_tex,17,desc,2)==HR_OK);
+     assert(rd(&h,OUT2+0)==FMT_A8R8G8B8&&rd(&h,OUT2+12)==D9_POOL_SYSTEMMEM);}
+    {uint32_t fl[]={0,OUT2,0,0};assert(call(&h,dxt_tex,19,fl,4)==HR_OK);
+     assert(rd(&h,OUT2)==32);
+     const uint32_t *px=guest_ptr(&h.memory,rd(&h,OUT2+4),256);assert(px);
+     for(unsigned i=0;i<64;++i)assert(px[i]==0xffff0000u);
+     uint32_t lvl=0;assert(call(&h,dxt_tex,20,&lvl,1)==HR_OK);}
+    assert(call(&h,dxt_tex,2,NULL,0)==0);
+
+    /* MipLevels=0 uses the file chain in this bridge (no mip generator). */
+    set_guest_path(&h,"menu.dds");
+    {uint32_t exa[14];memcpy(exa,tesv,sizeof exa);exa[4]=0;
      assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
      assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_OK);
-     uint32_t t=rd(&h,OUT);assert(t);
+     uint32_t t=rd(&h,OUT);assert(t&&call(&h,t,13,NULL,0)==2);
      assert(call(&h,t,2,NULL,0)==0);}
 
-    /* Parameter subset: anything that asks for resize/filter/usage/pool or a
-     * concrete format is rejected before the file is read and before any
-     * resource exists. */
+    /* Real D3DX filter values 1..4 are valid no-ops without resize. */
+    static const uint32_t good_filters[]={1u,2u,3u,4u};
+    for(unsigned i=0;i<sizeof good_filters/sizeof good_filters[0];++i){
+        uint32_t exa[14];memcpy(exa,tesv,sizeof exa);
+        exa[8]=exa[9]=good_filters[i];
+        assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+        assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_OK);
+        uint32_t t=rd(&h,OUT);assert(t);assert(call(&h,t,2,NULL,0)==0);
+    }
+
+    /* Resize/format/flag combinations that cannot be honored fail by name,
+     * before a resource exists and without touching pSrcInfo. */
     static const struct {unsigned index;uint32_t value;const char *needle;} bad_params[]={
-        {2,8,"Width"},{3,8,"Height"},{4,2,"MipLevels"},{5,1,"Usage"},
-        {6,FMT_A8R8G8B8,"Format"},{7,0,"Pool"},
-        {8,2,"Filter/MipFilter"},{9,2,"Filter/MipFilter"},{10,0x00ff00ffu,"ColorKey"},
+        {2,16,"does not match"},{3,16,"does not match"},
+        {6,22,"cannot be produced"}, /* X8R8G8B8 from an A8 file */
+        {4,2,"MipLevels"},{5,1,"Usage"},{7,0,"Pool"},
+        {8,0,"Filter/MipFilter"},{9,0,"Filter/MipFilter"},
+        {8,6,"Filter/MipFilter"},{9,6,"Filter/MipFilter"},
+        {10,0x00ff00ffu,"ColorKey"},
     };
     for(unsigned i=0;i<sizeof bad_params/sizeof bad_params[0];++i){
-        uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[bad_params[i].index]=bad_params[i].value;
+        uint32_t exa[14];memcpy(exa,exa_default,sizeof exa);
+        exa[bad_params[i].index]=bad_params[i].value;
         assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
         assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
         assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_NOTAVAILABLE);
         assert(rd(&h,OUT)==0);
+        /* Width/Height/Format are checked after parsing but still before the
+         * info output is written. */
         assert(rd(&h,INFO)==0xdeadbeefu);
         assert(strstr(d3dx_texture_shims_last_error(),bad_params[i].needle));
     }
-    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[11]=0x70000000u;
+    {uint32_t exa[14];memcpy(exa,exa_default,sizeof exa);exa[11]=0x70000000u;
      assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
      assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_INVALIDCALL);
      assert(rd(&h,OUT)==0);}
-    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[13]=0x70000000u;
+    {uint32_t exa[14];memcpy(exa,exa_default,sizeof exa);exa[13]=0x70000000u;
      assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_INVALIDCALL);}
-    {uint32_t exa[14];memcpy(exa,exa_base,sizeof exa);exa[0]=SCRATCH;
+    {uint32_t exa[14];memcpy(exa,exa_default,sizeof exa);exa[0]=SCRATCH;
      assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
      assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa,14)==HR_INVALIDCALL);
      assert(rd(&h,OUT)==0);}
 
     set_guest_path(&h,"bad.dds");
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDDATA);
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_INVALIDDATA);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"not a DDS"));
 
     set_guest_path(&h,"cube.dds");
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_E_NOTIMPL);
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_E_NOTIMPL);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"cube"));
 
     set_guest_path(&h,"volume.dds");
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_E_NOTIMPL);
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_E_NOTIMPL);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"volume"));
 
     set_guest_path(&h,"missing.dds");
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDDATA);
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_INVALIDDATA);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"cannot open"));
 
     set_guest_path(&h,"..\\escape.dds");
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDCALL);
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_INVALIDCALL);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"outside the sandbox"));
 
     set_guest_path(&h,"huge.dds");
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_base,14)==HR_INVALIDDATA);
+    assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_INVALIDDATA);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"64 MiB"));
 
     /* 7c. Dedicated cube/volume exports still fail by name: the D3D9 bridge
