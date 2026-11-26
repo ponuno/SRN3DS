@@ -140,6 +140,20 @@ export that still points into the guest DLL. The trace also prints host-shim
 bindings (`-> fd... (host shim)`), so plain exports remain visible when the
 builtin resolver wins before PE module lookup.
 
+Measured plain-export thunk order (trace13):
+
+| Thunk | Export |
+|---|---|
+| `0xfd000000` | `D3DXGetImageInfoFromFileInMemory` |
+| `0xfd000004` | `D3DXCreateTextureFromFileInMemory` |
+| `0xfd000008` | `D3DXGetImageInfoFromFileA` |
+| `0xfd00000c` | `D3DXCreateTextureFromFileExA` |
+| `0xfd000010` | `D3DXCreateCubeTextureFromFileInMemory` |
+| `0xfd000014` | `D3DXCreateVolumeTextureFromFileInMemory` |
+| `0xfd010000` | `D3DXLoadSurfaceFromMemory` |
+| `0xfd010004` | `D3DXLoadSurfaceFromSurface` |
+| `0xfd010008` | `D3DXCompileShader` |
+
 `pilot_vec3coord`/`pilot_vec3normal`/`pilot_vec3normalize` use a three-float
 output; the shared pilot runner selects that by case 6/7/8.
 `pilot_planenormalize` and `pilot_planetransform` use four floats (case
