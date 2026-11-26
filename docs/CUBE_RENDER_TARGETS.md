@@ -387,24 +387,30 @@ measurement build renames the three generated `f_FB5C20(c)` call sites in
 build. The probe prints `MEASUREMENT ONLY ... not shippable`; caps, SM3 words
 and T&L are unchanged.
 
-Host test: `tesv_cube_probe` PASS (exact 10-byte patch, only those bytes
-changed, repeat refusal, wrong flag/push/call/target/epilogue refusals,
-unmapped memory refusal). Registered in `tools/run_host_tests.ps1`.
+The probe was extended with byte-verified measurement-only pieces: NOPs at
+`0xc92698` (`89 44 B4 40`, store the cube group) and `0xc926a6` (`46`, inc
+`esi`); a group-sentinel guest-memory shadow (`tesv_cube_probe_ptr`, group
+vtables `0x011b019c`/`0x011539d8`); a runtime dispatch shadow for `0xfb6090`;
+and vtable slots 33/34 (`0x011b0220`/`0x011b0224`) pointed at a synthetic host
+stub `0x30000000` (the vtable part is opt-in via `TESV_CUBE_PROBE_VTABLE=1`).
+Host test `tesv_cube_probe` PASS (exact 15 code bytes plus
+the two vtable entries and the five-byte stub site, repeat refusal, wrong
+bytes, group shadow, unmapped memory). Registered in
+`tools/run_host_tests.ps1`.
 
-Fresh slice from `main` `bc6ae69` (`growth_probe/gen01`), census with SM3,
-HDR-fallback and 64 MiB budget probes: **90.243 s**, exit 1.
+Two fresh-slice censuses from `main` `bc6ae69` (`growth_probe/gen01`) with the
+SM3, HDR-fallback and 64 MiB budget probes:
 
-- `0xfb5bd0` is **gone**; the cube branch no longer calls `0xfb5c20`.
-- New first blocker: `last_call=0x00fb6090`, address `0xb`. `0xfb6090` is
-  `NiRenderTargetGroup` vtable `0x011b019c` slot 34 (`0x88`):
-  `mov eax,[ecx+eax*4+0xc]; mov eax,[eax+0xc]`. The selected buffer slot is
-  the `0xffffffff` sentinel, so `[[-1]+0xc]` faults at `0xb`. The active group
-  is `[0x1b913f0+0x628]`; the skipped cube group left a `-1` face/buffer entry
-  instead of a zeroed checked NULL.
-- Still 0: `CreateCubeTexture`, `GetCubeMapSurface`, `SetRenderTarget`,
-  `CreateDepthStencilSurface`, `SetDepthStencilSurface`, `CreateVertexShader`,
-  `CreatePixelShader`, `SetTexture`, both draw entry points and `Present`.
-  The last D3D call is still `Release(0x500022c0)` (the 0x71 2D target).
+1. **Dispatch-guard variant (default, no vtable stub): 210.657 s, exit 1.** Nine 2D
+   RTs created; `0xfb5bd0` gone; first blocker still
+   `last_call=0x00fb6090`, address `0xb` (`GetBufferData`, vtable slot 34,
+   buffer slot `-1`/`3`). The store/inc slot skip and the sentinel shadow did
+   not remove it: the getter is reached through the IR container, not the
+   skipped cube group's outer slot.
+2. **Vtable-stub variant (`TESV_CUBE_PROBE_VTABLE=1`): 231.052 s, exit 1.** Fault moves to
+   `last_call=0x30000000`, address `0`; `CreateTexture` is only 3, so the
+   renderer aborts before the nine-RT set. The stub returns NULL for legitimate
+   early `GetBufferData` calls too, so it is too broad.
 
 Next minimal step: zero the skipped group's buffer array (or skip the
 `0xc92676` group build and its slot bookkeeping) so `GetBufferData` at
@@ -440,3 +446,13 @@ CUBETEXTURE descriptor check as well (and, if the engine still probes by
 creating a trial resource, let that probe succeed) before the table entry can
 exist. This remains measurement-only; the shipping answer stays the named
 refusal until PICA cube render targets exist.
+Both: `CreateCubeTexture`, `GetCubeMapSurface`, `SetRenderTarget`,
+`CreateDepthStencilSurface`, `SetDepthStencilSurface`, `CreateVertexShader`,
+`CreatePixelShader`, `SetTexture`, both draw entry points and `Present` are 0.
+No depth/shader/texture-bind/draw was reached; no frame is claimed.
+
+Next minimal step: make the getter stub **conditional** — call the real
+container `0xfb6070`/`0xfb6090` for a valid `this`/slot and return NULL only
+for the `-1`/small-integer sentinel — or give the group a valid dummy
+`Ni2DBuffer` (width/height 0). The guest-byte-only paths cannot fix this
+because the getter is executed by the IR container. Do not fabricate a cube.

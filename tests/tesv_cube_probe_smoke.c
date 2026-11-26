@@ -6,19 +6,38 @@
 #include <string.h>
 
 #define PAGE_BASE 0x00c91000u
+#define CODE_SIZE 0x2000u
+#define GROUP_BASE 0x55100000u
+#define VTABLE_BASE 0x011b0000u
+#define STUB_BASE 0x00fb6000u
 #define PAGE_SIZE 0x1000u
+#define VTABLE_ADDR 0x011b0224u
+#define VTABLE2_ADDR 0x011b0220u
+#define STUB_ADDR 0x00fb60a7u
 #define FLAG_ADDR 0x00c9163eu
 #define PUSH_ADDR 0x00c9164du
 #define CALL_ADDR 0x00c91650u
 #define EPILOGUE_ADDR 0x00c916d1u
+#define STORE_ADDR 0x00c92698u
+#define INC_ADDR 0x00c926a6u
 
 static const uint8_t flag_expected[3]     = {0xf6, 0xc2, 0x10};
 static const uint8_t push_expected[3]     = {0x52, 0x51, 0x50};
 static const uint8_t call_expected[5]     = {0xe8, 0xcb, 0x45, 0x32, 0x00};
 static const uint8_t epilogue_expected[5] = {0x83, 0x7c, 0x24, 0x38, 0x00};
+static const uint8_t store_expected[4]    = {0x89, 0x44, 0xb4, 0x40};
+static const uint8_t inc_expected[1]      = {0x46};
 static const uint8_t patch_expected[10] = {
     0x83, 0xc4, 0x0c, 0x33, 0xf6, 0xe9, 0x77, 0x00, 0x00, 0x00
 };
+static const uint8_t store_patch[4] = {0x90, 0x90, 0x90, 0x90};
+static const uint8_t inc_patch[1]   = {0x90};
+static const uint8_t vtable_expected[4] = {0x90, 0x60, 0xfb, 0x00};
+static const uint8_t vtable2_expected[4] = {0x70, 0x60, 0xfb, 0x00};
+static const uint8_t stub_expected[5]   = {0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
+static const uint8_t vtable_patch[4]    = {0x00, 0x00, 0x00, 0x30};
+static const uint8_t vtable2_patch[4]   = {0x00, 0x00, 0x00, 0x30};
+static const uint8_t stub_patch[5]      = {0x31, 0xc0, 0xc2, 0x04, 0x00};
 
 #define CHECK(cond) do { if (!(cond)) { \
     fprintf(stderr, "tesv_cube_probe: FAIL line %d: %s\n", __LINE__, #cond); \
@@ -26,19 +45,29 @@ static const uint8_t patch_expected[10] = {
 } } while (0)
 
 static int seed_page(GuestMemory *m) {
-    uint8_t page[PAGE_SIZE];
+    uint8_t page[CODE_SIZE];
     memset(page, 0xcc, sizeof page);
     memcpy(page + (FLAG_ADDR - PAGE_BASE), flag_expected, sizeof flag_expected);
     memcpy(page + (PUSH_ADDR - PAGE_BASE), push_expected, sizeof push_expected);
     memcpy(page + (CALL_ADDR - PAGE_BASE), call_expected, sizeof call_expected);
     memcpy(page + (EPILOGUE_ADDR - PAGE_BASE), epilogue_expected,
            sizeof epilogue_expected);
+    memcpy(page + (STORE_ADDR - PAGE_BASE), store_expected, sizeof store_expected);
+    memcpy(page + (INC_ADDR - PAGE_BASE), inc_expected, sizeof inc_expected);
     CHECK(!guest_write(m, PAGE_BASE, page, sizeof page));
     return 0;
 }
 
+static int seed_extra(GuestMemory *m) {
+    CHECK(!guest_write(m, VTABLE_ADDR, vtable_expected, sizeof vtable_expected));
+    CHECK(!guest_write(m, VTABLE2_ADDR, vtable2_expected,
+                       sizeof vtable2_expected));
+    CHECK(!guest_write(m, STUB_ADDR, stub_expected, sizeof stub_expected));
+    return 0;
+}
+
 static int expect_unchanged(GuestMemory *m, const uint8_t *before) {
-    uint8_t after[PAGE_SIZE];
+    uint8_t after[CODE_SIZE];
     CHECK(!guest_read(m, PAGE_BASE, after, sizeof after));
     CHECK(!memcmp(before, after, sizeof after));
     return 0;
@@ -46,11 +75,15 @@ static int expect_unchanged(GuestMemory *m, const uint8_t *before) {
 
 int main(void) {
     GuestMemory m;
-    guest_init(&m, PAGE_SIZE);
-    CHECK(!guest_map(&m, PAGE_BASE, PAGE_SIZE));
+    guest_init(&m, CODE_SIZE + PAGE_SIZE * 3u);
+    CHECK(!guest_map(&m, PAGE_BASE, CODE_SIZE));
+    CHECK(!guest_map(&m, GROUP_BASE, PAGE_SIZE));
+    CHECK(!guest_map(&m, VTABLE_BASE, PAGE_SIZE));
+    CHECK(!guest_map(&m, STUB_BASE, PAGE_SIZE));
     CHECK(!seed_page(&m));
+    CHECK(!seed_extra(&m));
 
-    uint8_t before[PAGE_SIZE], after[PAGE_SIZE];
+    uint8_t before[CODE_SIZE], after[CODE_SIZE];
     CHECK(!guest_read(&m, PAGE_BASE, before, sizeof before));
 
     /* Disabled: no read, no write, even with null memory. */
@@ -58,9 +91,11 @@ int main(void) {
     CHECK(!tesv_cube_skip_active());
     CHECK(!tesv_cube_skip_probe(NULL));
     CHECK(!tesv_cube_skip_active());
+    CHECK(!tesv_cube_probe_ptr(GROUP_BASE + 0x0cu, 4));
     CHECK(!expect_unchanged(&m, before));
 
-    /* Enabled: verify the exact window and change only the ten call bytes. */
+    /* Enabled: verify the exact window and change only the expected bytes. */
+    CHECK(!_putenv_s("TESV_CUBE_PROBE_VTABLE", "1"));
     CHECK(!_putenv_s("TESV_D3D9_CUBE_SKIP_PROBE", "1"));
     CHECK(!tesv_cube_skip_probe(&m));
     CHECK(tesv_cube_skip_active());
@@ -73,17 +108,50 @@ int main(void) {
                   sizeof epilogue_expected));
     CHECK(!memcmp(after + (CALL_ADDR - PAGE_BASE), patch_expected,
                   sizeof patch_expected));
+    CHECK(!memcmp(after + (STORE_ADDR - PAGE_BASE), store_patch,
+                  sizeof store_patch));
+    CHECK(!memcmp(after + (INC_ADDR - PAGE_BASE), inc_patch, sizeof inc_patch));
     unsigned changed = 0;
     for (size_t i = 0; i < sizeof before; ++i)
         if (before[i] != after[i]) {
             ++changed;
-            CHECK(i >= CALL_ADDR - PAGE_BASE &&
-                  i < CALL_ADDR - PAGE_BASE + sizeof patch_expected);
+            CHECK((i >= CALL_ADDR - PAGE_BASE &&
+                   i < CALL_ADDR - PAGE_BASE + sizeof patch_expected) ||
+                  (i >= STORE_ADDR - PAGE_BASE &&
+                   i < STORE_ADDR - PAGE_BASE + sizeof store_patch) ||
+                  i == INC_ADDR - PAGE_BASE);
         }
-    CHECK(changed == sizeof patch_expected);
+    CHECK(changed == sizeof patch_expected + sizeof store_patch +
+                      sizeof inc_patch);
+    uint8_t vtable[4], vtable2[4], stub[5];
+    CHECK(!guest_read(&m, VTABLE_ADDR, vtable, sizeof vtable));
+    CHECK(!memcmp(vtable, vtable_patch, sizeof vtable));
+    CHECK(!guest_read(&m, VTABLE2_ADDR, vtable2, sizeof vtable2));
+    CHECK(!memcmp(vtable2, vtable2_patch, sizeof vtable2));
+    CHECK(!guest_read(&m, STUB_ADDR, stub, sizeof stub));
+    CHECK(!memcmp(stub, stub_patch, sizeof stub));
+
+    /* Group sentinel shadow: GROUP_BASE carries the NiRenderTargetGroup
+     * vtable, and group+0xc is -1.  The probe walks back to the vtable,
+     * rewrites only that field to a checked NULL and returns a zero shadow. */
+    CHECK(!guest_write32(&m, GROUP_BASE, 0x011b019cu));
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x0cu, 0xffffffffu));
+    uint32_t *zero = (uint32_t *)tesv_cube_probe_ptr(GROUP_BASE + 0x0cu, 4);
+    CHECK(zero && *zero == 0);
+    uint32_t slot = 0xffffffffu;
+    CHECK(!guest_read32(&m, GROUP_BASE + 0x0cu, &slot));
+    CHECK(slot == 0);
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x2cu, 0xffffffffu));
+    zero = (uint32_t *)tesv_cube_probe_ptr(GROUP_BASE + 0x2cu, 4);
+    CHECK(zero && *zero == 0);
+    slot = 0xffffffffu;
+    CHECK(!guest_read32(&m, GROUP_BASE + 0x2cu, &slot));
+    CHECK(slot == 0);
+    CHECK(!tesv_cube_probe_ptr(GROUP_BASE + 0x08u, 4));
+    CHECK(!tesv_cube_probe_ptr(GROUP_BASE + 0x0cu, 8));
 
     /* A second call sees the patch and must refuse without another write. */
-    uint8_t patched[PAGE_SIZE];
+    uint8_t patched[CODE_SIZE];
     memcpy(patched, after, sizeof patched);
     CHECK(tesv_cube_skip_probe(&m) == -1);
     CHECK(!expect_unchanged(&m, patched));
@@ -134,6 +202,53 @@ int main(void) {
     memcpy(patched, before, sizeof patched);
     CHECK(tesv_cube_skip_probe(&m) == -1);
     CHECK(!expect_unchanged(&m, patched));
+
+    /* Wrong store/inc bytes: refuse without writing. */
+    CHECK(!seed_page(&m));
+    CHECK(!guest_read(&m, PAGE_BASE, before, sizeof before));
+    before[STORE_ADDR - PAGE_BASE] = 0x8b;
+    CHECK(!guest_write(&m, STORE_ADDR, before + STORE_ADDR - PAGE_BASE, 1));
+    memcpy(patched, before, sizeof patched);
+    CHECK(tesv_cube_skip_probe(&m) == -1);
+    CHECK(!expect_unchanged(&m, patched));
+
+    CHECK(!seed_page(&m));
+    CHECK(!guest_read(&m, PAGE_BASE, before, sizeof before));
+    before[INC_ADDR - PAGE_BASE] = 0x47;
+    CHECK(!guest_write(&m, INC_ADDR, before + INC_ADDR - PAGE_BASE, 1));
+    memcpy(patched, before, sizeof patched);
+    CHECK(tesv_cube_skip_probe(&m) == -1);
+    CHECK(!expect_unchanged(&m, patched));
+
+    /* Wrong vtable/stub bytes: refuse without writing. */
+    CHECK(!seed_page(&m));
+    CHECK(!seed_extra(&m));
+    CHECK(!guest_read(&m, PAGE_BASE, before, sizeof before));
+    uint8_t bad_vtable = 0x91;
+    CHECK(!guest_write(&m, VTABLE_ADDR, &bad_vtable, 1));
+    memcpy(patched, before, sizeof patched);
+    CHECK(tesv_cube_skip_probe(&m) == -1);
+    CHECK(!expect_unchanged(&m, patched));
+
+    CHECK(!seed_page(&m));
+    CHECK(!seed_extra(&m));
+    CHECK(!guest_read(&m, PAGE_BASE, before, sizeof before));
+    uint8_t bad_stub = 0xcd;
+    CHECK(!guest_write(&m, STUB_ADDR, &bad_stub, 1));
+    memcpy(patched, before, sizeof patched);
+    CHECK(tesv_cube_skip_probe(&m) == -1);
+    CHECK(!expect_unchanged(&m, patched));
+
+    /* Vtable stub is opt-in: without TESV_CUBE_PROBE_VTABLE the code patches
+     * apply but the vtable/stub bytes remain expected. */
+    CHECK(!seed_page(&m));
+    CHECK(!seed_extra(&m));
+    CHECK(!_putenv_s("TESV_CUBE_PROBE_VTABLE", "0"));
+    CHECK(!tesv_cube_skip_probe(&m));
+    CHECK(!guest_read(&m, VTABLE_ADDR, vtable, sizeof vtable));
+    CHECK(!memcmp(vtable, vtable_expected, sizeof vtable));
+    CHECK(!guest_read(&m, STUB_ADDR, stub, sizeof stub));
+    CHECK(!memcmp(stub, stub_expected, sizeof stub));
 
     guest_destroy(&m);
 

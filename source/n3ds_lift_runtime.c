@@ -3,6 +3,10 @@
 /* Optional measurement hook; absent from ordinary host/ARM test binaries. */
 extern void *tesv_sm3_probe_level_ptr(uint32_t address, size_t bytes)
     __attribute__((weak));
+extern void *tesv_cube_probe_ptr(uint32_t address, size_t bytes)
+    __attribute__((weak));
+extern int tesv_cube_probe_dispatch(CPU *c, uint32_t addr)
+    __attribute__((weak));
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -266,6 +270,10 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
         void *probe = tesv_sm3_probe_level_ptr(addr, bytes);
         if (probe) return probe;
     }
+    if (tesv_cube_probe_ptr) {
+        void *probe = tesv_cube_probe_ptr(addr, bytes);
+        if (probe) return probe;
+    }
     void *p=memory?guest_ptr(memory,addr,bytes):NULL;
     if(!p){
         static unsigned logged;
@@ -310,6 +318,13 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
                     }else{
                         fprintf(stderr,"[guest] ecx_deref: unreadable\n");
                     }
+                }
+                if(getenv("TESV_CUBE_PROBE_DEBUG") && g_last_call==0x00fb6090u){
+                    uint32_t arg=0, slot=0;
+                    (void)guest_read32(memory, esp+4u, &arg);
+                    (void)guest_read32(memory, g_last_cpu->r[1]+arg*4u+0x0cu, &slot);
+                    fprintf(stderr,"[cube-probe] fault ecx=%08x arg=%08x slot=%08x\n",
+                            g_last_cpu->r[1],arg,slot);
                 }
             }
 #if defined(_WIN32)
@@ -436,6 +451,7 @@ void rt_int3(CPU *c,uint32_t addr) {rt_unimpl(c,addr,"int3");}
  * more than one table; the container is next; the generated slice IR table is
  * the final fallback. */
 int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
+    if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return 0;
     g_last_call=addr; g_last_cpu=c;
     const FnEntry *e=lookup(addr);
     if(e){e->fn(c);return 0;}
@@ -479,6 +495,7 @@ static void trace_indirect_fault(CPU *c,uint32_t target){
     }
 }
 void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
+    if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return;
     g_last_call=addr; g_last_cpu=c;
     const FnEntry *e=lookup(addr);
     if(e){*cache=e;e->fn(c);return;}

@@ -59,6 +59,17 @@ static int add_dll(BootSession *b, const char *name, uint32_t base, const char *
     return 0;
 }
 
+/* Measurement-only host target for the GetBufferData stub address that
+ * TESV_D3D9_CUBE_SKIP_PROBE writes into the NiRenderTargetGroup vtable.  The
+ * stub is not lifted, so bind it as a one-entry host module: eax=0 and the
+ * callee's `ret 4` (return address + one argument). */
+static void cube_probe_getbuffer_stub(CPU *c) {
+    if (c) c->r[0] = 0; /* caller reloads esp around the indirect call */
+}
+static const FnEntry cube_probe_table[] = {
+    {0x30000000u, cube_probe_getbuffer_stub}
+};
+
 static int run(const char *exe, const char *root, unsigned steps, size_t budget, const char *log,
                const D9Backend *backend, void *backend_ctx) {
     BootSession b;
@@ -120,6 +131,8 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
         tables[table_count++] = (FnModule){"d3dx", g_fn_table_pilot, g_fn_count_pilot};
         printf("d3dx: %u lifted function(s) registered\n", g_fn_count_pilot);
     }
+    if (table_count < sizeof tables / sizeof tables[0])
+        tables[table_count++] = (FnModule){"cube-probe", cube_probe_table, 1};
     n3ds_boot_set_unresolved_traps(&b, 1);
     if (n3ds_boot_prepare(&b, tables, table_count, 0x80000, 0x200000, root)) {
         printf("prepare: %s\n", b.message);
