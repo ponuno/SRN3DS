@@ -534,7 +534,12 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
          * exec_block() faults explicitly on a malformed instruction. */
     }
     if (!saw_entry) return N3DS_IRC_ERR_RECORD_BAD;
-    if (((e->flags & N3DS_IRC_FN_PREENTRY) != 0) != saw_preentry)
+    /* A container packed before the PREENTRY index flag existed can still
+     * carry a cold pre-entry block. It is safe to execute through the
+     * container tier, so accept it instead of invalidating old packs; it just
+     * does not get the pre-entry dispatch preference. The reverse mismatch is
+     * a real inconsistency: a flagged entry must contain its cold block. */
+    if ((e->flags & N3DS_IRC_FN_PREENTRY) != 0 && !saw_preentry)
         return N3DS_IRC_ERR_RECORD_BAD;
     return N3DS_IRC_OK;
 }

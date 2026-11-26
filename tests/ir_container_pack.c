@@ -138,6 +138,10 @@ static int range_cmp(const void *a, const void *b) {
     const Range *x = (const Range *)a, *y = (const Range *)b;
     if (x->lo != y->lo) return x->lo < y->lo ? -1 : 1;
     if (x->hi != y->hi) return x->hi < y->hi ? -1 : 1;
+    /* A closure copy has the same span as the discovery leader it promotes;
+     * keep the promoted copy first so the excluded discovery range cannot
+     * shadow it in the build loop. */
+    if (x->closure != y->closure) return x->closure ? -1 : 1;
     return 0;
 }
 
@@ -215,24 +219,31 @@ static void free_blocks(PackBlock *b, uint32_t n) {
  * code with an enclosing function, and guessing their frame would change guest
  * control flow. A genuinely absent target remains a named runtime refusal. */
 static int promote_closure_range(Fn *fn, uint32_t start) {
-    if (start >= fn->end) return 0;
+    if (start >= fn->entry) return 0;
+    int base = -1;
     for (uint32_t i = 0; i < fn->nranges; ++i) {
         if (fn->ranges[i].lo != start) continue;
-        if (start >= fn->entry || fn->ranges[i].closure) return 0;
-        /* The sorted pre-entry range was already skipped. Append a closure
-         * copy so the growing worklist decodes it after the branch is known. */
-        Range *grown = (Range *)realloc(fn->ranges, (fn->nranges + 1u) * sizeof *grown);
-        if (!grown) {
-            snprintf(fn->error, sizeof fn->error, "out of memory");
-            return -1;
-        }
-        fn->ranges = grown;
-        fn->ranges[fn->nranges] = fn->ranges[i];
-        fn->ranges[fn->nranges].closure = 1;
-        fn->nranges++;
-        return 1;
+        /* Discovery can list the same leader more than once. Return as soon as
+         * any copy is already promoted; appending per duplicate (or once per
+         * decoded edge) would grow the range list without bound. */
+        if (fn->ranges[i].closure) return 0;
+        if (base < 0) base = (int)i;
     }
-    return 0;
+    if (base < 0) return 0;
+    if (fn->nranges >= 0xffffu) {
+        snprintf(fn->error, sizeof fn->error, "more than 65535 closure leaders");
+        return -1;
+    }
+    Range *grown = (Range *)realloc(fn->ranges, (fn->nranges + 1u) * sizeof *grown);
+    if (!grown) {
+        snprintf(fn->error, sizeof fn->error, "out of memory");
+        return -1;
+    }
+    fn->ranges = grown;
+    fn->ranges[fn->nranges] = fn->ranges[base];
+    fn->ranges[fn->nranges].closure = 1;
+    fn->nranges++;
+    return 1;
 }
 
 /* Return the final instruction's signed direct-branch displacement. */
@@ -308,14 +319,16 @@ static int build_record(Fn *fn, uint8_t **out, size_t *out_size) {
          * branch target inside a later block). The interpreter decodes from
          * whichever address control flow reaches, so every leader must have
          * its own record block. Only exact duplicate starts are merged. */
-        if (have_start && start == last_start) continue;
-        last_start = start;
-        have_start = 1;
         /* Explicit discovery ranges before the entry remain excluded: they
          * are shared cold blocks owned by other functions. A closure-added
          * pre-entry leader is different: a decoded conditional branch in this
-         * function proved that it is reachable in this frame. */
+         * function proved that it is reachable in this frame. Check this before
+         * the duplicate-start merge: the closure copy intentionally has the
+         * same start as the excluded discovery range. */
         if (start < fn->entry && !fn->ranges[r].closure) continue;
+        if (have_start && start == last_start) continue;
+        last_start = start;
+        have_start = 1;
         if (start >= fn->end) {
             failed = 1; status = DEC_BAD_RANGE;
             snprintf(fn->error, sizeof fn->error, "leader %08x outside entry..end", start);

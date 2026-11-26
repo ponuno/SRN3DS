@@ -104,6 +104,22 @@ static void run_case(Harness *h,int probe){
         assert(rd(h,SIZE)==8u);
         assert(call(h,ps,4,(uint32_t[]){FUNC,SIZE},2)==HR_OK);
         assert(rd(h,FUNC)==0xFFFF0300u);
+        /* The retained copy must stop at the real END, not at a comment payload
+         * word that happens to look like END (0x0000ffff). GetFunction reports
+         * all five words: version, comment token, two payload words, END. */
+        uint32_t ps_comment[]={0xFFFF0300u,0x0002FFFEu,0x0000FFFFu,0xDEADBEEFu,
+                               0x0000FFFFu};
+        wr(h,CODE+0x100,ps_comment,sizeof ps_comment);
+        uint32_t cp2[]={CODE+0x100,OUT2};
+        assert(!guest_write32(&h->memory,OUT2,0));
+        assert(call(h,h->device,106,cp2,2)==HR_OK);
+        uint32_t ps3=rd(h,OUT2);assert(ps3);
+        uint32_t size3=0;wr(h,SIZE,&size3,4);
+        assert(call(h,ps3,4,(uint32_t[]){0,SIZE},2)==HR_OK);
+        assert(rd(h,SIZE)==sizeof ps_comment);
+        assert(call(h,ps3,4,(uint32_t[]){FUNC,SIZE},2)==HR_OK);
+        assert(rd(h,FUNC+3*4)==0xDEADBEEFu);
+        assert(call(h,ps3,2,NULL,0)==0);
         /* QI IUnknown, AddRef/Release and a second create/release cycle. */
         wr(h,GUID,iid_iunknown,16);
         uint32_t qi[]={GUID,OUT2};assert(!guest_write32(&h->memory,OUT2,0));

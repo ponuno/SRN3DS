@@ -2827,6 +2827,34 @@ static void shader_plan_sha256_hex(const uint32_t *code,size_t words,char out[65
     }
     out[64]=0;
 }
+/* Number of words the D3D9 token stream at `address` declares, bounded by
+ * `limit`. Every instruction token carries its own length in bits 24..27 and a
+ * comment token carries its payload length in bits 16..30, so the walk steps
+ * over operands (which can hold any constant bits, including 0xffff) instead of
+ * reading them as tokens. Only the stream itself is touched, not the rest of
+ * the enclosing guest region. A stream without a reachable END reports the
+ * whole bounded window, which preserves the previous fixed-window diagnostics
+ * for malformed shaders. */
+static size_t shader_stream_words(uint32_t address,size_t limit){
+    size_t pos=0;
+    while(pos<limit){
+        uint32_t token;
+        if(guest_read32(g.mem,address+(uint32_t)pos*4,&token))return limit;
+        /* The version token is not an instruction: its length bits are the
+         * low half's major version, not a word count. */
+        if(pos==0){pos=1;continue;}
+        uint32_t op=token&0xffffu;
+        if(op==0xffffu)return pos+1;
+        size_t total;
+        if(op==0xfffeu){
+            size_t skip=(size_t)((token>>16)&0x7fffu);
+            total=skip+1;
+        }else total=(size_t)((token>>24)&15u)+1;
+        if(total>limit-pos)return limit;
+        pos+=total;
+    }
+    return limit;
+}
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     if(!address||(address&3)||!ptr(out,4)||OBJ_LIMIT_HIT())return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
@@ -2842,7 +2870,12 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         return INVALID;
     }
     if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
-    uint32_t *code=malloc(count*4);if(!code)return OUTMEM;for(size_t i=0;i<count;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
+    /* Read exactly the declared token stream. The old path copied the whole
+     * bounded window (up to 16 KiB) for every shader, including code-less
+     * probe objects, which backed guest pages the stream never used. */
+    size_t words=shader_stream_words(address,count);
+    uint32_t *code=malloc(words*4);if(!code)return OUTMEM;
+    for(size_t i=0;i<words;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
     /* Structural validity is a device contract, not a backend capability: a
      * pointer that is not a D3D9 token stream (bad version, unknown opcode,
      * broken framing) is D3DERR_INVALIDCALL in both normal and measurement
@@ -2850,13 +2883,13 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
      * D3DERR_NOTAVAILABLE refusal unless the measurement-only skip probe is
      * requested, in which case it becomes a non-executable object. */
     D9ShaderInfo shape;
-    if(d9_shader_analyze(code,count,&shape)==D9_SHADER_INVALID){
+    if(d9_shader_analyze(code,words,&shape)==D9_SHADER_INVALID){
         char diagnostic[320];d9_shader_diagnostic(&shape,diagnostic,sizeof diagnostic);
         snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"%s",diagnostic);
         fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
         free(code);return INVALID;
     }
-    size_t stream_words=shape.saw_end&&shape.words?shape.words:count;
+    size_t stream_words=shape.saw_end&&shape.words?shape.words:words;
     /* Measurement-only skip probe: a shader outside the certified closure is
      * represented by a named, non-executable object so the census can pass the
      * renderer's shader wall.  Draws with it are explicitly refused below.
@@ -2867,16 +2900,15 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         D9MenuClosureRequest request;
         memset(&request,0,sizeof request);
         request.stage=kind==PS?D9_MENU_STAGE_PS:D9_MENU_STAGE_VS;
-        request.code=code;request.available_words=count;
+        request.code=code;request.available_words=words;
         int match=d9_menu_closure_certify(&request,&probe_verdict);
         if(match!=D9_MENU_MATCH){
             char reason[D9_MENU_CLOSURE_REASON_MAX];
             snprintf(reason,sizeof reason,"%s",probe_verdict.reason[0]?
                      probe_verdict.reason:"shader outside the certified closure");
-            /* GetFunction must report the real token-stream length. */
-            uint32_t *exact=realloc(code,stream_words*4);
-            if(exact)code=exact;
-            return shader_probe_object(kind,out,reason,code,stream_words);
+            /* shader_stream_words() already stopped at END, so the retained
+             * copy is exactly what GetFunction must report. */
+            return shader_probe_object(kind,out,reason,code,words);
         }
     }
     /* Named first-menu closure.  While the TESV menu path has armed this
@@ -2886,7 +2918,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
      * generic SM2/TEV paths can turn it into a fallback success. */
     D9MenuClosureVerdict closure;
     if(d9_menu_closure_precreate(kind==PS?D9_MENU_STAGE_PS:D9_MENU_STAGE_VS,
-                                 code,count,&closure)){
+                                 code,words,&closure)){
         snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
                  "menu shader closure: %s",closure.reason);
         fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
@@ -2932,7 +2964,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
          * is a different contract and must not reinterpret the object. */
         has_menu=has_menu_vs=0;
     }else if(kind==PS){
-        int menu_result=d9_menu_shader_match_ps(code,count,&menu,
+        int menu_result=d9_menu_shader_match_ps(code,words,&menu,
                                                 menu_why,sizeof menu_why);
         if(menu_result<0){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
@@ -2945,7 +2977,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         }
         has_menu=menu_result>0;
     }else{
-        int menu_result=d9_menu_shader_match_vs(code,count,&menu,
+        int menu_result=d9_menu_shader_match_vs(code,words,&menu,
                                                 menu_why,sizeof menu_why);
         if(menu_result<0){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
@@ -2986,9 +3018,9 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             }
         }
     }
-    if(!has_menu&&!has_menu_vs&&!has_plan_ps&&kind==PS&&count&&code[0]==0xFFFF0300u){
+    if(!has_menu&&!has_menu_vs&&!has_plan_ps&&kind==PS&&words&&code[0]==0xFFFF0300u){
         D9PicaTevReject reason;char backend_why[256];
-        if(d9_pica_tev_preflight_pixel(code,count,&reason,backend_why,sizeof backend_why)){
+        if(d9_pica_tev_preflight_pixel(code,words,&reason,backend_why,sizeof backend_why)){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
             fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
             if(reason==D9_PICA_TEV_MALFORMED||reason==D9_PICA_TEV_PROGRAM_VERSION){
@@ -3021,7 +3053,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             info.kind=D9_SHADER_VS_MENU;result=D9_SHADER_VS_MENU;
         }
     }else{
-        result=d9_shader_analyze_tev(code,count,&info,&tev);
+        result=d9_shader_analyze_tev(code,words,&info,&tev);
         int wanted=kind==VS?D9_SHADER_VS_MATRIX_UV:D9_SHADER_PS_TEXTURE;
         if(result!=wanted&&!(kind==PS&&result==D9_SHADER_TEV)){
             char diagnostic[320];d9_shader_diagnostic(&info,diagnostic,sizeof diagnostic);
