@@ -2917,6 +2917,8 @@ static void core_text_plan(D9TevProgram *p){
         s->src_a[0]=D9TEV_SRC_TEX0;
         s->src_a[1]=D9TEV_SRC_PRIMARY;
         s->src_a[2]=D9TEV_SRC_PRIMARY;
+        if(getenv("MENU_DEBUG_A8_RED"))
+            s->op_a[0]=D9TEV_A_R; /* diagnostic: A8 coverage may live in red */
     }
     for(unsigned i=0;i<3;++i){s->op_rgb[i]=D9TEV_RGB_COLOR;s->op_a[i]=D9TEV_A_ALPHA;}
     s->const_reg=0xFFu;

@@ -681,6 +681,12 @@ int main(void) {
         setenv("MENU_DEBUG_SOLID", "1", 1);
         fprintf(stderr, "MENU_DEBUG_SOLID: TEV ignores the atlas (vertex colour only)\n");
     }
+    FILE *a8red_flag = fopen("sdmc:/menu_debug_a8_red.flag", "r");
+    if (a8red_flag) {
+        fclose(a8red_flag);
+        setenv("MENU_DEBUG_A8_RED", "1", 1);
+        fprintf(stderr, "MENU_DEBUG_A8_RED: alpha reads the A8 red channel\n");
+    }
     if (cpu_ok) {
         unsigned nonzero = 0;
         for (unsigned i = 0; i < sizeof g_atlas_pixels; ++i)
