@@ -73,12 +73,26 @@ depth-stencil surface (`EnableAutoDepthStencil` is 0).
 `CreateDepthStencilSurface` / `SetDepthStencilSurface` /
 `GetDepthStencilSurface` / `Clear(Z|STENCIL)` / `CheckDepthStencilMatch`:
 
-- Accepted: `Width=400, Height=240`, `D3DFMT_D24S8 (75)` or `D24X8 (77)`,
-  `MultiSampleType=0`, `Quality=0`, `Lockable=FALSE`, pool DEFAULT. Both formats
+- Accepted: `D3DFMT_D24S8 (75)` or `D24X8 (77)`, `MultiSampleType=0`,
+  `Quality=0`, `Lockable=FALSE`, pool DEFAULT, with **power-of-two 8..1024**
+  dimensions or exactly the 400x240 presentation back-buffer size. Both formats
   are the same 32-bit PICA `DEPTH24_STENCIL8` attachment.
-- Rejected with named reasons: any other size/format/MSAA/quality, a lockable
-  depth surface, a shared handle, creation inside `BeginScene`/`EndScene`, and a
+- A depth surface is a **descriptor**, not an allocation: every colour target
+  already owns one PICA depth attachment, so a 1024x1024 depth descriptor costs
+  no extra VRAM. It describes whatever target is active when it is bound.
+- Rejected with named reasons: any other size (non-pow2 except the exact
+  400x240 back size, or outside 8..1024), any other format, MSAA/quality,
+  lockable, a shared handle, creation inside `BeginScene`/`EndScene`, and a
   backend without `depth_clear`.
+- **Binding is size-checked**: `SetDepthStencilSurface` accepts a depth surface
+  only when its dimensions equal the currently active explicit target (logical
+  size, so the retained 512x256 back buffer is checked as 400x240) or the
+  400x240 back buffer; otherwise it returns `D3DERR_NOTAVAILABLE` with
+  "the depth-stencil size does not match the active render target".
+- **Switching targets is checked**: with a depth surface bound, `SetRenderTarget`
+  to a target of a different size returns `D3DERR_NOTAVAILABLE` and leaves the
+  old target selected. The caller must bind a matching depth or
+  `SetDepthStencilSurface(NULL)` first. No silent depth reset.
 - `SetDepthStencilSurface(NULL)` detaches; then `Clear` with
   `D3DCLEAR_ZBUFFER`/`D3DCLEAR_STENCIL` is `D3DERR_INVALIDCALL` (the previous
   behaviour), and `GetDepthStencilSurface` returns `D3DERR_NOTFOUND`.
@@ -86,6 +100,8 @@ depth-stencil surface (`EnableAutoDepthStencil` is 0).
   `d9_clear_depth()`, which requires an active scene, the bound depth surface and
   a size match with the active render target. `z` must be finite and in `[0,1]`;
   the packed value written to the attachment is `depth24 | (stencil << 24)`.
+  A depth/stencil-only `Clear` no longer clears the colour target (the queued
+  colour clear is gated on `D3DCLEAR_TARGET`).
 - The PICA backend creates every colour target (screen and explicit) with
   `C3D_RenderTargetCreateFromTex(..., GPU_RB_DEPTH24_STENCIL8)`, binds depth
   testing for offscreen targets too (previously disabled), and implements

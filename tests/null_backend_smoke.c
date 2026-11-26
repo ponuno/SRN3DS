@@ -101,7 +101,7 @@ static int trace_only(int with_unsupported){
     uint32_t present[]={0,0,0,0};assert(call(&h,device,17,present,4)==0);
     uint32_t rt[]={0,OUT2};assert(call(&h,device,38,rt,2)==0);assert(unref(&h,rd(&h,OUT2))==1);
     if(with_unsupported){
-        uint32_t unsupported[]={16,16,75,0,0,0,OUT2,0};
+        uint32_t unsupported[]={16,16,80,0,0,0,OUT2,0}; /* D16, not the PICA attachment */
         uint32_t r=call(&h,device,29,unsupported,8);assert(r==0x8876086au&&rd(&h,OUT2)==0);
     }
     assert(unref(&h,device)==0&&unref(&h,h.factory)==0);
@@ -337,8 +337,9 @@ int main(int argc,char **argv){
     rt_args[0]=16;rt_args[2]=D9_DXT1;assert(call(&h,device,28,rt_args,8)==0x8876086au&&rd(&h,OUT2)==0);
     rt_args[2]=D9_A8R8G8B8;rt_args[7]=OUT;assert(call(&h,device,28,rt_args,8)==0x8876086cu&&rd(&h,OUT2)==0);
 
-    /* Unsupported depth paths return errors and null outputs. */
-    uint32_t no_depth[]={16,16,75,0,0,0,OUT2,0};
+    /* Depth descriptors: only the PICA formats are supported; the size is a
+     * descriptor of the active target's attachment (binding checks it). */
+    uint32_t no_depth[]={16,16,80,0,0,0,OUT2,0}; /* D16 */
     assert(call(&h,device,29,no_depth,8)==0x8876086au&&rd(&h,OUT2)==0);
     uint32_t no_z[]={0};assert(call(&h,device,39,no_z,1)==0);
     no_z[0]=back;assert(call(&h,device,39,no_z,1)==0x8876086cu);

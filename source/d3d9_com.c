@@ -604,9 +604,16 @@ static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     if(A(8)){d3d_log("CreateDepthStencilSurface","shared handles are not supported");RET(INVALID,9);}
     if(A(4)||A(5)){d3d_log("CreateDepthStencilSurface","only D3DMULTISAMPLE_NONE with quality zero is implemented");RET(UNAVAILABLE,9);}
     if(A(6)){d3d_log("CreateDepthStencilSurface","lockable depth-stencil surfaces are not implemented");RET(UNAVAILABLE,9);}
-    if(A(1)!=g.pp[0]||A(2)!=g.pp[1]){
-        d3d_log("CreateDepthStencilSurface","only a depth-stencil matching the presentation back buffer is implemented");
-        RET(UNAVAILABLE,9);}
+    /* A descriptor of the target's single DEPTH24_STENCIL8 attachment; no VRAM
+     * is allocated here.  Binding checks the size against the active target.
+     * Power-of-two 8..1024 covers render-target textures; the exact 400x240
+     * presentation size stays accepted (it is not a power of two). */
+    unsigned back_size=A(1)==g.pp[0]&&A(2)==g.pp[1];
+    unsigned pow2=A(1)>=8&&A(2)>=8&&A(1)<=1024&&A(2)<=1024&&
+                  !(A(1)&(A(1)-1))&&!(A(2)&(A(2)-1));
+    if(!back_size&&!pow2){
+        d3d_log("CreateDepthStencilSurface","only power-of-two 8..1024 or the exact back-buffer size is implemented");
+        RET(INVALID,9);}
     if(A(3)!=D9_D24S8&&A(3)!=D9_D24X8){
         d3d_log("CreateDepthStencilSurface","only D3DFMT_D24S8/D24X8 (the PICA depth attachment) is implemented");
         RET(UNAVAILABLE,9);}
@@ -614,8 +621,9 @@ static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     D9Handle h=0;int rc=d9_create_depth_surface(g.device,A(1),A(2),A(3),A(4),A(5),A(6)!=0,&h);
     if(rc){
         d3d_log("CreateDepthStencilSurface",rc==D9_MEMORY?"depth-stencil slot table is full":
-            rc==D9_UNSUPPORTED?"the backend has no depth attachment or depth clear":"invalid depth-stencil request");
-        RET(rc==D9_MEMORY?OUTMEM:UNAVAILABLE,9);
+            rc==D9_UNSUPPORTED?"the backend has no depth attachment or depth clear":
+            rc==D9_INVALID?"invalid depth-stencil dimensions or format":"invalid depth-stencil request");
+        RET(rc==D9_MEMORY?OUTMEM:rc==D9_INVALID?INVALID:UNAVAILABLE,9);
     }
     Obj *o=new_obj(SURFACE);if(!o){d9_release_depth_surface(g.device,h);RET(OUTMEM,9);}
     o->depth=h;o->is_depth=1;o->width=A(1);o->height=A(2);o->format=A(3);o->usage=0;o->pool=0;
@@ -654,7 +662,10 @@ static void set_render_target(CPU *c){Obj *o=obj(A(2),SURFACE);
     D9Handle h=(!o||o==g.back)?0:o->handle;
     if(g.clear_pending&&g.clear_target!=h){d3d_log("SetRenderTarget","queued Clear belongs to the previous render target");RET(INVALID,3);}
     int rc=d9_set_render_target(g.device,h);
-    if(rc)RET(hr(rc),3);
+    if(rc){
+        if(rc==D9_UNSUPPORTED)d3d_fail("SetRenderTarget",d9_last_draw_diagnostic(g.device),UNAVAILABLE);
+        RET(hr(rc),3);
+    }
     bind_render_target(o?o:g.back);
     default_viewport();
     trace_detail("RenderTarget=0x%08lx Implicit=%u",(unsigned long)(o?o->guest:0),(unsigned)(!o||o==g.back));
@@ -738,7 +749,7 @@ static void set_depth_stencil(CPU *c){
     Obj *o=obj(A(1),SURFACE);
     if(!o||!o->is_depth||o->lock_guest){d3d_log("SetDepthStencilSurface","argument is not a depth-stencil surface");RET(INVALID,2);}
     int rc=d9_set_depth_surface(g.device,o->depth);
-    if(rc){d3d_log("SetDepthStencilSurface","the depth-stencil surface was rejected by the device");RET(hr(rc),2);}
+    if(rc){d3d_fail("SetDepthStencilSurface",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),2);}
     bind(&g.depth,o);RET(OK,2);
 }
 static void get_depth_stencil(CPU *c){uint32_t out=A(1);if(!ptr(out,4))RET(INVALID,2);M32(out)=0;
@@ -1109,7 +1120,9 @@ static void clear(CPU *c){if(!obj(A(0),DEVICE)||g.phase){d3d_log("Clear","Clear 
 }
 static void begin_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,1);
     int queued=g.clear_pending;if(!queued)g.frame_clear=0;
-    int rc=d9_begin_scene_ex(g.device,g.clear,queued);
+    /* A depth/stencil-only Clear must not clear the colour target. */
+    int color_clear=queued&&(g.clear_flags&1u);
+    int rc=d9_begin_scene_ex(g.device,g.clear,color_clear);
     if(!rc&&queued&&(g.clear_flags&6u)){
         float z;memcpy(&z,&g.clear_z,4);
         rc=d9_clear_depth(g.device,g.clear_flags,z,g.clear_stencil);

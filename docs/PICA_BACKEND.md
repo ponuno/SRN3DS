@@ -689,10 +689,13 @@ Only `D3DMULTISAMPLE_NONE`, quality zero and no shared handle are accepted.
 512x256 RGBA8 target for the 400x240 mode, `BeginScene` binds it, `Present` blits
 it to the screen, `LockRect`/`UnlockRect` read/write it through
 `C3D_SyncTextureCopy`/`C3D_TexLoadImage`, and `StretchRect` can now sample it.
-Explicit `D24S8`/`D24X8` depth-stencil surfaces are supported for the 400x240
-back buffer (`CreateDepthStencilSurface`, `SetDepthStencilSurface`,
-`Clear(Z|STENCIL)`); the depth attachment is the target's PICA
-`DEPTH24_STENCIL8` buffer. A lockable target requires both a readback and a
+Explicit `D24S8`/`D24X8` depth-stencil surfaces are supported as descriptors of
+the active target's single PICA `DEPTH24_STENCIL8` attachment
+(`CreateDepthStencilSurface`, `SetDepthStencilSurface`, `Clear(Z|STENCIL)`):
+pow2 8..1024 or the exact 400x240 back-buffer size, bound only when the size
+matches the active target (the 400x240 back buffer or a render-target texture's
+backing target). No separate VRAM is allocated for a depth descriptor.
+A lockable target requires both a readback and a
 write-back callback; the null backend keeps real BGRA pixels (including a
 private 400x240 presented image) and implements both, so the host tests verify
 the pixels instead of only the call stream. Texture render targets, MRT,

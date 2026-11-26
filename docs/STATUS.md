@@ -355,8 +355,9 @@ The measured TESV `CreateDevice` set is now accepted end to end:
 ONE, `Flags=0x1` (`D3DPRESENTFLAG_LOCKABLE_BACKBUFFER`) and
 `EnableAutoDepthStencil=0`. The lockable flag is backed by a retained 512x256
 RGBA8 target with a real `Present` blit, `LockRect` read/write and
-`StretchRect` sampling; explicit `D24S8`/`D24X8` depth-stencil surfaces attach
-to the PICA depth attachment and `Clear(Z|STENCIL)` reaches hardware. The ARM
+`StretchRect` sampling; explicit `D24S8`/`D24X8` depth-stencil descriptors for
+pow2 8..1024 or the 400x240 back buffer attach to the active target's PICA depth
+attachment, are size-checked on bind, and `Clear(Z|STENCIL)` reaches hardware. The ARM
 `com` and `tesv` targets link the new backend code. Host evidence is pixel-level
 through the null backend only; Azahar pixel proof for the retained target,
 present orientation and depth clear is still open. Details and the remaining

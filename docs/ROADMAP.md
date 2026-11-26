@@ -239,14 +239,18 @@ read stage without fake successes. *Not met.*
       `shadersfx\Imagespace%03d.fxp`), so a pre-translation cache can be keyed
       by exactly `(name, index, stage)` without touching game code.
 - [~] One explicit LDR render-target surface is implemented across core/COM/PICA:
-  VRAM colour target, no depth, clear/bind/restore, read-only LockRect and bounded
-  lifetime. Azahar switching pixel proof passes. `GetViewport` is corrected to
-  slot 48. `D3DUSAGE_RENDERTARGET` textures (pow2 8..1024 X8R8G8B8/A8R8G8B8,
-  one level, pool DEFAULT) are real target-backed textures: `GetSurfaceLevel(0)`
-  returns the render target and `SetTexture` samples the same colour buffer.
-  Float/HDR render targets, mip chains, viewport orientation, depth/stencil,
-  scissor, state blocks, fog, multi-stage samplers, skinning, terrain and
-  particles remain unsupported.
+  VRAM colour target with its own depth attachment, clear/bind/restore, read-only
+  LockRect and bounded lifetime. Azahar switching pixel proof passes.
+  `GetViewport` is corrected to slot 48. `D3DUSAGE_RENDERTARGET` textures
+  (pow2 8..1024 X8R8G8B8/A8R8G8B8, one level, pool DEFAULT) are real
+  target-backed textures: `GetSurfaceLevel(0)` returns the render target and
+  `SetTexture` samples the same colour buffer. Depth-stencil descriptors now
+  cover pow2 8..1024 (plus the exact 400x240 back-buffer size), are bound only
+  to a target of the same size, and a target switch under an incompatible bound
+  depth is a named refusal; depth/stencil-only clears no longer clear colour.
+  Float/HDR render targets, mip chains, viewport orientation, MSAA depth,
+  depth textures, separate depth VRAM, scissor, state blocks, fog, multi-stage
+  samplers, skinning, terrain and particles remain unsupported.
 - [ ] Golden-image tests with tolerances; check emulator vs hardware differences.
 
 **Gate:** real Skyrim main menu and then world geometry drawn by TESV, not a

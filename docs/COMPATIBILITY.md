@@ -153,8 +153,10 @@ multisampling, queries, swap-chain control. Reset,
 back-buffer, CPU offscreen surface, one explicit LDR render-target and viewport
 methods work through COM. `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER` is real: a
 retained 512x256 target for the 400x240 mode with a Present blit and
-LockRect/UnlockRect read/write. Explicit `D24S8`/`D24X8` depth-stencil surfaces
-attach to the target's PICA depth attachment and `Clear(Z|STENCIL)` reaches it.
+LockRect/UnlockRect read/write. Explicit `D24S8`/`D24X8` depth-stencil descriptors
+(pow2 8..1024 or the exact 400x240 back-buffer size) attach to the active
+target's PICA depth attachment, are refused when the size does not match, and
+`Clear(Z|STENCIL)` reaches it.
 The PICA target path has synthetic Azahar pixel proof (two independent 64x64
 targets, readback and back-buffer restore); it is not yet a Skyrim frame. The
 retained target and depth attachment are host-tested and compiled for ARM;

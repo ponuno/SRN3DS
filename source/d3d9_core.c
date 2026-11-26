@@ -328,6 +328,7 @@ int d9_release_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if
     }
     if(d->texture == h)d->texture=0;if(d->texture1 == h)d->texture1=0;memset(t,0,sizeof *t);return D9_OK;}
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
+static Depth *depth_slot(D9Device *d,D9Handle h);
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
     if(out)*out=0;
     if(!d||d->scene||d->teardown||!out||!d->next||w<8||h<8||w>1024||h>1024||
@@ -378,6 +379,21 @@ int d9_set_render_target(D9Device *d,D9Handle h){
     /* Handle zero means the default back buffer: the retained target when
      * D3DPRESENTFLAG_LOCKABLE_BACKBUFFER created one, otherwise the screen. */
     Target *t=h?target(d,h):(d->back_target?target(d,d->back_target):NULL);
+    /* A bound depth-stencil describes the single depth attachment of the
+     * active target.  Switching to a target with another size would silently
+     * clear/test a different attachment; refuse and require an explicit
+     * SetDepthStencilSurface(NULL) or a matching surface. */
+    if(d->depth){
+        unsigned nw,nh;
+        if(t){nw=t->id==d->back_target?d->back_w:t->w;nh=t->id==d->back_target?d->back_h:t->h;}
+        else if(d->back_valid){nw=d->back_w;nh=d->back_h;}
+        else return D9_INVALID;
+        Depth *s=depth_slot(d,d->depth);
+        if(!s||s->w!=nw||s->h!=nh){
+            set_diagnosis(d,"SetRenderTarget: the bound depth-stencil surface does not match the new render target size");
+            return D9_UNSUPPORTED;
+        }
+    }
     void *native=t?t->native:NULL;
     if(d->scene){
         if(d->ops.target_bind(d->ctx,native))return D9_BACKEND;
@@ -1152,7 +1168,14 @@ int d9_create_depth_surface(D9Device *d,unsigned w,unsigned h,unsigned format,
     if(!d||d->teardown||d->scene||!out||!d->next||!d->back_valid||
        (format!=D9_D24S8&&format!=D9_D24X8)||multisample||quality||lockable)return D9_INVALID;
     if(!d->ops.depth_clear)return D9_UNSUPPORTED;
-    if(w!=d->back_w||h!=d->back_h)return D9_UNSUPPORTED;
+    /* A depth-stencil surface is a descriptor of the single PICA
+     * DEPTH24_STENCIL8 attachment of the active target: no VRAM is allocated
+     * here.  Creation accepts any power-of-two 8..1024 surface (headroom for
+     * render-target textures) plus the exact non-power-of-two presentation back
+     * buffer size; binding requires a size match with the active target. */
+    unsigned back_size=w==d->back_w&&h==d->back_h;
+    unsigned pow2=(w>=8&&h>=8&&w<=1024&&h<=1024&&!(w&(w-1))&&!(h&(h-1)));
+    if(!back_size&&!pow2)return D9_INVALID;
     Depth *slot=NULL;for(unsigned i=0;i<MAX_DEPTHS;++i)if(!d->depths[i].id){slot=&d->depths[i];break;}
     if(!slot)return D9_MEMORY;
     D9Handle id=d->next++;*slot=(Depth){id,w,h,format};*out=id;return D9_OK;
@@ -1177,9 +1200,13 @@ int d9_set_depth_surface(D9Device *d,D9Handle h){
     if(!d||d->teardown)return D9_INVALID;
     Depth *s=h?depth_slot(d,h):NULL;
     if(h&&!s)return D9_INVALID;
-    /* Binding records the surface.  Size compatibility with whichever target
-     * is bound is checked when a depth clear actually reaches the attachment
-     * (D3D9 itself allows binding a depth surface outside any render pass). */
+    if(s){
+        unsigned w,height;
+        if(logical_dims(d,&w,&height)||s->w!=w||s->h!=height){
+            set_diagnosis(d,"SetDepthStencilSurface: the depth-stencil size does not match the active render target");
+            return D9_UNSUPPORTED;
+        }
+    }
     d->depth=h;return D9_OK;
 }
 D9Handle d9_get_depth_surface(const D9Device *d){return d?d->depth:0;}

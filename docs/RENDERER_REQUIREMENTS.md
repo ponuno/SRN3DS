@@ -242,16 +242,25 @@ Status changed on 2026-11-26: `CheckDepthStencilMatch` accepts
 depth-stencil surface API is implemented. The single PICA
 `GPU_RB_DEPTH24_STENCIL8` attachment is now the D3D9 surface:
 
-- `CreateDepthStencilSurface` accepts exactly `400x240`, `D3DFMT_D24S8` or
-  `D3DFMT_D24X8`, `D3DMULTISAMPLE_NONE`, quality 0, `Lockable=FALSE`, no shared
-  handle. Other sizes/formats/MSAA/lockable return a named
-  `D3DERR_NOTAVAILABLE`/`D3DERR_INVALIDCALL`.
-- `SetDepthStencilSurface`/`GetDepthStencilSurface` bind and report the surface;
-  `NULL` detaches and `GetDepthStencilSurface` then returns
-  `D3DERR_NOTFOUND`.
+- `CreateDepthStencilSurface` accepts `D3DFMT_D24S8` or `D3DFMT_D24X8`,
+  `D3DMULTISAMPLE_NONE`, quality 0, `Lockable=FALSE`, no shared handle, and
+  either power-of-two dimensions 8..1024 (covering render-target targets and
+  textures) or exactly the 400x240 presentation size. Other sizes/formats/
+  MSAA/lockable return a named `D3DERR_NOTAVAILABLE`/`D3DERR_INVALIDCALL`.
+  The surface is a descriptor of the active target's existing PICA depth
+  attachment; it allocates no VRAM of its own.
+- `SetDepthStencilSurface` binds only a depth surface whose dimensions match the
+  currently active target (the 400x240 back buffer or an explicit target);
+  a mismatch is `D3DERR_NOTAVAILABLE` with a named reason.
+  `GetDepthStencilSurface` reports the bound surface; `NULL` detaches and then
+  returns `D3DERR_NOTFOUND`.
+- With a depth surface bound, `SetRenderTarget` to a target of a different size
+  is refused (`D3DERR_NOTAVAILABLE`) and the old target stays selected. There is
+  no silent depth reset.
 - `Clear` with `D3DCLEAR_ZBUFFER`/`D3DCLEAR_STENCIL` is queued and applied at
   `BeginScene` through the backend `depth_clear`; `z` must be finite and in
   `[0,1]`. Clearing without a bound depth surface stays `D3DERR_INVALIDCALL`.
+  A depth/stencil-only Clear does not clear the colour target.
 - The PICA backend creates every colour target with
   `C3D_RenderTargetCreateFromTex(..., GPU_RB_DEPTH24_STENCIL8)`, enables depth
   testing for offscreen targets too, and clears through
