@@ -673,7 +673,8 @@ static void shim_create_tex_ex_a(CPU *c){
 }
 
 static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8_t *p,
-                                     size_t size,const DdsImage *d,uint32_t *out){
+                                     size_t size,const DdsImage *d,unsigned pool,
+                                     uint32_t *out){
     if(d->resource==D3DRTYPE_VOLUMETEXTURE){
         reject("%s: volume DDS is not a cube map; use "
                "D3DXCreateVolumeTextureFromFileInMemory (E_NOTIMPL)",who);
@@ -725,7 +726,7 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
     }
     uint32_t cube=0;
     uint32_t hr=d9_com_host_create_cube_texture(device,edge,d->mips,0,d->format,
-                                                D9_POOL_MANAGED,&cube);
+                                                pool,&cube);
     if(hr){
         reject("%s: %s",who,d9_com_last_diagnostic());
         return hr;
@@ -772,14 +773,16 @@ static void shim_create_cube_mem(CPU *c){
     if(parse_checked("D3DXCreateCubeTextureFromFileInMemory",p,size,&d))
         RET(D3DXERR_INVALIDDATA,4);
     uint32_t cube=0;
-    uint32_t hr=create_cube_from_dds("D3DXCreateCubeTextureFromFileInMemory",device,p,size,&d,&cube);
+    uint32_t hr=create_cube_from_dds("D3DXCreateCubeTextureFromFileInMemory",device,p,size,&d,
+                                     D9_POOL_MANAGED,&cube);
     if(hr)RET(hr,4);
     *out_guest=cube;
     g.last_error[0]=0;
     RET(D3DX_OK,4);
 }
 static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uint8_t *p,
-                                       size_t size,const DdsImage *d,uint32_t *out){
+                                       size_t size,const DdsImage *d,unsigned pool,
+                                       uint32_t *out){
     if(d->resource!=D3DRTYPE_VOLUMETEXTURE||!(d->caps2&DDSCAPS2_VOLUME)){
         reject("%s: DDS is not a volume texture (resource type %u)",who,d->resource);
         return D3DXERR_INVALIDDATA;
@@ -826,7 +829,7 @@ static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uin
     }
     uint32_t volume=0;
     uint32_t hr=d9_com_host_create_volume_texture(device,d->width,d->height,d->depth,
-                                                  d->mips,0,d->format,D9_POOL_MANAGED,&volume);
+                                                  d->mips,0,d->format,pool,&volume);
     if(hr){
         reject("%s: %s",who,d9_com_last_diagnostic());
         return hr;
@@ -872,15 +875,215 @@ static void shim_create_volume_mem(CPU *c){
         RET(D3DXERR_INVALIDDATA,4);
     uint32_t volume=0;
     uint32_t hr=create_volume_from_dds("D3DXCreateVolumeTextureFromFileInMemory",
-                                       device,p,size,&d,&volume);
+                                       device,p,size,&d,D9_POOL_MANAGED,&volume);
     if(hr)RET(hr,4);
     *out_guest=volume;
     g.last_error[0]=0;
     RET(D3DX_OK,4);
 }
 
+/* One file-path loader shared by all four cube/volume exports.  Path, IO and
+ * parse failures keep the exact reasons recorded by read_guest_path(),
+ * read_sandbox_file() and parse_checked(); the payload then goes through the
+ * same create_*_from_dds() code as the InMemory entry points. */
+static uint32_t load_sandbox_dds(const char *who,uint32_t path_addr,
+                                 uint8_t **buffer,size_t *size,DdsImage *d){
+    *buffer=NULL;*size=0;
+    char path[260];
+    if(read_guest_path(path_addr,path,who))return D3DX_D3DERR_INVALIDCALL;
+    uint32_t hr=read_sandbox_file(who,path,buffer,size);
+    if(hr)return hr;
+    if(parse_checked(who,*buffer,*size,d)){
+        free(*buffer);*buffer=NULL;*size=0;
+        return D3DXERR_INVALIDDATA;
+    }
+    return D3DX_OK;
+}
+/* Strict ExA tuple for file-derived cube/volume creation: no resizing, no mip
+ * generation and no format conversion.  Dimensions are checked after parsing
+ * because they must equal the file's own dimensions. */
+static uint32_t file_exa_common(const char *who,unsigned mip_levels,unsigned usage,
+                                unsigned format,unsigned pool,unsigned filter,
+                                unsigned mip_filter,unsigned color_key,
+                                unsigned palette,uint32_t info_addr,
+                                uint8_t **out_info){
+    *out_info=NULL;
+    if(usage){
+        reject("%s: Usage must be 0 for a file-derived cube/volume texture; "
+               "dynamic/autogen usage is not implemented",who);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(pool!=D9_POOL_DEFAULT&&pool!=D9_POOL_MANAGED){
+        reject("%s: only Pool=D3DPOOL_DEFAULT (0) or D3DPOOL_MANAGED (1) are "
+               "implemented; got %lu",who,(unsigned long)pool);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(mip_levels!=0u&&mip_levels!=D3DX_FROM_FILE){
+        reject("%s: MipLevels must be 0 or D3DX_FROM_FILE (-3); got 0x%lx",
+               who,(unsigned long)mip_levels);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(!filter_valid(filter)||!filter_valid(mip_filter)){
+        reject("%s: Filter/MipFilter must be D3DX_DEFAULT (-1) or 1..5 with "
+               "optional MIRROR/WRAP bits; got 0x%lx/0x%lx",
+               who,(unsigned long)filter,(unsigned long)mip_filter);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(color_key){
+        reject("%s: ColorKey 0x%08lx is not implemented; use 0",
+               who,(unsigned long)color_key);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(palette){
+        reject("%s: pPalette is not supported; paletted cube/volume textures "
+               "are not implemented",who);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(format&&!texture_format_supported(format)){
+        reject("%s: requested format %s is not implemented",
+               who,format_name(format));
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(info_addr){
+        uint8_t *info=guest_ptr(g.memory,info_addr,28);
+        if(!info){
+            reject("%s: invalid D3DXIMAGE_INFO output pointer",who);
+            return D3DX_D3DERR_INVALIDCALL;
+        }
+        *out_info=info;
+    }
+    return D3DX_OK;
+}
+static uint32_t file_dim_matches(const char *who,const char *what,
+                                 unsigned requested,unsigned actual,
+                                 unsigned file_value){
+    if(!requested||requested==D3DX_DEFAULT||requested==file_value)return D3DX_OK;
+    reject("%s: requested %s %lu does not match the file's %u; resizing is not "
+           "implemented",who,what,(unsigned long)requested,actual);
+    return D3DX_D3DERR_NOTAVAILABLE;
+}
+static void shim_create_cube_a(CPU *c){
+    uint32_t device=A(0),out=A(2);
+    uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
+    if(!out_guest){
+        reject("D3DXCreateCubeTextureFromFileA: invalid output cube pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,3);
+    }
+    *out_guest=0;
+    uint8_t *buffer=NULL;size_t size=0;DdsImage d;
+    uint32_t hr=load_sandbox_dds("D3DXCreateCubeTextureFromFileA",A(1),
+                                 &buffer,&size,&d);
+    if(hr)RET(hr,3);
+    uint32_t cube=0;
+    hr=create_cube_from_dds("D3DXCreateCubeTextureFromFileA",device,buffer,size,&d,
+                            D9_POOL_MANAGED,&cube);
+    free(buffer);
+    if(hr)RET(hr,3);
+    *out_guest=cube;g.last_error[0]=0;
+    RET(D3DX_OK,3);
+}
+static void shim_create_cube_ex_a(CPU *c){
+    uint32_t device=A(0),requested=A(2),mip_levels=A(3),usage=A(4),format=A(5);
+    uint32_t pool=A(6),filter=A(7),mip_filter=A(8),color_key=A(9);
+    uint32_t info_addr=A(10),palette=A(11),out=A(12);
+    /* Real D3DX9_42 ABI: 13 arguments, `ret 0x34` (verified by disassembly). */
+    uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
+    if(!out_guest){
+        reject("D3DXCreateCubeTextureFromFileExA: invalid output cube pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,13);
+    }
+    *out_guest=0;
+    uint8_t *info=NULL;
+    uint32_t hr=file_exa_common("D3DXCreateCubeTextureFromFileExA",mip_levels,
+                                usage,format,pool,filter,mip_filter,color_key,
+                                palette,info_addr,&info);
+    if(hr)RET(hr,13);
+    uint8_t *buffer=NULL;size_t size=0;DdsImage d;
+    hr=load_sandbox_dds("D3DXCreateCubeTextureFromFileExA",A(1),&buffer,&size,&d);
+    if(hr)RET(hr,13);
+    hr=file_dim_matches("D3DXCreateCubeTextureFromFileExA","Size",requested,d.width,
+                        d.width);
+    if(!hr&&format&&format!=d.format){
+        reject("D3DXCreateCubeTextureFromFileExA: requested format %s cannot be "
+               "produced from DDS format %s; cube format conversion is not "
+               "implemented",format_name(format),format_name(d.format));
+        hr=D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(hr){free(buffer);RET(hr,13);}
+    if(info)write_image_info(info,&d,"D3DXCreateCubeTextureFromFileExA");
+    uint32_t cube=0;
+    hr=create_cube_from_dds("D3DXCreateCubeTextureFromFileExA",device,buffer,size,&d,
+                            pool,&cube);
+    free(buffer);
+    if(hr)RET(hr,13);
+    *out_guest=cube;g.last_error[0]=0;
+    RET(D3DX_OK,13);
+}
+static void shim_create_volume_a(CPU *c){
+    uint32_t device=A(0),out=A(2);
+    uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
+    if(!out_guest){
+        reject("D3DXCreateVolumeTextureFromFileA: invalid output volume pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,3);
+    }
+    *out_guest=0;
+    uint8_t *buffer=NULL;size_t size=0;DdsImage d;
+    uint32_t hr=load_sandbox_dds("D3DXCreateVolumeTextureFromFileA",A(1),
+                                 &buffer,&size,&d);
+    if(hr)RET(hr,3);
+    uint32_t volume=0;
+    hr=create_volume_from_dds("D3DXCreateVolumeTextureFromFileA",device,buffer,size,
+                              &d,D9_POOL_MANAGED,&volume);
+    free(buffer);
+    if(hr)RET(hr,3);
+    *out_guest=volume;g.last_error[0]=0;
+    RET(D3DX_OK,3);
+}
+static void shim_create_volume_ex_a(CPU *c){
+    uint32_t device=A(0),width=A(2),height=A(3),depth=A(4),mip_levels=A(5);
+    uint32_t usage=A(6),format=A(7),pool=A(8),filter=A(9),mip_filter=A(10);
+    uint32_t color_key=A(11),info_addr=A(12),palette=A(13),out=A(14);
+    /* Real D3DX9_42 ABI: 15 arguments, `ret 0x3c` (verified by disassembly). */
+    uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
+    if(!out_guest){
+        reject("D3DXCreateVolumeTextureFromFileExA: invalid output volume pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,15);
+    }
+    *out_guest=0;
+    uint8_t *info=NULL;
+    uint32_t hr=file_exa_common("D3DXCreateVolumeTextureFromFileExA",mip_levels,
+                                usage,format,pool,filter,mip_filter,color_key,
+                                palette,info_addr,&info);
+    if(hr)RET(hr,15);
+    uint8_t *buffer=NULL;size_t size=0;DdsImage d;
+    hr=load_sandbox_dds("D3DXCreateVolumeTextureFromFileExA",A(1),&buffer,&size,&d);
+    if(hr)RET(hr,15);
+    hr=file_dim_matches("D3DXCreateVolumeTextureFromFileExA","Width",width,d.width,
+                        d.width);
+    if(!hr)hr=file_dim_matches("D3DXCreateVolumeTextureFromFileExA","Height",height,
+                               d.height,d.height);
+    if(!hr)hr=file_dim_matches("D3DXCreateVolumeTextureFromFileExA","Depth",depth,
+                               d.depth,d.depth);
+    if(!hr&&format&&format!=d.format){
+        reject("D3DXCreateVolumeTextureFromFileExA: requested format %s cannot be "
+               "produced from DDS format %s; volume format conversion is not "
+               "implemented",format_name(format),format_name(d.format));
+        hr=D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(hr){free(buffer);RET(hr,15);}
+    if(info)write_image_info(info,&d,"D3DXCreateVolumeTextureFromFileExA");
+    uint32_t volume=0;
+    hr=create_volume_from_dds("D3DXCreateVolumeTextureFromFileExA",device,buffer,
+                              size,&d,pool,&volume);
+    free(buffer);
+    if(hr)RET(hr,15);
+    *out_guest=volume;g.last_error[0]=0;
+    RET(D3DX_OK,15);
+}
+
 #define D3DX_FUNCTIONS(X) X(get_image_info_mem) X(create_tex_mem) X(get_image_info_file_a) \
-    X(create_tex_ex_a) X(create_cube_mem) X(create_volume_mem)
+    X(create_tex_ex_a) X(create_cube_mem) X(create_volume_mem) \
+    X(create_cube_a) X(create_cube_ex_a) X(create_volume_a) X(create_volume_ex_a)
 #define D3DX_ENUM(f) D3DX_##f,
 enum { D3DX_FUNCTIONS(D3DX_ENUM) D3DX_FUNCTION_COUNT };
 static const struct {const char *name;unsigned index;} export_names[]={
@@ -890,6 +1093,10 @@ static const struct {const char *name;unsigned index;} export_names[]={
     {"D3DXCreateTextureFromFileExA",D3DX_create_tex_ex_a},
     {"D3DXCreateCubeTextureFromFileInMemory",D3DX_create_cube_mem},
     {"D3DXCreateVolumeTextureFromFileInMemory",D3DX_create_volume_mem},
+    {"D3DXCreateCubeTextureFromFileA",D3DX_create_cube_a},
+    {"D3DXCreateCubeTextureFromFileExA",D3DX_create_cube_ex_a},
+    {"D3DXCreateVolumeTextureFromFileA",D3DX_create_volume_a},
+    {"D3DXCreateVolumeTextureFromFileExA",D3DX_create_volume_ex_a},
 };
 #define ENTRY(f) {D3DX_TEXTURE_THUNK_BASE+D3DX_##f*4,shim_##f},
 static const FnEntry d3dx_entries[]={D3DX_FUNCTIONS(ENTRY)};

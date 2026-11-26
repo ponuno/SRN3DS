@@ -1,10 +1,12 @@
 # D3DX9_42 plain texture exports - host shims
 
-The TESV IAT imports six non-COM D3DX9_42 texture entry points. Before this
+The TESV IAT imports non-COM D3DX9_42 texture entry points. Before this
 module the import linker resolved them to guest addresses inside the staged
 `d3dx9_42.dll` body; those bodies are not lifted and not executable in the
 slice. `source/d3dx_texture_shims.c` registers an extra import resolver so
-these six slots point at host thunks in the `0xfd000000` window.
+these slots point at host thunks in the `0xfd000000` window. Ten exports are
+registered: the four InMemory creators/inspectors, `D3DXGetImageInfoFromFileA`,
+the 2D `ExA` loader, and the four file-path cube/volume loaders.
 
 ## Implemented (success is evidence-backed)
 
@@ -16,6 +18,10 @@ these six slots point at host thunks in the `0xfd000000` window.
 | `D3DXCreateTextureFromFileExA` | Reads the whole file (64 MiB cap), parses the same DDS, accepts the real TESV tuple (Width/Height from the file, `MipLevels=D3DX_FROM_FILE`, `D3DUSAGE_DYNAMIC`, `A8R8G8B8`, `D3DPOOL_SYSTEMMEM`), and creates/uploads a real texture. BC1/3/5 files requested as `A8R8G8B8` are decoded through `d3d9_bc.c`. |
 | `D3DXCreateCubeTextureFromFileInMemory` | Parses a six-face cube DDS (`CUBEMAP` plus all six face bits), validates square/pow2/<=1024 and the face-major mip chain, then creates a real `IDirect3DCubeTexture9` through the new core cube path and uploads every face/level. A8R8G8B8, X8R8G8B8, DXT1, DXT3 and DXT5 are accepted. |
 | `D3DXCreateVolumeTextureFromFileInMemory` | Parses a legacy volume DDS (`DDSCAPS2_VOLUME`, `DDSD_DEPTH`, depth > 1), validates pow2 width/height/depth up to 1024 and the level-major slice chain, then creates a real `IDirect3DVolumeTexture9` and uploads every depth slice/mip level. A8R8G8B8, X8R8G8B8, DXT1, DXT3 and DXT5 are accepted. |
+| `D3DXCreateCubeTextureFromFileA` | Reads a sandboxed file (64 MiB cap) and feeds the same cube DDS parser/creator; three arguments, `ret 0x0c`. |
+| `D3DXCreateCubeTextureFromFileExA` | Same file-derived cube path with the strict tuple below; 13 arguments, `ret 0x34`. |
+| `D3DXCreateVolumeTextureFromFileA` | Reads a sandboxed file and feeds the same volume DDS parser/creator; three arguments, `ret 0x0c`. |
+| `D3DXCreateVolumeTextureFromFileExA` | Same file-derived volume path with the strict tuple below; 15 arguments, `ret 0x3c`. |
 
 Supported DDS payloads: `A8R8G8B8`, `X8R8G8B8`, `DXT1`, `DXT3`, `DXT5`;
 power-of-two dimensions up to 1024. Legacy DDS headers only; a `DX10` header is
@@ -38,6 +44,29 @@ texture format stays compressed; decoding to A8R8G8B8 allows smaller levels.
 The real export has **14** arguments (`pPalette` at A(12), `ppTexture` at
 A(13)) and a `ret 0x38` epilogue, verified by disassembling RVA `0xBE4ED` in
 `D3DX9_42.dll`. The shim pops all 14 slots.
+
+### Cube/volume `ExA` accepted parameter set
+
+The cube and volume `...FromFileExA` exports are file-derived only and share
+one validator (`file_exa_common`) plus one sandbox reader/parser
+(`load_sandbox_dds`); the InMemory entry points call the same
+`create_cube_from_dds` / `create_volume_from_dds` creators.
+
+| Parameter | Accepted |
+|---|---|
+| Cube `Size` / volume `Width`, `Height`, `Depth` | 0, `D3DX_DEFAULT`, or exactly the file's dimension. A mismatch is `D3DERR_NOTAVAILABLE`; there is no resize path. |
+| `MipLevels` | `0` or `D3DX_FROM_FILE`; the file's DDS chain is used. Other values are rejected because there is no mip generator. |
+| `Usage` | 0 only; dynamic/autogen cube and volume usage is named `D3DERR_NOTAVAILABLE`. |
+| `Format` | 0 or exactly the file format. There is no cube/volume format conversion (unlike 2D DXT-to-A8). |
+| `Pool` | `D3DPOOL_DEFAULT` (0) or `D3DPOOL_MANAGED` (1). |
+| `Filter`, `MipFilter` | `D3DX_DEFAULT` (-1) or real D3DX values 1..5 with optional MIRROR/WRAP bits; no-op without resize. |
+| `ColorKey`, `pPalette` | Must be 0/NULL: colour-keyed and paletted cube/volume textures are named `D3DERR_NOTAVAILABLE`. |
+| `pSrcInfo` | NULL or a valid 28-byte guest pointer, filled only after a successful parse. |
+
+Verified epilogues in `D3DX9_42.dll`: cube `ExA` RVA `0xBE70C` is `ret 0x34`
+(13 arguments), volume `ExA` RVA `0xBE91F` is `ret 0x3c` (15 arguments); both
+`FromFileA` exports are 3 arguments with `ret 0x0c`. The test probe pushes the
+documented argument count and fails on any stack mismatch.
 
 ### Real ABI and `D3DX_FROM_FILE`
 

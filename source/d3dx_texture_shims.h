@@ -19,6 +19,14 @@
  *                                        (A8/X8/DXT1/3/5, face-major mips)
  *   D3DXCreateVolumeTextureFromFileInMemory  depth-slice DDS -> IDirect3DVolumeTexture9
  *                                        (A8/X8/DXT1/3/5, LockBox/UnlockBox)
+ *   D3DXCreateCubeTextureFromFileA          sandboxed file -> same cube path
+ *                                        (3 args, `ret 0x0c`)
+ *   D3DXCreateCubeTextureFromFileExA        file-derived tuple only; 13 args,
+ *                                        `ret 0x34`; pool DEFAULT/MANAGED
+ *   D3DXCreateVolumeTextureFromFileA        sandboxed file -> same volume path
+ *                                        (3 args, `ret 0x0c`)
+ *   D3DXCreateVolumeTextureFromFileExA      file-derived tuple only; 15 args,
+ *                                        `ret 0x3c`; pool DEFAULT/MANAGED
  *
  * Named unsupported (never a fake success):
  *   IDirect3DVolume9 / GetVolumeLevel (LockBox is the supported volume path)
