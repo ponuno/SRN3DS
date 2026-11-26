@@ -99,6 +99,7 @@ typedef struct {
     uint8_t gpu_owned;       /* cache may call the per-entry/default release */
     uint8_t has_rehydrate;   /* token-only entries remain findable after eviction */
     uint8_t gpu_failed;      /* last upload attempt failed; guest retained */
+    uint8_t no_evict;        /* explicit-release-only; LRU eviction skips it */
 } D9TexEntry;
 
 typedef struct {
@@ -113,6 +114,7 @@ typedef struct {
     unsigned evictions_gpu;
     unsigned evictions_guest;
     unsigned guest_drops;
+    unsigned non_evictable;
     size_t guest_bytes;
     size_t gpu_bytes;
     size_t both_bytes;       /* entries currently holding both copies */
@@ -163,6 +165,12 @@ int d9_texcache_destroy_ex(D9TexCache *cache);
 
 int d9_texcache_set_limits(D9TexCache *cache, size_t guest_limit,
                            size_t gpu_limit);
+
+/* Mark an entry as explicit-release-only.  LRU eviction (reserve/trim) skips
+ * it, but d9_texcache_remove() still releases it.  Used for resources whose
+ * native copy cannot be recreated from the guest source yet (cube/volume), so
+ * an eviction could not be repaired.  Returns NOT_FOUND for an absent key. */
+int d9_texcache_set_no_evict(D9TexCache *cache, uint64_t key, int no_evict);
 
 /* Find an entry; NULL when absent.  Does not touch LRU order. */
 D9TexEntry *d9_texcache_find(D9TexCache *cache, uint64_t key);

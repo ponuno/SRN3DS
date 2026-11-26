@@ -16,12 +16,13 @@ labelled **Azahar**.
 |---|---|
 | `tools/skyrim/etc1.py` | bounded-memory DDS/BC1/BC2/BC3 → ETC1/ETC1A4 pipeline, SKTX container, inventory projection, ETC1 decoder for quality metrics |
 | `tools/texture_pipeline.py` | CLI: `project`, `convert`, `sample`, `plan` |
-| `source/d3d9_texcache.c/.h` | guest/GPU ownership, direct GPU-only ETC1/SKTX registration, durable MANAGED rehydrate tokens, drop-after-upload, LRU/working-set limits, deterministic GPU-failure behavior, accounting |
+| `source/d3d9_texcache.c/.h` | guest/GPU ownership, direct GPU-only ETC1/SKTX registration, durable MANAGED rehydrate tokens, drop-after-upload, LRU/working-set limits, explicit `no_evict` entries, deterministic GPU-failure behavior, accounting |
 | `source/d3d9_texture_data.c/.h` | SKTX parser used by the runtime uploader |
 | `tests/texture_pipeline_test.py` | synthetic BC1/BC2/BC3, mips, alpha, budgets, container corruption, inventory projection, optional real sample |
 | `tests/texture_residency_smoke.c` | ownership/accounting/LRU/pin/GPU-failure unit tests |
 | `tests/texture_residency_upload_smoke.c` | direct GPU-only add/remove, MANAGED eviction/reload, release failures, exact peaks |
 | `tests/texture_runtime_smoke.c` | pool-aware core/COM ownership, split accounting, direct SKTX, retry and D3D9 state defaults |
+| `tests/cube_volume_residency_smoke.c` | cube/volume D9TexCache accounting, non-evictable entries, retryable release/teardown, 2D/RT coexistence |
 | `tests/texture_container_smoke.c` | SKTX parser and every rejection branch |
 | `tests/isolated/texetc1/` | isolated ARM build; ETC1/ETC1A4 GPU init+upload, frame clear, residency contract |
 

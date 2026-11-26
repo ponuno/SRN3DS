@@ -99,8 +99,8 @@ payload. Missing bits, non-square edges, truncation and non-cube DDS return
 `D3DXERR_INVALIDDATA`. A cube DDS passed to the 2D loaders still returns
 `E_NOTIMPL`.
 
-Remaining in the cube layer: cube objects are not registered in the 2D texture
-cache (`D9TexCache`) and cube-map sampling/PICA cube faces are not implemented.
+Remaining in the cube layer: cube-map sampling/PICA cube faces are not
+implemented.
 
 ## Volume textures
 
@@ -125,9 +125,30 @@ The D3DX loader requires `DDSCAPS2_VOLUME` + `DDSD_DEPTH`, depth > 1, pow2
 dimensions <=1024 and a complete level-major slice chain. Missing depth,
 truncation, non-volume DDS and unsupported formats are named failures.
 
-Remaining in this layer: volume sampling, PICA volume faces and volume texcache
-integration. Volume textures keep a CPU slice store per mip level and are not
-sampled by the draw path.
+Remaining in this layer: volume sampling and PICA volume faces. Volume
+textures keep a CPU slice store per mip level and are not sampled by the draw
+path.
+
+## Residency and accounting
+
+Cube and volume objects are registered in the device's `D9TexCache` like 2D
+textures. The guest copy is the full CPU store (six faces or every depth slice,
+for every mip level) and the GPU copy is the backend native plus its estimated
+native byte cost. `d9_memory_used()`, `d9_texture_cache_stats()` and eviction
+therefore use one sum for 2D textures, cubes and volumes. LDR render-target
+textures still stay outside the cache and are counted as targets, so the
+`rt_target` path is unchanged.
+
+Cube/volume entries are explicit-release-only: `no_evict` entries are skipped by
+LRU reserve/trim and the guest pixels are never dropped, because native
+rehydration for these kinds is not implemented yet. An attempted eviction cannot
+silently free a native the core still points at. `d9_cube_resource_info()` and
+`d9_volume_resource_info()` expose the split guest/GPU bytes for diagnostics.
+
+Release and device teardown go through the cache, so each native is deleted
+exactly once. A backend release failure returns `D9_RELEASE_FAILED` and leaves
+the remaining copy retryable, matching the 2D contract; already-released copies
+are detached from the core slot to avoid a double free.
 
 ## Named unsupported
 

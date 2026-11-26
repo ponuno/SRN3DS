@@ -167,6 +167,14 @@ int d9_texcache_set_limits(D9TexCache *cache, size_t guest_limit,
     return D9TEXCACHE_OK;
 }
 
+int d9_texcache_set_no_evict(D9TexCache *cache, uint64_t key, int no_evict) {
+    if (!cache) return D9TEXCACHE_INVALID;
+    D9TexEntry *entry = d9_texcache_find(cache, key);
+    if (!entry) return D9TEXCACHE_NOT_FOUND;
+    entry->no_evict = no_evict ? 1 : 0;
+    return D9TEXCACHE_OK;
+}
+
 static int evict_one(D9TexCache *cache, int want_gpu, int want_guest,
                      uint64_t exclude_key, int exclude, unsigned *evicted) {
     int best = -1;
@@ -174,8 +182,9 @@ static int evict_one(D9TexCache *cache, int want_gpu, int want_guest,
     for (unsigned i = 0; i < cache->capacity; ++i) {
         D9TexEntry *entry = &cache->entry[i];
         if (exclude && entry->key == exclude_key) continue;
-        if (!entry->pins && ((want_gpu && entry->has_gpu) ||
-                             (want_guest && entry->has_guest))) {
+        if (!entry->pins && !entry->no_evict &&
+            ((want_gpu && entry->has_gpu) ||
+             (want_guest && entry->has_guest))) {
             if (entry->last_use <= best_clock) {
                 best_clock = entry->last_use;
                 best = (int)i;
@@ -579,6 +588,7 @@ void d9_texcache_stats(const D9TexCache *cache, D9TexCacheStats *out) {
         }
         if (entry->has_rehydrate) ++out->rehydratable;
         if (entry->pins) ++out->pinned;
+        if (entry->no_evict) ++out->non_evictable;
         if (entry->has_guest && entry->has_gpu)
             out->both_bytes = add_size(out->both_bytes,
                                        add_size(entry->guest_bytes, entry->gpu_bytes));

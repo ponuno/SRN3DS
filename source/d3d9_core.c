@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <math.h>
 
-enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_VOLUMES=8,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_VOLUMES=8,
+      MAX_TEX_ENTRIES=MAX_TEXTURES+MAX_CUBES+MAX_VOLUMES,
+      MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
 /* Bounded native storage for explicit LDR render targets.  The default is 256
  * so the measured TESV set fits the N3DS 6 MiB VRAM budget:
  *   5x1024 + 4x512 logical targets -> nine 256x256 targets
@@ -46,7 +48,7 @@ typedef struct {
 typedef struct {
     D9Handle id;unsigned edge,levels,format,pool,usage;
     int cpu_only;
-    size_t cost,cpu_bytes,face_bytes;
+    size_t cost,cpu_bytes,gpu_bytes,face_bytes;
     uint8_t *pixels; /* face-major: 6 * face_bytes */
     void *native;
     CubeLevel level[MAX_LEVELS];
@@ -55,7 +57,7 @@ typedef struct {unsigned w,h,depth;size_t pitch,plane_bytes,bytes,offset;int upl
 typedef struct {
     D9Handle id;unsigned w,h,depth,levels,format,pool,usage;
     int cpu_only;
-    size_t cost,cpu_bytes;
+    size_t cost,cpu_bytes,gpu_bytes;
     uint8_t *pixels; /* level-major: level[i].offset, each level has depth slices */
     void *native;
     VolumeLevel level[MAX_LEVELS];
@@ -63,7 +65,6 @@ typedef struct {
 struct D9Device {
     D9Backend ops;void *ctx;size_t used,limit;D9Handle next;int teardown;
     Buffer buffers[MAX_BUFFERS];Texture textures[MAX_TEXTURES];CubeTexture cubes[MAX_CUBES];VolumeTexture volumes[MAX_VOLUMES];
-    size_t cube_used,volume_used;
     Target targets[MAX_TARGETS];D9Handle target;size_t target_used;
     /* D3DPRESENTFLAG_LOCKABLE_BACKBUFFER: a retained offscreen colour target
      * that lives as a normal Target slot.  back_tex_w/h are its native
@@ -73,7 +74,7 @@ struct D9Device {
     unsigned target_native_max; /* env-selected cap for explicit targets, 64..512 */
     Depth depths[MAX_DEPTHS];D9Handle depth;
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
-    D9TexEntry tex_entries[MAX_TEXTURES];D9TexCache tex_cache;
+    D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
     float tev_constants[9][4];
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
@@ -147,7 +148,7 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     D9Device *d=calloc(1,sizeof *d);if(!d)return NULL;d->ops=*ops;d->ctx=ctx;d->limit=limit;d->next=1;
     d->target_native_max=target_native_max_from_env();
     D9TexCacheOps cache_ops={d,cache_release_guest,cache_release_gpu};
-    if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEXTURES,&cache_ops,0,0)){
+    if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEX_ENTRIES,&cache_ops,0,0)){
         free(d);return NULL;
     }
     d->state=(D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
@@ -176,16 +177,9 @@ int d9_destroy_device_ex(D9Device *d){
     int rc=d9_texcache_destroy_ex(&d->tex_cache);
     if(rc!=D9TEXCACHE_OK)return D9_RELEASE_FAILED;
     for(unsigned i=0;i<MAX_BUFFERS;++i)free(d->buffers[i].data);
-    for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id){
-        if(d->cubes[i].native)d->ops.texture_delete(d->ctx,d->cubes[i].native);
-        free(d->cubes[i].pixels);
-    }
-    d->cube_used=0;
-    for(unsigned i=0;i<MAX_VOLUMES;++i)if(d->volumes[i].id){
-        if(d->volumes[i].native)d->ops.texture_delete(d->ctx,d->volumes[i].native);
-        free(d->volumes[i].pixels);
-    }
-    d->volume_used=0;
+    /* Cube and volume guest pixels and native handles are owned by the texture
+     * cache (d9_texcache_destroy_ex above); freeing the slots here would double
+     * free every one of them. */
     for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id){
         if(d->ops.target_delete)d->ops.target_delete(d->ctx,d->targets[i].native);
     }
@@ -212,6 +206,57 @@ int d9_release_buffer(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(!b
     for(unsigned i=0;i<D9_MAX_STREAMS;++i)if(d->streams[i].id==h)d->streams[i]=(Stream){0};
     if(d->index==h)d->index=0;d->used-=b->bytes;free(b->data);memset(b,0,sizeof *b);return D9_OK;}
 static void delete_unowned_native(D9Device *d,void *native){if(native)d->ops.texture_delete(d->ctx,native);}
+/* Cube/volume residency.  Both kinds keep their full CPU slice store as the
+ * cache guest copy and register the backend-native object as the GPU copy.
+ * The guest copy is never dropped and the entry is marked explicit-release-
+ * only: cube/volume native rehydration is not implemented yet, so an LRU
+ * eviction could not be repaired.  d9_texcache_remove() still releases them. */
+static size_t cube_gpu_bytes(unsigned edge,unsigned levels){
+    uint64_t total=0,dim=edge;
+    for(unsigned i=0;i<levels;++i){
+        size_t side=native_dim((unsigned)dim);
+        total+= (uint64_t)side*side*4u;
+        if(dim>1)dim>>=1;
+    }
+    total*=6u;
+    return total>SIZE_MAX?SIZE_MAX:(size_t)total;
+}
+static size_t volume_gpu_bytes(unsigned w,unsigned h,unsigned depth,unsigned levels){
+    uint64_t total=0,lw=w,lh=h,ld=depth;
+    for(unsigned i=0;i<levels;++i){
+        size_t sw=native_dim((unsigned)lw),sh=native_dim((unsigned)lh);
+        total+= (uint64_t)sw*sh*4u*ld;
+        if(lw>1)lw>>=1;if(lh>1)lh>>=1;if(ld>1)ld>>=1;
+    }
+    return total>SIZE_MAX?SIZE_MAX:(size_t)total;
+}
+/* Takes ownership of pixels and native on every path.  On success both are
+ * owned by the cache and the entry is non-evictable. */
+static int register_subtexture(D9Device *d,D9Handle key,uint8_t *pixels,size_t cpu,
+                               void *native,size_t gpu,int cpu_only){
+    if(d9_texcache_add_guest(&d->tex_cache,key,pixels,cpu,1)!=D9TEXCACHE_OK){
+        delete_unowned_native(d,native);free(pixels);return D9_BACKEND;
+    }
+    if(!cpu_only){
+        D9TexGpuRegistration reg={native,gpu,1,cache_release_gpu,d,D9TEXCACHE_NO_REHYDRATE_TOKEN};
+        if(d9_texcache_attach_gpu(&d->tex_cache,key,&reg)!=D9TEXCACHE_OK){
+            (void)d9_texcache_remove(&d->tex_cache,key);
+            delete_unowned_native(d,native);
+            return D9_BACKEND;
+        }
+    }
+    (void)d9_texcache_set_no_evict(&d->tex_cache,key,1);
+    return D9_OK;
+}
+static int subtexture_has_gpu(D9Device *d,D9Handle h){
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+    return e&&e->has_gpu;
+}
+static int subtexture_commit_ready(D9Device *d,D9Handle h,void *native,size_t gpu){
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+    if(!e||!e->has_gpu||e->gpu_ready)return D9_OK;
+    return d9_texcache_commit_upload(&d->tex_cache,h,native,gpu,0)==D9TEXCACHE_OK?D9_OK:D9_BACKEND;
+}
 int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned levels,
                          unsigned pool,unsigned usage,int disposable,D9Handle *out){
     if(!d||d->scene||d->teardown||!out||!d->next||!pow2(w)||!pow2(h)||pool>D9_POOL_SYSTEMMEM)return D9_INVALID;
@@ -419,7 +464,10 @@ int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
     }
     t.face_bytes=offset;
     if(t.face_bytes>SIZE_MAX/6u)return D9_MEMORY;
-    t.cpu_bytes=t.face_bytes*6u;t.cost=t.cpu_bytes;
+    t.cpu_bytes=t.face_bytes*6u;
+    t.gpu_bytes=t.cpu_only?0:cube_gpu_bytes(edge,levels);
+    if(t.cpu_bytes>SIZE_MAX-t.gpu_bytes)return D9_MEMORY;
+    t.cost=t.cpu_bytes+t.gpu_bytes;
     if(budget_has_room(d,t.cost))return D9_MEMORY;
     CubeTexture *slot=NULL;
     for(unsigned i=0;i<MAX_CUBES;++i)if(!d->cubes[i].id){slot=&d->cubes[i];break;}
@@ -431,7 +479,10 @@ int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
             free(t.pixels);return D9_BACKEND;
         }
     }
-    t.id=d->next++;*slot=t;d->cube_used+=t.cpu_bytes;*out=t.id;return D9_OK;
+    D9Handle key=d->next;
+    if(register_subtexture(d,key,t.pixels,t.cpu_bytes,t.native,t.gpu_bytes,t.cpu_only))
+        return D9_BACKEND;
+    t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
 unsigned d9_cube_levels(D9Device *d,D9Handle h){CubeTexture *c=cube_texture(d,h);return c?c->levels:0;}
 int d9_cube_level_info(D9Device *d,D9Handle h,unsigned level,
@@ -478,10 +529,18 @@ int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned leve
     for(size_t y=0;y<rows;++y)
         memcpy(dst+y*l->pitch,(const uint8_t *)src+y*src_pitch,row_bytes);
     if(!c->cpu_only){
+        if(!subtexture_has_gpu(d,h)){
+            set_diagnosis(d,"cube texture native copy is not resident; CPU pixels are "
+                            "retained but cube rehydration is not implemented");
+            return D9_UNSUPPORTED;
+        }
         if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,dst,l->bytes))
             return D9_BACKEND;
     }
     l->uploaded=1;l->face_mask|=1u<<face;
+    if(!c->cpu_only&&level==0&&
+       c->level[0].face_mask==((1u<<D9_CUBE_FACES)-1u))
+        return subtexture_commit_ready(d,h,c->native,c->gpu_bytes);
     return D9_OK;
 }
 int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level){
@@ -489,23 +548,52 @@ int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level){
     if(!c||face>=D9_CUBE_FACES||level>=c->levels)return D9_INVALID;
     CubeLevel *l=&c->level[level];
     if(!c->cpu_only){
+        if(!subtexture_has_gpu(d,h)){
+            set_diagnosis(d,"cube texture native copy is not resident; CPU pixels are "
+                            "retained but cube rehydration is not implemented");
+            return D9_UNSUPPORTED;
+        }
         uint8_t *src=c->pixels+(size_t)face*c->face_bytes+l->offset;
         if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,src,l->bytes))
             return D9_BACKEND;
     }
     l->uploaded=1;l->face_mask|=1u<<face;
+    if(!c->cpu_only&&level==0&&
+       c->level[0].face_mask==((1u<<D9_CUBE_FACES)-1u))
+        return subtexture_commit_ready(d,h,c->native,c->gpu_bytes);
     return D9_OK;
 }
 int d9_release_cube_texture(D9Device *d,D9Handle h){
     CubeTexture *c=cube_texture(d,h);
     if(!c||d->scene||d->teardown)return D9_INVALID;
+    int rc=d9_texcache_remove(&d->tex_cache,h);
+    if(rc!=D9TEXCACHE_OK){
+        if(rc==D9TEXCACHE_RELEASE_FAILED){
+            /* Mirror the 2D contract: copies the cache already released are
+             * detached from the core object; the rest stay retryable. */
+            D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+            if(e&&!e->has_guest){c->pixels=NULL;c->cpu_bytes=0;c->face_bytes=0;}
+            if(e&&!e->has_gpu){c->native=NULL;c->gpu_bytes=0;
+                if(d->cube_texture==h)d->cube_texture=0;
+                if(d->cube_texture1==h)d->cube_texture1=0;}
+            return D9_RELEASE_FAILED;
+        }
+        return D9_BACKEND;
+    }
     if(d->cube_texture==h)d->cube_texture=0;
     if(d->cube_texture1==h)d->cube_texture1=0;
-    if(c->native)d->ops.texture_delete(d->ctx,c->native);
-    free(c->pixels);
-    if(d->cube_used>=c->cpu_bytes)d->cube_used-=c->cpu_bytes;
     memset(c,0,sizeof *c);
     return D9_OK;
+}
+int d9_cube_resource_info(D9Device *d,D9Handle h,unsigned *levels,
+                          unsigned *edge_length,unsigned *format,
+                          size_t *guest_bytes,size_t *gpu_bytes,int *cpu_only){
+    CubeTexture *c=cube_texture(d,h);if(!c)return D9_INVALID;
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+    if(levels)*levels=c->levels;if(edge_length)*edge_length=c->edge;if(format)*format=c->format;
+    if(guest_bytes)*guest_bytes=e&&e->has_guest?e->guest_bytes:0;
+    if(gpu_bytes)*gpu_bytes=e&&e->has_gpu?e->gpu_bytes:0;
+    if(cpu_only)*cpu_only=c->cpu_only;return D9_OK;
 }
 int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
     if(!d||stage>=d9_stage_count(d)){
@@ -516,6 +604,12 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
         CubeTexture *c=cube_texture(d,h);
         if(!c||c->cpu_only||!c->native||c->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u))
             return D9_INVALID;
+        D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+        if(!e||!e->has_gpu||!e->gpu_ready){
+            set_diagnosis(d,"cube texture is not cache-resident; cube rehydration is not implemented");
+            return D9_INVALID;
+        }
+        d9_texcache_touch(&d->tex_cache,h);
     }
     if(stage){d->cube_texture1=h;d->texture1=0;d->volume_texture1=0;}
     else{d->cube_texture=h;d->texture=0;d->volume_texture=0;}
@@ -555,7 +649,10 @@ int d9_create_volume_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned depth
         l->bytes=l->plane_bytes*l->depth;
         offset+=l->bytes;
     }
-    t.cpu_bytes=offset;t.cost=t.cpu_bytes;
+    t.cpu_bytes=offset;
+    t.gpu_bytes=t.cpu_only?0:volume_gpu_bytes(w,h,depth,levels);
+    if(t.cpu_bytes>SIZE_MAX-t.gpu_bytes)return D9_MEMORY;
+    t.cost=t.cpu_bytes+t.gpu_bytes;
     if(budget_has_room(d,t.cost))return D9_MEMORY;
     VolumeTexture *slot=NULL;
     for(unsigned i=0;i<MAX_VOLUMES;++i)if(!d->volumes[i].id){slot=&d->volumes[i];break;}
@@ -567,7 +664,10 @@ int d9_create_volume_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned depth
             free(t.pixels);return D9_BACKEND;
         }
     }
-    t.id=d->next++;*slot=t;d->volume_used+=t.cpu_bytes;*out=t.id;return D9_OK;
+    D9Handle key=d->next;
+    if(register_subtexture(d,key,t.pixels,t.cpu_bytes,t.native,t.gpu_bytes,t.cpu_only))
+        return D9_BACKEND;
+    t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
 unsigned d9_volume_levels(D9Device *d,D9Handle h){VolumeTexture *v=volume_texture(d,h);return v?v->levels:0;}
 int d9_volume_level_info(D9Device *d,D9Handle h,unsigned level,
@@ -614,10 +714,17 @@ int d9_volume_upload_level(D9Device *d,D9Handle h,unsigned level,
             memcpy(dp+y*l->pitch,sp+y*src_pitch,row_bytes);
     }
     if(!v->cpu_only){
+        if(!subtexture_has_gpu(d,h)){
+            set_diagnosis(d,"volume texture native copy is not resident; CPU pixels are "
+                            "retained but volume rehydration is not implemented");
+            return D9_UNSUPPORTED;
+        }
         if(d->ops.texture_upload_volume(d->ctx,v->native,level,dst,l->bytes))
             return D9_BACKEND;
     }
     l->uploaded=1;
+    if(!v->cpu_only&&level==0)
+        return subtexture_commit_ready(d,h,v->native,v->gpu_bytes);
     return D9_OK;
 }
 int d9_volume_level_unlocked(D9Device *d,D9Handle h,unsigned level){
@@ -625,22 +732,50 @@ int d9_volume_level_unlocked(D9Device *d,D9Handle h,unsigned level){
     if(!v||level>=v->levels)return D9_INVALID;
     VolumeLevel *l=&v->level[level];
     if(!v->cpu_only){
+        if(!subtexture_has_gpu(d,h)){
+            set_diagnosis(d,"volume texture native copy is not resident; CPU pixels are "
+                            "retained but volume rehydration is not implemented");
+            return D9_UNSUPPORTED;
+        }
         if(d->ops.texture_upload_volume(d->ctx,v->native,level,v->pixels+l->offset,l->bytes))
             return D9_BACKEND;
     }
     l->uploaded=1;
+    if(!v->cpu_only&&level==0)
+        return subtexture_commit_ready(d,h,v->native,v->gpu_bytes);
     return D9_OK;
 }
 int d9_release_volume_texture(D9Device *d,D9Handle h){
     VolumeTexture *v=volume_texture(d,h);
     if(!v||d->scene||d->teardown)return D9_INVALID;
+    int rc=d9_texcache_remove(&d->tex_cache,h);
+    if(rc!=D9TEXCACHE_OK){
+        if(rc==D9TEXCACHE_RELEASE_FAILED){
+            D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+            if(e&&!e->has_guest){v->pixels=NULL;v->cpu_bytes=0;}
+            if(e&&!e->has_gpu){v->native=NULL;v->gpu_bytes=0;
+                if(d->volume_texture==h)d->volume_texture=0;
+                if(d->volume_texture1==h)d->volume_texture1=0;}
+            return D9_RELEASE_FAILED;
+        }
+        return D9_BACKEND;
+    }
     if(d->volume_texture==h)d->volume_texture=0;
     if(d->volume_texture1==h)d->volume_texture1=0;
-    if(v->native)d->ops.texture_delete(d->ctx,v->native);
-    free(v->pixels);
-    if(d->volume_used>=v->cpu_bytes)d->volume_used-=v->cpu_bytes;
     memset(v,0,sizeof *v);
     return D9_OK;
+}
+int d9_volume_resource_info(D9Device *d,D9Handle h,unsigned *levels,
+                            unsigned *w,unsigned *height,unsigned *depth,
+                            unsigned *format,size_t *guest_bytes,
+                            size_t *gpu_bytes,int *cpu_only){
+    VolumeTexture *v=volume_texture(d,h);if(!v)return D9_INVALID;
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+    if(levels)*levels=v->levels;if(w)*w=v->w;if(height)*height=v->h;if(depth)*depth=v->depth;
+    if(format)*format=v->format;
+    if(guest_bytes)*guest_bytes=e&&e->has_guest?e->guest_bytes:0;
+    if(gpu_bytes)*gpu_bytes=e&&e->has_gpu?e->gpu_bytes:0;
+    if(cpu_only)*cpu_only=v->cpu_only;return D9_OK;
 }
 int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
     if(!d||stage>=d9_stage_count(d)){
@@ -650,6 +785,12 @@ int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
     if(h){
         VolumeTexture *v=volume_texture(d,h);
         if(!v||v->cpu_only||!v->native||!v->level[0].uploaded)return D9_INVALID;
+        D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+        if(!e||!e->has_gpu||!e->gpu_ready){
+            set_diagnosis(d,"volume texture is not cache-resident; volume rehydration is not implemented");
+            return D9_INVALID;
+        }
+        d9_texcache_touch(&d->tex_cache,h);
     }
     if(stage){d->volume_texture1=h;d->texture1=0;d->cube_texture1=0;}
     else{d->volume_texture=h;d->texture=0;d->cube_texture=0;}
@@ -1621,7 +1762,12 @@ int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
     return d->ops.depth_clear(d->ctx,flags,packed)?D9_BACKEND:D9_OK;
 }
 size_t d9_memory_used(const D9Device *d){if(!d)return 0;D9TexCacheStats st;d9_texcache_stats(&d->tex_cache,&st);
-    return memory_sum(d->used,memory_sum(d->cube_used,memory_sum(d->volume_used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used)))));}
+    return memory_sum(d->used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used)));}
+int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out){
+    if(!d||!out)return D9_INVALID;
+    d9_texcache_stats(&d->tex_cache,out);
+    return D9_OK;
+}
 int d9_get_draw_state(const D9Device *d,D9DrawState *out){
     if(!d||!out)return D9_INVALID;
     *out=d->state;

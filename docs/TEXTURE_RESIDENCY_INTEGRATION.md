@@ -10,6 +10,8 @@ is preserved; the texture modules now ship in graphics, COM, and TESV builds.
 | `D3DPOOL_DEFAULT` | retained for CPU lock/readback | allocated at creation, marked ready after upload | allowed after level 0 upload |
 | `D3DPOOL_MANAGED` | retained as the restoration source | same lifecycle as DEFAULT | allowed after level 0 upload |
 | `D3DPOOL_SYSTEMMEM` | retained, cache-owned | none | rejected |
+| cube (`IDirect3DCubeTexture9`) | six faces x every mip, cache-owned | backend native cost estimate | allowed after all six level-0 faces upload |
+| volume (`IDirect3DVolumeTexture9`) | every depth slice x every mip, cache-owned | backend native cost estimate | allowed after level 0 uploads |
 | direct `d9_create_texture_sktx()` | none; SKTX is parsed and released by the caller | ETC1/ETC1A4 native uploaded before registration | allowed immediately |
 
 `d9_memory_used()` is now the exact sum of buffer bytes plus cache-accounted
@@ -32,7 +34,11 @@ flag is recorded but **does not drop the guest source yet**.
 * `d9_release_texture()` clears the core slot only after cache removal succeeds.
   A backend release failure returns `D9_RELEASE_FAILED`; already-released copies
   are removed from accounting and the remaining copy can be retried without a
-  double free.
+  double free.  Cube and volume objects follow the same contract.
+* Cube/volume entries set `no_evict`: LRU reserve/trim skips them and their guest
+  pixels are never dropped because native rehydration is not implemented.  An
+  explicit `d9_release_cube_texture()` / `d9_release_volume_texture()` still
+  removes them and their native exactly once.
 * `d9_destroy_device_ex()` reports the first release failure and preserves the
   device for retry. The legacy void wrapper remains best effort.
 * Backends may supply optional `texture_release`, `texture_create_encoded`, and

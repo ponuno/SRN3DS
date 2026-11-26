@@ -169,11 +169,13 @@ static void destroy_obj(Obj *o){
         parent=g.dev;
     }
     else if(o->kind==CUBE){
-        (void)d9_release_cube_texture(g.device,o->handle);
+        int rc=d9_release_cube_texture(g.device,o->handle);
+        if(rc==D9_RELEASE_FAILED){o->refs=1;o->deferred=1;return;}
         parent=g.dev;
     }
     else if(o->kind==VOLUME){
-        (void)d9_release_volume_texture(g.device,o->handle);
+        int rc=d9_release_volume_texture(g.device,o->handle);
+        if(rc==D9_RELEASE_FAILED){o->refs=1;o->deferred=1;return;}
         parent=g.dev;
     }
     else if(o->kind==VS||o->kind==PS){free(o->code);o->code=NULL;parent=g.dev;}

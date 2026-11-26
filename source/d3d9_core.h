@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "d3d9_vertex.h"
 #include "d3d9_tev.h"
+#include "d3d9_texcache.h"
 
 /* Deliberately small fixed-function D3D9 subset, separate from guest COM ABI. */
 typedef struct D9Device D9Device;
@@ -283,6 +284,11 @@ int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned leve
                               const void *src,size_t src_pitch,size_t src_bytes);
 /* Re-upload a face level after a GetCubeMapSurface view was written. */
 int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level);
+/* Residency view of a cube: guest bytes are the six face stores plus mips,
+ * gpu_bytes is the backend-native estimate.  Both live in the D9TexCache. */
+int d9_cube_resource_info(D9Device *d,D9Handle h,unsigned *levels,
+                          unsigned *edge_length,unsigned *format,
+                          size_t *guest_bytes,size_t *gpu_bytes,int *cpu_only);
 int d9_release_cube_texture(D9Device *d,D9Handle h);
 /* Bind a ready cube to stage 0/1.  h==0 clears that stage.  Cube sampling is
  * not implemented by the draw path, so a later draw with a cube bound fails
@@ -308,6 +314,12 @@ int d9_volume_upload_level(D9Device *d,D9Handle h,unsigned level,
                            size_t src_bytes);
 /* Re-upload a whole level after a LockBox view was written. */
 int d9_volume_level_unlocked(D9Device *d,D9Handle h,unsigned level);
+/* Residency view of a volume: guest bytes are all depth slices plus mips,
+ * gpu_bytes is the backend-native estimate.  Both live in the D9TexCache. */
+int d9_volume_resource_info(D9Device *d,D9Handle h,unsigned *levels,
+                            unsigned *w,unsigned *height,unsigned *depth,
+                            unsigned *format,size_t *guest_bytes,
+                            size_t *gpu_bytes,int *cpu_only);
 int d9_release_volume_texture(D9Device *d,D9Handle h);
 /* Bind a ready volume to stage 0/1.  h==0 clears that stage.  Volume sampling
  * is not implemented by the draw path, so a later draw with a volume bound
@@ -469,6 +481,8 @@ int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,
 int d9_end_scene(D9Device *d);
 int d9_present(D9Device *d);
 size_t d9_memory_used(const D9Device *d);
+/* Read-only copy of the device's texture-cache counters (cube/volume included). */
+int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out);
 int d9_texture_layout(unsigned w,unsigned h,unsigned format,size_t *pitch,size_t *bytes);
 /* Split texture residency accounting and pool/usage metadata. */
 int d9_texture_resource_info(D9Device *d,D9Handle h,unsigned *pool,
