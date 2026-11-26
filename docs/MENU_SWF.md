@@ -2,15 +2,14 @@
 
 Status: the SWF **container, tag stream, structured font imports, exact-id font
 resolution, flattened display list, solid fill colours, DefineEditText
-parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch, bounded AVM1/AS2
-action inventory with safe frame control, and host CPU -> COM indexed/UP menu
-submission** are implemented.  Real StartMenu declares imported font ids 34/41
-from `gfxfontlib.swf`; that URL is absent and the `Interface/fonts_en.swf`
-fallback contains neither id, so all 57 text records are named refusals rather
-than name-substituted.  An exact-id match is wired through edit
-layout/tessellation into the COM geometry batch.  This is still not a menu
-frame: gradient/bitmap fill sampling, mask/clip rendering, arbitrary AVM/AS2
-execution, full GFx text/assets and PICA sampling remain open.
+parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch and host CPU ->
+COM indexed/UP menu submission** are implemented.  Real StartMenu declares
+imported font ids 34/41 from `gfxfontlib.swf`; that URL is absent and the
+`Interface/fonts_en.swf` fallback contains neither id, so all 57 text records are
+named refusals rather than name-substituted.  An exact-id match is wired through
+edit layout/tessellation into the COM geometry batch.  This is still not a menu
+frame: focal/bitmap fill sampling, mask/clip rendering, AVM/AS2, full GFx
+text/assets and PICA sampling remain open.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -29,7 +28,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement/tessellation, 16.16 transform, ARGB vertices, plus DefineEditText WordWrap/Multiline/alignment/Justify/indent/leading/Password/HTML layout |
 | `source/menu_swf_raster.h` / `.c` | Bounded A8 coverage rasterisation of tessellated glyph triangles with 4x4 subpixel samples, caller buffers, 16.16-quantised matrix/pen and named refusals |
 | `source/menu_swf_atlas.h` / `.c` | Deterministic shelf packing of A8 coverage rectangles into a caller atlas, zero-filled padding, per-glyph rect/UV and named refusals |
-| `source/menu_swf_batch.h` / `.c` | Text quad/index batch plus solid-filled shape triangle batch from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping and count-before-write overflow |
+| `source/menu_swf_batch.h` / `.c` | Text quad/index batch plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping and count-before-write overflow |
 | `source/d3d9_menu_text.h` / `.c` | Host/menu COM demo: A8 texture creation/upload and one DrawPrimitiveUP from the atlas+batch |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_avm_smoke.c` | Synthetic Stop/Play/GotoFrame/GotoLabel/Wait/Push/variable/function/unknown/truncated cases, DoInitAction ownership, safe display annotation and exact real StartMenu histogram |
@@ -42,7 +41,8 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_raster_smoke.c` | Synthetic square/triangle exact coverage, hole rules, subpixel/rotation/mirror/clip, empty glyph and named refusals; optional real code-33 32x32 and 64x64 coverage |
 | `tests/menu_swf_atlas_smoke.c` | Synthetic varied-size pack/determinism/UV/composition/overflow/empty cases; optional real codes 33..36 coverage-sum comparison |
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
-| `tests/menu_swf_fill_smoke.c` | Synthetic solid RGBA/loops, CXFORM, mirroring, gradient and bitmap refusals; optional real fill census and per-vertex colours |
+| `tests/menu_swf_fill_smoke.c` | Synthetic solid RGBA/loops, CXFORM, mirroring, accepted linear/radial batches, focal/bitmap refusals; optional real fill census and per-vertex colours |
+| `tests/menu_swf_gradient_smoke.c` | Synthetic exact 2/3-stop linear, radial, pad/reflect/repeat, named invalid stops/matrix/interpolation/spread/focal/bitmap refusals; optional real StartMenu gradient census |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
 | `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: URL/fallback font load, exact-id resolve/refusals, solid-fill shape batch + resolved edit-text tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
 | `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
@@ -594,9 +594,16 @@ table.  Each triangle uses the 1-based style in `triangle_fills[]`:
 * A solid fill's RGBA is transformed per channel by the record CXFORM
   (`mult` 8.8, `add` 8-bit) and written to its shared vertex.  The same white
   texel UV is written to every vertex.
-* Linear/radial/focal gradients are the exact named refusal
-  `gradient fills are not implemented`; bitmap fills are
-  `bitmap fills are not implemented`.  Neither produces fallback pixels.
+* Linear gradients invert the fill matrix, normalize the gradient-square x
+  axis from `-16384..16384`, apply the SWF spread mode (pad/reflect/repeat),
+  interpolate up to eight ratio+RGBA stops and then the record CXFORM.  Radial
+  gradients use the distance from the gradient center divided by `16384`;
+  the gradient matrix's scale/rotate are 16.16 and its translation is twips.
+  Colours are evaluated per source vertex, so large triangles are an explicit
+  approximation (no gradient texture or TEV gradient).  Focal gradients and
+  bitmap fills are named refusals (`focal gradient fills are not implemented`,
+  `bitmap fills are not implemented`); invalid/truncated stops, unsupported
+  interpolation/spread and a singular matrix are named too.
 * The batch reuses `mesh->vertices[]` and `mesh->indices[]`: each source vertex
   is emitted once, and copied only when the same vertex is referenced by
   triangles with different fills.  This keeps the real StartMenu at **57,480**
@@ -885,10 +892,13 @@ glyphs (one empty) with exact positions/UV/indices/winding/colors, partial and
 full viewport clipping, overflow without buffer mutation, NaN/negative-scale/
 rotated-clip refusals, and real 33..36 atlas quads.  The fill test adds a
 solid `80402010` fill with exact per-vertex ARGB, an 8.8 CXFORM result
-`808a2003`, mirrored winding, gradient and bitmap named refusals, and a
-short-output refusal that leaves the buffer untouched; the real check reports
-40 solid fills with no gradients/bitmaps, a black shape 2, and 552/552 shape-2
-vertices carrying fill colours.
+`808a2003`, mirrored winding, accepted linear/radial gradient batches, named
+focal/bitmap refusals, and a short-output refusal that leaves the buffer
+untouched; the real check reports 40 solid fills with no gradients/bitmaps, a
+black shape 2, and 552/552 shape-2 vertices carrying fill colours.
+`menu_swf_gradient` adds exact two- and three-stop linear colours, radial
+center/mid/radius, pad/reflect/repeat at `t=1.25`, and named descending-stop,
+truncated-stop, interpolation, spread and singular-matrix refusals.
 
 Full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
 `-TestTimeoutSec 300`: **128 passed, 0 diagnostic, 0 failed**.  This includes the
@@ -956,11 +966,12 @@ are named refusals and add zero real-text glyphs/vertices.  The exact-id
 resolved-text layout/tessellation path is wired but not exercised by this retail
 census.  The single local-font `!` control exercises the raster/atlas/batch/COM
 path.  Shape fills use the atlas's white texel and the parsed solid-fill RGBA
-multiplied by the record CXFORM; gradient and bitmap fills are named refusals,
-and the 182 stroke segments are counted and skipped.  The current deduplicated
-shape mesh keeps the source at 57,484 vertices, so the strict branch submits one
-compact 16-bit indexed draw; the UP fallback and its assertions remain present.
-The host mock `Present` only closes the COM
+multiplied by the record CXFORM; linear/radial gradient fills are evaluated per
+vertex, focal/bitmap fills are named refusals,
+and the 182 stroke segments are counted and skipped.  On this pre-dedup HEAD the
+86,158-vertex batch exceeds the 16-bit indexed range, so the preserved UP path
+submits 22 chunks; after dedup brings it under 65,536 vertices the same test
+takes the strict indexed branch.  The host mock `Present` only closes the COM
 scene state machine so releases are not deferred.  No pixel readback, GPU/PICA
 sampling, visual equivalence or frame is claimed.
 
@@ -987,8 +998,9 @@ Verification:
 
 1. **Renderable display list** — bounded state, flattened CPU transform records,
    shape geometry, solid fill colours, tessellation and a host COM triangle
-   batch exist, but this is not a GFx display list: gradient/bitmap fill
-   sampling, mask/clip rendering, clipping layers, button states, frame scripts
+   batch exist, but this is not a GFx display list: gradient textures (linear/
+   radial fills are per-vertex), bitmap fill sampling, mask/clip rendering,
+   clipping layers, button states, frame scripts
    and real draw submission remain.
 2. **Arbitrary AVM/AS2 execution** — the bounded inventory and safe
    Stop/Play/in-range GotoFrame metadata are implemented, but constants,

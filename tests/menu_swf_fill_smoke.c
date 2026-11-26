@@ -366,15 +366,19 @@ static void test_gradient_refusal(void) {
         if (st != MENU_SWF_OK) continue;
         MenuSwfBatchShapeStyle style;
         identity_style(&style);
-        MenuSwfBatchVertex vertices[3];
-        uint32_t indices[3];
+        MenuSwfBatchVertex vertices[8];
+        uint32_t indices[8];
         MenuSwfBatchResult br;
         MenuSwfBatchStatus bs = menu_swf_batch_shape(
-            &mesh, &style, NULL, vertices, 3, indices, 3, &br, reason,
+            &mesh, &style, NULL, vertices, 8, indices, 8, &br, reason,
             sizeof reason);
-        check(bs == MENU_SWF_BATCH_ERR_FILL &&
-                  strstr(reason, "gradient fills are not implemented"),
-              "gradient batch refusal is named");
+        check(bs == MENU_SWF_BATCH_OK && br.vertex_count == 3,
+              "gradient batch is accepted per vertex");
+        if (bs == MENU_SWF_BATCH_OK) {
+            check(vertices[0].color != 0 && vertices[1].color != 0 &&
+                      vertices[2].color != 0,
+                  "gradient colours are evaluated");
+        }
     }
 }
 

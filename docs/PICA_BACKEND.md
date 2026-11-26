@@ -1408,6 +1408,9 @@ PICA-shaped backend without `draw_volume`.
 - No vertex-colour or fragment-varying routing.
 - No VPOS/VFACE support.
 - No MRT, depth-output or non-TEV fragment operation.
+- Gradient fills are CPU per-vertex colours from `menu_swf_batch`; the backend
+  receives only the resulting COLOR0.  There is no gradient texture, TEV
+  gradient interpolation or per-fragment focal evaluation.
 - No PICA volume sampler; volume draws are refused by name (section 5.9).
 - No claim that the wider translator subset is renderable by this backend.
 - No claim of a real Skyrim frame or pixel-equivalent PICA rendering.

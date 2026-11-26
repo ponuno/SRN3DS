@@ -10,8 +10,9 @@
  *
  * Shape input is a tessellated MenuSwfTessMesh with its parsed fill table.
  * Each triangle uses its 1-based style; solid RGBA is transformed by the
- * record CXFORM and written per vertex.  Gradients and bitmap fills are honest
- * named refusals.
+ * record CXFORM and written per vertex.  Linear/radial gradients evaluate the
+ * gradient matrix and up to eight stops per vertex (a documented approximation
+ * for large triangles); bitmap and focal fills are honest named refusals.
  *
  * Glyph bounds are taken from the text mesh's layout space and the batch style
  * is applied on top; for one final transform, lay out text with an identity
@@ -104,9 +105,13 @@ MenuSwfBatchStatus menu_swf_batch_text(
 /* Build a triangle batch from a tessellated shape plus its fill table.
  * Every triangle uses the style named by mesh->triangle_fills[] (1-based).
  * Solid fills are transformed by style->mult/add and written as per-vertex
- * ARGB; linear/radial/focal gradients return MENU_SWF_BATCH_ERR_FILL with
- * "gradient fills are not implemented"; bitmap fills return the same status
- * with "bitmap fills are not implemented".  A negative determinant mirrors and
+ * ARGB.  Linear gradients project the source vertex through the inverse fill
+ * matrix, normalize x from the gradient square (-16384..16384), apply the
+ * SWF spread mode (pad/reflect/repeat) and interpolate the stored stops;
+ * radial gradients use the distance from the gradient center divided by
+ * 16384.  Colours are per-vertex, so large triangles are an approximation.
+ * Focal gradients and bitmap fills return MENU_SWF_BATCH_ERR_FILL with named
+ * reasons.  A negative determinant mirrors and
  * reverses each triangle's winding; zero is ERR_SCALE.  The batch reuses
  * mesh->vertices[]/indices[]: a source vertex shared by triangles with
  * different fills is copied once and its index remapped.  The caller capacity

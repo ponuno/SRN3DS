@@ -334,38 +334,163 @@ static uint8_t shape_channel(uint32_t base, int32_t mult, int32_t add) {
     return (uint8_t)value;
 }
 
-static MenuSwfBatchStatus shape_fill_color(const MenuSwfTessMesh *mesh,
-                                           uint16_t style_index,
-                                           const MenuSwfBatchShapeStyle *style,
-                                           uint32_t *out, char *reason,
-                                           size_t reason_cap) {
-    if (!style_index || style_index > mesh->fill_count) {
+#define MENU_SWF_GRADIENT_SCALE 16384.0
+
+static int gradient_matrix(const MenuSwfShapeFill *fill, double x, double y,
+                           double *gx, double *gy) {
+    /* SWF MATRIX maps gradient space to shape space.  Scale/rotate are 16.16,
+     * translation is twips; invert the 2x2 part to get gradient coordinates. */
+    double a = fill->matrix.scale_x / 65536.0;
+    double b = fill->matrix.rotate_skew0 / 65536.0;
+    double c = fill->matrix.rotate_skew1 / 65536.0;
+    double d = fill->matrix.scale_y / 65536.0;
+    double det = a * d - b * c;
+    if (!isfinite(det) || fabs(det) < 1e-9) return -1;
+    double sx = x - (double)fill->matrix.translate_x;
+    double sy = y - (double)fill->matrix.translate_y;
+    *gx = (d * sx - c * sy) / det;
+    *gy = (-b * sx + a * sy) / det;
+    return 0;
+}
+
+static int gradient_spread(double t, unsigned spread, double *out) {
+    if (!isfinite(t)) return -1;
+    switch (spread) {
+    case 0: /* pad/clamp */
+        if (t < 0.0) t = 0.0;
+        if (t > 1.0) t = 1.0;
+        break;
+    case 1: { /* reflect */
+        double period = fmod(t, 2.0);
+        if (period < 0.0) period += 2.0;
+        t = period > 1.0 ? 2.0 - period : period;
+        break;
+    }
+    case 2: { /* repeat */
+        t -= floor(t);
+        break;
+    }
+    default:
+        return -1;
+    }
+    *out = t;
+    return 0;
+}
+
+static uint32_t gradient_stop_color(const MenuSwfShapeFill *fill, double t) {
+    const MenuSwfShapeGradientStop *s = fill->stops;
+    unsigned count = fill->stop_count;
+    double position = t * 255.0;
+    if (position <= (double)s[0].ratio)
+        return ((uint32_t)s[0].a << 24) | ((uint32_t)s[0].r << 16) |
+               ((uint32_t)s[0].g << 8) | s[0].b;
+    for (unsigned i = 1; i < count; ++i) {
+        if (position <= (double)s[i].ratio) {
+            double span = (double)s[i].ratio - (double)s[i - 1].ratio;
+            double k = span > 0.0 ? (position - (double)s[i - 1].ratio) / span
+                                  : 0.0;
+            double r = s[i - 1].r + ((double)s[i].r - s[i - 1].r) * k;
+            double g = s[i - 1].g + ((double)s[i].g - s[i - 1].g) * k;
+            double b = s[i - 1].b + ((double)s[i].b - s[i - 1].b) * k;
+            double a = s[i - 1].a + ((double)s[i].a - s[i - 1].a) * k;
+            return ((uint32_t)(a + 0.5) << 24) |
+                   ((uint32_t)(r + 0.5) << 16) |
+                   ((uint32_t)(g + 0.5) << 8) | (uint32_t)(b + 0.5);
+        }
+    }
+    const MenuSwfShapeGradientStop *last = &s[count - 1];
+    return ((uint32_t)last->a << 24) | ((uint32_t)last->r << 16) |
+           ((uint32_t)last->g << 8) | last->b;
+}
+
+static MenuSwfBatchStatus shape_fill_validate(const MenuSwfTessFill *fill,
+                                               char *reason,
+                                               size_t reason_cap) {
+    switch (fill->kind) {
+    case MENU_SWF_FILL_SOLID: return MENU_SWF_BATCH_OK;
+    case MENU_SWF_FILL_BITMAP:
+        batch_reason(reason, reason_cap, "bitmap fills are not implemented");
+        return MENU_SWF_BATCH_ERR_FILL;
+    case MENU_SWF_FILL_FOCAL:
         batch_reason(reason, reason_cap,
-                     "shape batch: triangle references fill %u of %u",
-                     style_index, mesh->fill_count);
+                     "focal gradient fills are not implemented");
+        return MENU_SWF_BATCH_ERR_FILL;
+    case MENU_SWF_FILL_LINEAR:
+    case MENU_SWF_FILL_RADIAL:
+        break;
+    default:
+        batch_reason(reason, reason_cap, "shape batch: unknown fill kind %u",
+                     fill->kind);
         return MENU_SWF_BATCH_ERR_FILL;
     }
-    const MenuSwfTessFill *fill = &mesh->fills[style_index - 1];
-    if (fill->kind == MENU_SWF_FILL_LINEAR ||
-        fill->kind == MENU_SWF_FILL_RADIAL ||
-        fill->kind == MENU_SWF_FILL_FOCAL) {
+    if (fill->focal_present) {
         batch_reason(reason, reason_cap,
-                     "gradient fills are not implemented");
+                     "focal gradient fills are not implemented");
         return MENU_SWF_BATCH_ERR_FILL;
     }
-    if (fill->kind == MENU_SWF_FILL_BITMAP) {
+    if (!fill->stop_count || fill->stop_count != fill->stop_total) {
         batch_reason(reason, reason_cap,
-                     "bitmap fills are not implemented");
+                     "gradient fills require 1..8 stored colour stops "
+                     "(have %u of %u)", fill->stop_count, fill->stop_total);
         return MENU_SWF_BATCH_ERR_FILL;
     }
-    uint32_t rgba = fill->rgba;
+    if (fill->interpolation != 0) {
+        batch_reason(reason, reason_cap,
+                     "gradient interpolation mode %u is not implemented",
+                     fill->interpolation);
+        return MENU_SWF_BATCH_ERR_FILL;
+    }
+    if (fill->spread > 2) {
+        batch_reason(reason, reason_cap,
+                     "gradient spread mode %u is not implemented",
+                     fill->spread);
+        return MENU_SWF_BATCH_ERR_FILL;
+    }
+    for (unsigned i = 1; i < fill->stop_count; ++i)
+        if (fill->stops[i].ratio < fill->stops[i - 1].ratio) {
+            batch_reason(reason, reason_cap,
+                         "gradient stops are not ascending at %u", i);
+            return MENU_SWF_BATCH_ERR_FILL;
+        }
+    double gx, gy;
+    if (gradient_matrix(fill, 0.0, 0.0, &gx, &gy)) {
+        batch_reason(reason, reason_cap, "gradient matrix is singular");
+        return MENU_SWF_BATCH_ERR_FILL;
+    }
+    return MENU_SWF_BATCH_OK;
+}
+
+static MenuSwfBatchStatus shape_vertex_color(const MenuSwfTessFill *fill,
+                                             const MenuSwfBatchShapeStyle *style,
+                                             const MenuSwfTessVertex *v,
+                                             uint32_t *out, char *reason,
+                                             size_t reason_cap) {
+    uint32_t rgba;
+    if (fill->kind == MENU_SWF_FILL_SOLID) {
+        rgba = fill->rgba;
+    } else {
+        double gx, gy;
+        if (gradient_matrix(fill, v->x, v->y, &gx, &gy)) {
+            batch_reason(reason, reason_cap, "gradient matrix is singular");
+            return MENU_SWF_BATCH_ERR_FILL;
+        }
+        double t;
+        if (fill->kind == MENU_SWF_FILL_LINEAR)
+            t = (gx + MENU_SWF_GRADIENT_SCALE) / (2.0 * MENU_SWF_GRADIENT_SCALE);
+        else
+            t = sqrt(gx * gx + gy * gy) / MENU_SWF_GRADIENT_SCALE;
+        if (gradient_spread(t, fill->spread, &t)) {
+            batch_reason(reason, reason_cap, "gradient spread is invalid");
+            return MENU_SWF_BATCH_ERR_FILL;
+        }
+        rgba = gradient_stop_color(fill, t);
+    }
     uint8_t r = shape_channel((rgba >> 16) & 255u, style->mult[0],
                               style->add[0]);
     uint8_t g = shape_channel((rgba >> 8) & 255u, style->mult[1],
                               style->add[1]);
     uint8_t b = shape_channel(rgba & 255u, style->mult[2], style->add[2]);
-    uint8_t a = shape_channel((rgba >> 24) & 255u, style->mult[3],
-                              style->add[3]);
+    uint8_t a = shape_channel((rgba >> 24) & 255u, style->mult[3], style->add[3]);
     *out = ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
     return MENU_SWF_BATCH_OK;
 }
@@ -417,9 +542,15 @@ MenuSwfBatchStatus menu_swf_batch_shape(
         }
     }
     for (uint32_t t = 0; t < triangles; ++t) {
-        uint32_t color;
-        MenuSwfBatchStatus st = shape_fill_color(
-            mesh, mesh->triangle_fills[t], style, &color, reason, reason_cap);
+        uint16_t style_index = mesh->triangle_fills[t];
+        if (!style_index || style_index > mesh->fill_count) {
+            batch_reason(reason, reason_cap,
+                         "shape batch: triangle references fill %u of %u",
+                         style_index, mesh->fill_count);
+            return MENU_SWF_BATCH_ERR_FILL;
+        }
+        MenuSwfBatchStatus st = shape_fill_validate(
+            &mesh->fills[style_index - 1], reason, reason_cap);
         if (st != MENU_SWF_BATCH_OK) return st;
         for (unsigned k = 0; k < 3; ++k) {
             uint32_t index = mesh->indices[t * 3u + k];
@@ -485,13 +616,15 @@ MenuSwfBatchStatus menu_swf_batch_shape(
 
     uint32_t icount = 0;
     for (uint32_t t = 0; t < triangles; ++t) {
-        uint32_t color;
-        MenuSwfBatchStatus st = shape_fill_color(
-            mesh, mesh->triangle_fills[t], style, &color, reason, reason_cap);
-        if (st != MENU_SWF_BATCH_OK) return st;
+        uint16_t style_index = mesh->triangle_fills[t];
+        const MenuSwfTessFill *fill = &mesh->fills[style_index - 1];
         uint32_t tri[3];
         for (unsigned k = 0; k < 3; ++k) {
             uint32_t s = mesh->indices[t * 3u + k];
+            uint32_t color;
+            MenuSwfBatchStatus st = shape_vertex_color(
+                fill, style, &mesh->vertices[s], &color, reason, reason_cap);
+            if (st != MENU_SWF_BATCH_OK) return st;
             uint32_t index;
             uint8_t mask = (uint8_t)(1u << (s & 7u));
             if (!(seen[s >> 3] & mask)) {
