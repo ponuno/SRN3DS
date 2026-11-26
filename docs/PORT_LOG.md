@@ -161,3 +161,4 @@ Hardware (CIA) before step 8: crash **before `main`** in
 - Do not skip a fault by stubbing; implement the named API or add the exact
   decoded function, with a test.
 - Hardware and emulator results are separate columns.
+| 136 | ARM d3dx17; host 74+1 | current D3DX/BSA/VS/ExA/renderer state | ARM TESV `d3dx17` rebuilds the full slice with the 12-entry pilot table, all D3DX shims, renderer lockable/depth code and the menu VS/ExA paths. `.3dsx` 2,169,200 B SHA256 `25858cb9…65fe493`; `.text` 2,151,444 B (`2151444`). No Azahar run: the old Azahar session is still open and the desktop was not reused. |
