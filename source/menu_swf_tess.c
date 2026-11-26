@@ -663,6 +663,9 @@ MenuSwfStatus menu_swf_tess_glyph(const uint8_t *data, size_t size,
     sink.line_to = tess_line_to;
     sink.curve_to = tess_curve_to;
     sink.end_path = tess_end_path;
+    sink.filter = 1;
+    sink.want_font_id = font_id;
+    sink.want_code = code;
 
     st = menu_swf_shape_walk_fonts(data, size, &sink, reason, reason_cap);
     if (st != MENU_SWF_OK) {

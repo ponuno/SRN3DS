@@ -187,6 +187,14 @@ typedef struct {
     void (*curve_to)(void *user, int32_t cx, int32_t cy, int32_t ax,
                      int32_t ay);
     void (*end_path)(void *user);
+    /* Optional target filter.  When `filter` is nonzero only the glyph with
+     * this font id and character code is decoded; other glyphs are framed
+     * with begin/end_glyph but their contours are skipped.  This keeps a
+     * single-glyph lookup from failing on unrelated complex glyphs in the
+     * same font library. */
+    uint8_t filter;
+    uint16_t want_font_id;
+    uint16_t want_code;
 } MenuSwfFontSink;
 
 /* Find a parsed shape by character id (NULL when absent). */

@@ -813,7 +813,10 @@ static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
         if (events && events->begin_glyph)
             events->begin_glyph(events->user, (uint16_t)i, (uint16_t)code,
                                 start);
-        if (start < end) {
+        int wanted = !events || !events->filter ||
+                     (font_id == events->want_font_id &&
+                      code == events->want_code);
+        if (wanted && start < end) {
             GeomStats g;
             memset(&g, 0, sizeof g);
             StyleState styles;

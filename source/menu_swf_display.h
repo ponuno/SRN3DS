@@ -120,6 +120,7 @@ typedef struct {
     uint16_t glyph_count;
     uint16_t stored_glyphs;
     uint8_t font_type;       /* 2 = DefineFont2, 3 = DefineFont3 */
+    uint8_t flags;           /* raw FontFlags (Bold=0x01, Italic=0x02) */
     uint8_t has_layout;
     uint8_t wide_offsets;
     uint8_t wide_codes;

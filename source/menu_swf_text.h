@@ -162,6 +162,20 @@ MenuSwfStatus menu_swf_text_layout_edit(
     const MenuSwfEditText *edit, const MenuSwfTextStyle *style,
     MenuSwfTextMesh *out, char *reason, size_t reason_cap);
 
+/* Resolved-field variant: `font` is the DefineFont that actually contains the
+ * glyphs for an imported field font (for example fonts_en.swf id 3 for an
+ * imported id 34), so the edit's stored `font_id` is allowed to differ from
+ * `font->font_id`.  `run_fonts` is optional; when non-NULL it is indexed by
+ * MenuSwfTextRun index and supplies the real face for each HTML run (NULL
+ * entries fall back to `font`).  Line metrics still come from `font`.  The
+ * caller is responsible for proving the substitution through
+ * menu_swf_font_resolve()/menu_swf_font_resolve_face() and logging it. */
+MenuSwfStatus menu_swf_text_layout_edit_resolved(
+    const uint8_t *data, size_t size, const MenuSwfFontSummary *font,
+    const MenuSwfFontSummary *const *run_fonts, const MenuSwfEditText *edit,
+    const MenuSwfTextStyle *style, MenuSwfTextMesh *out, char *reason,
+    size_t reason_cap);
+
 /* Extract the bounded plain source used by edit layout (including the measured
  * GFx HTML-in-variable-name convention).  No font is required. */
 MenuSwfStatus menu_swf_text_edit_plain(

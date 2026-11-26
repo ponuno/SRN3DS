@@ -633,6 +633,7 @@ static int parse_font(const uint8_t *p, size_t len, uint8_t font_type,
     }
     (void)lang;
     f->font_type = font_type;
+    f->flags = flags;
     f->has_layout = (flags & 0x80) != 0;
     f->wide_offsets = (flags & 0x08) != 0;
     f->wide_codes = (flags & 0x04) != 0;
