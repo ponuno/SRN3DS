@@ -9,6 +9,7 @@
 #define CODE_SIZE 0x2000u
 #define GROUP_BASE 0x55100000u
 #define BUFFER_BASE 0x55101000u
+#define STACK_BASE 0x55102000u
 #define VTABLE_BASE 0x011b0000u
 #define PAGE_SIZE 0x1000u
 #define VTABLE_ADDR 0x011b0224u
@@ -71,10 +72,11 @@ static int expect_unchanged(GuestMemory *m, const uint8_t *before) {
 
 int main(void) {
     GuestMemory m;
-    guest_init(&m, CODE_SIZE + PAGE_SIZE * 4u);
+    guest_init(&m, CODE_SIZE + PAGE_SIZE * 5u);
     CHECK(!guest_map(&m, PAGE_BASE, CODE_SIZE));
     CHECK(!guest_map(&m, GROUP_BASE, PAGE_SIZE));
     CHECK(!guest_map(&m, BUFFER_BASE, PAGE_SIZE));
+    CHECK(!guest_map(&m, STACK_BASE, PAGE_SIZE));
     CHECK(!guest_map(&m, VTABLE_BASE, PAGE_SIZE));
     CHECK(!seed_page(&m));
     CHECK(!seed_extra(&m));
@@ -181,6 +183,23 @@ int main(void) {
     CHECK(!guest_write32(&m, GROUP_BASE, 0x011b0198u));
     CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 0, &cslot) == 0);
     CHECK(!guest_write32(&m, GROUP_BASE, 0x011b019cu));
+
+    /* Stack-copy group (no recognised vtable) is opt-in: a -1/small slot is
+     * the checked NULL; a readable Ni2DBuffer still goes to the real getter. */
+    CHECK(!_putenv_s("TESV_CUBE_PROBE_STACK", "0"));
+    CHECK(!guest_write32(&m, STACK_BASE, 0u));
+    CHECK(!guest_write32(&m, STACK_BASE + 0x0cu, 0xffffffffu));
+    uint32_t sslot = 0;
+    CHECK(tesv_cube_probe_slot_state(&m, STACK_BASE, 0, &sslot) == 0);
+    CHECK(!_putenv_s("TESV_CUBE_PROBE_STACK", "1"));
+    CHECK(tesv_cube_probe_slot_state(&m, STACK_BASE, 0, &sslot) == -1);
+    CHECK(!guest_write32(&m, STACK_BASE + 0x0cu, BUFFER_BASE));
+    CHECK(tesv_cube_probe_slot_state(&m, STACK_BASE, 0, &sslot) == 1);
+    CHECK(!guest_write32(&m, STACK_BASE + 0x0cu, 0x20u));
+    CHECK(tesv_cube_probe_slot_state(&m, STACK_BASE, 0, &sslot) == -1);
+    CHECK(!guest_write32(&m, STACK_BASE + 0x0cu, 0x70000000u));
+    CHECK(tesv_cube_probe_slot_state(&m, STACK_BASE, 0, &sslot) == 0);
+    CHECK(!_putenv_s("TESV_CUBE_PROBE_STACK", "0"));
 
     /* A second call sees the patch and must refuse without another write. */
     uint8_t patched[CODE_SIZE];

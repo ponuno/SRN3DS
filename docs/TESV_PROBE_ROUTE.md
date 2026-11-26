@@ -607,6 +607,46 @@ engine requests a cube. The route still stops at the stack-copy getter. Next:
 teach the `0xfb6090` guard about that stack-copy group (or the cube's format),
 without fabricating a cube.
 
+### Stack-copy getter guard (2026-11-26)
+
+`TESV_CUBE_PROBE_STACK=1` extends `tesv_cube_probe_slot_state` for a
+`0xfb6090`/`0xfb6070` receiver that is not a recognised
+`NiRenderTargetGroup` vtable.  For a readable `this` in
+`0x10000000..0x70000000` it reads the getter slot at
+`[this+0xc+arg*4]`: a small integer or `-1` becomes the checked NULL, and a
+readable `Ni2DBuffer` (`[slot+0xc]` readable) is accepted.  The real group
+path is unchanged.  Host test `tesv_cube_probe` PASS covers stack-copy
+small/valid/unreadable, the real group path and the existing repeat/wrong-byte
+refusals.
+
+Census on `e220ae3`/`gen01` with the full env, cube skip, shader skip,
+`TESV_CECDC0_SOURCE_FILL=1` and `TESV_CUBE_PROBE_STACK=1`: **226.833 s**,
+exit 1.  The counts are unchanged: `CreateTexture=53`, **`CreateCubeTexture`
+one call** (HRESULT `0x8876086c`), and `GetCubeMapSurface`,
+`CreateDepthStencilSurface`, `SetRenderTarget`, `SetDepthStencilSurface`,
+`CreateVertexShader`, `CreatePixelShader`, `SetTexture`, both draw entry
+points and `Present` all 0.
+
+The fault is still:
+
+```text
+[guest] unmapped addr=0000000b bytes=4 last_call=00fb6090
+eax=0 ebx=0x0b ecx=0x408486b0 edx=0x1007f97c esi=0 edi=0x1007f97c
+ebp=0x71 esp=0x1007f9b8
+```
+
+The symbolized host backtrace is `n3ds_guest_ptr <- f_C91BA0 <- f_C92410 <-
+f_C74710 <- ...`: the cube-group store calls the group vtable slot `0x88`
+(`0xfb6090`) with `arg=0` and a `-1` buffer slot.  Neither the vtable stub nor
+the dispatch guard is invoked (`[cube-probe] getter/dispatch` debug lines are
+absent): the stack-copy group uses a **copied vtable** that the global
+`0x011b0224` patch does not cover, and the container's direct call bypasses
+the dispatch hook.
+
+Route closed for this guard.  A real next layer must patch the copied
+vtable/container call (or give that group a valid real buffer), not the global
+vtable slot.  No fake width/height and no frame are claimed.
+
 ### Fault-register / face-writer probe (2026-11-26)
 
 Base: `main` at `ca60984` (default native render-target cap 256). Added the

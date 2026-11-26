@@ -131,7 +131,25 @@ int tesv_cube_probe_slot_state(GuestMemory *m, uint32_t this_, uint32_t arg,
 
     uint32_t vtable = 0;
     if (guest_read32(m, this_, &vtable)) return 0;
-    if (vtable != 0x011b019cu && vtable != 0x011539d8u) return 0;
+    if (vtable != 0x011b019cu && vtable != 0x011539d8u) {
+        /* Measurement-only stack/heap copy of a group: no recognised vtable,
+         * but the getter's [this+0xc+arg*4] slot is still readable.  Only run
+         * this when explicitly enabled, and only treat a small/-1 slot as the
+         * checked NULL; a readable Ni2DBuffer still goes to the real getter. */
+        const char *env = getenv("TESV_CUBE_PROBE_STACK");
+        if (!env || strcmp(env, "1")) return 0;
+        if (this_ < 0x10000000u || this_ >= 0x70000000u) return 0;
+        if (arg > 0x1000u) return 0;
+
+        uint32_t slot = 0;
+        if (guest_read32(m, this_ + 0x0cu + arg * 4u, &slot)) return 0;
+        if (slot_out) *slot_out = slot;
+        if (slot == 0u || slot == 0xffffffffu || slot < 0x10000u) return -1;
+
+        uint32_t field = 0;
+        if (guest_read32(m, slot + 0x0cu, &field)) return 0;
+        return 1;
+    }
 
     uint32_t count = 0;
     int have_count = guest_read32(m, this_ + 0x1cu, &count) == 0;

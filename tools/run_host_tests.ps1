@@ -423,11 +423,15 @@ if (Test-Path $TesvExe) {
         if (Select-String -Path (Join-Path $TesvSliceGen "tesv_*.c") -SimpleMatch -Pattern "tesv_cube_probe_fb5c20" -List -ErrorAction SilentlyContinue) {
             $sliceCubeProbe = @("source/tesv_cube_probe_slice.c")
         }
+        $sliceCecdc0Probe = @()
+        if (Select-String -Path (Join-Path $TesvSliceGen "tesv_*.c") -SimpleMatch -Pattern "tesv_cecdc0_probe_shadow" -List -ErrorAction SilentlyContinue) {
+            $sliceCecdc0Probe = @("source/tesv_cecdc0_probe_slice.c")
+        }
         Add-Test "tesv_slice" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c", "source/tesv_cecdc0_source.c", "source/tesv_cecdc0_probe.c") + $sliceCubeProbe + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160")
         # Measurement-only variant: the generated cube call sites are renamed to
         # tesv_cube_probe_fb5c20() for the census build, so this spec links the
         # AOT/IR shadow that the standard slice intentionally keeps out.
-        if ($sliceCubeProbe.Count -gt 0 -or $sliceCecdc0Probe.Count -gt 0) { Add-Test "tesv_slice_cube_probe" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c", "source/tesv_cecdc0_source.c") + $sliceCubeProbe + $sliceCecdc0Probe + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160") }
+        if ($sliceCubeProbe.Count -gt 0 -or $sliceCecdc0Probe.Count -gt 0) { Add-Test "tesv_slice_cube_probe" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c", "source/tesv_cecdc0_source.c", "source/tesv_cecdc0_probe.c") + $sliceCubeProbe + $sliceCecdc0Probe + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160") }
     }
 }
 
