@@ -14,6 +14,11 @@
  * gradient matrix and up to eight stops per vertex (a documented approximation
  * for large triangles); bitmap and focal fills are honest named refusals.
  *
+ * The *_clip entry points apply a MenuSwfClipRecord: fully outside glyphs or
+ * triangles are culled, fully inside ones are unchanged, and partial overlap
+ * is the named "partial clip-mask culling is not implemented" refusal.  No
+ * vertex clamping, re-winding or vertex expansion is performed.
+ *
  * Glyph bounds are taken from the text mesh's layout space and the batch style
  * is applied on top; for one final transform, lay out text with an identity
  * style.  Matrix/translation are quantised to signed 16.16 before use.  Negative
@@ -33,6 +38,7 @@
 #include <stdint.h>
 
 #include "menu_swf_atlas.h"
+#include "menu_swf_clip.h"
 #include "menu_swf_tess.h"
 #include "menu_swf_text.h"
 
@@ -49,7 +55,8 @@ typedef enum {
     MENU_SWF_BATCH_ERR_NAN,
     MENU_SWF_BATCH_ERR_SCALE,
     MENU_SWF_BATCH_ERR_CLIP,
-    MENU_SWF_BATCH_ERR_FILL
+    MENU_SWF_BATCH_ERR_FILL,
+    MENU_SWF_BATCH_ERR_MASK
 } MenuSwfBatchStatus;
 
 typedef struct {
@@ -106,6 +113,21 @@ MenuSwfBatchStatus menu_swf_batch_text(
     uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
     MenuSwfBatchResult *out, char *reason, size_t reason_cap);
 
+/* Clip-mask variants.  `clip` is the MenuSwfClipRecord for this display-list
+ * record (NULL or mask_count==0 means no clip).  A fully clipped record emits
+ * nothing; a glyph/triangle wholly inside the intersected clip rectangle is
+ * kept; a wholly outside one is culled.  A partially overlapping glyph/triangle
+ * is the named refusal "partial clip-mask culling is not implemented"; this
+ * layer never clamps or re-winds geometry.  `clip->clip_rect` is in screen
+ * twips and is compared against the integer output AABB (*20). */
+MenuSwfBatchStatus menu_swf_batch_text_clip(
+    const MenuSwfTextMesh *text, const MenuSwfAtlasEntry *atlas_entries,
+    uint32_t atlas_count, const MenuSwfBatchStyle *style,
+    const MenuSwfBatchViewport *viewport, const MenuSwfClipRecord *clip,
+    MenuSwfBatchVertex *vertices, uint32_t vertex_capacity, uint32_t *indices,
+    uint32_t index_capacity, MenuSwfBatchResult *out, char *reason,
+    size_t reason_cap);
+
 /* Build a triangle batch from a tessellated shape plus its fill table.
  * Every triangle uses the style named by mesh->triangle_fills[] (1-based).
  * Solid fills are transformed by style->mult/add and written as per-vertex
@@ -128,3 +150,14 @@ MenuSwfBatchStatus menu_swf_batch_shape(
     const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,
     uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
     MenuSwfBatchResult *out, char *reason, size_t reason_cap);
+
+/* Shape clip-mask variant.  Fully clipped triangles are culled; fully inside
+ * triangles keep the existing winding/colour/dedup; a partially overlapping
+ * triangle is the named "partial clip-mask culling is not implemented"
+ * refusal.  A fully clipped record returns an empty result without writing. */
+MenuSwfBatchStatus menu_swf_batch_shape_clip(
+    const MenuSwfTessMesh *mesh, const MenuSwfBatchShapeStyle *style,
+    const MenuSwfBatchViewport *viewport, const MenuSwfClipRecord *clip,
+    MenuSwfBatchVertex *vertices, uint32_t vertex_capacity, uint32_t *indices,
+    uint32_t index_capacity, MenuSwfBatchResult *out, char *reason,
+    size_t reason_cap);

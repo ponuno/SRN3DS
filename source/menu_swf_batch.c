@@ -25,8 +25,31 @@ static void batch_reason(char *reason, size_t cap, const char *fmt, ...) {
     reason[cap - 1] = 0;
 }
 
-static uint8_t batch_channel(uint32_t base, int32_t mult, int32_t add) {
-    int64_t value = ((int64_t)base * mult + (int64_t)add * 256ll) / 256ll;
+typedef enum {
+    BATCH_CLIP_KEEP = 0,
+    BATCH_CLIP_DROP,
+    BATCH_CLIP_PARTIAL,
+    BATCH_CLIP_BAD
+} BatchClip;
+
+/* Screen-space clip rectangles are twips; batch bounds are integer pixels. */
+static BatchClip batch_clip_aabb(const MenuSwfClipRecord *clip, int32_t xmin,
+                                 int32_t xmax, int32_t ymin, int32_t ymax) {
+    if (!clip || !clip->mask_count) return BATCH_CLIP_KEEP;
+    if (clip->fully_clipped) return BATCH_CLIP_DROP;
+    if (!clip->has_rect) return BATCH_CLIP_BAD;
+    int64_t x0 = (int64_t)xmin * 20, x1 = (int64_t)xmax * 20;
+    int64_t y0 = (int64_t)ymin * 20, y1 = (int64_t)ymax * 20;
+    int64_t cx0 = clip->clip_rect.xmin, cx1 = clip->clip_rect.xmax;
+    int64_t cy0 = clip->clip_rect.ymin, cy1 = clip->clip_rect.ymax;
+    if (x1 <= cx0 || x0 >= cx1 || y1 <= cy0 || y0 >= cy1)
+        return BATCH_CLIP_DROP;
+    if (x0 >= cx0 && x1 <= cx1 && y0 >= cy0 && y1 <= cy1)
+        return BATCH_CLIP_KEEP;
+    return BATCH_CLIP_PARTIAL;
+}
+
+static uint8_t batch_channel(uint32_t base, int32_t mult, int32_t add) {    int64_t value = ((int64_t)base * mult + (int64_t)add * 256ll) / 256ll;
     if (value < 0) value = 0;
     if (value > 255) value = 255;
     return (uint8_t)value;
@@ -56,6 +79,7 @@ const char *menu_swf_batch_status_name(MenuSwfBatchStatus status) {
     case MENU_SWF_BATCH_ERR_SCALE: return "degenerate/negative batch scale";
     case MENU_SWF_BATCH_ERR_CLIP: return "unsupported viewport clip";
     case MENU_SWF_BATCH_ERR_FILL: return "unsupported batch fill";
+    case MENU_SWF_BATCH_ERR_MASK: return "unsupported clip mask";
     default: return "unknown batch status";
     }
 }
@@ -178,12 +202,13 @@ static int make_quad(const BatchCtx *c, const MenuSwfShapeRect *bounds,
     return area2(q) > 0;
 }
 
-MenuSwfBatchStatus menu_swf_batch_text(
+static MenuSwfBatchStatus batch_text_impl(
     const MenuSwfTextMesh *text, const MenuSwfAtlasEntry *atlas_entries,
     uint32_t atlas_count, const MenuSwfBatchStyle *style,
-    const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,
-    uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
-    MenuSwfBatchResult *out, char *reason, size_t reason_cap) {
+    const MenuSwfBatchViewport *viewport, const MenuSwfClipRecord *clip,
+    MenuSwfBatchVertex *vertices, uint32_t vertex_capacity, uint32_t *indices,
+    uint32_t index_capacity, MenuSwfBatchResult *out, char *reason,
+    size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
     if (!out) return MENU_SWF_BATCH_ERR_ARGUMENT;
     memset(out, 0, sizeof *out);
@@ -251,7 +276,28 @@ MenuSwfBatchStatus menu_swf_batch_text(
                          g->code);
             return MENU_SWF_BATCH_ERR_CLIP;
         }
-        if (rc) ++quads;
+        if (rc) {
+            int32_t xmin = q.x[0], xmax = q.x[0];
+            int32_t ymin = q.y[0], ymax = q.y[0];
+            for (unsigned k = 1; k < 4; ++k) {
+                if (q.x[k] < xmin) xmin = q.x[k];
+                if (q.x[k] > xmax) xmax = q.x[k];
+                if (q.y[k] < ymin) ymin = q.y[k];
+                if (q.y[k] > ymax) ymax = q.y[k];
+            }
+            BatchClip cs = batch_clip_aabb(clip, xmin, xmax, ymin, ymax);
+            if (cs == BATCH_CLIP_BAD) {
+                batch_reason(reason, reason_cap,
+                             "clip-mask record bounds are missing");
+                return MENU_SWF_BATCH_ERR_MASK;
+            }
+            if (cs == BATCH_CLIP_PARTIAL) {
+                batch_reason(reason, reason_cap,
+                             "partial clip-mask culling is not implemented");
+                return MENU_SWF_BATCH_ERR_MASK;
+            }
+            if (cs == BATCH_CLIP_KEEP) ++quads;
+        }
     }
     uint32_t need_vertices = quads * 4u;
     uint32_t need_indices = quads * 6u;
@@ -276,6 +322,21 @@ MenuSwfBatchStatus menu_swf_batch_text(
         if (!g->has_geometry || g->missing) continue;
         BatchQuad q;
         if (!make_quad(&c, &g->bounds, &atlas_entries[i], &q)) continue;
+        int32_t xmin = q.x[0], xmax = q.x[0];
+        int32_t ymin = q.y[0], ymax = q.y[0];
+        for (unsigned k = 1; k < 4; ++k) {
+            if (q.x[k] < xmin) xmin = q.x[k];
+            if (q.x[k] > xmax) xmax = q.x[k];
+            if (q.y[k] < ymin) ymin = q.y[k];
+            if (q.y[k] > ymax) ymax = q.y[k];
+        }
+        BatchClip cs = batch_clip_aabb(clip, xmin, xmax, ymin, ymax);
+        if (cs == BATCH_CLIP_DROP) continue;
+        if (cs != BATCH_CLIP_KEEP) {
+            batch_reason(reason, reason_cap,
+                         "partial clip-mask culling is not implemented");
+            return MENU_SWF_BATCH_ERR_MASK;
+        }
         uint32_t base = vcount;
         uint32_t color = batch_text_color(style, g);
         for (unsigned k = 0; k < 4; ++k) {
@@ -312,6 +373,29 @@ MenuSwfBatchStatus menu_swf_batch_text(
     out->bounds.ymax = bymax;
     out->has_bounds = (uint8_t)have_bounds;
     return MENU_SWF_BATCH_OK;
+}
+
+MenuSwfBatchStatus menu_swf_batch_text(
+    const MenuSwfTextMesh *text, const MenuSwfAtlasEntry *atlas_entries,
+    uint32_t atlas_count, const MenuSwfBatchStyle *style,
+    const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,
+    uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
+    MenuSwfBatchResult *out, char *reason, size_t reason_cap) {
+    return batch_text_impl(text, atlas_entries, atlas_count, style, viewport,
+                           NULL, vertices, vertex_capacity, indices,
+                           index_capacity, out, reason, reason_cap);
+}
+
+MenuSwfBatchStatus menu_swf_batch_text_clip(
+    const MenuSwfTextMesh *text, const MenuSwfAtlasEntry *atlas_entries,
+    uint32_t atlas_count, const MenuSwfBatchStyle *style,
+    const MenuSwfBatchViewport *viewport, const MenuSwfClipRecord *clip,
+    MenuSwfBatchVertex *vertices, uint32_t vertex_capacity, uint32_t *indices,
+    uint32_t index_capacity, MenuSwfBatchResult *out, char *reason,
+    size_t reason_cap) {
+    return batch_text_impl(text, atlas_entries, atlas_count, style, viewport,
+                           clip, vertices, vertex_capacity, indices,
+                           index_capacity, out, reason, reason_cap);
 }
 
 /* ------------------------------------------------------------------ */
@@ -518,11 +602,35 @@ static MenuSwfBatchStatus shape_vertex_color(const MenuSwfTessFill *fill,
     return MENU_SWF_BATCH_OK;
 }
 
-MenuSwfBatchStatus menu_swf_batch_shape(
+static int shape_triangle_aabb(const MenuSwfBatchShapeStyle *s,
+                               const MenuSwfTessMesh *mesh, uint32_t t,
+                               int32_t *xmin, int32_t *xmax, int32_t *ymin,
+                               int32_t *ymax) {
+    for (unsigned k = 0; k < 3; ++k) {
+        uint32_t index = mesh->indices[t * 3u + k];
+        int32_t x, y;
+        if (shape_transform(s, mesh->vertices[index].x,
+                            mesh->vertices[index].y, &x, &y))
+            return -1;
+        if (!k) {
+            *xmin = *xmax = x;
+            *ymin = *ymax = y;
+        } else {
+            if (x < *xmin) *xmin = x;
+            if (x > *xmax) *xmax = x;
+            if (y < *ymin) *ymin = y;
+            if (y > *ymax) *ymax = y;
+        }
+    }
+    return 0;
+}
+
+static MenuSwfBatchStatus batch_shape_impl(
     const MenuSwfTessMesh *mesh, const MenuSwfBatchShapeStyle *style,
-    const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,
-    uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
-    MenuSwfBatchResult *out, char *reason, size_t reason_cap) {
+    const MenuSwfBatchViewport *viewport, const MenuSwfClipRecord *clip,
+    MenuSwfBatchVertex *vertices, uint32_t vertex_capacity, uint32_t *indices,
+    uint32_t index_capacity, MenuSwfBatchResult *out, char *reason,
+    size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
     if (!out) return MENU_SWF_BATCH_ERR_ARGUMENT;
     memset(out, 0, sizeof *out);
@@ -553,6 +661,14 @@ MenuSwfBatchStatus menu_swf_batch_shape(
     int flip = det < 0;
     uint32_t triangles = mesh->triangle_count;
     if (!triangles) return MENU_SWF_BATCH_OK;
+    if (clip && clip->mask_count) {
+        if (clip->fully_clipped) return MENU_SWF_BATCH_OK;
+        if (!clip->has_rect) {
+            batch_reason(reason, reason_cap,
+                         "clip-mask record bounds are missing");
+            return MENU_SWF_BATCH_ERR_MASK;
+        }
+    }
 
     /* Validate every fill and transformed source point before writing. */
     for (uint32_t s = 0; s < mesh->vertex_count; ++s) {
@@ -564,6 +680,7 @@ MenuSwfBatchStatus menu_swf_batch_shape(
             return MENU_SWF_BATCH_ERR_OVERFLOW;
         }
     }
+    uint32_t kept = 0;
     for (uint32_t t = 0; t < triangles; ++t) {
         uint16_t style_index = mesh->triangle_fills[t];
         if (!style_index || style_index > mesh->fill_count) {
@@ -584,7 +701,26 @@ MenuSwfBatchStatus menu_swf_batch_shape(
                 return MENU_SWF_BATCH_ERR_ARGUMENT;
             }
         }
+        int32_t xmin, xmax, ymin, ymax;
+        if (shape_triangle_aabb(style, mesh, t, &xmin, &xmax, &ymin, &ymax)) {
+            batch_reason(reason, reason_cap,
+                         "shape batch: transformed point overflow");
+            return MENU_SWF_BATCH_ERR_OVERFLOW;
+        }
+        BatchClip cs = batch_clip_aabb(clip, xmin, xmax, ymin, ymax);
+        if (cs == BATCH_CLIP_BAD) {
+            batch_reason(reason, reason_cap,
+                         "clip-mask record bounds are missing");
+            return MENU_SWF_BATCH_ERR_MASK;
+        }
+        if (cs == BATCH_CLIP_PARTIAL) {
+            batch_reason(reason, reason_cap,
+                         "partial clip-mask culling is not implemented");
+            return MENU_SWF_BATCH_ERR_MASK;
+        }
+        if (cs == BATCH_CLIP_KEEP) ++kept;
     }
+    if (!kept) return MENU_SWF_BATCH_OK;
 
     uint64_t worst64 = (uint64_t)mesh->vertex_count + mesh->index_count;
     uint32_t worst_vertices = worst64 > UINT32_MAX
@@ -638,9 +774,24 @@ MenuSwfBatchStatus menu_swf_batch_shape(
     }
 
     uint32_t icount = 0;
+    if (clip && clip->mask_count) have_bounds = 0;
     for (uint32_t t = 0; t < triangles; ++t) {
         uint16_t style_index = mesh->triangle_fills[t];
         const MenuSwfTessFill *fill = &mesh->fills[style_index - 1];
+        int32_t txmin, txmax, tymin, tymax;
+        if (shape_triangle_aabb(style, mesh, t, &txmin, &txmax, &tymin,
+                                &tymax)) {
+            batch_reason(reason, reason_cap,
+                         "shape batch: transformed point overflow");
+            return MENU_SWF_BATCH_ERR_OVERFLOW;
+        }
+        BatchClip cs = batch_clip_aabb(clip, txmin, txmax, tymin, tymax);
+        if (cs == BATCH_CLIP_DROP) continue;
+        if (cs != BATCH_CLIP_KEEP) {
+            batch_reason(reason, reason_cap,
+                         "partial clip-mask culling is not implemented");
+            return MENU_SWF_BATCH_ERR_MASK;
+        }
         uint32_t tri[3];
         for (unsigned k = 0; k < 3; ++k) {
             uint32_t s = mesh->indices[t * 3u + k];
@@ -679,14 +830,48 @@ MenuSwfBatchStatus menu_swf_batch_shape(
         indices[icount++] = tri[0];
         indices[icount++] = tri[1];
         indices[icount++] = tri[2];
+        for (unsigned k = 0; k < 3; ++k) {
+            const MenuSwfBatchVertex *v = &vertices[tri[k]];
+            if (!have_bounds) {
+                bxmin = bxmax = v->x;
+                bymin = bymax = v->y;
+                have_bounds = 1;
+            } else {
+                if (v->x < bxmin) bxmin = v->x;
+                if (v->x > bxmax) bxmax = v->x;
+                if (v->y < bymin) bymin = v->y;
+                if (v->y > bymax) bymax = v->y;
+            }
+        }
     }
     out->vertex_count = vcount;
     out->index_count = icount;
-    out->triangle_count = triangles;
+    out->triangle_count = icount / 3u;
     out->bounds.xmin = bxmin;
     out->bounds.xmax = bxmax;
     out->bounds.ymin = bymin;
     out->bounds.ymax = bymax;
     out->has_bounds = (uint8_t)have_bounds;
     return MENU_SWF_BATCH_OK;
+}
+
+MenuSwfBatchStatus menu_swf_batch_shape(
+    const MenuSwfTessMesh *mesh, const MenuSwfBatchShapeStyle *style,
+    const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,
+    uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
+    MenuSwfBatchResult *out, char *reason, size_t reason_cap) {
+    return batch_shape_impl(mesh, style, viewport, NULL, vertices,
+                            vertex_capacity, indices, index_capacity, out,
+                            reason, reason_cap);
+}
+
+MenuSwfBatchStatus menu_swf_batch_shape_clip(
+    const MenuSwfTessMesh *mesh, const MenuSwfBatchShapeStyle *style,
+    const MenuSwfBatchViewport *viewport, const MenuSwfClipRecord *clip,
+    MenuSwfBatchVertex *vertices, uint32_t vertex_capacity, uint32_t *indices,
+    uint32_t index_capacity, MenuSwfBatchResult *out, char *reason,
+    size_t reason_cap) {
+    return batch_shape_impl(mesh, style, viewport, clip, vertices,
+                            vertex_capacity, indices, index_capacity, out,
+                            reason, reason_cap);
 }

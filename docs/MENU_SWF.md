@@ -28,7 +28,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement/tessellation, 16.16 transform, ARGB vertices, GFx HTML runs (colour/size/face/flags/alignment), plus DefineEditText WordWrap/Multiline/alignment/Justify/indent/leading/Password layout |
 | `source/menu_swf_raster.h` / `.c` | Bounded A8 coverage rasterisation of tessellated glyph triangles with 4x4 subpixel samples, caller buffers, 16.16-quantised matrix/pen and named refusals |
 | `source/menu_swf_atlas.h` / `.c` | Deterministic shelf packing of A8 coverage rectangles into a caller atlas, zero-filled padding, per-glyph rect/UV and named refusals |
-| `source/menu_swf_batch.h` / `.c` | Text quad/index batch with per-run colours and optional record CXFORM, plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping and count-before-write overflow |
+| `source/menu_swf_batch.h` / `.c` | Text quad/index batch with per-run colours and optional record CXFORM, plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping, clip-mask culling (full/outside; partial named refusal) and count-before-write overflow |
 | `source/d3d9_menu_text.h` / `.c` | Host/menu COM demo: A8 texture creation/upload and one DrawPrimitiveUP from the atlas+batch |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_avm_smoke.c` | Synthetic Stop/Play/GotoFrame/GotoLabel/Wait/Push/variable/function/unknown/truncated cases, DoInitAction ownership, safe display annotation and exact real StartMenu histogram |
@@ -44,9 +44,10 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
 | `tests/menu_swf_fill_smoke.c` | Synthetic solid RGBA/loops, CXFORM, mirroring, accepted linear/radial batches, focal/bitmap refusals; optional real fill census and per-vertex colours |
 | `tests/menu_swf_gradient_smoke.c` | Synthetic exact 2/3-stop linear, radial, pad/reflect/repeat, named invalid stops/matrix/interpolation/spread/focal/bitmap refusals; optional real StartMenu gradient census |
+| `tests/menu_swf_mask_batch_smoke.c` | Synthetic clip records: fully inside/outside, partial named refusal, rotated partial, missing bounds and fully clipped; real StartMenu zero-mask batch equivalence |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
 | `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: URL/fallback font load, exact-id resolve/refusals, solid-fill shape batch + resolved edit-text tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_html`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_swf_gradient`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_html`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_swf_gradient`, `menu_swf_mask_batch`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
 | `tests/menu_indexed_draw_smoke.c` | Core recording backend: exact compact vertices/indices, >4,095-index batch, 32-bit and 65,536-vertex fallbacks, named expansion limit and DevCaps 0x00082000 |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
@@ -574,6 +575,11 @@ rectangle order reflects height/width sorting (35, 36, 33 at height 62, then
   UVs are interpolated over the clipped fraction.  Fully clipped glyphs are
   omitted.  A rotated/skewed matrix with viewport clipping is the named
   `ERR_CLIP` rather than a silently wrong AABB clip.
+* `menu_swf_batch_text_clip()` additionally applies a menu clip record:
+  glyphs wholly outside the intersected `clip_rect` are omitted, wholly inside
+  glyphs are kept unchanged, and a partial overlap is the exact named refusal
+  `partial clip-mask culling is not implemented`.  The clip rect is screen
+  twips; the output AABB is compared as pixels*20.
 * The required quad/vertex/index counts are computed before any write.
   Capacity or hard-limit overflow is `ERR_OVERFLOW` and leaves both buffers
   untouched.  Limits: 4,096 quads, 16,384 vertices, 24,576 indices.
@@ -619,6 +625,12 @@ table.  Each triangle uses the 1-based style in `triangle_fills[]`:
   worst-case `vertex_count + index_count` output vertices (actual StartMenu
   output is 57,480).  Counts and styles are validated before any write;
   refusals leave the buffers untouched.
+* `menu_swf_batch_shape_clip()` applies the record's intersected clip rect:
+  a fully clipped record returns an empty batch without writing, wholly outside
+  triangles are culled, and wholly inside triangles keep the existing
+  winding/colour/dedup.  Partial or rotated overlap is the exact named refusal
+  `partial clip-mask culling is not implemented`; the real StartMenu has zero
+  masks, so its batch is byte-for-byte unchanged at 57,480 vertices.
 * No allocation, texture, upload or GPU call is performed.
 
 The real pipeline tessellates 28,718 triangles and emits 57,480 shape vertices
@@ -822,12 +834,13 @@ Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_fill,menu_swf_gradient,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_html,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
+  -Only menu_swf_batch,menu_swf_fill,menu_swf_gradient,menu_swf_mask_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_html,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
 Result: `menu_swf_batch` **21 checks, 0 failures**; `menu_swf_fill` **34
-checks, 0 failures**; `menu_swf_atlas` **27
+checks, 0 failures**; `menu_swf_mask_batch` **13 checks, 0 failures**;
+`menu_swf_atlas` **27
 checks, 0 failures**; `menu_swf_raster` **44 checks, 0 failures**;
 `menu_swf_text` **76 checks, 0 failures**; `menu_swf_html` **31 checks, 0
 failures**; `menu_swf_tess` **47 checks, 0
@@ -842,12 +855,13 @@ Real read-only:
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_fill,menu_swf_gradient,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_html,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
+  -Only menu_swf_batch,menu_swf_fill,menu_swf_gradient,menu_swf_mask_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_html,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
 Result: `menu_swf_batch` **34 checks, 0 failures**; `menu_swf_fill` **45
-checks, 0 failures**; `menu_swf_atlas` **37
+checks, 0 failures**; `menu_swf_mask_batch` **20 checks, 0 failures**;
+`menu_swf_atlas` **37
 checks, 0 failures**; `menu_swf_raster` **60 checks, 0 failures**;
 `menu_swf_text` **93 checks, 0 failures**; `menu_swf_html` **58 checks, 0
 failures**; `menu_swf_tess` **55 checks, 0
@@ -919,16 +933,20 @@ all supported entities, nested style restore, unknown-tag text preservation,
 malformed/unknown-entity and capacity refusals; it lays out a 24px run at twice
 the 12px advance, checks per-run glyph and batch colours plus CXFORM, and the
 real check reports 22 HTML-flagged definitions, 4 payloads (3 nonempty), 3
-runs, 14 tags and 0 unknown tags.
+runs, 14 tags and 0 unknown tags.  The mask-batch test adds a synthetic clip
+record with a fully inside triangle (kept unchanged), a fully outside triangle
+(culled), partial and rotated-partial overlaps (exact named refusal), a
+fully-clipped record and a clip without record bounds; the real StartMenu
+zero-mask clip records leave the shape-2 batch counts identical.
 
 Full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
-`-TestTimeoutSec 300`: **129 passed, 0 diagnostic, 0 failed**.  This includes the
+`-TestTimeoutSec 300`: **130 passed, 0 diagnostic, 0 failed**.  This includes the
 real `menu_swf_avm` inventory (35 checks), `menu_swf` (114),
 `menu_swf_display_list` (23) and `menu_pipeline_e2e` (60), all with zero
 failures.
 
 Full host suite with the main-tree generated slice/IR container:
-**140 passed, 1 diagnostic (`tesv_slice`), 0 failed**.
+**141 passed, 1 diagnostic (`tesv_slice`), 0 failed**.
 
 ## 17. Real StartMenu CPU -> COM pipeline
 
@@ -1010,18 +1028,24 @@ Verification:
   `menu_swf_html,menu_swf_text,menu_swf_batch,menu_swf_fill,menu_indexed_draw,menu_pipeline_e2e`
   with real data: **16 passed, 0 diagnostic, 0 failed**; check counts 58, 93,
   34, 45, indexed PASS and 60;
+* targeted
+  `menu_swf_mask_batch,menu_swf_clip,menu_swf_batch,menu_swf_shape,menu_pipeline_e2e`
+  with real data: **15 passed, 0 diagnostic, 0 failed**; check counts 20, 24,
+  34, 40 and 60;
+* mask + real e2e under ASan: **20 + 60 checks, 0 failures; harness 12
+  passed, 0 diagnostic, 0 failed**;
 * AVM + SWF + display-list + real e2e under ASan: **35 + 114 + 23 + 60 checks,
   0 failures; harness 14 passed, 0 diagnostic, 0 failed**;
 * HTML + real e2e under ASan: **58 + 60 checks, 0 failures; harness 12
   passed, 0 diagnostic, 0 failed**;
 * full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
-  `-TestTimeoutSec 300`: **129 passed, 0 diagnostic, 0 failed**;
+  `-TestTimeoutSec 300`: **130 passed, 0 diagnostic, 0 failed**;
 * full host suite with the main-tree generated slice/IR container:
-  **140 passed, 1 diagnostic (`tesv_slice`), 0 failed**;
+  **141 passed, 1 diagnostic (`tesv_slice`), 0 failed**;
 * ARM compile-only (`arm-none-eabi-gcc`, no link/run): all **5/5** changed C
   translation units succeeded; `menu_swf_avm.c.o` text 11,771 B and
   `menu_swf_display_list.c.o` text 6,189 B.  No ARM binary/hardware/frame claim;
-* ARM compile-only: `menu_swf_text.o` 22,192 B, `menu_swf_batch.o` 12,940 B,
+* ARM compile-only: `menu_swf_text.o` 22,192 B, `menu_swf_batch.o` 15,144 B,
   `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B;
 * ARM compile-only `-Mode com -Isolated edit_text`: `.elf` 6,178,376 B,
   SHA256 `2fd3e1af9ec6de706e762f20012340a90f74ad61dec2b64ccdf339cfecc4191e`;
@@ -1031,11 +1055,11 @@ Verification:
 ## 18. What remains
 
 1. **Renderable display list** — bounded state, flattened CPU transform records,
-   shape geometry, solid fill colours, tessellation and a host COM triangle
-   batch exist, but this is not a GFx display list: gradient textures (linear/
-   radial fills are per-vertex), bitmap fill sampling, mask/clip rendering,
-   clipping layers, button states, frame scripts
-   and real draw submission remain.
+   shape geometry, solid/gradient fills, tessellation, full/outside clip-mask
+   culling and a host COM triangle batch exist, but this is not a GFx display
+   list: partial mask clipping/tessellation, bitmap fill sampling, clip
+   rendering, clipping layers, button states, frame scripts and real draw
+   submission remain.
 2. **Arbitrary AVM/AS2 execution** — the bounded inventory and safe
    Stop/Play/in-range GotoFrame metadata are implemented, but constants,
    variables, property/member access, function calls, event handlers, branches,
