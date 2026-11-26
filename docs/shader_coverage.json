@@ -118,12 +118,12 @@
    "owner": "sm3-agent-lighting",
    "chunks": 7459,
    "unique_hashes": 4991,
-   "translated": 2,
+   "translated": 4,
    "draw_enabled": 0,
-   "refused": 4989,
+   "refused": 4987,
    "contract_only": 130,
    "refused_classes": {
-    "def_literal_out_of_range": 4804,
+    "def_literal_out_of_range": 4802,
     "pica_vs": 130,
     "unsupported_opcode": 31,
     "too_many_vs_varyings (8 > 7)": 17,
@@ -140,9 +140,9 @@
   }
  ],
  "total": {
-  "translated": 86,
+  "translated": 88,
   "draw-enabled": 1,
-  "refused": 6572,
+  "refused": 6570,
   "chunks": 10475,
   "unique_hashes": 6659
  },
