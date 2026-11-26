@@ -36,6 +36,7 @@ static void capture_present_event(void);
 #define INVALID 0x8876086cu
 #define UNAVAILABLE 0x8876086au
 #define NOTFOUND 0x88760866u
+#define MOREDATA 0x88760867u
 #define OUTMEM 0x8876017cu
 #define NOINTERFACE 0x80004002u
 #define NOAUTOGEN 0x0876086fu /* D3DOK_NOAUTOGEN: adapter is not WHQL certified */
@@ -47,6 +48,9 @@ static void capture_present_event(void);
 #define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
 #define MAX_PALETTES 256u
 #define PALETTE_BYTES 1024u /* 256 PALETTEENTRY (RGBA bytes) */
+#define D3DSPD_IUNKNOWN 1u
+#define D9_PRIVATE_DATA_MAX_ENTRIES 16u
+#define D9_PRIVATE_DATA_MAX_BYTES (64u * 1024u)
 enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,QUERY,STATEBLOCK,SWAPCHAIN,KIND_COUNT};
 typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
 struct Obj;
@@ -62,6 +66,12 @@ typedef struct {
     D9Matrix transforms[3];uint32_t viewport[6];
     D9TnlState tnl;uint32_t scissor[4];
 } D9ComStateBlock;
+typedef struct {
+    uint8_t guid[16];
+    uint32_t size,flags;
+    uint8_t *data;
+    struct Obj *unknown;
+} D9PrivateEntry;
 typedef struct Obj {
     unsigned kind,refs,deferred;uint32_t guest;D9Handle handle;
     unsigned bytes,width,height,format,usage,pool,fvf,pitch,lockable;
@@ -86,6 +96,8 @@ typedef struct Obj {
     int probe_skip; /* TEST-ONLY shader-skip object: bytecode kept, no TEV/plan */
     D9Decl *declaration;
     D9ComStateBlock *state_block;
+    D9PrivateEntry private_data[D9_PRIVATE_DATA_MAX_ENTRIES];
+    unsigned private_data_count;
     /* Level surface view: pixels point into the parent texture's CPU store. */
     struct Obj *view_parent;D9Handle view_texture;unsigned view_level,view_face;int is_view,view_cube;
 } Obj;
@@ -187,8 +199,17 @@ static Obj *new_obj(unsigned kind){
 }
 static void retain(Obj *o){if(o)++o->refs;}
 static void release(Obj *o);
+static void private_data_clear(Obj *o){
+    if(!o)return;
+    for(unsigned i=0;i<o->private_data_count;++i){
+        release(o->private_data[i].unknown);
+        free(o->private_data[i].data);
+    }
+    o->private_data_count=0;
+}
 static void destroy_obj(Obj *o){
     Obj *parent=NULL;
+    private_data_clear(o);
     if(o->kind==VB||o->kind==IB){d9_release_buffer(g.device,o->handle);parent=g.dev;}
     else if(o->kind==TEX){
         int rc=d9_release_texture(g.device,o->handle);
@@ -257,6 +278,79 @@ static void destroy_obj(Obj *o){
 static void release(Obj *o){if(!o||!o->refs)return;if(--o->refs)return;if(g.phase){o->deferred=1;return;}destroy_obj(o);}
 static void collect(void){for(unsigned i=0;i<g.next;++i)if(g.o[i].deferred)destroy_obj(&g.o[i]);}
 static void bind(Obj **slot,Obj *o){if(*slot==o)return;retain(o);Obj *old=*slot;*slot=o;release(old);}
+/* IDirect3DResource9 private data.  Only the six resource kinds that really
+ * inherit IDirect3DResource9 expose slots 4..6; shader/state-block/query and
+ * swap-chain interfaces keep their native, different vtable layouts. */
+static int private_data_resource(Obj *o){
+    return o&&(o->kind==VB||o->kind==IB||o->kind==TEX||o->kind==SURFACE||
+               o->kind==CUBE||o->kind==VOLUME);
+}
+static int private_data_find(const Obj *o,const uint8_t guid[16]){
+    for(unsigned i=0;i<o->private_data_count;++i)
+        if(!memcmp(o->private_data[i].guid,guid,16))return (int)i;
+    return -1;
+}
+static void set_private_data(CPU *c){
+    Obj *o=obj(A(0),0);const uint8_t *guid=ptr(A(1),16);
+    uint32_t data=A(2),size=A(3),flags=A(4);
+    if(!private_data_resource(o)||!guid){d3d_fail("SetPrivateData","object is not an IDirect3DResource9",INVALID);RET(INVALID,5);}
+    if(flags!=0&&flags!=D3DSPD_IUNKNOWN){d3d_fail("SetPrivateData","flags must be zero or D3DSPD_IUNKNOWN",INVALID);RET(INVALID,5);}
+    if(size>D9_PRIVATE_DATA_MAX_BYTES){d3d_fail("SetPrivateData","private-data size exceeds the 64 KiB per-write limit",INVALID);RET(INVALID,5);}
+    if(flags==D3DSPD_IUNKNOWN&&size!=4){d3d_fail("SetPrivateData","D3DSPD_IUNKNOWN requires one 32-bit COM pointer",INVALID);RET(INVALID,5);}
+    if(size&&!ptr(data,size)){d3d_fail("SetPrivateData","private-data bytes are not readable guest memory",INVALID);RET(INVALID,5);}
+    Obj *unknown=NULL;
+    if(flags==D3DSPD_IUNKNOWN){
+        uint32_t address=0;memcpy(&address,ptr(data,4),4);
+        unknown=obj(address,0);
+        if(!unknown){d3d_fail("SetPrivateData","D3DSPD_IUNKNOWN payload is not a live COM object",INVALID);RET(INVALID,5);}
+    }
+    int index=private_data_find(o,guid);
+    if(index<0&&o->private_data_count>=D9_PRIVATE_DATA_MAX_ENTRIES){
+        d3d_fail("SetPrivateData","private-data entry limit (16) exceeded",INVALID);RET(INVALID,5);
+    }
+    uint8_t *copy=NULL;
+    if(size){
+        copy=malloc(size);
+        if(!copy){d3d_fail("SetPrivateData","private-data allocation failed",OUTMEM);RET(OUTMEM,5);}
+        memcpy(copy,ptr(data,size),size);
+    }
+    if(unknown)retain(unknown);
+    if(index<0)index=(int)o->private_data_count++;
+    else{release(o->private_data[index].unknown);free(o->private_data[index].data);}
+    D9PrivateEntry *entry=&o->private_data[index];
+    memcpy(entry->guid,guid,16);entry->size=size;entry->flags=flags;
+    entry->data=copy;entry->unknown=unknown;
+    g.last_diagnostic[0]=0;RET(OK,5);
+}
+static void get_private_data(CPU *c){
+    Obj *o=obj(A(0),0);const uint8_t *guid=ptr(A(1),16);
+    uint32_t data=A(2),size_address=A(3);
+    if(!private_data_resource(o)||!guid||!ptr(size_address,4)){
+        d3d_fail("GetPrivateData","invalid resource, GUID or size pointer",INVALID);RET(INVALID,4);
+    }
+    int index=private_data_find(o,guid);
+    if(index<0){d3d_fail("GetPrivateData","private-data GUID was not found",NOTFOUND);RET(NOTFOUND,4);}
+    const D9PrivateEntry *entry=&o->private_data[index];
+    uint32_t capacity=M32(size_address);M32(size_address)=entry->size;
+    if(capacity<entry->size){d3d_fail("GetPrivateData","caller buffer is smaller than the stored private data",MOREDATA);RET(MOREDATA,4);}
+    if(entry->size&&(!data||!ptr(data,entry->size))){
+        d3d_fail("GetPrivateData","private-data destination is not writable guest memory",INVALID);RET(INVALID,4);
+    }
+    if(entry->size)memcpy(ptr(data,entry->size),entry->data,entry->size);
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void free_private_data(CPU *c){
+    Obj *o=obj(A(0),0);const uint8_t *guid=ptr(A(1),16);
+    if(!private_data_resource(o)||!guid){d3d_fail("FreePrivateData","invalid resource or GUID",INVALID);RET(INVALID,2);}
+    int index=private_data_find(o,guid);
+    if(index>=0){
+        release(o->private_data[index].unknown);free(o->private_data[index].data);
+        --o->private_data_count;
+        memmove(&o->private_data[index],&o->private_data[index+1],
+                (o->private_data_count-(unsigned)index)*sizeof o->private_data[0]);
+    }
+    g.last_diagnostic[0]=0;RET(OK,2);
+}
 static void unsupported(CPU *c){Obj *o=obj(A(0),0);
     trace_detail("unsupported: %s COM method is not implemented by this bridge",interface_name(o?o->kind:0));
     fprintf(stderr,"[d3d9] %s@0x%08lx: unsupported COM method\n",interface_name(o?o->kind:0),(unsigned long)A(0));
@@ -3173,7 +3267,8 @@ static void draw_indexed_up(CPU *c){
  X(surface_desc) X(surface_container) X(surface_lock) X(surface_unlock) X(surface_dc) X(surface_release_dc) \
  X(cube_level_count) X(cube_desc) X(cube_get_surface) X(cube_lock) X(cube_unlock) X(cube_add_dirty_rect) \
  X(volume_level_count) X(volume_desc) X(volume_get_level) X(volume_lock_box) X(volume_unlock_box) X(volume_add_dirty_box) \
- X(create_state_block) X(begin_state_block) X(end_state_block) X(state_block_capture_com) X(state_block_apply_com)
+ X(create_state_block) X(begin_state_block) X(end_state_block) X(state_block_capture_com) X(state_block_apply_com) \
+ X(set_private_data) X(get_private_data) X(free_private_data)
 #define ENUM(f) I_##f,
 enum {FUNCTIONS(ENUM) I_COUNT};
 #undef ENUM
@@ -3345,7 +3440,10 @@ static void init_tables(void){
     SLOT(SWAPCHAIN,3,swapchain_present);SLOT(SWAPCHAIN,4,swapchain_get_back_buffer);
     SLOT(SWAPCHAIN,5,swapchain_raster_status);SLOT(SWAPCHAIN,6,swapchain_display_mode);
     SLOT(SWAPCHAIN,7,swapchain_get_device);SLOT(SWAPCHAIN,8,swapchain_present_parameters);
-    for(unsigned k=VB;k<=TEX;++k){SLOT(k,3,resource_device);SLOT(k,10,resource_type);}
+    for(unsigned k=VB;k<=TEX;++k){SLOT(k,3,resource_device);SLOT(k,4,set_private_data);SLOT(k,5,get_private_data);SLOT(k,6,free_private_data);SLOT(k,10,resource_type);}
+    SLOT(SURFACE,4,set_private_data);SLOT(SURFACE,5,get_private_data);SLOT(SURFACE,6,free_private_data);
+    SLOT(CUBE,4,set_private_data);SLOT(CUBE,5,get_private_data);SLOT(CUBE,6,free_private_data);
+    SLOT(VOLUME,4,set_private_data);SLOT(VOLUME,5,get_private_data);SLOT(VOLUME,6,free_private_data);
     for(unsigned k=VB;k<=IB;++k){SLOT(k,11,buffer_lock);SLOT(k,12,buffer_unlock);SLOT(k,13,buffer_desc);}
     SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,18,texture_get_surface_level);
     SLOT(TEX,19,texture_lock);SLOT(TEX,20,texture_unlock);SLOT(TEX,21,texture_add_dirty_rect);
@@ -3408,7 +3506,7 @@ void d9_com_shutdown(void){if(!g.mem)return;capture_stop();win32_set_external_re
     free_palettes();
     if(g.phase)d9_present(g.device);g.phase=0;
     if(g.device)d9_set_pixel_shader(g.device,NULL);
-    for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->lock_guest){
+    for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];private_data_clear(o);if(o->lock_guest){
             if(o->kind==SURFACE)unlock_surface(o);else if(unlock(o))guest_unmap(g.mem,o->lock_guest);
         }
         /* Texture/cube face views point into a parent store owned elsewhere. */
