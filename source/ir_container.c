@@ -488,6 +488,7 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
     if (stream_begin > e->record_size || stream_bytes > e->record_size - stream_begin)
         return N3DS_IRC_ERR_RECORD_BAD;
 
+    int saw_entry = 0;
     for (uint32_t i = 0; i < blocks; ++i) {
         const uint8_t *p = data + blocks_off + (size_t)i * N3DS_IRC_BLOCK_ENTRY;
         uint32_t start = irc_rd32(p + 0);
@@ -497,7 +498,10 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
         uint8_t count = p[14];
         if (i && irc_rd32(data + blocks_off + (size_t)(i - 1) * N3DS_IRC_BLOCK_ENTRY) >= start)
             return N3DS_IRC_ERR_RECORD_BAD;
-        if (start < e->addr || start >= e->end || !x86_len || !count || !words)
+        /* Cold blocks may precede the callable entry. The first sorted block
+         * defines the frame's lower bound; the exact entry must still exist. */
+        if (start == e->addr) saw_entry = 1;
+        if (start >= e->end || !x86_len || !count || !words)
             return N3DS_IRC_ERR_RECORD_BAD;
         if ((uint64_t)start + x86_len > e->end) return N3DS_IRC_ERR_RECORD_BAD;
         if (off & 3u) return N3DS_IRC_ERR_RECORD_BAD;
@@ -508,6 +512,7 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
          * record CRC plus the exact record/block bounds protect the stream;
          * exec_block() faults explicitly on a malformed instruction. */
     }
+    if (!saw_entry) return N3DS_IRC_ERR_RECORD_BAD;
     return N3DS_IRC_OK;
 }
 
@@ -656,7 +661,7 @@ static int irc_fetch_block(CPU *c, uint32_t start, uint32_t func_end, IrExecBloc
     (void)func_end;
     if (!g_irc_frame_count || !out) return -1;
     IrcSlot *s = g_irc_frames[g_irc_frame_count - 1].slot;
-    if (!s || !s->used || start < s->addr || start >= s->end) return -1;
+    if (!s || !s->used || start >= s->end) return -1;
     const uint8_t *base = s->data;
     uint32_t blocks_off = irc_rd32(base + 24);
     unsigned lo = 0, hi = s->block_count;
@@ -688,6 +693,10 @@ static int irc_fetch_block(CPU *c, uint32_t start, uint32_t func_end, IrExecBloc
 static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
     Flags f = {0};
     uint32_t ip = addr;
+    IrcSlot *s = g_irc_frames[g_irc_frame_count - 1].slot;
+    /* Records are sorted by block start. A cold block before the callable
+     * entry is part of this frame, so direct branches may target it. */
+    uint32_t frame_start = irc_rd32(s->data + N3DS_IRC_RECORD_HEADER);
     for (;;) {
         IrExecBlock b;
         n3ds_irc_last_function = addr;
@@ -701,7 +710,7 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
             rt_unimpl(c, ip, what);
         }
         uint32_t next = 0;
-        if (exec_block(c, &b, &f, addr, func_end, &next)) return;
+        if (exec_block(c, &b, &f, frame_start, func_end, &next)) return;
         ip = next;
     }
 }

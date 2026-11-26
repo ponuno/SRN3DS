@@ -110,7 +110,7 @@ static size_t align8(size_t v) { return (v + 7u) & ~(size_t)7u; }
 
 /* ----------------------------------------------------------------- data */
 
-typedef struct { uint32_t lo, hi; } Range;
+typedef struct { uint32_t lo, hi; int closure; } Range;
 
 typedef struct {
     uint32_t entry, end;
@@ -129,6 +129,7 @@ typedef struct {
     uint32_t x86_len;
     uint32_t insn_count;
     uint32_t nwords;
+    uint16_t term_op;
     uint32_t *words;
 } PackBlock;
 
@@ -208,6 +209,83 @@ static void free_blocks(PackBlock *b, uint32_t n) {
     free(b);
 }
 
+/* Add a missing control-flow leader. The decoder stops at the terminator, so
+ * the span may safely extend to the function's exclusive end. */
+static int add_closure_range(Fn *fn, uint32_t start) {
+    if (start >= fn->end) return 0;
+    for (uint32_t i = 0; i < fn->nranges; ++i) {
+        if (fn->ranges[i].lo != start) continue;
+        if (start >= fn->entry || fn->ranges[i].closure) return 0;
+        /* Keep scanning: a later closure copy may already be queued. */
+    }
+    if (fn->nranges >= 0xffffu) {
+        snprintf(fn->error, sizeof fn->error, "more than 65535 closure leaders");
+        return -1;
+    }
+    Range *grown = (Range *)realloc(fn->ranges, (fn->nranges + 1u) * sizeof *grown);
+    if (!grown) {
+        snprintf(fn->error, sizeof fn->error, "out of memory");
+        return -1;
+    }
+    fn->ranges = grown;
+    fn->ranges[fn->nranges].lo = start;
+    fn->ranges[fn->nranges].hi = fn->end;
+    fn->ranges[fn->nranges].closure = 1;
+    fn->nranges++;
+    return 1;
+}
+
+/* Return the final instruction's signed direct-branch displacement. */
+static int block_displacement(const PackBlock *b, int32_t *out) {
+    size_t p = 0;
+    uint32_t core = 0, imm = 0;
+    int have = 0;
+    while (p < b->nwords) {
+        core = b->words[p++];
+        uint32_t addr = 0;
+        if (IR_HAS_ADDR(core)) {
+            if (p >= b->nwords) return -1;
+            addr = b->words[p++];
+            if (IR_A_DISPK(addr) == 2 && p >= b->nwords) return -1;
+            if (IR_A_DISPK(addr) == 2) p++;
+        }
+        if (IR_IMMK(core) == 2) {
+            if (p >= b->nwords) return -1;
+            imm = b->words[p++];
+        } else {
+            imm = IR_IMM8U(core);
+        }
+        have = 1;
+    }
+    if (!have || p != b->nwords) return -1;
+    *out = IR_IMMK(core) == 2 ? (int32_t)imm : IR_IMM8(core);
+    return 0;
+}
+
+/* Discovery normally supplies every leader, but optimized CRT code can branch
+ * backward to a cold exit block placed before the callable entry. Close that
+ * gap from the real decoded terminator instead of treating the target as an
+ * import. Unconditional jumps before the entry retain tail-call semantics. */
+static int add_closure_edges(Fn *fn, const PackBlock *b) {
+    uint32_t op = b->term_op;
+    int conditional = (op >= IR_OP_JCC_BASE && op < IR_OP_JCC_BASE + 16) ||
+                      op == IR_OP_LOOP || op == IR_OP_LOOPE ||
+                      op == IR_OP_LOOPNE || op == IR_OP_JECXZ;
+    if (!conditional) return 0;
+    int32_t disp;
+    if (block_displacement(b, &disp)) {
+        snprintf(fn->error, sizeof fn->error, "malformed direct-branch stream");
+        return -1;
+    }
+    uint32_t fallthrough = b->start + b->x86_len;
+    uint32_t target = fallthrough + (uint32_t)disp;
+    /* Discovery already covers ordinary in-frame leaders and fallthroughs.
+     * Only close the observed cold-block-before-entry gap; treating every
+     * omitted edge as internal would swallow shared/tail-call code. */
+    if (target >= fn->entry) return 0;
+    return add_closure_range(fn, target) < 0 ? -1 : 0;
+}
+
 /* Decode one function into a record. Returns 0 on success, -1 on decode
  * failure (fn->status set). */
 static int build_record(Fn *fn, uint8_t **out, size_t *out_size) {
@@ -233,10 +311,11 @@ static int build_record(Fn *fn, uint8_t **out, size_t *out_size) {
         if (have_start && start == last_start) continue;
         last_start = start;
         have_start = 1;
-        /* Discovery ranges may include a shared cold block before the entry.
-         * The interpreter's frame starts at the exact entry, so such blocks
-         * are not reachable in this frame; other functions index them. */
-        if (start < fn->entry) continue;
+        /* Explicit discovery ranges before the entry remain excluded: they
+         * are shared cold blocks owned by other functions. A closure-added
+         * pre-entry leader is different: a decoded conditional branch in this
+         * function proved that it is reachable in this frame. */
+        if (start < fn->entry && !fn->ranges[r].closure) continue;
         if (start >= fn->end) {
             failed = 1; status = DEC_BAD_RANGE;
             snprintf(fn->error, sizeof fn->error, "leader %08x outside entry..end", start);
@@ -268,6 +347,15 @@ static int build_record(Fn *fn, uint8_t **out, size_t *out_size) {
             size_t n = n3ds_ir_encode_block(NULL, pos, fn->end, words, words_cap, &info, 1);
             if (!n || info.end_ip <= pos) {
                 free(words);
+                /* Closure is an enrichment, not a reason to invalidate an
+                 * otherwise decoded function when discovery excluded a shared
+                 * or non-decodable pre-entry target. If control flow reaches
+                 * it, the runtime still raises a named missing-block fault. */
+                if (fn->ranges[r].closure) {
+                    fn->error[0] = 0;
+                    pos = hi;
+                    break;
+                }
                 failed = 1;
                 status = classify(info.error);
                 snprintf(fn->error, sizeof fn->error, "%s", info.error);
@@ -289,7 +377,13 @@ static int build_record(Fn *fn, uint8_t **out, size_t *out_size) {
             b->x86_len = info.end_ip - pos;
             b->insn_count = info.insn_count;
             b->nwords = (uint32_t)(n / 4);
+            b->term_op = info.term_op;
             b->words = words;
+            if (add_closure_edges(fn, b)) {
+                failed = 1;
+                status = DEC_BAD_RANGE;
+                break;
+            }
             if ((info.term_op != IR_OP_CALL && info.term_op != IR_OP_CALL_IND) ||
                 info.end_ip >= hi)
                 break;
@@ -552,7 +646,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "pack: truncated ranges\n");
                 return 2;
             }
-            if (rs) { rs[k].lo = lo; rs[k].hi = hi; }
+            if (rs) { rs[k].lo = lo; rs[k].hi = hi; rs[k].closure = 0; }
         }
         fns[i].entry = entry;
         fns[i].end = fend > entry ? fend : entry + 1;

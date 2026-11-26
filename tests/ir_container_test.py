@@ -138,6 +138,24 @@ def build_input(corpus_path, out_path):
     return len(funcs), payload, macros
 
 
+def build_preentry_input(out_path):
+    """Discovery lists the cold range, but it lies before the callable entry."""
+    base = 0x1000
+    image = bytes([
+        0x8d, 0x42, 0xff, 0x5b, 0xc3,             # cold: lea/pop/ret
+        0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+        0x53, 0x31, 0xc0, 0x74, 0xeb,             # entry: push/xor/je cold
+        0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+    ])
+    entry, end = 0x1010, 0x1015
+    payload = struct.pack('<IIII', 0x49524d31, base, len(image), 1) + image
+    # The cold leader is present in discovery but precedes the callable entry;
+    # the old packer skipped it unconditionally.
+    payload += struct.pack('<IIIIIII', entry, end, 2, 0x1000, 0x1005, entry, end)
+    Path(out_path).write_bytes(payload)
+    return len(payload)
+
+
 def run(cmd, cwd=None, env=None):
     p = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True,
                        text=True, env=env)
@@ -239,6 +257,14 @@ def main():
                           ROOT / "staged" / "fpu.c",
                           ROOT / "tests" / "ir_aot_fixture.c"],
                   work / "ir_container_equiv.exe")
+    preentry = build(clang, [ROOT / "tests" / "ir_container_preentry.c",
+                             ROOT / "source" / "ir_container.c",
+                             ROOT / "source" / "ir_decode.c",
+                             ROOT / "source" / "ir_exec.c",
+                             ROOT / "source" / "ir_core.c",
+                             ROOT / "source" / "guest.c",
+                             ROOT / "staged" / "fpu.c"],
+                     work / "ir_container_preentry.exe")
     integration = build(clang, [ROOT / "tests" / "ir_container_integration.c",
                                 ROOT / "source" / "guest.c",
                                 ROOT / "source" / "ir_container.c",
@@ -263,6 +289,21 @@ def main():
     rep = json.loads(report.read_text(encoding="utf-8"))
     print(f"packed: {nfun} functions, {rep['decoded']} decoded, "
           f"{rep['invalid']} invalid, {rep['file_bytes']} bytes")
+
+    print("== pre-entry cold-block regression ==")
+    preentry_input = work / "preentry_input.bin"
+    build_preentry_input(preentry_input)
+    preentry_container = work / "preentry.irc"
+    p = run([packer, preentry_input, preentry_container])
+    print(p.stdout.rstrip())
+    if p.returncode != 0:
+        print(p.stderr)
+        return 1
+    p = run([preentry, preentry_container])
+    print(p.stdout.rstrip())
+    if p.returncode != 0 or "IR container pre-entry block PASS" not in p.stdout:
+        print(p.stderr)
+        return 1
 
     print("== differential: AOT vs IR vs container ==")
     p = run([equiv, container])

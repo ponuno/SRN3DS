@@ -174,8 +174,8 @@ buffer and Present scales it to 400x240. With it, the host census now:
 3. **Menu**: face-to-font mapping or the GDI/system-font provider, bitmap fill
    sampling, partial clip-mask tessellation; then a PICA path for the menu
    batch (TEV/vertex colour) and a real frame.
-4. Keep the honest gates honest: solving (1) does not mean advertising SM3/T&L;
-   measurement flags must stay out of shipping defaults.
+5. Keep the honest gates honest: solving the census does not mean advertising
+   SM3/T&L; measurement flags must stay out of shipping defaults.
 
 ## Gotchas
 
