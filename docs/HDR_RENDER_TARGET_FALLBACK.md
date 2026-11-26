@@ -8,14 +8,16 @@ initialisation the measured set is:
 
 | Size | Format | Count | Result without fallback |
 |---|---|---|---|
-| 1024x1024 | `0x72` `A32B32G32R32F` | 5 | `D3DERR_NOTAVAILABLE` (tolerated) |
+| 1024x1024 | `0x72` `R32F` | 5 | `D3DERR_NOTAVAILABLE` (tolerated) |
 | 512x512 | `0x15` `A8R8G8B8` | 3 | `S_OK` |
 | 512x512 | `0x71` `A16B16G16R16F` | 1 | `D3DERR_NOTAVAILABLE`, then a null dereference at `0x00fb5bd0` |
 
 `bDoHighDynamicRange=0`, `bUseBlurShader=1` and `iShadowMode=0` do **not** remove
-these requests. The 0x72 targets are tolerated when creation fails; the 0x71
-target is dereferenced unconditionally, so the engine faults during renderer
-initialisation before any shader, draw or `Present`.
+these requests. They are renderer-init shadow resources, not HDR/bloom: five
+1024 `R32F` shadow maps plus a quarter-res shadow-mask set. The five `0x72`
+failures are checked (the renderer logs a null target); after the last 2D
+creation the engine queries a `NiRenderedCubeMap` face table through
+`0x00fb5bd0` and faults on a stale entry, before any shader, draw or `Present`.
 
 ## The switch
 
@@ -25,8 +27,8 @@ tuples and backs them with a real `A8R8G8B8` target:
 
 - `GetLevelDesc`/`GetDesc` report the **requested** format (`0x71`/`0x72`), as
   D3D9 requires for the created resource;
-- the storage is RGBA8, so HDR values are clamped to `[0,1]` and negative
-  values are lost;
+- the storage is RGBA8, so float/shadow values are clamped to `[0,1]` and
+  negative values are lost;
 - `GetSurfaceLevel(0)`, `SetRenderTarget`, `SetTexture` and sampling use the
   same target-backed texture path as LDR render targets;
 - pool must be `DEFAULT`, levels `1`, dimensions pow2 8..1024.

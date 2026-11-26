@@ -120,13 +120,15 @@ Census result (104 s, exit 1, `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cens
   reached after the gate.
 - The first post-gate D3D9 activity is the nonfatal `CheckDeviceFormat` probe
   loop at `0x00c6e447`, then `CreateTexture` with `D3DUSAGE_RENDERTARGET`
-  (`caller 0x00ceca5e`, 1024x1024, levels 1, format `0x72` A32B32G32R32F,
-  pool 0) returning `D3DERR_NOTAVAILABLE` (`0x8876086a`); the engine repeats
-  1024/512/256 with formats `0x72`, `0x15` (A8R8G8B8) and `0x71`
-  (A16B16G16R16F).
-- After every target creation failed, the engine dereferenced the missing
-  target at `0x00fb5bd0` and faulted on `[0x0000000c]`. Depth-stencil, draws and
-  `Present` were never reached; only `RendererInfo.txt` was opened.
+  (`caller 0x00ceca5e`, 1024x1024, levels 1, format `0x72` **`R32F`**, pool 0)
+  returning `D3DERR_NOTAVAILABLE` (`0x8876086a`); the engine repeats the
+  1024/512/256 shadow set with formats `0x72` (R32F), `0x15` (A8R8G8B8) and
+  `0x71` (A16B16G16R16F).
+- After the last 2D creation the engine queries a `NiRenderedCubeMap` face
+  table through `0x00fb5bd0` (vtable slot `0x8c`, `[[this+0x40]+8]`) and faults
+  on `[0x0000000c]`; this is a stale/invalid face entry, not the failed R32F
+  texture (a plain NULL at `+0x40` would fault at `0x8`). Depth-stencil, draws
+  and `Present` were never reached; only `RendererInfo.txt` was opened.
 
 The LDR half of that census is now implemented: pow2 8..1024
 X8R8G8B8/A8R8G8B8 render-target textures with one level and pool DEFAULT are
@@ -163,9 +165,15 @@ The SM3 gate is passed and the fallback is active. Render-target requests from
 
 | Size | Format | Count | HRESULT |
 |---|---|---:|---|
-| 1024x1024 | `0x72` A32B32G32R32F | 5 | `D3DERR_OUTOFVIDEOMEMORY` (`0x8876017c`) |
+| 1024x1024 | `0x72` R32F | 5 | `D3DERR_OUTOFVIDEOMEMORY` (`0x8876017c`) |
 | 512x512 | `0x15` A8R8G8B8 | 3 | `S_OK` |
 | 512x512 | `0x71` A16B16G16R16F | 1 | `D3DERR_OUTOFVIDEOMEMORY` (`0x8876017c`) |
+
+These are the renderer-init shadow-map set, not HDR/bloom: the five 1024
+targets are `R32F` shadow maps (requested `R16F 0x6f`, promoted at
+`0xc91d19`), and the 512 group is the quarter-res shadow-mask set. The fatal
+step after the last 2D creation is the `NiRenderedCubeMap` face-table query at
+`0x00fb5bd0`, not the failed `0x71` texture.
 
 The HDR fallback logs confirm that `0x72` and `0x71` were accepted as formats and
 rewritten to A8R8G8B8 storage; creation then failed in the resource-budget layer.
