@@ -236,8 +236,9 @@ static uint32_t wait_common(CPU *c, const uint32_t *h, unsigned n, int all,
             static unsigned block_logged;
             if (block_logged < 400) {
                 ++block_logged;
-                fprintf(stderr, "[sync] block thread=%lu n=%u all=%d ms=%lu",
-                        (unsigned long)current_thread, n, all, (unsigned long)ms);
+                fprintf(stderr, "[sync] block thread=%lu n=%u all=%d ms=%lu caller=%08x",
+                        (unsigned long)current_thread, n, all, (unsigned long)ms,
+                        (unsigned)M32(c->r[4]));
                 for (unsigned i = 0; i < n; ++i) {
                     SyncObject *o = obj(h[i]);
                     fprintf(stderr, " h=%03x%s", (unsigned)h[i],
@@ -304,6 +305,9 @@ static void s_CreateSemaphoreA(CPU *c) {
     if (i < 0) FAIL(ERR_NOT_ENOUGH_MEMORY, 0, 4);
     objects[i].count = initial;
     objects[i].maximum = maximum ? maximum : SEM_MAX_DEFAULT;
+    fprintf(stderr, "[sync] sem create h=%03x caller=%08x thread=%lu\n",
+            (unsigned)(WIN32_SYNC_HANDLE_BASE + i), (unsigned)M32(c->r[4]),
+            (unsigned long)current_thread);
     set_error(c, 0);
     RET(WIN32_SYNC_HANDLE_BASE + (uint32_t)i, 4);
 }
@@ -323,8 +327,9 @@ static void s_ReleaseSemaphore(CPU *c) {
     if (previous) M32(previous) = (uint32_t)o->count;
     int64_t next = (int64_t)o->count + release;
     o->count = next > (int64_t)o->maximum ? o->maximum : (int32_t)next; /* saturate, see header */
-    fprintf(stderr, "[sync] release h=%03x count=%ld thread=%lu\n",
-            (unsigned)A(0), (long)o->count, (unsigned long)current_thread);
+    fprintf(stderr, "[sync] release h=%03x count=%ld thread=%lu caller=%08x\n",
+            (unsigned)A(0), (long)o->count, (unsigned long)current_thread,
+            (unsigned)M32(c->r[4]));
     win32_sync_notify(A(0));
     RET(1, 3);
 }
