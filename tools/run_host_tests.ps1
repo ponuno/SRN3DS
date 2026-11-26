@@ -406,11 +406,10 @@ if (Test-Path $TesvExe) {
             $sliceCubeProbe = @("source/tesv_cube_probe_slice.c")
         }
         Add-Test "tesv_slice" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c") + $sliceCubeProbe + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160")
-        Add-Test "tesv_slice" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c", "source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160")
         # Measurement-only variant: the generated cube call sites are renamed to
         # tesv_cube_probe_fb5c20() for the census build, so this spec links the
         # AOT/IR shadow that the standard slice intentionally keeps out.
-        Add-Test "tesv_slice_cube_probe" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c", "source/tesv_cube_probe_slice.c", "source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160")
+        if ($sliceCubeProbe.Count -gt 0) { Add-Test "tesv_slice_cube_probe" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c", "source/tesv_cube_probe_slice.c", "source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160") }
     }
 }
 
@@ -434,7 +433,7 @@ foreach ($name in $tests.Keys) {
     $exe = Join-Path $runDir "$name.exe"
     Remove-Item -Recurse -Force $runDir -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $runDir | Out-Null
-    if ($name -eq "tesv_slice") {
+    if ($name -eq "tesv_slice" -or $name -eq "tesv_slice_cube_probe") {
         # Give the guest the same sandbox the 3DS title sees: the game's own
         # default INI and the two profile INIs (port display 400x240). Without
         # them the engine falls back to PC defaults and the renderer gate fails
@@ -454,7 +453,7 @@ foreach ($name in $tests.Keys) {
     $clangArgs = @($spec.Flags) + $srcQuoted + @("-o", "`"$exe`"")
     $cmd = "call `"$vsVars`" >nul && `"$clang`" " + ($clangArgs -join " ")
     $jobs = if ($env:HOST_CLANG_JOBS) { [int]$env:HOST_CLANG_JOBS } else { 6 }
-    $useParallel = ($name -eq "tesv_slice") -and (-not $Sanitize) -and ($jobs -gt 1) -and ($spec.Sources.Count -gt 2)
+    $useParallel = (($name -eq "tesv_slice") -or ($name -eq "tesv_slice_cube_probe")) -and (-not $Sanitize) -and ($jobs -gt 1) -and ($spec.Sources.Count -gt 2)
     if ($useParallel) {
         Write-Log "BUILD $name (parallel clang jobs=$jobs)"
         $pb = Invoke-ClangParallel $clang $spec.Flags $spec.Sources $exe $runDir $jobs
@@ -472,7 +471,7 @@ foreach ($name in $tests.Keys) {
         continue
     }
     $savedIrc = $env:N3DS_IRC_PATH
-    if ($name -eq "tesv_slice" -and $TesvIrc) { $env:N3DS_IRC_PATH = $TesvIrc }
+    if (($name -eq "tesv_slice" -or $name -eq "tesv_slice_cube_probe") -and $TesvIrc) { $env:N3DS_IRC_PATH = $TesvIrc }
     else { Remove-Item Env:N3DS_IRC_PATH -ErrorAction SilentlyContinue }
     try {
         $run = Invoke-TestProcess $exe @($spec.Args) $runDir $TestTimeoutSec
@@ -488,7 +487,7 @@ foreach ($name in $tests.Keys) {
         $failed += $name
         continue
     }
-    if ($name -eq "tesv_slice") {
+    if ($name -eq "tesv_slice" -or $name -eq "tesv_slice_cube_probe") {
         $diag = ($runOut -join "`n") -match 'first fault: Guest fault at'
         $exit = ($runOut -join "`n") -match '\[guest\] ExitProcess\((\d+)\) from ([0-9a-fA-F]+)'
         if ($diag) {
