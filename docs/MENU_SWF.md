@@ -15,6 +15,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, tag walk (including DefineSprite nesting), bounded summary |
 | `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, DefineFont2/3 metrics and kerning pairs |
 | `source/menu_swf_display_list.h` / `.c` | First-frame flattened display list with recursive sprite expansion, accumulated 16.16 matrices/colour transforms, clip depth and cycle/depth limits |
+| `source/menu_swf_clip.h` / `.c` | Clip-depth mask pairs/rectangles, active-mask lists, intersection, fully-clipped flags and rectangle mask quads |
 | `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, streaming geometry sink, and DefineFont2/3 glyph SHAPE contours/bounds |
 | `source/menu_swf_tess.h` / `.c` | Bounded even-odd/non-zero tessellation of one shape or DefineFont2/3 glyph into caller-owned vertex/index/triangle-style pools plus separate stroked line segments |
 | `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement, glyph tessellation through `menu_swf_tess`, 16.16 transform, ARGB vertices and per-glyph triangle ranges |
@@ -25,6 +26,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_display_smoke.c` | Synthetic PlaceObject2/3, RemoveObject2, sprite, ShowFrame and DefineFont3 fixtures; optional real display/font summary |
 | `tests/menu_swf_display_list_smoke.c` | Synthetic 2-sprite nesting/matrices/colour/RemoveObject2/clip-depth plus cycle, overflow and broken-tag refusals; optional real StartMenu flatten |
+| `tests/menu_swf_clip_smoke.c` | Synthetic 3-mask nesting/intersection/full-clip plus bad-pair, overflow, complex-mask and record-matrix cases; optional real display-list clip |
 | `tests/menu_swf_shape_smoke.c` | Synthetic rectangle/curve/two-style/glyph shapes plus truncation, bitmap-id, segment-limit and AVM2/DefineFont4 refusals; optional real shape/glyph summary |
 | `tests/menu_swf_tess_smoke.c` | Synthetic square in both orientations, even-odd hole, non-zero star/nested contours, curve, multiple styles, stroked square, empty contour, overflow and missing-shape refusals; optional real tessellation summary |
 | `tests/menu_swf_text_smoke.c` | Synthetic 3-glyph font with kerning, direct glyph tessellation, placement/transform/colour, empty/unknown glyph and overflow; optional real StartMenu text |
@@ -32,7 +34,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_atlas_smoke.c` | Synthetic varied-size pack/determinism/UV/composition/overflow/empty cases; optional real codes 33..36 coverage-sum comparison |
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch` and `menu_text_draw`; `menu_bsa` now links `menu_swf.c` |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_clip`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch` and `menu_text_draw`; `menu_bsa` now links `menu_swf.c` |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -500,40 +502,76 @@ and 216 total flattened records, with a maximum sprite nesting depth of 7.
 This is CPU metadata only: masks/clip rendering, AVM and font layout are still
 outside the module, and no frame is produced.
 
-## 14. Tests
+## 14. Clip-depth masks
+
+`menu_swf_clip_build()` derives rectangles from the flat display-list records:
+
+* A record with ClipDepth is a mask active for depths
+  `(mask.depth, mask.clip_depth]`.  The builder uses the flat record-depth ranges
+  (it does not reconstruct separate sprite-scope ownership) and intersects every
+  active mask.  Up to eight nested masks are allowed; more is
+  `MENU_SWF_CLIP_ERR_NESTING`.  Mask depth >= clip depth is `ERR_PAIR`.
+* `MenuSwfClipShape` supplies local shape/glyph bounds aligned with records.
+  Mask bounds must be present and `is_rect=1`; a complex shape is the named
+  `"mask shape tessellation is not implemented"` refusal.  Record bounds are
+  optional for non-mask records; without them `has_rect=0`.
+* Each output record gets its transformed screen-space AABB, the intersection
+  of all active mask AABBs, active mask indices, `fully_clipped`, and the record
+  index.  Masks are emitted in record order with their four transformed quad
+  corners and AABB.
+* `menu_swf_clip_mask_quad()` exposes the four transformed rectangle corners
+  independently.  `menu_swf_clip_rect_intersect()` is the axis-aligned helper.
+* Limits: 8,192 records, 256 masks, 8 active masks per record.  Pair, mask,
+  nesting and capacity validation completes before any output write, so a
+  refusal leaves the caller arrays untouched.
+* No mask tessellation, AVM, GPU clip or frame is produced.
+
+Measured real `Update.bsa` StartMenu (flat display list above):
+
+```text
+real: clip records=216 masks=0 clipped=0 max=0
+```
+
+The retail StartMenu has no ClipDepth pairs on the first frame.  Synthetic
+coverage uses three nested masks: depth 4 receives all three and intersects to
+`40..60`; depth 5 receives two and intersects to `30..70`; an off-mask record is
+fully clipped.  Bad pairs, nine-mask nesting, complex masks and capacity
+overflows are named.
+
+## 15. Tests
 
 Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
 Result: `menu_swf_batch` **21 checks, 0 failures**; `menu_swf_atlas` **27
 checks, 0 failures**; `menu_swf_raster` **44 checks, 0 failures**;
 `menu_swf_text` **33 checks, 0 failures**; `menu_swf_tess` **47 checks, 0
-failures**; `menu_swf_shape` **28 checks, 0 failures**;
-`menu_swf_display_list` **15 checks, 0 failures**; `menu_swf_display` **38
-checks, 0 failures**; `menu_swf` **86 checks, 0 failures**; `menu_bsa` **277
-checks, 0 failures**.
+failures**; `menu_swf_shape` **28 checks, 0 failures**; `menu_swf_clip` **17
+checks, 0 failures**; `menu_swf_display_list` **15 checks, 0 failures**;
+`menu_swf_display` **38 checks, 0 failures**; `menu_swf` **86 checks, 0
+failures**; `menu_bsa` **277 checks, 0 failures**.
 
 Real read-only:
 
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
 Result: `menu_swf_batch` **34 checks, 0 failures**; `menu_swf_atlas` **37
 checks, 0 failures**; `menu_swf_raster` **60 checks, 0 failures**;
 `menu_swf_text` **46 checks, 0 failures**; `menu_swf_tess` **55 checks, 0
-failures**; `menu_swf_shape` **40 checks, 0 failures**;
-`menu_swf_display_list` **23 checks, 0 failures**; `menu_swf_display` **57
-checks, 0 failures**; `menu_swf` **102 checks, 0 failures**; `menu_bsa` **286
-checks, 0 failures**.
+failures**; `menu_swf_shape` **40 checks, 0 failures**; `menu_swf_clip` **24
+checks, 0 failures**; `menu_swf_display_list` **23 checks, 0 failures**;
+`menu_swf_display` **57 checks, 0 failures**; `menu_swf` **102 checks, 0
+failures**; `menu_bsa` **286 checks, 0 failures**.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
 long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
@@ -571,19 +609,20 @@ full viewport clipping, overflow without buffer mutation, NaN/negative-scale/
 rotated-clip refusals, and real 33..36 atlas quads.
 
 Full host suite with the main-tree generated slice and IR container:
-**119 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
+**120 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
 contributes 21 synthetic checks, `menu_swf_atlas` 27, `menu_swf_raster` 44,
-`menu_swf_text` 33, `menu_swf_tess` 47, `menu_swf_shape` 28,
-`menu_swf_display_list` 15, `menu_swf_display` 38 and `menu_swf` 86;
+`menu_swf_text` 33, `menu_swf_tess` 47, `menu_swf_shape` 28, `menu_swf_clip`
+17, `menu_swf_display_list` 15, `menu_swf_display` 38 and `menu_swf` 86;
 `menu_text_draw` is an assertion-based COM test outside that real-data matrix.
 No real-data checks are run in that suite.
 
-## 15. What remains
+## 16. What remains
 
 1. **Renderable display list** — bounded state, flattened CPU transform records,
-   shape geometry and triangle tessellation exist, but this is not a GFx
-   display list: mask/clip rendering, clipping layers, button states, frame
-   scripts and draw submission remain.
+   rectangular clip-mask intersections and triangle tessellation exist, but
+   this is not a GFx display list: complex mask-shape tessellation, clip
+   rendering, clipping layers, button states, frame scripts and draw submission
+   remain.
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
    the menu's script behaviour.  `DoAction`/clip-action payloads are not
    executed.
@@ -598,7 +637,7 @@ No real-data checks are run in that suite.
    TEV/PICA submission and the first real frame.  The host COM DrawPrimitiveUP
    is not a frame claim.
 
-## 16. Integration
+## 17. Integration
 
 ```c
 /* r came from menu_bsa_resolve_startmenu(&heap, ...). */
@@ -618,6 +657,9 @@ uint32_t batch_indices[glyph_count * 6];
 MenuSwfBatchResult batch_result;
 MenuSwfDisplayListRecord list_records[216]; /* caller-sized */
 MenuSwfDisplayListResult flat;
+MenuSwfClipRecord clip_records[216];
+MenuSwfClipMask clip_masks[16];
+MenuSwfClipResult clip_result;
 char reason[BSA_REASON_MAX];
 const uint8_t *bytes = guest_ptr(heap.memory, r.guest_address, r.size);
 MenuSwfStatus st = menu_swf_summary(bytes, r.size, &summary, reason,
@@ -628,6 +670,11 @@ if (st == MENU_SWF_OK)
 if (st == MENU_SWF_OK)
     st = menu_swf_display_list_build(bytes, r.size, list_records, 216,
                                      &flat, reason, sizeof reason);
+/* shapes may be NULL when no clip-mask bounds are needed. */
+if (st == MENU_SWF_OK)
+    (void)menu_swf_clip_build(list_records, flat.record_count, NULL, 0,
+                              clip_masks, 16, clip_records, 216,
+                              &clip_result, reason, sizeof reason);
 if (st == MENU_SWF_OK)
     st = menu_swf_shape_summary(bytes, r.size, &shapes, reason,
                                 sizeof reason);
@@ -669,7 +716,7 @@ are metadata, CPU geometry, A8 coverage/atlas memory and CPU vertex/index data
 only.  They must not be reported as a parsed movie, renderable display list or
 frame.
 
-## 17. Honest claim
+## 18. Honest claim
 
 * StartMenu.swf is validated as one CWS/zlib stream with the declared size,
   frame header and complete top-level tag stream through End.
@@ -680,6 +727,10 @@ frame.
   bounds/kerning data.
 * The flattened display list reports **216 records**, 71 sprite definitions,
   106 sprite records, one top-level object and a maximum sprite depth of **7**.
+* The clip layer finds **0 ClipDepth pairs** in the real StartMenu first frame;
+  synthetic three-mask nesting intersects to `40..60`, two-mask to `30..70`,
+  and an off-mask record is fully clipped.  Complex mask shapes are a named
+  refusal.
 * The bounded shape model reports 27 shapes, 151 paths, 1,712 shape segments,
   2,362 shape points, 243 glyphs (241 non-empty) and 5,292 glyph segments.
 * The bounded tessellator turns all 27 shapes into 71,605 vertices / 35,759
