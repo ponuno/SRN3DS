@@ -56,6 +56,12 @@ if (-not $Python) {
 }
 
 $outDir = if ($OutDir) { $OutDir } else { Join-Path $root "build_host" }
+# TEMP/TMP must be absolute: relative paths break the CRT's tmpfile_s in the
+# steam/registry smokes. Resolve a relative -OutDir against the caller's cwd.
+if (-not [System.IO.Path]::IsPathRooted($outDir)) {
+    $outDir = Join-Path (Get-Location).Path $outDir
+}
+$outDir = [System.IO.Path]::GetFullPath($outDir)
 $logDir = Join-Path $outDir "logs"
 $tmpDir = Join-Path $outDir "tmp"
 New-Item -ItemType Directory -Force -Path $outDir, $logDir, $tmpDir | Out-Null
