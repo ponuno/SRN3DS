@@ -15,7 +15,7 @@ _Static_assert(offsetof(D9Caps9,vs20)==248,"D3DCAPS9 VS20Caps");
 _Static_assert(offsetof(D9Caps9,ps20)==264,"D3DCAPS9 PS20Caps");
 _Static_assert(offsetof(D9Caps9,max_vertex_shader_30_instruction_slots)==296,"D3DCAPS9 SM3 slots");
 
-enum {DEVTYPE_HAL=1,RTYPE_SURFACE=1,RTYPE_TEXTURE=3};
+enum {DEVTYPE_HAL=1,RTYPE_SURFACE=1,RTYPE_TEXTURE=3,RTYPE_CUBETEXTURE=5};
 #define DEV_DRAWPRIMITIVES2 0x00002000u
 #define DEV_DRAWPRIMITIVES2EX 0x00008000u
 #define DEV_HWTRANSFORMANDLIGHT 0x00010000u
@@ -68,6 +68,21 @@ static int devcaps_probe_enabled(void){
 }
 static int texture_format(unsigned format){
     return format==D9_A8R8G8B8||format==D9_X8R8G8B8||format==D9_DXT1||format==D9_DXT3||format==D9_DXT5;
+}
+/* Measurement-only companion to the COM render-target storage fallback.  It
+ * lets the measured float format checks reach the real create path; it does
+ * not add a float format, cube render target, SM3 or T&L capability. */
+static int hdr_format_probe_logged;
+static int hdr_format_probe_enabled(void){
+    const char *v=getenv("TESV_D3D9_HDR_LDR_FALLBACK");
+    int on=v&&!strcmp(v,"1");
+    if(on&&!hdr_format_probe_logged){
+        hdr_format_probe_logged=1;
+        fprintf(stderr,"[d3d9] MEASUREMENT ONLY: CheckDeviceFormat accepts "
+            "0x71/0x72 RENDERTARGET SURFACE/TEXTURE/CUBETEXTURE as LDR fallback; "
+            "not shippable\n");
+    }
+    return on;
 }
 
 int d9_adapter_mode_count(unsigned adapter,unsigned format){
@@ -158,6 +173,9 @@ int d9_adapter_check_device_type(unsigned adapter,unsigned device_type,unsigned 
 int d9_adapter_check_device_format(unsigned adapter,unsigned device_type,unsigned adapter_format,unsigned usage,unsigned resource_type,unsigned format){
     if(adapter>=D9_ADAPTER_COUNT||device_type!=DEVTYPE_HAL)return D9_ADAPTER_INVALID;
     if(adapter_format!=D9_X8R8G8B8)return D9_ADAPTER_UNAVAILABLE;
+    if((resource_type==RTYPE_SURFACE||resource_type==RTYPE_TEXTURE||resource_type==RTYPE_CUBETEXTURE)&&
+       usage==USAGE_RENDERTARGET&&(format==0x71u||format==0x72u)&&hdr_format_probe_enabled())
+        return D9_ADAPTER_OK;
     if(resource_type==RTYPE_SURFACE){
         if(usage!=0&&usage!=USAGE_RENDERTARGET)return D9_ADAPTER_UNAVAILABLE;
         if(format==D9_D24S8||format==D9_D24X8)return usage==0?D9_ADAPTER_OK:D9_ADAPTER_UNAVAILABLE;

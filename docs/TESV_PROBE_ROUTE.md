@@ -557,6 +557,84 @@ depth, scene, shader, draw or `Present` call. The next blocker is the unchecked
 corruption of the face-0 pointer. This is measurement-only; no cube or frame is
 claimed.
 
+### CheckDeviceFormat fallback census (2026-11-26)
+
+Base: `main` at `c9e0ced`. Under `TESV_D3D9_HDR_LDR_FALLBACK=1`,
+`d9_adapter_check_device_format` now returns `S_OK` for measured float formats
+`0x71`/`0x72` with `D3DUSAGE_RENDERTARGET` for `D3DRTYPE_SURFACE`,
+`D3DRTYPE_TEXTURE` and `D3DRTYPE_CUBETEXTURE`. It logs
+`MEASUREMENT ONLY ... not shippable`; without the env the previous refusals are
+unchanged. `D9Caps9`, SM2 versions, SM3 slots and T&L bits are not modified.
+`tests/adapter_smoke.c` covers default-off refusals, all six env-on format/type
+combinations, negative usage/type/format cases, and a byte-for-byte caps
+comparison. Targeted adapter tests reported **11 passed, 0 failed** with
+`-TestTimeoutSec 300`; `render_texture_hdr` also passed.
+
+A fresh slice was built from `growth_probe/gen01` with six clang jobs and the
+generated D3DX table. The build/test script took **157.9543572 s** and reported
+**10 passed, 1 expected diagnostic, 0 failed**. The generated slice already
+references `tesv_cube_probe_fb5c20`, so the host build linked the required
+`source/tesv_cube_probe_slice.c` through a temporary build-script copy; the
+repository build script was not changed. The census took **93.6686395 s**,
+exit `1`, with a 2,000,000,000-step budget:
+
+```text
+TESV_MEMPROBE=1
+TESV_D3D9_CAPS_PROBE=1
+TESV_D3D9_TRACE=1
+TESV_D3D9_SM3_GATE_PROBE=1
+TESV_D3D9_CAPTURE_DRAWS=8
+TESV_D3D9_HDR_LDR_FALLBACK=1
+TESV_D3D9_BUDGET_MB=64
+N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+```
+
+Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_checkformat_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_checkformat_census.out`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_checkformat_census.run.txt`
+
+The first measured float RT queries now succeed:
+
+```text
+CheckDeviceFormat(adapter=0, device=1, adapter_format=0x16,
+                  usage=1, resource_type=1, format=0x71) -> S_OK
+CheckDeviceFormat(adapter=0, device=1, adapter_format=0x16,
+                  usage=1, resource_type=1, format=0x72) -> S_OK
+```
+
+Both are from `caller=0x00ce54f4`. The host test also covers RT TEXTURE and
+CUBETEXTURE, but the retail cube path does **not** issue an RT usage query.
+Its descriptor lookup uses `usage=0`:
+
+```text
+CheckDeviceFormat(adapter=0, device=1, adapter_format=0x16,
+                  usage=0, resource_type=5, format=0x71) -> 0x8876086a
+CheckDeviceFormat(adapter=0, device=1, adapter_format=0x16,
+                  usage=0, resource_type=5, format=0x72) -> 0x8876086a
+```
+
+These calls are from `caller=0x00cd5542` and remain `D3DERR_NOTAVAILABLE` by
+design because this probe only extends RENDERTARGET usage. Consequently the
+expected `CreateCubeTexture(512,1,1,0x71,0)` is **not reached**. Counts remain
+zero for `CreateCubeTexture`, `GetCubeMapSurface`, `SetRenderTarget`,
+`CreateDepthStencilSurface`, `SetDepthStencilSurface`, `CreateVertexShader`,
+`CreatePixelShader`, `SetTexture`, draw and `Present`; capture has no records.
+
+The first fatal event is unchanged. Symbolizing the host backtrace still identifies
+`f_CED3E0` and the actual fault at **`0x00ced444`** (`mov ecx,[ebp+0xc]`, with
+`ebp=0`), address `0x0000000c`; `last_call=0x00fb5bd0` remains the earlier width
+getter. The cube descriptor refusal leaves `0x00ce9a40` with no matching
+descriptor, so it returns NULL and `CreateSurf` dereferences it before
+`CreateCubeTexture` at `0x00ced472`.
+
+The next blocker is therefore the **usage-0 CUBETEXTURE descriptor query** for
+`0x71`/`0x72`, not the RT capability check. A further measurement-only probe
+would have to admit that descriptor query (or implement a real cube descriptor)
+before the cube create/surface/depth path can be measured. This env is not
+shippable; no cube or frame is claimed.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
