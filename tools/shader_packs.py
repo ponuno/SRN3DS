@@ -207,7 +207,7 @@ def write_manifests(built: dict) -> dict:
         pack_dir = os.path.join(PACKS_DIR, name)
         os.makedirs(pack_dir, exist_ok=True)
         with open(os.path.join(pack_dir, "manifest.json"), "w",
-                  encoding="utf-8") as handle:
+                  encoding="utf-8", newline="\r\n") as handle:
             json.dump(manifest, handle, indent=1)
             handle.write("\n")
         _write_readme(pack_dir, manifest)
@@ -220,7 +220,7 @@ def write_manifests(built: dict) -> dict:
         index["chunks"] += bucket["chunks"]
         index["unique_hashes"] += len(hashes)
     os.makedirs(PACKS_DIR, exist_ok=True)
-    with open(INDEX_PATH, "w", encoding="utf-8") as handle:
+    with open(INDEX_PATH, "w", encoding="utf-8", newline="\r\n") as handle:
         json.dump(index, handle, indent=1)
         handle.write("\n")
     return index
@@ -249,7 +249,8 @@ and append-only; add entries, never rewrite another pack's rows.
 
 def _write_readme(pack_dir: str, manifest: dict) -> None:
     coverage = manifest["coverage"]
-    with open(os.path.join(pack_dir, "README.md"), "w", encoding="utf-8") as handle:
+    with open(os.path.join(pack_dir, "README.md"), "w", encoding="utf-8",
+                  newline="\r\n") as handle:
         handle.write(README.format(
             pack=manifest["pack"], owner=manifest["owner"],
             description=manifest["description"],
@@ -436,7 +437,7 @@ def main(argv=None) -> int:
     if args.command == "coverage":
         report = coverage_report()
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-        with open(args.out, "w", encoding="utf-8") as handle:
+        with open(args.out, "w", encoding="utf-8", newline="\r\n") as handle:
             json.dump(report, handle, indent=1)
             handle.write("\n")
         print(json.dumps(report["total"], indent=1))
