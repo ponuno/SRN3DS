@@ -7,14 +7,14 @@
   a SHA256 manifest and the linker log under dist/<target>/.  Every failure
   propagates as a non-zero exit code.
 .PARAMETER Mode
-  default | graphics | com | boot | lift | pilot
+  default | graphics | com | menu | boot | lift | pilot
 .PARAMETER PilotGen
   Generated pilot directory (contains pilot_config.h). Required for -Mode pilot.
 .PARAMETER Opt
   Optimisation flag passed to make (default -O2).
 #>
 param(
-    [ValidateSet("default", "graphics", "com", "boot", "lift", "pilot", "tesv", "audio", "va")]
+    [ValidateSet("default", "graphics", "com", "menu", "boot", "lift", "pilot", "tesv", "audio", "va")]
     [string]$Mode = "default",
     [string]$PilotGen = "",
     [string]$TesvGen = "",
@@ -39,6 +39,7 @@ $modes = @{
     "default"  = @{ Target = "Skyrim_N3DS"; Vars = "" }
     "graphics" = @{ Target = "Skyrim_N3DS_graphics"; Vars = "GRAPHICS=1" }
     "com"      = @{ Target = "Skyrim_N3DS_graphics_com"; Vars = "GRAPHICS_COM=1 LIFT_STAGE=staged" }
+    "menu"     = @{ Target = "Skyrim_N3DS_menu_frame"; Vars = "MENU_FRAME=1 LIFT_STAGE=staged" }
     "boot"     = @{ Target = "Skyrim_N3DS_boot"; Vars = "LIFT_STAGE=staged BOOT_SMOKE=1" }
     "lift"     = @{ Target = "Skyrim_N3DS_lift"; Vars = "LIFT_STAGE=staged" }
     "pilot"    = @{ Target = "Skyrim_N3DS_pilot"; Vars = "LIFT_STAGE=staged" }

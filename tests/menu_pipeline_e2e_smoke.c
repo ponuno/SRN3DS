@@ -469,6 +469,15 @@ static int backend_draw_menu_indexed(void *ctx, const D9ColorVertex *vertices,
     (void)matrix; (void)constants;
     if (!mock->active || !vertices || !count || !indices || !index_count ||
         (index_count % 3u) != 0 || !texture || texture1 || !state ||
+        !state->pixel_shader ||
+        !(state->pixel_shader->backend_flags & D9TEV_PLAN_MENU_TEXT) ||
+        state->pixel_shader->stages != 1 || state->pixel_shader->textures != 1 ||
+        state->pixel_shader->stage[0].func_rgb != D9TEV_FUNC_MODULATE ||
+        state->pixel_shader->stage[0].func_a != D9TEV_FUNC_MODULATE ||
+        state->pixel_shader->stage[0].src_rgb[0] != D9TEV_SRC_TEX0 ||
+        state->pixel_shader->stage[0].src_rgb[1] != D9TEV_SRC_PRIMARY ||
+        ((MockTex *)texture)->format != D9_A8 || ((MockTex *)texture)->w != 64 ||
+        ((MockTex *)texture)->h != 64 ||
         state->address_u != 3 || state->address_v != 3 ||
         state->min_filter != 1 || state->mag_filter != 1 ||
         state->mip_filter != 0 || state->stage_colorop != 4 ||
@@ -687,7 +696,8 @@ static void run_com_batch(MenuSwfBatchVertex *vertices, uint32_t vertex_count,
     stats->batch_triangles = index_count / 3u;
     printf("real: COM draw_calls=%u expanded_vertices=%u max_draw_vertices=%u "
            "indexed_draws=%u indexed_vertices=%u indexed_indices=%u "
-           "FVF=0x142 A8=%ux%u control_text_quads=%u\n",
+           "FVF=0x142 A8=%ux%u tev_plan=menu_text stages=1 textures=1 "
+           "control_text_quads=%u\n",
            mock.draw_calls, mock.expanded_vertices, mock.max_draw_vertices,
            mock.indexed_draw_calls, mock.indexed_vertices, mock.indexed_indices,
            E2E_ATLAS_SIZE, E2E_ATLAS_SIZE, stats->text_quads);

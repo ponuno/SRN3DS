@@ -53,7 +53,8 @@ Write-Log "Copied $ThreeDsx -> $sdFile (sha256 $srcHash)"
 $appLog = Join-Path $SdRoot "Skyrim_N3DS.log"
 $pilotLog = Join-Path $SdRoot "Skyrim_N3DS_pilot.log"
 $tesvLog = Join-Path $SdRoot "Skyrim_N3DS_tesv.log"
-foreach ($f in @($appLog, $pilotLog, $tesvLog)) { if (Test-Path $f) { Remove-Item $f -Force } }
+$stderrLog = Join-Path $SdRoot "Skyrim_N3DS_stderr.log"
+foreach ($f in @($appLog, $stderrLog, $pilotLog, $tesvLog)) { if (Test-Path $f) { Remove-Item $f -Force } }
 
 Add-Type -AssemblyName System.Drawing
 if (-not ("AzWin" -as [type])) {
@@ -97,7 +98,7 @@ if (-not $p.HasExited) {
     Write-Log "Closed Azahar PID=$($p.Id)"
 }
 
-foreach ($f in @($appLog, $pilotLog, $tesvLog)) {
+foreach ($f in @($appLog, $stderrLog, $pilotLog, $tesvLog)) {
     if (Test-Path $f) {
         $dest = Join-Path $ev ([IO.Path]::GetFileName($f))
         Copy-Item $f $dest -Force
@@ -117,7 +118,7 @@ $failed = $false
 $hasPass = $false
 $faultAddr = $null
 $faultReason = $null
-foreach ($f in @($appLog, $pilotLog, $tesvLog)) {
+foreach ($f in @($appLog, $stderrLog, $pilotLog, $tesvLog)) {
     if (-not (Test-Path $f)) { continue }
     $text = Get-Content $f -Raw
     foreach ($needle in $Grep) { if ($text -match [regex]::Escape($needle)) { $failed = $true } }
@@ -130,7 +131,7 @@ foreach ($f in @($appLog, $pilotLog, $tesvLog)) {
         $failed = $true
     }
 }
-if (-not $SkipAppLogCheck -and -not (Test-Path $appLog) -and -not (Test-Path $pilotLog) -and -not (Test-Path $tesvLog)) {
+if (-not $SkipAppLogCheck -and -not (Test-Path $appLog) -and -not (Test-Path $stderrLog) -and -not (Test-Path $pilotLog) -and -not (Test-Path $tesvLog)) {
     Write-Log "Expected an application log but none was written"
     $failed = $true
 }

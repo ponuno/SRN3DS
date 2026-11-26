@@ -639,9 +639,12 @@ foreach ($name in $tests.Keys) {
 
 Write-Log "PYTHON tests"
 $pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py")
-if ($SkipPython) { $pyTests = @() }
-$realContainer = "E:\Skyrim_N3DS_build\ir_container\tesv.irc"
-if (Test-Path $realContainer) { $pyTests += "tests/ir_container_growth_test.py" }
+if ($SkipPython) {
+    $pyTests = @()
+} else {
+    $realContainer = "E:\Skyrim_N3DS_build\ir_container\tesv.irc"
+    if (Test-Path $realContainer) { $pyTests += "tests/ir_container_growth_test.py" }
+}
 foreach ($script in $pyTests) {
     if (-not (Test-Path $script)) { continue }
     $out = & $Python $script 2>&1

@@ -13,6 +13,11 @@
 
 #define FRAME_VERTICES 16384u
 #define FRAME_INDICES 262144u
+/* Indexed menu batches may use the full 16-bit vertex range.  Keep the older
+ * 16k arena policy for ordinary/cube colour draws, but give the compact menu
+ * path its own 65,536-entry allocation instead of rejecting the real 57,484
+ * vertex StartMenu batch after core accepted it. */
+#define FRAME_MENU_VERTICES 65536u
 /* Cube draw vertex: the PICA cube shader reads a 3-component direction and
  * writes texcoord0.xy + texcoord0w, so the attribute stride is 40 bytes. */
 typedef struct {float x,y,z,dx,dy,dz,r,g,b,a;} D9CubeVertex;
@@ -62,7 +67,7 @@ D9Citro *d9_citro_open(void){
     if(R_FAILED(shaderProgramInit(&c->program_color)))goto fail;c->program_color_ready=1;
     if(R_FAILED(shaderProgramSetVsh(&c->program_color,&c->shader_color->DVLE[0])))goto fail;
     c->uniform_color=shaderInstanceGetUniformLocation(c->program_color.vertexShader,"clip");if(c->uniform_color<0)goto fail;
-    c->arena_color=linearAlloc(FRAME_VERTICES*sizeof(D9ColorVertex));if(!c->arena_color)goto fail;
+    c->arena_color=linearAlloc(FRAME_MENU_VERTICES*sizeof(D9ColorVertex));if(!c->arena_color)goto fail;
     c->shader_cube=DVLB_ParseFile((u32 *)d9shader_cube_shbin,d9shader_cube_shbin_size);if(!c->shader_cube)goto fail;
     if(R_FAILED(shaderProgramInit(&c->program_cube)))goto fail;c->program_cube_ready=1;
     if(R_FAILED(shaderProgramSetVsh(&c->program_cube,&c->shader_cube->DVLE[0])))goto fail;
@@ -453,7 +458,7 @@ static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
         fprintf(stderr,"[d3d9-citro] draw_menu: text TEV plan requires an A8 texture unit\n");
         return -1;
     }
-    if(count>FRAME_VERTICES-c->cursor_color)return -1;
+    if(count>FRAME_MENU_VERTICES-c->cursor_color)return -1;
     if(indices&&index_count>FRAME_INDICES-c->cursor_index)return -1;
     D9DrawState draw_state=*state;
     if(text_plan){

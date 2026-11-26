@@ -1434,6 +1434,56 @@ PICA-shaped backend without `draw_volume`.
   an explicit named refusal at the buffer/device boundary.  No frame is
   claimed.
 
+## 5.10 Real StartMenu indexed PICA runner (build-only, 2026-11-26)
+
+The real StartMenu batch now has an isolated ARM path to the production PICA
+backend. `source/menu_frame_main.c` reads
+`sdmc:/Skyrim/Data/Update.bsa!interface/startmenu.swf`, rebuilds the bounded
+CPU batch, creates/uploads the 64x64 `D3DFMT_A8` atlas through COM, sets the
+400x240 orthographic/alpha-blended 2D state, and submits
+**57,484 vertices / 86,160 indices / 28,720 triangles** as one unsigned-short
+`C3D_DrawElements`. The selected plan is the certified one-stage menu-text TEV
+`MODULATE(TEXTURE0,PRIMARY)`; it is a 2D/menu TEV path, not SM3 or a hardware
+T&L claim. `DevCaps` remains exactly `0x00082000`.
+
+The previous color arena was 16,384 vertices even though the core/index path
+accepted 65,536. `d3d9_citro3d.c` now gives only the menu-color arena
+`FRAME_MENU_VERTICES=65536`; ordinary and cube colour draws retain
+`FRAME_VERTICES=16384`. The existing index arena remains 262,144 entries. The
+real 86,160-index batch therefore fits without UP expansion, index rewriting or
+chunking. Core still names the 65,536-vertex / 262,144-index limits for larger
+requests.
+
+The isolated runner includes the production adapter solely to count real
+`C3D_TexBind`, TEV apply and `C3D_DrawElements` calls; each wrapper calls the
+real implementation. It verifies one apply/draw, the bound texture is 64x64
+`GPU_A8` 2D, stage 0 is MODULATE for RGB/alpha, the PICA index count/type/hash
+matches the CPU batch, and the compact cursors are 57,484/86,160. It writes
+`sdmc:/Skyrim_N3DS_stderr.log`; `tools/run_azahar.ps1` now archives that file as
+well as the older application logs.
+
+Evidence:
+
+* host targeted PICA/menu/COM set: **6 passed, 0 diagnostic, 0 failed**;
+* real `menu_pipeline_e2e`: **60 checks, 0 failures**, one indexed draw,
+  `expanded_vertices=0`, A8 64x64 and `menu_text` TEV asserted by the recording
+  backend; `menu_indexed_draw` rechecks `DevCaps=0x00082000`;
+* ASan `menu_pipeline_e2e,menu_indexed_draw`: **2 passed, 0 failures**;
+* full real-data host suite: **135 passed, 1 diagnostic, 0 failed** (known TESV
+  startup memory gate);
+* ARM `-Mode com -Isolated com_frame -Jobs 8`: `.text` 917,468 B, `.3dsx`
+  936,180 B, SHA256
+  `b2d030cf2a50948fb68af9cd6d05731a6ac929614dcfedef034dfef99f95bbd4`;
+* ARM `-Mode menu -Isolated menu_frame -Jobs 8`: `.text` 1,030,544 B, `.bss`
+  11,431,852 B, `.3dsx` 1,049,640 B, SHA256
+  `a305d0902ea178ff08d88a906bcdd8bb39ca59a6523795e8cb1cdd6ed684082a`, copied
+  to `E:\azahar_run\Skyrim_N3DS_menu_frame.3dsx`.
+
+No Azahar run was performed by the build agent. This is **build-only; frame not
+claimed**. The user must launch the artifact manually and archive a screenshot
+plus `Skyrim_N3DS_stderr.log`; actual `GPU_A8` sampling/visible pixels are the
+next blocker.
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.

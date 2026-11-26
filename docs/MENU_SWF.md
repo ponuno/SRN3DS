@@ -4,16 +4,19 @@ Status: the SWF **container, tag stream, structured font imports, fontconfig
 face resolution, flattened display list, solid fill colours, DefineEditText
 parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch and host CPU ->
 COM indexed/UP menu submission** are implemented.  Real StartMenu declares
-imported font ids 34/41 from `gfxfontlib.swf`; that URL is absent and the
-`Interface/fonts_en.swf` library contains neither id.  The shipped
-`Interface/fontconfig.txt` maps the imported symbols to real faces
+imported font ids 34/41 from `gfxfontlib.swf`; that URL is absent, but the
+shipped `Interface/fontconfig.txt` maps the symbols to real faces
 (`$EverywhereMediumFont` -> Futura Condensed, `$EverywhereFont` -> Futura
 CondensedLight) and those faces exist in `fonts_en.swf` (DefineFont3 ids 3 and
-1).  Resolution therefore uses a logged, proven face substitution instead of a
-guess: all 57 text records resolve and the 3 authored labels produce **72 real
-glyphs / 3,024 vertices / 4,320 indices / 1,440 triangles**.  This is still not
-a menu frame: focal/bitmap fill sampling, mask/clip rendering, AVM/AS2, full
-GFx assets and PICA sampling remain open.
+1).  All 57 text records resolve with a logged face substitution and the three
+authored labels produce **72 real glyphs / 3,024 vertices / 4,320 indices /
+1,440 triangles**.  An isolated ARM runner also reads the real `Update.bsa`
+SWF and submits the combined batch through COM/core to the real PICA
+`C3D_DrawElements` path with a 64x64 A8 atlas and the menu-text TEV plan.  That
+runner is build-only until it is launched in Azahar and a screenshot plus
+`sdmc:/Skyrim_N3DS_stderr.log` are archived.  Focal/bitmap fill sampling,
+complete mask/AVM/AS2 behaviour, a persistent cache, PICA A8 pixel proof and a
+real GFx text object remain open.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -1170,17 +1173,18 @@ Verification:
 3. **Atlas cache/real GFx fonts** — `gfxfontlib.swf` (imported font ids 34/41)
    is absent, but the shipped `Interface/fontconfig.txt` now maps 34/41 to
    real `fonts_en.swf` faces (ids 3/1) and all three authored labels produce
-   real glyph geometry.  There is still no persistent texture/glyph cache,
-   `fonts_console.swf` is not merged, and richer shaping (ligatures,
-   bidi, multi-font fallback), letter-spacing/class spans
-   and text metrics beyond advance+kerning remain.  The host COM demo can
+   real glyph geometry.  The host COM demo and the isolated ARM runner can
    create/upload an A8 atlas and draw the combined shape/control-text batch;
-   there is no persistent cache, PICA A8 sampling or real GFx text object yet.
+   actual Azahar A8 sampling/pixels are still pending.  There is no persistent
+   texture/glyph cache, `fonts_console.swf` is not merged, and richer shaping
+   (ligatures, bidi, multi-font fallback), letter-spacing/class spans and text
+   metrics beyond advance+kerning remain.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
-5. **Draw path** - real GFx display list/masks, dynamic vertex buffer/FVF,
-   TEV/PICA submission and the first real frame.  The host COM indexed/UP draw
-   is not a frame claim.
+5. **Draw path** — the isolated ARM StartMenu runner now reaches the real PICA
+   indexed/TEV submission and 400x240 Present in code, but the user-run Azahar
+   screenshot/log is still pending.  Complete GFx masks/assets, dynamic vertex
+   buffer/FVF and visual equivalence remain; build-only is not a frame claim.
 
 ## 19. Integration
 
@@ -1321,8 +1325,10 @@ frame.
    unknown opcode, finds 53 Stop controls and no Play/Goto/SetTarget/Wait, and
    applies only frame-scoped Stop metadata to 66 of 216 display records.  No
    arbitrary ActionScript or side effect is executed.
-* No texture cache or real GFx draw/frame is built, and no
-   frame/pixel/Azahar/hardware result is claimed.
+* No persistent texture cache or complete GFx draw/frame is built.  The isolated
+  real-StartMenu PICA runner is build-only until its user-launched Azahar
+  screenshot and stderr log are archived; no frame/pixel/hardware result is
+  claimed.
 
 ## 17. SWF bitmap tags (2026-11-26)
 
@@ -1339,3 +1345,61 @@ the output is written only after validation. JPEG tags (6/21/35/90) are a named
 Real `Update.bsa` StartMenu has no bitmap tags (`total=0`), so the logo and
 background are not bitmap characters in this asset. Synthetic coverage is in
 `tests/menu_swf_bitmap_smoke.c` (23 checks) plus 27 real-data checks.
+
+
+## 21. Real StartMenu PICA runner (build-only, 2026-11-26)
+
+`source/menu_frame_main.c` is an isolated ARM diagnostic, built by
+`tools/build.ps1 -Mode menu`. It reads the winning SWF at runtime from
+`sdmc:/Skyrim/Data/Update.bsa!interface/startmenu.swf` (60,284 B, CRC32
+`0x6910248f`), rebuilds the same 216-record / 53-shape / 57-text first frame,
+rasterises the local 243-glyph Font3 `!` control, and packs it beside one white
+texel in a 64x64 A8 atlas. Imported font ids 34/41 remain named refusals, so the
+retail text contributes zero glyphs; no local/name font is substituted.
+
+The resulting **57,484 vertices / 86,160 indices / 28,720 triangles** go through
+`d3d9_menu_text` -> x86 COM stdcall -> `d3d9_core` -> the real Citro3D backend.
+The runner sets a 400x240 orthographic transform, disables depth/culling, enables
+SRCALPHA/INVSRCALPHA blending, binds `GPU_A8`, selects the certified one-stage
+`MODULATE(TEXTURE0,PRIMARY)` menu-text TEV plan, and issues one unsigned-short
+`C3D_DrawElements` followed by COM EndScene/Present. The PICA menu-colour arena
+is 65,536 vertices (the 16-bit indexed range); the index arena is 262,144
+entries, so the real batch fits without expansion or index rewriting. Ordinary
+and cube colour draws keep their previous 16,384-vertex policy.
+
+The adapter is included only to count the production calls. Every counter
+wrapper invokes the real `C3D_TexBind`, `d9_pica_citro3d_apply_tev_ex`, or
+`C3D_DrawElements`. The log checks one apply, one indexed draw, A8 64x64/2D,
+TEV stage-0 MODULATE, exact index count/type/hash, compact vertex/index cursors,
+and `DevCaps=0x00082000`.
+
+Build evidence:
+
+```text
+-mode menu -Isolated menu_frame -Jobs 8
+.text=1,030,544 B  data=7,312 B  bss=11,431,852 B
+.3dsx=1,049,640 B
+sha256=a305d0902ea178ff08d88a906bcdd8bb39ca59a6523795e8cb1cdd6ed684082a
+artifact=E:\azahar_run\Skyrim_N3DS_menu_frame.3dsx
+```
+
+Host regression evidence: targeted **6 passed, 0 diagnostic, 0 failed**;
+`menu_pipeline_e2e` **60 checks, 0 failures**, with the recording backend now
+requiring the A8 64x64 native and `D9TEV_PLAN_MENU_TEXT` one-stage plan. ASan
+`menu_pipeline_e2e,menu_indexed_draw` **2 passed, 0 failures**. Full real-data
+suite with the generated slice: **135 passed, 1 diagnostic, 0 failed**; the
+diagnostic is the known TESV startup memory gate. ARM `-Mode com` also links in
+an isolated directory.
+
+Manual Azahar step (not performed by the build agent):
+
+1. Launch `E:\azahar_run\Skyrim_N3DS_menu_frame.3dsx` in Azahar.
+2. Wait for `MENU_FRAME_STATUS`, then save a screenshot, for example
+   `E:\azahar_run\shot_menu_frame.png`.
+3. Archive `%APPDATA%\Azahar\sdmc\Skyrim_N3DS_stderr.log`; expected markers are
+   `MENU_INPUT`, `MENU_CPU`, `DEVCAPS=00082000`, `PICA_DRAW`, and
+   `MENU_FRAME_STATUS=SUBMISSION_PASS_FRAME_NOT_CLAIMED` when submission works.
+
+Until that screenshot/log exists this section is **build-only; frame not
+claimed**. The next possible blocker is actual Azahar `GPU_A8` sampling or
+visible rasterisation, not host geometry or index counts.

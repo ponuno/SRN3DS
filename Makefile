@@ -24,6 +24,16 @@ ifneq ($(strip $(LIFT_STAGE)),)
 BUILD := build_lift
 TARGET := Skyrim_N3DS_lift
 endif
+ifneq ($(strip $(MENU_FRAME)),)
+ifeq ($(strip $(LIFT_STAGE)),)
+$(error MENU_FRAME requires LIFT_STAGE)
+endif
+ifneq ($(strip $(GRAPHICS)$(GRAPHICS_COM)$(LIFT_GEN)$(BOOT_SMOKE)$(PILOT_GEN)$(TESV_SLICE)$(AUDIO)$(VA_PROBE)),)
+$(error MENU_FRAME is a separate build mode)
+endif
+BUILD := build_menu_frame
+TARGET := Skyrim_N3DS_menu_frame
+endif
 ifneq ($(strip $(LIFT_GEN)),)
 ifeq ($(strip $(LIFT_STAGE)),)
 $(error LIFT_GEN requires LIFT_STAGE)
@@ -103,7 +113,7 @@ CFLAGS += -DTESV_FORCE_MEMPROBE
 endif
 LDFLAGS := -specs=3dsx.specs -g $(ARCH) -Wl,--gc-sections
 LIBS := -lctru -lm
-ifneq ($(strip $(GRAPHICS)$(GRAPHICS_COM)),)
+ifneq ($(strip $(GRAPHICS)$(GRAPHICS_COM)$(MENU_FRAME)),)
 LIBS := -lcitro3d -lctru -lm
 endif
 ifneq ($(strip $(AUDIO)),)
@@ -152,6 +162,12 @@ ifneq ($(strip $(GRAPHICS_COM)),)
 export OFILES := graphics_com_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_pica_tev.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_citro3d.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d3d9_menu_text.o menu_swf_batch.o d9shader.shbin.o d9shader_color.shbin.o d3d9_capture.o guest.o guest_heap.o pe_imports.o d9shader_cube.shbin.o
 export INCLUDE += -I$(CURDIR)/$(BUILD)
 endif
+ifneq ($(strip $(MENU_FRAME)),)
+# menu_frame_main.c includes the production Citro3D adapter to count the real
+# bind/TEV/DrawElements calls, so d3d9_citro3d.o is deliberately not linked twice.
+export OFILES := menu_frame_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_pica_tev.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d3d9_menu_text.o d3d9_capture.o bsa_reader.o menu_swf.o menu_swf_display.o menu_swf_display_list.o menu_swf_clip.o menu_swf_shape.o menu_swf_tess.o menu_swf_text.o menu_swf_raster.o menu_swf_atlas.o menu_swf_batch.o guest.o guest_heap.o pe_imports.o d9shader.shbin.o d9shader_color.shbin.o d9shader_cube.shbin.o
+export INCLUDE += -I$(CURDIR)/$(BUILD)
+endif
 ifneq ($(strip $(AUDIO)),)
 # The demo talks to the same win32_audio module the guest uses.
 export OFILES := audio_main.o win32_audio.o guest.o
@@ -162,7 +178,7 @@ override export LIFT_STAGE := $(abspath $(LIFT_STAGE))
 export VPATH += $(abspath $(LIFT_STAGE)) $(CURDIR)/tests
 export INCLUDE += -I$(abspath $(LIFT_STAGE))
 export OFILES += n3ds_lift_runtime.o ir_core.o ir_decode.o ir_exec.o ir_container.o rt_prof.o fpu.o win32_shims.o win32_sync.o win32_user.o win32_locale.o win32_shell.o win32_audio.o win32_thread.o win32_hostctx.o win32_input.o win32_steam.o win32_registry.o
-ifeq ($(strip $(GRAPHICS_COM)$(PILOT_GEN)$(TESV_SLICE)),)
+ifeq ($(strip $(GRAPHICS_COM)$(MENU_FRAME)$(PILOT_GEN)$(TESV_SLICE)),)
 ifneq ($(strip $(BOOT_SMOKE)),)
 export OFILES += n3ds_boot.o boot_smoke.o
 else
@@ -205,13 +221,14 @@ clean:
 else
 $(OUTPUT).3dsx: $(OUTPUT).elf
 $(OUTPUT).elf: $(OFILES)
-ifneq ($(strip $(GRAPHICS)$(GRAPHICS_COM)$(TESV_SLICE)),)
+ifneq ($(strip $(GRAPHICS)$(GRAPHICS_COM)$(MENU_FRAME)$(TESV_SLICE)),)
 # Both vertex shaders are compiled from picasso source in source/ and embedded
 # with bin2s.  The colour shader feeds D9Backend.draw_colored.
 PICASSO ?= $(DEVKITPRO)/tools/bin/picasso
 %.shbin: %.v.pica
 	$(PICASSO) -o $@ $<
 d3d9_citro3d.o: d9shader_shbin.h d9shader_color_shbin.h d9shader_cube_shbin.h
+menu_frame_main.o: d9shader_shbin.h d9shader_color_shbin.h d9shader_cube_shbin.h
 %.shbin.o %_shbin.h: %.shbin
 	$(bin2o)
 endif
