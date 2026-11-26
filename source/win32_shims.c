@@ -1694,6 +1694,7 @@ static void s_ReadFile(CPU *c){
     if(!file_can_read[A(0)-0x100])FAIL(ERR_ACCESS_DENIED,0,5);
     if(A(4) || !bytes || !guest_ptr(mem,bytes,4) || (n&&!guest_ptr(mem,A(1),n)))FAIL(ERR_INVALID_PARAMETER,0,5);
     M32(bytes)=0;size_t read=n?fread(guest_ptr(mem,A(1),n),1,n,f):0;M32(bytes)=(uint32_t)read;
+    if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] read %lu bytes -> %lu\n",(unsigned long)n,(unsigned long)read);}}
     if(ferror(f))FAIL(ERR_READ_FAULT,0,5);
     set_error(c,0);RET(1,5);
 }
@@ -1744,6 +1745,7 @@ static void s_SetFilePointer(CPU *c){
     if(whence>2 || (hi&&(!guest_ptr(mem,hi,4)||M32(hi)!=(off<0?UINT32_MAX:0))))FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,4);
     const int origins[]={SEEK_SET,SEEK_CUR,SEEK_END};if(file_seek(f,off,origins[whence]))FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,4);
     int64_t p=file_tell(f);if(p<0)FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,4);
+    {static unsigned sw;if(sw<80u){++sw;fprintf(stderr,"[io] seek %ld whence %lu -> %lld\n",(long)off,(unsigned long)whence,(long long)p);}}
     if(hi)M32(hi)=(uint32_t)((uint64_t)p>>32);
     set_error(c,0);RET((uint32_t)p,4);
 }
