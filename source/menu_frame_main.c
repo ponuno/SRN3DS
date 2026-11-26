@@ -689,11 +689,14 @@ int main(void) {
     }
     FILE *white1_flag = fopen("sdmc:/menu_debug_white1.flag", "r");
     if (white1_flag) {
-        static uint8_t white_pixel = 255;
+        /* 1x1 is below the COM texture minimum; 8x8 is the smallest A8 that
+         * the bridge accepts and still makes every UV opaque. */
+        static uint8_t white8[8 * 8];
         fclose(white1_flag);
-        atlas.width = atlas.height = atlas.stride = 1;
-        atlas.pixels = &white_pixel;
-        fprintf(stderr, "MENU_DEBUG_WHITE1: binding a 1x1 opaque A8 texture\n");
+        memset(white8, 0xFF, sizeof white8);
+        atlas.width = atlas.height = atlas.stride = 8;
+        atlas.pixels = white8;
+        fprintf(stderr, "MENU_DEBUG_WHITE1: binding an 8x8 opaque A8 texture\n");
     }
     if (cpu_ok) {
         unsigned nonzero = 0;
