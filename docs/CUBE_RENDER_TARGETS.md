@@ -397,3 +397,33 @@ Next minimal step: zero the skipped group's buffer array (or skip the
 `0xc92676` group build and its slot bookkeeping) so `GetBufferData` at
 `0xfb6090` sees NULL and returns 0; then re-run for depth/shaders/draw. Do not
 fabricate a cube.
+
+## 12. Where the cube format descriptor comes from (2026-11-26, static)
+
+The fault register probe moved the fault to  x00ced444: CreateSurf calls
+ x00ce9a40 and dereferences [eax+0x0c] without a NULL check. Static reading
+of the lifted slice explains the NULL.
+
+- The renderer singleton is  x001B418B0. Its constructor _CD58F0 creates
+  four format tables by calling _CD4F10(this, table, flag, type):
+  +0x4A4 = (0, 3) texture, +0x4FC = (1, 3) render-target texture,
+  +0x554 = (0, 5) cube, +0x5AC = (1, 5) render-target cube.
+  D3DRTYPE_TEXTURE is 3 and D3DRTYPE_CUBETEXTURE is 5, so +0x5AC is the
+  table CreateSurf needs for the water-reflection cube target.
+- _CED3E0 passes enderer+0x5AC to _CE9A40. That helper looks up the
+  requested format/type pair in the table and returns a format-descriptor
+  pointer, or NULL when the table has no entry. _CED3E0 then reads
+  [descriptor+0x0C] (the D3DFORMAT) before checking the pointer.
+- The constructor fills those tables from measured device capability: the
+  CheckDeviceFormat calls captured in the census come from this path. The
+  census at 4204b1a shows the retail query for the cube descriptor uses
+  usage=0: CheckDeviceFormat(0, 1, 0x16, usage=0, type=CUBETEXTURE,
+  format=0x71) from  x00cd5542 returns D3DERR_NOTAVAILABLE, so +0x5AC
+  stays empty and CreateCubeTexture is never reached.
+
+Implication: accepting only D3DUSAGE_RENDERTARGET is not enough for the
+descriptor query. A measurement-only run has to accept the usage=0
+CUBETEXTURE descriptor check as well (and, if the engine still probes by
+creating a trial resource, let that probe succeed) before the table entry can
+exist. This remains measurement-only; the shipping answer stays the named
+refusal until PICA cube render targets exist.
