@@ -13,6 +13,7 @@
 #include "tesv_sm3_probe.h"
 #include "tesv_cube_probe.h"
 #include "tesv_cecdc0_probe.h"
+#include "tesv_cecdc0_source.h"
 #include "ir_core.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
@@ -163,6 +164,10 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
     }
     if (tesv_cecdc0_skip_probe(&b.memory)) {
         printf("cecdc0 probe: refused; guest run not started\n");
+        goto out;
+    }
+    if (tesv_cecdc0_source_probe(&b.memory)) {
+        printf("cecdc0 source probe: refused; guest run not started\n");
         goto out;
     }
     if (n3ds_ir_cache_init(4u << 20) != 0) printf("IR cache: 4 MiB allocation failed; using default\n");

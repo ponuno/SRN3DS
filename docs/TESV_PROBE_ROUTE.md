@@ -561,6 +561,52 @@ NULL (`0x00ced19d` / the `[esp+0x18]` base slot), or initialize that slot
 before `0x00ced04b`; both are different probes, not an unconditional call-site
 replacement.
 
+
+### CECDC0 source-fill probe (2026-11-26)
+
+`TESV_CECDC0_SOURCE_FILL=1` is host-slice only and not shippable. It
+byte-verifies the `0x00ced041` block (`8B 54 24 54 8B 8A 24 06 00 00 8B 54 24
+18 8B 0C 8A 89 4C 24 14`) and instruments only `f_CECDC0`'s `L_CED041` with
+`n3ds_cecdc0_source_fill(esp, index, ebx)` via
+`tools/instrument_cecdc0_source.py`; the original 68-byte copy is unchanged.
+
+The real source object `[[esp+0x54]+0x604]` is `0x548b6a50`, with
+`[source+0x10]=2`, but `[source+8]=0`: the object has no descriptor at index 2.
+The alternate `[ebp+0x70]=0` branch copies the descriptor from
+`[esp+0x10]+0x14`; at the fault that is `0x54115294`. The hook writes
+`[esp+0x14]=buffer+0x14` and skips the uninitialised `base[index]` overwrite.
+The source-object path is still implemented for a valid `[source+index*4]`;
+both values are real engine pointers, never fabricated descriptors.
+
+Host test `tesv_cecdc0_source` PASS: exact block bytes, fill/no-op, NULL
+source, `[esp+0x10]`/ebx alternative, existing descriptor, unreadable, repeat
+and wrong-byte refusals.
+
+Census on `9743b89`/`gen01` with MEMPROBE + CAPS + TRACE + SM3 + HDR fallback +
+budget64 + cube skip + shader skip + `TESV_CECDC0_SOURCE_FILL=1`, 2e9 steps:
+**219.656 s**, exit 1.
+
+- `0x00ced19d` is **gone**.
+- `CreateTexture` 32 -> **53**.
+- **`CreateCubeTexture` is reached**: one call
+  `CreateCubeTexture(0x20, 1, 0, 0, 1, 0x1007faa8, 0)` from `0x00cecc92`,
+  HRESULT **0x8876086c** (D3DERR_INVALIDCALL; format 0). This is not a real
+  512 cube; no frame is claimed.
+- New first blocker: `[guest] unmapped addr=0000000b bytes=4
+  last_call=00fb6090`; regs `eax=0 ebx=0x0b ecx=0x408486b0 edx=0x1007f97c
+  esi=0 edi=0x1007f97c ebp=0x71 esp=0x1007f9b8`. The getter is reached with a
+  **stack `this=0x408486b0`**, not a recognised `NiRenderTargetGroup` vtable,
+  so the conditional vtable stub and the `0xfb6090` dispatch guard do not
+  intercept it.
+- `GetCubeMapSurface`, `CreateDepthStencilSurface`, `SetRenderTarget`,
+  `SetDepthStencilSurface`, `CreateVertexShader`, `CreatePixelShader`,
+  `SetTexture`, both draw entry points and `Present` remain 0.
+
+The source fill is a real advance: the descriptor-copy fault is gone and the
+engine requests a cube. The route still stops at the stack-copy getter. Next:
+teach the `0xfb6090` guard about that stack-copy group (or the cube's format),
+without fabricating a cube.
+
 ### Fault-register / face-writer probe (2026-11-26)
 
 Base: `main` at `ca60984` (default native render-target cap 256). Added the

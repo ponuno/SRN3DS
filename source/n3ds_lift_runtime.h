@@ -31,6 +31,9 @@ void n3ds_trace_cstr(const char *tag, uint32_t ptr);
 void n3ds_trace_u32(const char *tag, uint32_t value);
 /* Measurement-only dump for the NiDX9TextureBufferData descriptor slot. */
 void n3ds_cube_desc_probe(uint32_t arg, uint32_t index, uint32_t base, uint32_t slot);
+/* Measurement-only fill for f_CECDC0's uninitialised base local.
+ * 1: skip the original lookup and keep the real ebx+0x14/[esp+0x14] value. */
+int n3ds_cecdc0_source_fill(uint32_t frame, uint32_t index, uint32_t ebx);
 void n3ds_lift_exit(uint32_t code) __attribute__((noreturn));
 int n3ds_lift_self_test(void);
 

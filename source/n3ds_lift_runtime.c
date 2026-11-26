@@ -7,6 +7,11 @@ extern void *tesv_cube_probe_ptr(uint32_t address, size_t bytes)
     __attribute__((weak));
 extern int tesv_cube_probe_dispatch(CPU *c, uint32_t addr)
     __attribute__((weak));
+extern int tesv_cecdc0_source_active(void) __attribute__((weak));
+extern int tesv_cecdc0_source_decide(GuestMemory *m, uint32_t frame,
+                                      uint32_t index, uint32_t ebx,
+                                      uint32_t *new_base, uint32_t *new_desc)
+    __attribute__((weak));
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -372,6 +377,29 @@ void n3ds_cube_desc_probe(uint32_t arg, uint32_t index, uint32_t base, uint32_t 
     } else {
         fprintf(stderr, "[cube-desc] base8=unreadable\n");
     }
+}
+
+/* Measurement-only generated-slice hook: fill f_CECDC0's uninitialised base
+ * local from the real source object when the pending descriptor slot is NULL.
+ * The original lookup and 68-byte copy still run. */
+int n3ds_cecdc0_source_fill(uint32_t frame, uint32_t index, uint32_t ebx) {
+    if (!tesv_cecdc0_source_active || !tesv_cecdc0_source_decide) return 0;
+    if (!memory || !tesv_cecdc0_source_active()) return 0;
+    uint32_t new_base = 0, new_desc = 0;
+    int rc = tesv_cecdc0_source_decide(memory, frame, index, ebx, &new_base,
+                                        &new_desc);
+    if (rc == 1) {
+        if (guest_write32(memory, frame + 0x14u, new_desc))
+            fprintf(stderr, "[cecdc0-source] REFUSED: descriptor write "
+                            "failed; no fill\n");
+        return 1; /* skip the base[index] overwrite */
+    }
+    if (rc == 0 && new_base) {
+        if (guest_write32(memory, frame + 0x18u, new_base))
+            fprintf(stderr, "[cecdc0-source] REFUSED: base write failed; "
+                            "no fill\n");
+    }
+    return 0;
 }
 
 void n3ds_trace_cstr(const char *tag, uint32_t ptr) {
