@@ -1,0 +1,6 @@
+{
+  "schema": "d9-shader-plan-v1",
+  "archive": "Skyrim - Shaders.bsa",
+  "note": "Terrain phase-2 classification found no hash in the current single-pass TEV subset; no plan is emitted or runtime-enabled.",
+  "entries": []
+}
