@@ -21,6 +21,7 @@ param(
     [string]$Opt = "-O2",
     [string]$Isolated = "",
     [switch]$NoClean,
+    [int]$Jobs = 0,
     [switch]$ForceMemProbe,
     [uint32]$TesvArmSteps = 0
 )
@@ -97,7 +98,8 @@ if ($Isolated) {
 }
 
 $cleanCmd = if ($NoClean) { "" } else { "make clean $vars && " }
-$cmd = "cd `"$unixRoot`" && export PATH=$devkit/devkitARM/bin:$devkit/tools/bin:`$PATH && ${cleanCmd}make $vars"
+$jobsFlag = if ($Jobs -gt 0) { "-j$Jobs " } else { "" }
+$cmd = "cd `"$unixRoot`" && export PATH=$devkit/devkitARM/bin:$devkit/tools/bin:`$PATH && ${cleanCmd}make ${jobsFlag}$vars"
 
 $dist = Join-Path $root "dist\$target"
 $bin = Join-Path $root "build\$target"

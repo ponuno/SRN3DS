@@ -190,7 +190,9 @@ function Invoke-ClangParallel([string]$Clang, [string[]]$Flags, [string[]]$Sourc
             if ($e.R.Proc.ExitCode -eq 0) {
                 try { Move-Item -LiteralPath $e.Tmp -Destination $e.Obj -Force -ErrorAction Stop }
                 catch {
-                    if (-not (Test-Path -LiteralPath $e.Obj)) {
+                    if (Test-Path -LiteralPath $e.Obj) {
+                        Remove-Item -LiteralPath $e.Tmp -Force -ErrorAction SilentlyContinue
+                    } else {
                         $failed = $true
                         $allOut.Add("OBJECT CACHE STORE FAILED: $($e.Obj)")
                     }
