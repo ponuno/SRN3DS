@@ -618,6 +618,9 @@ static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
     C3D_TexFlush(&t->tex);
     linearFree(tmp);return 0;
 }
+/* PICA target_create/render-target views always allocate DEPTH24_STENCIL8;
+ * d9_set_depth_surface only validates the descriptor size. */
+static int depth_attachment_embedded(void *ctx){(void)ctx;return 1;}
 /* Clear the depth attachment of the currently bound colour target.  PICA stores
  * depth and stencil in one DEPTH24_STENCIL8 buffer, so a depth clear writes the
  * packed word (and, with it, the stencil byte). */
@@ -762,4 +765,4 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
      * PROJECTION and SHADOW_CUBE only; there is no 3D texture mode, so volume
      * sampling is refused by name and the PICA backend also has no
      * texture_create_volume callback. */
-    NULL};return &ops;}
+    NULL,depth_attachment_embedded};return &ops;}

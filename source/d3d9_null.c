@@ -590,7 +590,7 @@ static const D9Backend backend={null_texture_create,null_texture_upload,null_tex
     null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete,
     null_cube_face_create,null_cube_face_delete,
     null_texture_create_format,null_texture_upload_format,null_draw_menu_indexed,
-    null_draw_volume};
+    null_draw_volume,NULL};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

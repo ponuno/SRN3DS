@@ -314,6 +314,14 @@ typedef struct {
     int (*draw_volume)(void *ctx,const D9ColorVertex *vertices,size_t count,
                        const D9Matrix *clip,const D9VolumeView *volume,
                        const D9DrawState *state);
+    /* Optional embedded-depth capability, appended after draw_volume so all
+     * existing positional initializers keep their meaning.  Return 1 when each
+     * colour target already owns a depth-stencil attachment (PICA); the core
+     * then treats a matching SetDepthStencilSurface as a no-op and a size
+     * mismatch as D3DERR_INVALIDCALL instead of the separate-depth backend's
+     * D3DERR_NOTAVAILABLE path.  NULL means separate depth objects (null
+     * backend) and keeps the old policy. */
+    int (*depth_attachment_embedded)(void *ctx);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);

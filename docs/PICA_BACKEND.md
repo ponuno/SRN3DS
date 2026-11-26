@@ -811,9 +811,17 @@ it to the screen, `LockRect`/`UnlockRect` read/write it through
 Explicit `D24S8`/`D24X8` depth-stencil surfaces are supported as descriptors of
 the active target's single PICA `DEPTH24_STENCIL8` attachment
 (`CreateDepthStencilSurface`, `SetDepthStencilSurface`, `Clear(Z|STENCIL)`):
-pow2 8..1024 or the exact 400x240 back-buffer size, bound only when the size
-matches the active target (the 400x240 back buffer or a render-target texture's
-backing target). No separate VRAM is allocated for a depth descriptor.
+pow2 8..1024 or the exact 400x240 back-buffer size.  Every PICA colour target
+already owns its depth attachment, so a size-matching
+`SetDepthStencilSurface` is a no-op `S_OK`; a mismatched surface is a named
+`D3DERR_INVALIDCALL` (`the depth-stencil size does not match the active render
+target's embedded depth attachment`) with no retry and no rebind.  The backend
+advertises this through the append-only
+`depth_attachment_embedded(ctx)` callback; the null backend has separate depth
+objects, leaves the callback NULL and keeps the old matching-only
+`D3DERR_NOTAVAILABLE` refusal.  `Clear(Z)` still reaches the active target's
+`C3D_RenderTargetClear(...C3D_CLEAR_DEPTH...)` with the packed D24S8 value.
+No separate VRAM is allocated for a depth descriptor.
 A lockable target requires both a readback and a
 write-back callback; the null backend keeps real BGRA pixels (including a
 private 400x240 presented image) and implements both, so the host tests verify

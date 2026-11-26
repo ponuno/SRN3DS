@@ -1602,6 +1602,7 @@ static int apply_target_viewport(D9Device *d,Target *t){
     }
     return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,t->w,t->h)?D9_BACKEND:D9_OK;
 }
+static int backend_depth_embedded(const D9Device *d);
 int d9_set_render_target(D9Device *d,D9Handle h){
     if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
     /* Handle zero means the default back buffer: the retained target when
@@ -1617,7 +1618,7 @@ int d9_set_render_target(D9Device *d,D9Handle h){
         else if(d->back_valid){nw=d->back_w;nh=d->back_h;}
         else return D9_INVALID;
         Depth *s=depth_slot(d,d->depth);
-        if(!s||s->w!=nw||s->h!=nh){
+        if(!s||((s->w!=nw||s->h!=nh)&&!backend_depth_embedded(d))){
             set_diagnosis(d,"SetRenderTarget: the bound depth-stencil surface does not match the new render target size");
             return D9_UNSUPPORTED;
         }
@@ -3155,6 +3156,13 @@ static int logical_dims(const D9Device *d,unsigned *w,unsigned *h){
     if(!d->back_valid)return D9_INVALID;
     *w=d->back_w;*h=d->back_h;return D9_OK;
 }
+/* PICA colour targets embed their depth-stencil attachment; a D3D depth
+ * surface is only a size/formats descriptor.  Other backends keep separate
+ * depth objects. */
+static int backend_depth_embedded(const D9Device *d){
+    return d&&d->ops.depth_attachment_embedded&&
+           d->ops.depth_attachment_embedded(d->ctx);
+}
 int d9_set_depth_surface(D9Device *d,D9Handle h){
     if(!d||d->teardown)return D9_INVALID;
     Depth *s=h?depth_slot(d,h):NULL;
@@ -3162,6 +3170,11 @@ int d9_set_depth_surface(D9Device *d,D9Handle h){
     if(s){
         unsigned w,height;
         if(logical_dims(d,&w,&height)||s->w!=w||s->h!=height){
+            if(backend_depth_embedded(d)){
+                set_diagnosis(d,"SetDepthStencilSurface: the depth-stencil size does not "
+                                "match the active render target's embedded depth attachment");
+                return D9_INVALID;
+            }
             set_diagnosis(d,"SetDepthStencilSurface: the depth-stencil size does not match the active render target");
             return D9_UNSUPPORTED;
         }
