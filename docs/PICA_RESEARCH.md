@@ -208,8 +208,9 @@ it explains why the current single-instruction-per-stage planner refuses it.
    saturate bit, each source register/index/swizzle/modifier, relative
    address, and instruction length. Do not compare raw
    `instruction_count`: MojoShader and our parser count `dcl`/`def`
-   differently, so a naive count comparison produces many false mismatches.
-   Compare the decoded fields instead.
+   differently. In this worktree, a naive count comparison reported 8,921 of
+   9,621 PS chunks as different for that reason alone, with no parse error on
+   either side. Compare the decoded fields instead.
 5. Store the normalized IR by SHA-256 in a generated, git-ignored cache. The
    planner consumes the IR; the runtime keeps only the accepted plan table.
 
