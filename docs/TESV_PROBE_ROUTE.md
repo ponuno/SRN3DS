@@ -111,6 +111,29 @@ Static post-gate chain (read-only analysis):
   preflight-versus-observed certification order must be resolved before the
   closure can be the gate predicate.
 
+Census result (104 s, exit 1, `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_census_final2.*`):
+
+- The gate is passed and the SM3 message disappears; VS/PS stay 2.0 and guest
+  `[0x01ba749c]` stays `7`.
+- **No shader is created.** `CreateVertexShader`/`CreatePixelShader` are not
+  reached after the gate.
+- The first post-gate D3D9 activity is the nonfatal `CheckDeviceFormat` probe
+  loop at `0x00c6e447`, then `CreateTexture` with `D3DUSAGE_RENDERTARGET`
+  (`caller 0x00ceca5e`, 1024x1024, levels 1, format `0x72` A32B32G32R32F,
+  pool 0) returning `D3DERR_NOTAVAILABLE` (`0x8876086a`); the engine repeats
+  1024/512/256 with formats `0x72`, `0x15` (A8R8G8B8) and `0x71`
+  (A16B16G16R16F).
+- After every target creation failed, the engine dereferenced the missing
+  target at `0x00fb5bd0` and faulted on `[0x0000000c]`. Depth-stencil, draws and
+  `Present` were never reached; only `RendererInfo.txt` was opened.
+
+The LDR half of that census is now implemented: pow2 8..1024
+X8R8G8B8/A8R8G8B8 render-target textures with one level and pool DEFAULT are
+real Target-backed textures, `GetSurfaceLevel(0)` returns the target and
+`SetTexture` samples the same colour buffer. Float/HDR render targets stay
+named refusals. Re-running the census with this layer is the next measurement;
+no shader or frame claim follows from the old trace.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the

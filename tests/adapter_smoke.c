@@ -91,7 +91,8 @@ int main(void){
     args[5]=0x32545844u;assert(call(&s,s.factory,10,args,6)==0x8876086au);   /* DXT2 */
     args[5]=0x34545844u;assert(call(&s,s.factory,10,args,6)==0x8876086au);   /* DXT4 */
     args[5]=D9_A8R8G8B8;args[3]=1;args[4]=1;assert(call(&s,s.factory,10,args,6)==0); /* LDR render-target surface */
-    args[4]=3;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* render-target textures are not implemented */
+    args[4]=3;assert(call(&s,s.factory,10,args,6)==0); /* LDR render-target texture */
+    args[5]=0x72u;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* HDR RT texture */
     args[4]=1;args[5]=D9_DXT1;assert(call(&s,s.factory,10,args,6)==0x8876086au);
     args[5]=D9_A8R8G8B8;args[3]=0x00020001u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
     args[3]=0x00020000u;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* QUERY_FILTER is texture-only */

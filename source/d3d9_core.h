@@ -17,6 +17,7 @@ enum {D9_TRIANGLELIST=4,D9_TRIANGLESTRIP=5,D9_TRIANGLEFAN=6,D9_A8R8G8B8=21,D9_X8
       D9_D24S8=75,D9_D24X8=77,D9_INDEX16=101,D9_INDEX32=102};
 enum {D9_DXT1=0x31545844u,D9_DXT3=0x33545844u,D9_DXT5=0x35545844u};
 enum {D9_POOL_DEFAULT=0,D9_POOL_MANAGED=1,D9_POOL_SYSTEMMEM=2};
+enum {D9_USAGE_RENDERTARGET=1};
 enum {D9_TEX_ETC1=0,D9_TEX_ETC1A4=1};
 enum {D9_WORLD=0,D9_VIEW=1,D9_PROJECTION=2};
 /* Fixed-function texture stage subset used by the GFx UI batch.  Only stage 0
@@ -170,6 +171,14 @@ int d9_texture_lock_level_ex(D9Device *d,D9Handle h,unsigned level,void **ptr,
 int d9_texture_unlock_level(D9Device *d,D9Handle h,unsigned level);
 int d9_texture_unlock_readonly(D9Device *d,D9Handle h,unsigned level);
 int d9_release_texture(D9Device *d,D9Handle h);
+/* D3DUSAGE_RENDERTARGET texture: a Texture handle backed by a Target's colour
+ * buffer.  Only pool DEFAULT, one level and a pow2 8..1024 X8R8G8B8/A8R8G8B8
+ * format are accepted.  The texture carries no guest copy; GetSurfaceLevel(0)
+ * exposes the backing target and SetTexture samples it after rendering. */
+int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
+                             unsigned pool,unsigned usage,D9Handle *out);
+/* Returns the backing target handle for a render-target texture, or zero. */
+D9Handle d9_texture_render_target(const D9Device *d,D9Handle h);
 /* One LDR render target at a time.  Handle zero is the implicit back buffer. */
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,
                             int lockable,D9Handle *out);

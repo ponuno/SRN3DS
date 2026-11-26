@@ -164,6 +164,10 @@ int d9_adapter_check_device_format(unsigned adapter,unsigned device_type,unsigne
         return format==D9_X8R8G8B8||format==D9_A8R8G8B8?D9_ADAPTER_OK:D9_ADAPTER_UNAVAILABLE;
     }
     if(resource_type!=RTYPE_TEXTURE)return D9_ADAPTER_UNAVAILABLE;
+    /* Render-target textures are real LDR targets with a single level; float
+     * and HDR formats are not PICA200 render targets in this bridge. */
+    if(usage==USAGE_RENDERTARGET)
+        return format==D9_X8R8G8B8||format==D9_A8R8G8B8?D9_ADAPTER_OK:D9_ADAPTER_UNAVAILABLE;
     /* The sampler really does point/linear filtering, wrap/mirror/clamp and
      * explicit mip chains; every other usage bit is a capability we do not have. */
     if(usage&~(USAGE_QUERY_FILTER|USAGE_QUERY_WRAPANDMIP))return D9_ADAPTER_UNAVAILABLE;

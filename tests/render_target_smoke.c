@@ -133,10 +133,10 @@ int main(void){
     assert(!d9_release_render_target(small,a));d9_destroy_device(small);
 
     D9Device *slots=d9_create_device(&ops,&sw,4096);assert(slots);
-    D9Handle hs[4]={0};
-    for(unsigned i=0;i<4;++i)assert(!d9_create_render_target(slots,8,8,D9_A8R8G8B8,1,&hs[i]));
+    D9Handle hs[12]={0};
+    for(unsigned i=0;i<12;++i)assert(!d9_create_render_target(slots,8,8,D9_A8R8G8B8,1,&hs[i]));
     assert(d9_create_render_target(slots,8,8,D9_A8R8G8B8,1,&info)==D9_MEMORY&&!info);
-    for(unsigned i=0;i<4;++i)assert(!d9_release_render_target(slots,hs[i]));
+    for(unsigned i=0;i<12;++i)assert(!d9_release_render_target(slots,hs[i]));
     d9_destroy_device(slots);
 
     sw.fail_create=1;d=d9_create_device(&ops,&sw,4096);assert(d);

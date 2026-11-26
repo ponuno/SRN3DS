@@ -132,7 +132,9 @@ int main(int argc,char **argv){
     uint32_t fmt[]={0,1,D9_X8R8G8B8,0,1,D9_A8R8G8B8};
     assert(call(&h,h.factory,10,fmt,6)==0); /* lockable CPU plain surface format */
     fmt[3]=1;assert(call(&h,h.factory,10,fmt,6)==0); /* one LDR render-target surface */
-    fmt[4]=3;assert(call(&h,h.factory,10,fmt,6)==0x8876086au); /* no render-target texture */
+    fmt[4]=3;assert(call(&h,h.factory,10,fmt,6)==0); /* LDR render-target texture */
+    fmt[5]=0x72u;assert(call(&h,h.factory,10,fmt,6)==0x8876086au); /* HDR RT texture */
+    fmt[5]=D9_A8R8G8B8;
     fmt[4]=1;fmt[3]=0x00020001u;assert(call(&h,h.factory,10,fmt,6)==0x8876086au);
     fmt[3]=0;fmt[5]=75;assert(call(&h,h.factory,10,fmt,6)==0); /* D24S8 depth surface */
     fmt[5]=77;assert(call(&h,h.factory,10,fmt,6)==0); /* D24X8, same attachment */

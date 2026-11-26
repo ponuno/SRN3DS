@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <math.h>
 
-enum {MAX_BUFFERS=32,MAX_TEXTURES=16,MAX_TARGETS=4,MAX_DEPTHS=2,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
 typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
 typedef struct {
     D9Handle id;size_t offset,stride;
@@ -21,6 +21,9 @@ typedef struct {
     D9Handle id;unsigned w,h,format,levels,gpu_levels,locked,pool,usage;
     int cpu_only,gpu_only,disposable,cache_pinned;
     size_t cost,cpu_bytes,gpu_bytes;uint8_t *pixels;void *native;Level level[MAX_LEVELS];
+    /* D3DUSAGE_RENDERTARGET: nonzero target handle whose colour buffer is the
+     * texture storage.  The Texture owns no separate native allocation. */
+    D9Handle rt_target;
 } Texture;
 struct D9Device {
     D9Backend ops;void *ctx;size_t used,limit;D9Handle next;int teardown;
@@ -119,6 +122,11 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
 }
 static Buffer *buffer(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_BUFFERS;++i)if(d->buffers[i].id==id)return &d->buffers[i];return NULL;}
 static Texture *texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_TEXTURES;++i)if(d->textures[i].id==id)return &d->textures[i];return NULL;}
+D9Handle d9_texture_render_target(const D9Device *d,D9Handle h){
+    if(!d||!h)return 0;
+    for(unsigned i=0;i<MAX_TEXTURES;++i)if(d->textures[i].id==h)return d->textures[i].rt_target;
+    return 0;
+}
 int d9_destroy_device_ex(D9Device *d){
     if(!d)return D9_INVALID;d->teardown=1;
     if(d->scene){d->ops.end(d->ctx);d->scene=0;}
@@ -299,6 +307,12 @@ int d9_texture_lock(D9Device *d,D9Handle h,void **ptr,size_t *pitch){return d9_t
 int d9_texture_unlock(D9Device *d,D9Handle h){return d9_texture_unlock_level(d,h,0);}
 int d9_texture_unlock_readonly(D9Device *d,D9Handle h,unsigned level){Texture *t=d?texture(d,h):NULL;return finish_texture_unlock(d,t,level,1);}
 int d9_release_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if(!t||d->scene||d->teardown||t->locked)return D9_INVALID;
+    if(t->rt_target){
+        D9Handle tgt=t->rt_target;
+        if(d->texture==h)d->texture=0;if(d->texture1==h)d->texture1=0;
+        memset(t,0,sizeof *t);
+        return d9_release_render_target(d,tgt);
+    }
     int rc=d9_texcache_remove(&d->tex_cache,h);
     if(rc!=D9TEXCACHE_OK){
         if(rc==D9TEXCACHE_RELEASE_FAILED){
@@ -326,6 +340,24 @@ int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,in
     }
     D9Handle id=d->next++;*slot=(Target){id,w,h,format,lockable?1:0,bytes,native};
     d->target_used+=bytes;*out=id;return D9_OK;
+}
+int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
+                             unsigned pool,unsigned usage,D9Handle *out){
+    if(out)*out=0;
+    if(!d||d->scene||d->teardown||!out||!d->next||pool!=D9_POOL_DEFAULT||
+       usage!=D9_USAGE_RENDERTARGET||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))
+        return D9_INVALID;
+    D9Handle tgt=0;int rc=d9_create_render_target(d,w,h,format,0,&tgt);
+    if(rc)return rc;
+    Target *tg=target(d,tgt);
+    Texture *slot=NULL;
+    for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
+    if(!tg||!slot){d9_release_render_target(d,tgt);return D9_MEMORY;}
+    Texture t;memset(&t,0,sizeof t);
+    t.w=w;t.h=h;t.format=format;t.levels=1;t.gpu_levels=1;t.pool=pool;t.usage=usage;
+    t.gpu_only=1;t.native=tg->native;t.rt_target=tgt;
+    t.level[0]=(Level){w,h,(size_t)w*4u,(size_t)w*h*4u,0,1};
+    t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
 int d9_set_render_target(D9Device *d,D9Handle h){
     if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
@@ -551,7 +583,7 @@ int d9_set_texture(D9Device *d,D9Handle h){return d9_bind_texture(d,0,h);}
 int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
     if(stage>=d9_stage_count(d)){if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");return D9_UNSUPPORTED;}
     Texture *t=d?texture(d,h):NULL;if(!d||d->teardown||(h&&(!t||t->locked||!t->native||!t->level[0].uploaded)))return D9_INVALID;
-    if(h){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
+    if(h&&!t->rt_target){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
     if(stage)d->texture1=h;else d->texture=h;return D9_OK;}
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;

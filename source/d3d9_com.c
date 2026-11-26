@@ -347,7 +347,7 @@ static void check_format(CPU *c){
             (A(5)!=3&&A(5)!=1)?"only D3DRTYPE_TEXTURE and plain D3DRTYPE_SURFACE are implemented":
             A(5)==1&&A(4)&&A(4)!=1?"only usage zero or D3DUSAGE_RENDERTARGET is implemented for surfaces":
             A(5)==1?"plain/render-target surfaces require a 32-bit X8R8G8B8/A8R8G8B8 format":
-            A(4)==1?"render-target textures are not implemented":
+            A(4)==1?"render-target textures are available only as X8R8G8B8/A8R8G8B8":
             "format is not A8R8G8B8, X8R8G8B8, DXT1, DXT3 or DXT5";
         d3d_log("CheckDeviceFormat",why);RET(adapter_result(rc),7);
     }
@@ -834,7 +834,24 @@ static void create_ib(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!
     o->handle=h;o->bytes=A(1);o->usage=A(2);o->format=A(3);o->pool=A(4);retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,7);}
 static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,9);M32(out)=0;
     if(A(8))RET(INVALID,9);
-    if(A(4)&~0x00220200u){d3d_fail("CreateTexture","autogen, render-target, depth-stencil and non-DYNAMIC texture usages are not implemented",UNAVAILABLE);RET(UNAVAILABLE,9);}
+    if(A(4)==1u){
+        unsigned w=A(1),height=A(2),levels=A(3),format=A(5),pool=A(6);
+        const char *why=pool!=0?"render-target textures require D3DPOOL_DEFAULT":
+            levels!=1?"render-target textures are implemented with exactly one level":
+            (w<8||height<8||w>1024||height>1024||(w&(w-1))||(height&(height-1)))?
+                "render-target textures must be power-of-two 8..1024":
+            (format!=D9_A8R8G8B8&&format!=D9_X8R8G8B8)?
+                "float/HDR render-target textures are not implemented; A8R8G8B8 and X8R8G8B8 only":NULL;
+        if(why){d3d_fail("CreateTexture",why,UNAVAILABLE);RET(UNAVAILABLE,9);}
+        if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_render_texture(g.device,w,height,format,pool,1u,&h);
+        if(rc){d3d_log("CreateTexture",rc==D9_MEMORY?
+                "render-target texture memory budget exceeded":
+                "render-target texture creation failed");RET(rc==D9_MEMORY?OUTMEM:UNAVAILABLE,9);}
+        Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
+        o->handle=h;o->width=w;o->height=height;o->bytes=w*height*4u;o->pitch=w*4u;
+        o->format=format;o->usage=1u;o->pool=pool;retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,9);
+    }
+    if(A(4)&~0x00220200u){d3d_fail("CreateTexture","autogen, depth-stencil and non-DYNAMIC texture usages are not implemented",UNAVAILABLE);RET(UNAVAILABLE,9);}
     if(A(6)>2)RET(UNAVAILABLE,9);
     if(A(6)==1)d3d_log("CreateTexture","MANAGED keeps a guest-backed restoration source; device-loss restoration is pending");
     if(A(6)==2)d3d_log("CreateTexture","SYSTEMMEM is CPU-only and cannot be bound as a GPU texture");
@@ -894,6 +911,20 @@ static void texture_get_surface_level(CPU *c){
     Obj *t=obj(A(0),TEX);uint32_t level=A(1),out=A(2);
     if(!t||!ptr(out,4))RET(INVALID,3);
     M32(out)=0;
+    D9Handle rt=d9_texture_render_target(g.device,t->handle);
+    if(rt){
+        if(level){d3d_log("GetSurfaceLevel","a render-target texture exposes only level 0");RET(INVALID,3);}
+        if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+        Obj *o=new_obj(SURFACE);if(!o)RET(OUTMEM,3);
+        o->width=t->width;o->height=t->height;o->format=t->format;o->usage=t->usage;o->pool=t->pool;
+        o->pitch=t->pitch;o->bytes=t->bytes;o->handle=rt;
+        o->is_view=1;o->view_parent=t;o->view_texture=t->handle;o->view_level=0;
+        retain(t);M32(out)=o->guest;
+        trace_detail("Render-target surface=0x%08lx texture=0x%08lx target=%lu %lux%lu",
+            (unsigned long)o->guest,(unsigned long)t->guest,(unsigned long)rt,
+            (unsigned long)t->width,(unsigned long)t->height);
+        RET(OK,3);
+    }
     void *pixels=NULL;unsigned w=0,h=0;size_t pitch=0,bytes=0;
     int rc=d9_texture_level_view(g.device,t->handle,level,&pixels,&w,&h,&pitch,&bytes);
     if(rc){

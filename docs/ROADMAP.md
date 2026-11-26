@@ -241,8 +241,12 @@ read stage without fake successes. *Not met.*
 - [~] One explicit LDR render-target surface is implemented across core/COM/PICA:
   VRAM colour target, no depth, clear/bind/restore, read-only LockRect and bounded
   lifetime. Azahar switching pixel proof passes. `GetViewport` is corrected to
-  slot 48. Viewport orientation, depth/stencil, scissor, state blocks, fog,
-  multi-stage samplers, skinning, terrain and particles remain unsupported.
+  slot 48. `D3DUSAGE_RENDERTARGET` textures (pow2 8..1024 X8R8G8B8/A8R8G8B8,
+  one level, pool DEFAULT) are real target-backed textures: `GetSurfaceLevel(0)`
+  returns the render target and `SetTexture` samples the same colour buffer.
+  Float/HDR render targets, mip chains, viewport orientation, depth/stencil,
+  scissor, state blocks, fog, multi-stage samplers, skinning, terrain and
+  particles remain unsupported.
 - [ ] Golden-image tests with tolerances; check emulator vs hardware differences.
 
 **Gate:** real Skyrim main menu and then world geometry drawn by TESV, not a
