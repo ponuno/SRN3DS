@@ -47,6 +47,9 @@ from shaders import compile as C  # noqa: E402
 
 PLANS_PATH = os.path.join(HERE, "menu_plans.json")
 IR_PATH = os.path.join(HERE, "menu_ir.json")
+#: Shared-catalog file discovered by tools/fxp_compile.py.  Entries here are
+#: translated-only (`runtime` absent/0); nothing claims a runtime table slot.
+CATALOG_PATH = os.path.join(HERE, "plans.json")
 
 # GFx D3D9 renderer tables in TESV.exe (see docs/MENU_SHADERS.md section 2-3).
 VS_TABLE_VA = 0x12DFCA8
@@ -399,6 +402,17 @@ def build(tesv: str) -> dict:
             "refused": len(refusals),
         },
     }
+    catalog = {
+        "schema": "d9-shader-plan-v1",
+        "archive": "TESV.exe (GFx renderer tables 0x%08x / 0x%08x)"
+                   % (VS_TABLE_VA, PS_TABLE_VA),
+        "note": ("Pack-owned StartMenu/GFx plans. Translated only: no entry is "
+                 "draw-certified, so none sets runtime=1 and none enters the "
+                 "16-slot runtime table. Hashes are the true full-blob "
+                 "SHA-256; MENU_SHADERS prefix hashes are kept in "
+                 "menu_plans.json."),
+        "entries": [dict(entry, runtime=0) for entry in entries],
+    }
     ir_doc = {
         "schema": "ui-menu-ir/1",
         "note": ("Derived IR metadata only: no bytecode. sha256 over the "
@@ -406,7 +420,7 @@ def build(tesv: str) -> dict:
         "rows": ir_rows,
         "prefix_to_full": prefix_to_full,
     }
-    return doc, ir_doc
+    return doc, ir_doc, catalog
 
 
 def by_prefix_code(rows, prefix):
@@ -419,12 +433,23 @@ def by_prefix_code(rows, prefix):
 # --------------------------------------------------------------------------
 # Check
 
-def check(plans_path=PLANS_PATH, ir_path=IR_PATH, tesv="") -> list:
+def check(plans_path=PLANS_PATH, ir_path=IR_PATH, catalog_path=CATALOG_PATH,
+          tesv="") -> list:
     problems = []
     with open(plans_path, encoding="utf-8") as handle:
         doc = json.load(handle)
     with open(ir_path, encoding="utf-8") as handle:
         ir_doc = json.load(handle)
+    with open(catalog_path, encoding="utf-8") as handle:
+        catalog = json.load(handle)
+    if any(entry.get("runtime") == 1 for entry in catalog.get("entries", [])):
+        problems.append("catalog: a translated menu plan claims a runtime slot")
+    catalog_by_sha = {entry.get("sha256"): entry
+                      for entry in catalog.get("entries", [])}
+    expected_catalog = {entry["sha256"]: dict(entry, runtime=0)
+                        for entry in doc.get("entries", [])}
+    if catalog_by_sha != expected_catalog:
+        problems.append("catalog: plans.json and menu_plans.json drifted")
 
     ids, shas = set(), set()
     expected = EXPECTED_PREFIX["vs"] + EXPECTED_PREFIX["ps"]
@@ -494,7 +519,7 @@ def check(plans_path=PLANS_PATH, ir_path=IR_PATH, tesv="") -> list:
                             % row["prefix_sha256"][:8])
 
     if tesv:
-        fresh, fresh_ir = build(tesv)
+        fresh, fresh_ir, _fresh_catalog = build(tesv)
         old = {(e["prefix_sha256"]): e for e in doc["entries"]}
         new = {(e["prefix_sha256"]): e for e in fresh["entries"]}
         if set(old) != set(new):
@@ -526,15 +551,19 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "build":
-        doc, ir_doc = build(args.tesv)
+        doc, ir_doc, catalog = build(args.tesv)
         with open(PLANS_PATH, "w", encoding="utf-8") as handle:
             json.dump(doc, handle, indent=1, sort_keys=True)
             handle.write("\n")
         with open(IR_PATH, "w", encoding="utf-8") as handle:
             json.dump(ir_doc, handle, indent=1, sort_keys=True)
             handle.write("\n")
-        print("wrote %s and %s" % (os.path.basename(PLANS_PATH),
-                                   os.path.basename(IR_PATH)))
+        with open(CATALOG_PATH, "w", encoding="utf-8") as handle:
+            json.dump(catalog, handle, indent=1, sort_keys=True)
+            handle.write("\n")
+        print("wrote %s, %s and %s" % (
+            os.path.basename(PLANS_PATH), os.path.basename(IR_PATH),
+            os.path.basename(CATALOG_PATH)))
         print(json.dumps(doc["coverage"], indent=2))
         return 0
 

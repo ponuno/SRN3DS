@@ -66,11 +66,22 @@ def main(argv=None):
           "full-blob identity counts")
     check(len(ir.get("rows", [])) == 10, "ten IR rows")
 
-    problems = T.check(plans_path=T.PLANS_PATH, ir_path=T.IR_PATH, tesv=tesv)
+    with open(T.CATALOG_PATH, encoding="utf-8") as handle:
+        catalog = json.load(handle)
+    check(catalog.get("schema") == "d9-shader-plan-v1", "catalog schema")
+    check(len(catalog.get("entries", [])) == 5, "catalog has five entries")
+    check(all(e.get("runtime") != 1 for e in catalog.get("entries", [])),
+          "no catalog entry claims a runtime slot")
+    check({e["sha256"] for e in catalog["entries"]}
+          == {e["sha256"] for e in entries},
+          "catalog and measurement doc agree")
+
+    problems = T.check(plans_path=T.PLANS_PATH, ir_path=T.IR_PATH,
+                       catalog_path=T.CATALOG_PATH, tesv=tesv)
     check(not problems, "symbolic verifier: %r" % problems)
 
     print(json.dumps({
-        "checks": 16,
+        "checks": 20,
         "failures": FAILS,
         "translated": len(entries),
         "refused": len(refusals),

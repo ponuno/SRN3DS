@@ -1,0 +1,530 @@
+{
+ "archive": "TESV.exe (GFx renderer tables 0x012dfca8 / 0x012dfcd8)",
+ "entries": [
+  {
+   "codegen": "pending",
+   "constants": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "draw_enabled": 0,
+   "expandable": [],
+   "family": "ui",
+   "id": "menu.gfx.vs.4281bd82",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 2,
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    }
+   ],
+   "instructions": 6,
+   "kind": "pica_vs",
+   "measurable_objects": 1,
+   "note": "PICA VS descriptor for a GFx menu program; native codegen pending, draw disabled",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 2,
+     "type": 6,
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    }
+   ],
+   "prefix_sha256": "4281bd82262c5a5a8d26588a60fea83d52a265f8ef08fcbf34ce2b0045eb826a",
+   "runtime": 0,
+   "sha1": "9187a51ac807e1ac37efe7dcbc9a820a95b0f7aa",
+   "sha256": "264c20659a094788a9f7c7f53e7626fc5f6a07613894c150510ffb5a3066be39",
+   "skinning": false,
+   "source_slot": 2,
+   "source_table": "0x012dfca8",
+   "stage": "vs_3_0",
+   "uniform_registers": 4,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "constants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "draw_enabled": 0,
+   "expandable": [],
+   "family": "ui",
+   "id": "menu.gfx.vs.77bc67a8",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    }
+   ],
+   "instructions": 6,
+   "kind": "pica_vs",
+   "measurable_objects": 3,
+   "note": "PICA VS descriptor for a GFx menu program; native codegen pending, draw disabled",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "prefix_sha256": "77bc67a86e38ea6565c82f95313185a48420430c4f4c7afa6144d144ce075376",
+   "runtime": 0,
+   "sha1": "caa4027654aef71bbbd81767a06e1bcce29b3831",
+   "sha256": "6186c545f488d0f84789cf3e0ca55d0fd87f37c2091f87239f5dccf7afc404a0",
+   "skinning": false,
+   "source_slot": 1,
+   "source_table": "0x012dfca8",
+   "stage": "vs_3_0",
+   "uniform_registers": 6,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "constants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "draw_enabled": 0,
+   "expandable": [],
+   "family": "ui",
+   "id": "menu.gfx.vs.ad97e55f",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    },
+    {
+     "reg_index": 2,
+     "usage": 10,
+     "usage_index": 1,
+     "usage_name": "color"
+    }
+   ],
+   "instructions": 10,
+   "kind": "pica_vs",
+   "measurable_objects": 1,
+   "note": "PICA VS descriptor for a GFx menu program; native codegen pending, draw disabled",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    },
+    {
+     "reg_index": 2,
+     "type": 6,
+     "usage": 10,
+     "usage_index": 1,
+     "usage_name": "color"
+    },
+    {
+     "reg_index": 3,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 4,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 1,
+     "usage_name": "texcoord"
+    }
+   ],
+   "prefix_sha256": "ad97e55f922355acfd8f40e8d37f53ab122c8d3f7dbc5e2af1cc5e4adbe1f924",
+   "runtime": 0,
+   "sha1": "ef20631c6c684a230fb5ada056115d91dbedcf16",
+   "sha256": "0975cc503f63d9b1a1a36f8886a34043742e9a13f4a351e203d5dbd33b3f95ce",
+   "skinning": false,
+   "source_slot": 5,
+   "source_table": "0x012dfca8",
+   "stage": "vs_3_0",
+   "uniform_registers": 8,
+   "version": "0xfffe0300"
+  },
+  {
+   "constants": [
+    2,
+    3
+   ],
+   "draw_enabled": 0,
+   "family": "ui",
+   "id": "menu.gfx.ps.2c4a7280",
+   "inputs": [],
+   "instructions": 3,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": false,
+    "constants": [
+     2,
+     3
+    ],
+    "runtime_binding_measured": false,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "measurable_objects": 14,
+   "note": "GFx menu PS translated to TEV; draw blocked until the c2/c3 material binding is measured",
+   "plan_expression": [
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      0
+     ],
+     [
+      "const",
+      2,
+      0
+     ],
+     [
+      "const",
+      3,
+      0
+     ]
+    ],
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      1
+     ],
+     [
+      "const",
+      2,
+      1
+     ],
+     [
+      "const",
+      3,
+      1
+     ]
+    ],
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      2
+     ],
+     [
+      "const",
+      2,
+      2
+     ],
+     [
+      "const",
+      3,
+      2
+     ]
+    ],
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      3
+     ],
+     [
+      "const",
+      2,
+      3
+     ],
+     [
+      "const",
+      3,
+      3
+     ]
+    ]
+   ],
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "55e30fe2c407f3ea6c8ed17dc2b5a8e0ff4162ae",
+   "sha256": "0eb58f00a88d68a6378e149f165bd371c069f344c6d459390c27624ea976817e",
+   "source_slot": 1,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 232
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "mov",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      14,
+      15,
+      15
+     ],
+     "src_rgb": [
+      14,
+      15,
+      15
+     ],
+     "word": 248
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 8,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      14
+     ],
+     "src_rgb": [
+      3,
+      15,
+      14
+     ],
+     "word": 260
+    }
+   ],
+   "stages": 3,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "constants": [
+    0
+   ],
+   "draw_enabled": 0,
+   "family": "ui",
+   "id": "menu.gfx.ps.f031c9f8",
+   "inputs": [],
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": false,
+    "constants": [
+     0
+    ],
+    "runtime_binding_measured": false,
+    "textures": [],
+    "varyings": []
+   },
+   "measurable_objects": 2,
+   "note": "GFx menu PS translated to TEV; draw blocked until the c2/c3 material binding is measured",
+   "plan_expression": [
+    [
+     "const",
+     0,
+     0
+    ],
+    [
+     "const",
+     0,
+     1
+    ],
+    [
+     "const",
+     0,
+     2
+    ],
+    [
+     "const",
+     0,
+     3
+    ]
+   ],
+   "prefix_sha256": "f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "12624e4fa254f6f3d95a815627822b82a019cbfe",
+   "sha256": "bfc0b3e0df8802bde722c0d0a815a3bff6de1b82fe67653262cfab2b75d9805e",
+   "source_slot": 0,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "mov",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      14,
+      15,
+      15
+     ],
+     "src_rgb": [
+      14,
+      15,
+      15
+     ],
+     "word": 140
+    }
+   ],
+   "stages": 1,
+   "textures": [],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  }
+ ],
+ "note": "Pack-owned StartMenu/GFx plans. Translated only: no entry is draw-certified, so none sets runtime=1 and none enters the 16-slot runtime table. Hashes are the true full-blob SHA-256; MENU_SHADERS prefix hashes are kept in menu_plans.json.",
+ "schema": "d9-shader-plan-v1"
+}

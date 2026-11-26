@@ -80,15 +80,28 @@ python source\shader_packs\ui\test_menu_plans.py --tesv <TESV.exe>
 it with the IR expression; with `--tesv` it re-extracts the blobs, re-runs
 `tools/shaders/compile.py` and regenerates the plans from retail bytes.
 
-### Shared integration still needed
+### Shared integration (main contract `8abe218`)
 
-These 10 plans are pack-local on purpose: `tools/fxp_compile.py` only reads
-`Skyrim - Shaders.bsa`, so `plan_verify.py --data` would report them as
-"regenerated manifest has no plan" and the append-only
-`source/d3d9_shader_plan_table.inc` would not match.  Requested shared change:
+Plans live in two files:
 
-1. `build_manifest()` merges `source/shader_packs/<pack>/menu_plans.json`
-   (validated by the pack verifier) and `plan_verify.py` treats those entries as
-   symbolic-pass when the pack verifier passes.
-2. `tools/shader_packs.py` coverage ignores hashes outside the census (already
-   the case) so the pack table row stays `0 draw-enabled`.
+* `plans.json` — schema `d9-shader-plan-v1`, the catalog the shared tools
+  discover.  All five entries have `"runtime": 0`; a translated descriptor does
+  not take a slot in the 16-entry runtime table.  Promote an entry to
+  `"runtime": 1` only after its material binding and draw path are certified.
+* `menu_plans.json` / `menu_ir.json` — the measurement record for all ten
+  prefix groups: named refusals, both hash forms, and the IR expression the
+  symbolic check compares against.
+
+Checked against this tree:
+
+```text
+fxp_compile.py manifest --data F:\Skyrim\Data   -> 4 runtime entries (unchanged)
+plan_verify.py --data F:\Skyrim\Data            -> pack_plans ui: 5, ok true
+shader_packs.py check                           -> 6 packs, 10475 chunks, OK
+```
+
+The ten menu hashes are outside the BSA census, so the aggregate
+`shader_coverage.json` totals are unchanged (3 translated / 1 draw-enabled /
+6655 refused).  The five translated menu representatives appear in
+`plan_verify`'s `pack_plans` and in `plans.json`; the five refusals stay in
+`menu_plans.json` because a refusal is not a plan entry.
