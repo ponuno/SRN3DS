@@ -230,8 +230,7 @@ static void default_contract(Harness *h) {
     expect_diagnostic("float/HDR render-target textures are not implemented");
 
     /* not measured: TESV never reached CreateCubeTexture.  The exact requested
-     * tuple is refused before any cube storage because float cube RTs are not
-     * native; the LDR fallback below is the measurement-only path. */
+     * tuple has a stable named refusal for float/HDR cube render targets. */
     assert(create_cube_071(&s.demo) == ERR_UNAVAILABLE);
     assert(read32(&s.demo, OUT) == 0);
     expect_diagnostic("float/HDR cube render targets are not implemented");
@@ -317,13 +316,12 @@ static void render_target_contract(Harness *h) {
     }
     assert(d9_null_stats()->target_creates == before_creates + 9);
 
-    /* not measured: host-only stability check.  The measurement-only LDR
-     * fallback stores the float cube RT as A8R8G8B8, so creation succeeds and
-     * the logical format stays 0x71; the cube is released here. */
+    /* not measured: host-only stability check.  The current measurement
+     * fallback admits this cube RENDERTARGET tuple and stores it as LDR. */
     assert(create_cube_071(&s.demo) == 0);
-    uint32_t cube = read32(&s.demo, OUT);
-    assert(cube);
-    release_object(&s.demo, cube);
+    uint32_t fallback_cube = read32(&s.demo, OUT);
+    assert(fallback_cube);
+    assert(call(&s.demo, fallback_cube, 2, NULL, 0) == 0);
 
     for (unsigned i = 0; i < 9; ++i) release_object(&s.demo, textures[i]);
     assert(d9_null_stats()->target_deletes == before_deletes + 9);

@@ -2188,6 +2188,21 @@ static void get_software_vp(CPU *c){
     if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);
     M32(A(1))=0;RET(OK,2); /* the bridge always advertises hardware processing */
 }
+static void process_vertices(CPU *c){
+    d3d_fail("ProcessVertices","software vertex processing is not provided; use hardware vertex shaders",UNAVAILABLE);
+    RET(UNAVAILABLE,7);
+}
+static void draw_rect_patch(CPU *c){
+    d3d_fail("DrawRectPatch","N-patch drawing is not implemented",UNAVAILABLE);
+    RET(UNAVAILABLE,3);
+}
+static void draw_tri_patch(CPU *c){
+    d3d_fail("DrawTriPatch","N-patch drawing is not implemented",UNAVAILABLE);
+    RET(UNAVAILABLE,4);
+}
+static void delete_patch(CPU *c){
+    g.last_diagnostic[0]=0;RET(OK,2);
+}
 /* ---- cursor and legacy palettes ---------------------------------------- */
 static void set_cursor_properties(CPU *c){
     uint32_t surface_address=A(3);
@@ -3272,7 +3287,8 @@ static void draw_indexed_up(CPU *c){
  X(cube_level_count) X(cube_desc) X(cube_get_surface) X(cube_lock) X(cube_unlock) X(cube_add_dirty_rect) \
  X(volume_level_count) X(volume_desc) X(volume_get_level) X(volume_lock_box) X(volume_unlock_box) X(volume_add_dirty_box) \
  X(create_state_block) X(begin_state_block) X(end_state_block) X(state_block_capture_com) X(state_block_apply_com) \
- X(set_private_data) X(get_private_data) X(free_private_data)
+ X(set_private_data) X(get_private_data) X(free_private_data) \
+ X(process_vertices) X(draw_rect_patch) X(draw_tri_patch) X(delete_patch)
 #define ENUM(f) I_##f,
 enum {FUNCTIONS(ENUM) I_COUNT};
 #undef ENUM
@@ -3427,7 +3443,7 @@ static void init_tables(void){
     SLOT(DEVICE,75,set_scissor_rect);SLOT(DEVICE,76,get_scissor_rect);
     SLOT(DEVICE,79,set_npatch_mode);SLOT(DEVICE,80,get_npatch_mode);
     SLOT(DEVICE,57,set_render);SLOT(DEVICE,58,get_render);SLOT(DEVICE,66,get_texture_stage_state);SLOT(DEVICE,67,set_texture_stage_state);SLOT(DEVICE,68,get_sampler);SLOT(DEVICE,69,set_sampler);
-    SLOT(DEVICE,81,draw_primitive);SLOT(DEVICE,82,draw_indexed);SLOT(DEVICE,83,draw_primitive_up);SLOT(DEVICE,84,draw_indexed_up);SLOT(DEVICE,89,set_fvf);SLOT(DEVICE,90,get_fvf);SLOT(DEVICE,100,stream);SLOT(DEVICE,104,indices);
+    SLOT(DEVICE,81,draw_primitive);SLOT(DEVICE,82,draw_indexed);SLOT(DEVICE,83,draw_primitive_up);SLOT(DEVICE,84,draw_indexed_up);SLOT(DEVICE,85,process_vertices);SLOT(DEVICE,89,set_fvf);SLOT(DEVICE,90,get_fvf);SLOT(DEVICE,100,stream);SLOT(DEVICE,104,indices);
     SLOT(DEVICE,86,create_decl);SLOT(DEVICE,87,set_decl);SLOT(DEVICE,88,get_decl);SLOT(DEVICE,101,get_stream);SLOT(DEVICE,102,stream_freq);SLOT(DEVICE,103,get_stream_freq);SLOT(DEVICE,105,get_indices);
     SLOT(DEVICE,59,create_state_block);SLOT(DEVICE,60,begin_state_block);SLOT(DEVICE,61,end_state_block);
     SLOT(STATEBLOCK,3,resource_device);SLOT(STATEBLOCK,4,state_block_capture_com);SLOT(STATEBLOCK,5,state_block_apply_com);
@@ -3439,6 +3455,7 @@ static void init_tables(void){
     SLOT(DEVICE,111,set_ps_const_i);SLOT(DEVICE,112,get_ps_const_i);
     SLOT(DEVICE,113,set_ps_const_b);SLOT(DEVICE,114,get_ps_const_b);
     SLOT(DEVICE,118,create_query);
+    SLOT(DEVICE,115,draw_rect_patch);SLOT(DEVICE,116,draw_tri_patch);SLOT(DEVICE,117,delete_patch);
     SLOT(QUERY,3,query_get_device);SLOT(QUERY,4,query_get_type);SLOT(QUERY,5,query_get_data_size);
     SLOT(QUERY,6,query_issue);SLOT(QUERY,7,query_get_data);
     SLOT(SWAPCHAIN,3,swapchain_present);SLOT(SWAPCHAIN,4,swapchain_get_back_buffer);

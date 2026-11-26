@@ -26,8 +26,11 @@ int main(void){
     assert(!method(&s,s.vb,13,a+1,1));uint32_t bytes;assert(!guest_read32(&s.memory,0x10010410,&bytes)&&bytes==24*sizeof(D9Vertex));
     uint32_t invalid[]={100000,4,0x10010400,0};assert(method(&s,s.vb,11,invalid,4)==0x8876086c);
     uint32_t fvf=0x112;assert(method(&s,s.device,89,&fvf,1)==0x8876086a); /* normal bit is not admitted */
-    uint32_t r;assert(d9_com_demo_call(&s,s.device,85,NULL,0,&r)==N3DS_INVOKE_TRAP);
-    assert(strstr(n3ds_lift_fault(),"unsupported D3D9"));
+    uint32_t process[] = {0, 0, 1, s.vb, 0, 0};
+    uint32_t r;
+    assert(!d9_com_demo_call(&s, s.device, 85, process, 6, &r));
+    assert(r == 0x8876086au);
+    assert(strstr(d9_com_last_diagnostic(), "software vertex processing is not provided"));
     assert(!d9_com_demo_frame(&s,0)&&m.draw==1&&m.n==36&&m.end==1);
     assert(!d9_com_demo_frame(&s,0.7f)&&m.draw==2&&m.end==2);
     D9Matrix fixed=m.clip;D9Vertex fixed_geometry[36];memcpy(fixed_geometry,m.vertices,sizeof fixed_geometry);
