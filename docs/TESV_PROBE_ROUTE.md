@@ -98,6 +98,19 @@ VS/PS 2.0. It exists solely to record the first post-gate D3D9 calls (shader
 creates, depth, draws, `Present`) and is refused if the bytes differ. Do not
 combine its output with a rendering claim.
 
+Static post-gate chain (read-only analysis):
+
+- `0x00c6dbf0` itself creates no shader, loads no asset and issues no draw or
+  `Present`; success returns to `0x0069d97e -> 0x00696810 -> 0x00c74710`.
+- `0x00c74710` opens `SHADERSFX/Shaders002.fxp`; the first record is `BSVS`
+  `vs_3_0`, 436 bytes. `CreateVertexShader` is called at `0x00ccbbb3` and its
+  HRESULT is ignored (nonfatal preload). The PS path later reads `BSPS` and
+  calls `CreatePixelShader` at `0x00ccbfb3` / `0x00ccc3a7`.
+- `0x00ca38d0` queues 124 lighting-package keys; while a menu closure is armed,
+  any non-menu shader from that preload invalidates it. This is why the
+  preflight-versus-observed certification order must be resolved before the
+  closure can be the gate predicate.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
