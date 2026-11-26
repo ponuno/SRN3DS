@@ -365,7 +365,7 @@ static void s_ShowCursor(CPU *c) {
     set_error(c,0);
     RET((uint32_t)show_count,1);
 }
-static void s_GetKeyState(CPU *c) {RET(0,1);}      /* no keyboard input yet */
+static void s_GetKeyState(CPU *c) {RET(0,1);}      /* fallback: win32_input's real thunk resolves first */
 static void s_GetAsyncKeyState(CPU *c) {RET(0,1);}
 /* Never fabricate WM_QUIT or any other message: the queue is permanently empty. */
 static void s_PeekMessageA(CPU *c) {

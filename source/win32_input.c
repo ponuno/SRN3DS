@@ -13,13 +13,16 @@
  *    elements); GetDeviceState is the state path.
  *  - On the host there is no HID source: the controller reports "not
  *    connected" and the keyboard/mouse are driven through the injection API
- *    used by the tests. On the 3DS libctru HID is sampled at 60 Hz.
+ *    used by the tests. On the 3DS libctru HID is sampled at 60 Hz and mapped
+ *    through a selectable control profile (default: menu pad -> arrows/Enter/
+ *    Escape/Tab, touch -> mouse; legacy keeps the old A/B/X mouse mapping).
  */
 #include "win32_input.h"
 #include "win32_sync.h"
 #include "guest_process.h"
 #include "n3ds_lift_runtime.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifdef __3DS__
 #include <3ds.h>
@@ -134,6 +137,48 @@ static int vk_char(uint32_t vk, int shift, int caps) {
     }
 }
 
+/* ---- control profiles ---------------------------------------------------------- */
+/* Portable pad mask -> guest virtual keys.  This is the single mapping table used
+ * by the 3DS sampler, so a host test can prove exactly what the guest will see. */
+void win32_input_map_pad(Win32InputProfile profile, uint32_t pad,
+                         uint8_t vk_down[256], uint8_t mouse_buttons[8]) {
+    uint8_t *vk = vk_down;
+    memset(vk, 0, 256);
+    memset(mouse_buttons, 0, 8);
+#define SET(v) (vk[(unsigned)(v)] = 1)
+    if (profile == WIN32_INPUT_PROFILE_LEGACY) {
+        /* Pre-profile behaviour: A/B/X are mouse buttons, D-pad is WASD. */
+        if (pad & WIN32_INPUT_PAD_A) { SET(VK_LBUTTON); mouse_buttons[0] = 1; }
+        if (pad & WIN32_INPUT_PAD_B) { SET(VK_RBUTTON); mouse_buttons[1] = 1; }
+        if (pad & WIN32_INPUT_PAD_X) { SET(VK_MBUTTON); mouse_buttons[2] = 1; SET(0x20); }
+        if (pad & WIN32_INPUT_PAD_Y) SET('E');
+        if (pad & WIN32_INPUT_PAD_UP) SET('W');
+        if (pad & WIN32_INPUT_PAD_DOWN) SET('S');
+        if (pad & WIN32_INPUT_PAD_LEFT) SET('A');
+        if (pad & WIN32_INPUT_PAD_RIGHT) SET('D');
+    } else {
+        /* Menu profile: arrows for range selection, Enter to accept, Escape for
+         * back, Tab for the tween/back menu.  WASD stays held as well because the
+         * retail ControlMap may bind menu navigation to either set; touch is the
+         * only left-click source, so A is never a click here. */
+        if (pad & WIN32_INPUT_PAD_UP) { SET(0x26); SET('W'); }
+        if (pad & WIN32_INPUT_PAD_DOWN) { SET(0x28); SET('S'); }
+        if (pad & WIN32_INPUT_PAD_LEFT) { SET(0x25); SET('A'); }
+        if (pad & WIN32_INPUT_PAD_RIGHT) { SET(0x27); SET('D'); }
+        if (pad & WIN32_INPUT_PAD_A) SET(0x0D);      /* VK_RETURN */
+        if (pad & WIN32_INPUT_PAD_B) SET(0x1B);      /* VK_ESCAPE */
+        if (pad & WIN32_INPUT_PAD_START) SET(0x1B);  /* VK_ESCAPE */
+        if (pad & WIN32_INPUT_PAD_SELECT) SET(0x09); /* VK_TAB */
+        if (pad & WIN32_INPUT_PAD_X) SET(0x20);      /* VK_SPACE */
+        if (pad & WIN32_INPUT_PAD_Y) SET('E');
+    }
+    if (pad & WIN32_INPUT_PAD_L) SET(0xA0);          /* VK_LSHIFT */
+    if (pad & WIN32_INPUT_PAD_R) SET('R');
+    if (pad & WIN32_INPUT_PAD_ZL) SET(0xA2);         /* VK_RCONTROL */
+    if (pad & WIN32_INPUT_PAD_ZR) SET(0xA4);         /* VK_RMENU */
+#undef SET
+}
+
 /* ---- state --------------------------------------------------------------------- */
 enum { OBJ_FREE = 0, OBJ_DI_A, OBJ_DI_W, OBJ_KB_A, OBJ_KB_W, OBJ_MOUSE_A, OBJ_MOUSE_W };
 typedef struct {
@@ -142,6 +187,7 @@ typedef struct {
 } DIObj;
 static struct {
     GuestMemory *mem;
+    Win32InputProfile profile;
     uint8_t down[256], prev[256], pressed[256], toggled[256];
     int32_t mx, my, dx, dy, dz;
     uint8_t mb[8], mb_prev[8];
@@ -165,6 +211,12 @@ static void set_error(CPU *c, uint32_t v) {
 #define A(n) M32(c->r[4] + 4 + 4 * (n))
 #define RET(v, n) do { c->r[0] = (uint32_t)(v); c->r[4] += 4 + 4 * (n); return; } while (0)
 
+static void apply_pad_state(uint32_t pad) {
+    uint8_t nd[256], nb[8];
+    win32_input_map_pad(g.profile, pad, nd, nb);
+    memcpy(g.down, nd, sizeof nd);
+    memcpy(g.mb, nb, sizeof nb);
+}
 static void sample_3ds(void) {
 #ifdef __3DS__
     uint64_t now = svcGetSystemTick();
@@ -172,15 +224,17 @@ static void sample_3ds(void) {
     g.last_sample = now;
     hidScanInput();
     uint32_t held = hidKeysHeld();
-    uint8_t nd[256];
-    memset(nd, 0, sizeof nd);
-#define KEY(vk, bit) do { if (held & (bit)) nd[(vk)] = 1; } while (0)
-    KEY(VK_LBUTTON, KEY_A); KEY(VK_RBUTTON, KEY_B);
-    KEY(0x20, KEY_X); KEY('E', KEY_Y); KEY(0xA0, KEY_L); KEY('R', KEY_R);
-    KEY(0xA2, KEY_ZL); KEY(0xA4, KEY_ZR);
-    KEY(0x1B, KEY_START); KEY(0x09, KEY_SELECT);
-    KEY('W', KEY_DUP); KEY('S', KEY_DDOWN); KEY('A', KEY_DLEFT); KEY('D', KEY_DRIGHT);
-#undef KEY
+    uint32_t pad = 0;
+#define PAD(bit, m) do { if (held & (bit)) pad |= (m); } while (0)
+    PAD(KEY_DUP, WIN32_INPUT_PAD_UP); PAD(KEY_DDOWN, WIN32_INPUT_PAD_DOWN);
+    PAD(KEY_DLEFT, WIN32_INPUT_PAD_LEFT); PAD(KEY_DRIGHT, WIN32_INPUT_PAD_RIGHT);
+    PAD(KEY_A, WIN32_INPUT_PAD_A); PAD(KEY_B, WIN32_INPUT_PAD_B);
+    PAD(KEY_X, WIN32_INPUT_PAD_X); PAD(KEY_Y, WIN32_INPUT_PAD_Y);
+    PAD(KEY_L, WIN32_INPUT_PAD_L); PAD(KEY_R, WIN32_INPUT_PAD_R);
+    PAD(KEY_ZL, WIN32_INPUT_PAD_ZL); PAD(KEY_ZR, WIN32_INPUT_PAD_ZR);
+    PAD(KEY_START, WIN32_INPUT_PAD_START); PAD(KEY_SELECT, WIN32_INPUT_PAD_SELECT);
+#undef PAD
+    apply_pad_state(pad);
     circlePosition cp; hidCircleRead(&cp);
     touchPosition tp; hidTouchRead(&tp);
     int touch = (held & KEY_TOUCH) != 0;
@@ -188,12 +242,11 @@ static void sample_3ds(void) {
     if (cp.dy > 20 || cp.dy < -20) { g.dy -= cp.dy / 24; g.my -= cp.dy / 24; }
     if (touch) {
         g.mx = tp.px * 400 / 320; g.my = tp.py;
-        nd[VK_LBUTTON] = 1;
+        g.down[VK_LBUTTON] = 1;
+        g.mb[0] = 1;
     }
     if (g.mx < 0) g.mx = 0; if (g.mx > 399) g.mx = 399;
     if (g.my < 0) g.my = 0; if (g.my > 239) g.my = 239;
-    memcpy(g.down, nd, sizeof nd);
-    g.mb[0] = nd[VK_LBUTTON]; g.mb[1] = nd[VK_RBUTTON]; g.mb[2] = (held & KEY_X) != 0;
     g.pad_connected = 1;
     g.pad_buttons = 0;
     if (held & KEY_A) g.pad_buttons |= 0x1000;
@@ -228,7 +281,10 @@ static int refresh(void) {
     g.down[VK_MBUTTON] = g.mb[2] ? 1 : 0;
     int changed = 0;
     for (unsigned i = 0; i < 256; ++i) {
-        if (g.down[i] && !g.prev[i]) { g.pressed[i] = 1; changed = 1; }
+        if (g.down[i] && !g.prev[i]) {
+            g.pressed[i] = 1; changed = 1;
+            if (i == 0x14 || i == 0x90 || i == 0x91) g.toggled[i] ^= 1u;
+        }
         if (g.down[i] != g.prev[i]) changed = 1;
         g.prev[i] = g.down[i];
     }
@@ -243,6 +299,19 @@ static int refresh(void) {
     return changed;
 }
 void win32_input_poll(void) { refresh(); }
+void win32_input_apply_pad(uint32_t pad) { apply_pad_state(pad); refresh(); }
+const char *win32_input_profile_name(void) {
+    return g.profile == WIN32_INPUT_PROFILE_LEGACY ? "legacy" : "menu";
+}
+Win32InputProfile win32_input_profile(void) { return g.profile; }
+int win32_input_set_profile(const char *name) {
+    if (!name) return -1;
+    if (!strcmp(name, "menu")) { g.profile = WIN32_INPUT_PROFILE_MENU; return 0; }
+    if (!strcmp(name, "legacy")) { g.profile = WIN32_INPUT_PROFILE_LEGACY; return 0; }
+    fprintf(stderr, "[input] unknown control profile \"%s\" (expected menu|legacy); "
+                    "keeping \"%s\"\n", name, win32_input_profile_name());
+    return -1;
+}
 void win32_input_set_key(unsigned vk, int down) {
     if (vk > 255) return;
     g.down[vk] = down ? 1 : 0;
@@ -286,7 +355,7 @@ static int guid_is(uint32_t addr, const uint8_t *want) {
 enum {
     I_DirectInput8Create,
     I_XInputGetState, I_XInputSetState, I_XInputGetCapabilities,
-    I_GetKeyboardState, I_GetAsyncKeyState, I_MapVirtualKeyA, I_ToUnicode,
+    I_GetKeyboardState, I_GetAsyncKeyState, I_GetKeyState, I_MapVirtualKeyA, I_ToUnicode,
     I_GetKeyboardLayout, I_GetCursorPos, I_SetCursorPos,
     I_unsupported, I_query, I_addref, I_release,
     I_di_create_device, I_di_enum_devices, I_di_get_device_status,
@@ -604,6 +673,15 @@ static void s_GetAsyncKeyState(CPU *c) {
     g.pressed[vk] = 0;
     RET((uint32_t)(int32_t)(int16_t)v, 1);
 }
+/* GetKeyState is a latched/keyboard-state query, unlike GetAsyncKeyState: no
+ * "pressed" bit, but the low toggle bit for Caps/Num/Scroll Lock.  The 3DS has
+ * no such keys, so toggles only change through injection/GetDeviceState. */
+static void s_GetKeyState(CPU *c) {
+    uint32_t vk = A(0) & 0xffu;
+    refresh();
+    uint32_t v = (g.down[vk] ? 0x8000u : 0) | (g.toggled[vk] ? 1u : 0);
+    RET((uint32_t)(int32_t)(int16_t)v, 1);
+}
 static void s_MapVirtualKeyA(CPU *c) {
     uint32_t code = A(0), type = A(1);
     uint32_t r = 0;
@@ -693,6 +771,7 @@ static void init_functions(void) {
     fn_table[I_XInputGetCapabilities] = s_XInputGetCapabilities;
     fn_table[I_GetKeyboardState] = s_GetKeyboardState;
     fn_table[I_GetAsyncKeyState] = s_GetAsyncKeyState;
+    fn_table[I_GetKeyState] = s_GetKeyState;
     fn_table[I_MapVirtualKeyA] = s_MapVirtualKeyA;
     fn_table[I_ToUnicode] = s_ToUnicode;
     fn_table[I_GetKeyboardLayout] = s_GetKeyboardLayout;
@@ -754,6 +833,11 @@ int win32_input_init(GuestMemory *m) {
     if (!m || g.mem) return -1;
     memset(&g, 0, sizeof g);
     g.mem = m;
+    g.profile = WIN32_INPUT_PROFILE_MENU;
+    {
+        const char *want = getenv("TESV_INPUT_PROFILE");
+        if (want && *want) (void)win32_input_set_profile(want); /* logs named refusal */
+    }
     if (guest_map(m, IN_MEM_BASE, IN_MEM_BYTES)) { g.mem = NULL; return -1; }
     if (guest_map(m, IN_CB_STACK, IN_CB_STACK_BYTES)) {
         guest_unmap(m, IN_MEM_BASE); g.mem = NULL; return -1;
@@ -797,6 +881,7 @@ static const NamedDef named[] = {
     {"xinput1_3.dll", "XInputGetCapabilities", I_XInputGetCapabilities},
     {"user32.dll", "GetKeyboardState", I_GetKeyboardState},
     {"user32.dll", "GetAsyncKeyState", I_GetAsyncKeyState},
+    {"user32.dll", "GetKeyState", I_GetKeyState},
     {"user32.dll", "MapVirtualKeyA", I_MapVirtualKeyA},
     {"user32.dll", "ToUnicode", I_ToUnicode},
     {"user32.dll", "GetKeyboardLayout", I_GetKeyboardLayout},

@@ -65,10 +65,12 @@ def main():
         pe = menu_harness.Pe(real)
         try:
             ok, rows = menu_harness.verify_pe(pe)
+            iok, irows = menu_harness.verify_input_imports(pe)
         finally:
             pe.close()
         assert ok, [r for r in rows if not r[1]]
-        checks += 1
+        assert iok, [r for r in irows if not r[1]]
+        checks += 2
     print("menu_harness_test: %d checks OK" % checks)
     return 0
 

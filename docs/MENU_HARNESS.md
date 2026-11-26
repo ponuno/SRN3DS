@@ -87,7 +87,7 @@ in `docs/MENU_SHADER_CLOSURE.md`; that is not yet proven to be the SWF overlay.
 | 5 | shader execution | `TESV_D3D9_SHADER_SKIP_PROBE` turns valid non-closure streams into non-executable objects; every draw is refused by name | a real bounded SM3 execution path (VS family + PS plans) or a GFx fixed-function contract; do not fake caps |
 | 6 | GFx init/first draw | never reached; `CreatePixelShader`/`CreateVertexBuffer`/`Draw*`/`Present` all 0 | after layer 4: count GFx's built-in shaders and buffers in the `0xa60200` window, then implement exactly those |
 | 7 | Bink/video | `_BinkOpen` returns NULL; no frame; not fatal | empty `sIntroSequence` skips it entirely |
-| 8 | audio/input | not required for the first menu frame | input only for navigation; audio failures are non-fatal |
+| 8 | audio/input | not required for the first menu frame | input only for navigation (`TESV_INPUT_PROFILE=menu`; see `docs/MENU_INPUT.md`); audio failures are non-fatal |
 
 ## 5. Minimal menu harness
 
@@ -115,6 +115,7 @@ TESV_D3D9_HDR_LDR_FALLBACK=1
 TESV_D3D9_SHADER_SKIP_PROBE=1
 TESV_D3D9_BUDGET_MB=92
 N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+TESV_INPUT_PROFILE=menu
 ```
 
 Launch normally (no `-psave`/load): `0x6982c0` returns 1, WinMain calls

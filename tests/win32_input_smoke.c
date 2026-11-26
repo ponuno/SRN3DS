@@ -109,6 +109,50 @@ int main(void) {
     a[0] = 'W'; CHECK(!U(GetAsyncKeyState, a, 1) && (r & 0x8000));
     a[0] = 0; CHECK(!U(GetKeyboardLayout, a, 1) && r == 0x04090409u);
 
+    /* Control profiles: the portable 3DS pad mask must produce the exact guest
+     * codes the menu needs, and the legacy mapping must stay unchanged. */
+    {
+        uint8_t vk[256], mb[8];
+        win32_input_map_pad(WIN32_INPUT_PROFILE_MENU, WIN32_INPUT_PAD_A, vk, mb);
+        CHECK(vk[0x0D] && !vk[0x01] && !mb[0]);          /* Enter, not click */
+        win32_input_map_pad(WIN32_INPUT_PROFILE_MENU, WIN32_INPUT_PAD_UP, vk, mb);
+        CHECK(vk[0x26] && vk['W'] && !vk[0x28]);
+        win32_input_map_pad(WIN32_INPUT_PROFILE_MENU,
+                            WIN32_INPUT_PAD_B | WIN32_INPUT_PAD_START, vk, mb);
+        CHECK(vk[0x1B] && !mb[1]);
+        win32_input_map_pad(WIN32_INPUT_PROFILE_MENU, WIN32_INPUT_PAD_SELECT, vk, mb);
+        CHECK(vk[0x09]);
+        win32_input_map_pad(WIN32_INPUT_PROFILE_MENU,
+                            WIN32_INPUT_PAD_X | WIN32_INPUT_PAD_Y, vk, mb);
+        CHECK(vk[0x20] && vk['E'] && !vk[0x01]);
+        win32_input_map_pad(WIN32_INPUT_PROFILE_MENU, 0, vk, mb);
+        CHECK(!vk[0x26] && !vk[0x0D] && !mb[0]);
+        win32_input_map_pad(WIN32_INPUT_PROFILE_LEGACY, WIN32_INPUT_PAD_A, vk, mb);
+        CHECK(vk[0x01] && mb[0] && !vk[0x0D]);
+        win32_input_map_pad(WIN32_INPUT_PROFILE_LEGACY, WIN32_INPUT_PAD_UP, vk, mb);
+        CHECK(vk['W'] && !vk[0x26]);
+        /* The gameplay default used to be legacy; the menu profile is the port
+         * default and is switchable by name. */
+        CHECK(win32_input_profile() == WIN32_INPUT_PROFILE_MENU);
+        CHECK(!win32_input_set_profile("legacy") &&
+              win32_input_profile() == WIN32_INPUT_PROFILE_LEGACY);
+        CHECK(win32_input_set_profile("bogus") == -1 &&
+              win32_input_profile() == WIN32_INPUT_PROFILE_LEGACY);
+        CHECK(!win32_input_set_profile("menu"));
+    }
+    /* End-to-end: pad A in the menu profile is Enter through every input API. */
+    win32_input_apply_pad(WIN32_INPUT_PAD_A);
+    a[0] = kbd; a[1] = 256; a[2] = DATA + 0x380;
+    CHECK(!method(cpu, kvt, 9, a, 3, &r) && r == 0);
+    CHECK(M8(DATA + 0x380 + 0x1C) == 0x80);              /* DIK_RETURN */
+    a[0] = 0x0D; CHECK(!U(GetAsyncKeyState, a, 1) && (r & 0x8000));
+    a[0] = 0x0D; CHECK(!U(GetKeyState, a, 1) && (r & 0x8000));
+    win32_input_apply_pad(0);
+    a[0] = 0x0D; CHECK(!U(GetAsyncKeyState, a, 1) && !(r & 0x8000));
+    a[0] = kbd; a[1] = 256; a[2] = DATA + 0x380;
+    CHECK(!method(cpu, kvt, 9, a, 3, &r) && r == 0);
+    CHECK(M8(DATA + 0x380 + 0x1C) == 0);
+
     /* Mouse device with a 16-byte DIMOUSESTATE. */
     uint32_t mouse;
     CHECK(!open_device(cpu, di, GUID_MOUSE, &mouse, &r));

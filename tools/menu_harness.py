@@ -37,6 +37,7 @@ class Pe:
         opt_size = struct.unpack_from("<H", head, e + 20)[0]
         self.base = struct.unpack_from("<I", head, e + 0x34)[0]
         self.entry = self.base + struct.unpack_from("<I", head, e + 0x28)[0]
+        self.import_rva = struct.unpack_from("<I", head, e + 24 + 104)[0]
         off = e + 24 + opt_size
         self.f.seek(off)
         sec_table = self.f.read(40 * nsec)
@@ -146,6 +147,72 @@ def verify_pe(pe, anchors=ANCHORS, strings=STRINGS):
     return ok_all, rows
 
 
+# --------------------------------------------------------------------------
+# Input path: the two device APIs the engine really imports.  The menu reads
+# keyboard/mouse state through DirectInput8 (fed by win32_input.c from 3DS HID)
+# and queries GetAsyncKeyState/GetKeyState/GetCursorPos on the same state.
+# --------------------------------------------------------------------------
+INPUT_IMPORTS = [
+    ("DINPUT8.dll", "DirectInput8Create"),
+    ("USER32.dll", "GetAsyncKeyState"),
+    ("USER32.dll", "GetKeyState"),
+    ("USER32.dll", "GetCursorPos"),
+]
+
+
+def read_imports(pe):
+    """Map DLL name (upper case) -> set of imported function names."""
+    out = {}
+    if not getattr(pe, "import_rva", 0):
+        return out
+    va = pe.base + pe.import_rva
+    for i in range(256):
+        try:
+            desc = pe.read_va(va + 20 * i, 20)
+        except ValueError:
+            break
+        if not any(desc):
+            break
+        name_va = struct.unpack_from("<I", desc, 12)[0]
+        if not name_va:
+            break
+        dll = pe.read_cstr(pe.base + name_va).upper()
+        names = out.setdefault(dll, set())
+        thunk = struct.unpack_from("<I", desc, 0)[0]
+        if not thunk:
+            thunk = struct.unpack_from("<I", desc, 16)[0]
+        for k in range(4096):
+            try:
+                ent = struct.unpack_from("<I", pe.read_va(pe.base + thunk + 4 * k, 4))[0]
+            except ValueError:
+                break
+            if ent == 0:
+                break
+            if ent & 0x80000000:
+                names.add("#%d" % (ent & 0xFFFF))
+                continue
+            try:
+                names.add(pe.read_cstr(pe.base + ent + 2))
+            except ValueError:
+                break
+    return out
+
+
+def verify_input_imports(pe):
+    rows = []
+    ok_all = True
+    try:
+        imports = read_imports(pe)
+    except (ValueError, struct.error) as exc:
+        return False, [("imports", False, str(exc))]
+    for dll, name in INPUT_IMPORTS:
+        ok = name in imports.get(dll.upper(), set())
+        ok_all = ok_all and ok
+        rows.append((("input.%s!%s" % (dll, name)), ok,
+                     "import present" if ok else "import missing"))
+    return ok_all, rows
+
+
 class SparsePe:
     """In-memory stand-in with the same read interface as Pe."""
 
@@ -213,7 +280,29 @@ HARNESS = {
         "TESV_D3D9_SHADER_SKIP_PROBE=1",
         "TESV_D3D9_BUDGET_MB=92",
         "N3DS_IRC_PATH=F:\\Skyrim\\ir\\tesv.irc",
+        "TESV_INPUT_PROFILE=menu",
     ],
+    "input": {
+        "profile_env": "TESV_INPUT_PROFILE=menu|legacy (default menu)",
+        "runtime_api": "win32_input_set_profile() / win32_input_apply_pad()",
+        "mapping": {
+            "D-pad": "VK_UP/DOWN/LEFT/RIGHT plus W/S/A/D",
+            "A": "VK_RETURN (0x0D); not a mouse click",
+            "B": "VK_ESCAPE (0x1B)",
+            "Start": "VK_ESCAPE (0x1B)",
+            "Select": "VK_TAB (0x09)",
+            "X": "VK_SPACE (0x20)",
+            "Y": "VK_E (0x45)",
+            "touch": "absolute cursor + left mouse button",
+        },
+        "guest_paths": [
+            "dinput8.dll!DirectInput8Create -> IDirectInputDevice8::GetDeviceState "
+            "(DIK_RETURN 0x1C, DIK_ESCAPE 0x01, DIK_TAB 0x0F, DIK_UP 0x48)",
+            "user32.dll!GetAsyncKeyState / GetKeyState (IAT 0x0106b2bc / 0x0106b324)",
+            "user32.dll!GetCursorPos (IAT 0x0106b328)",
+        ],
+        "not_claimed": "no menu frame was executed; mapping is host-tested only",
+    },
     "not_needed": (
         "no world/load-game skip: WinMain calls 0x876f60(1) automatically when "
         "0x6982c0 returns \"no startup save\" (normal launch); no input is "
@@ -235,6 +324,9 @@ def main(argv=None):
     pe = Pe(args.exe)
     try:
         ok, rows = verify_pe(pe)
+        iok, irows = verify_input_imports(pe)
+        ok = ok and iok
+        rows += irows
         result = {
             "exe": args.exe,
             "base": pe.base,
@@ -262,6 +354,12 @@ def main(argv=None):
         for e in HARNESS["measurement_env"]:
             print("  " + e)
         print("  " + HARNESS["not_needed"])
+        print("\ninput profile (%s):" % HARNESS["input"]["profile_env"])
+        for k, v in HARNESS["input"]["mapping"].items():
+            print("  %-8s -> %s" % (k, v))
+        for e in HARNESS["input"]["guest_paths"]:
+            print("  " + e)
+        print("  " + HARNESS["input"]["not_claimed"])
         print("\nresult: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
