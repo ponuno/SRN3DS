@@ -19,6 +19,7 @@
 #include "win32_audio.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #ifdef __3DS__
 #include <3ds.h>
 #include "d3d9_citro3d.h"
