@@ -989,7 +989,10 @@ static MenuSwfBatchStatus batch_shape_impl(
     /* Keep the source mesh's vertex sharing.  Each source vertex starts with
      * the colour of its first triangle; a vertex shared by triangles with
      * different fills is duplicated only when that conflict is observed. */
-    uint8_t seen[(MENU_SWF_BATCH_MAX_SHAPE_VERTICES + 7u) / 8u];
+    /* 262,144 bits = 32 KiB.  On the console that alone fills the whole
+     * main-thread stack, so the dedup bitmap lives in static storage.  The
+     * batch path is single-threaded and clears it per call. */
+    static uint8_t seen[(MENU_SWF_BATCH_MAX_SHAPE_VERTICES + 7u) / 8u];
     memset(seen, 0, sizeof seen);
     uint32_t vcount = 0;
     int have_bounds = 0;
