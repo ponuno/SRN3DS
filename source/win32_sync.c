@@ -209,9 +209,21 @@ static int validate_wait_set(CPU *c, const uint32_t *h, unsigned n) {
     return 0;
 }
 /* One wait loop shared by WaitForSingleObject and WaitForMultipleObjects. */
+/* A handle can be closed while this thread is blocked on it. Closing is not a
+ * signal: Windows leaves that wait undefined, but this port must not leave a
+ * thread blocked forever on a dead slot. The closer wakes the waiters; the
+ * next loop pass turns the missing object into ERROR_INVALID_HANDLE. */
+static int wait_set_invalid(CPU *c, const uint32_t *h, unsigned n) {
+    for (unsigned i = 0; i < n; ++i) {
+        if (obj(h[i]) || h[i] == 0xffffffffu) continue;
+        if (thread_state(h[i], NULL) < 0) { set_error(c, ERR_INVALID_HANDLE); return 1; }
+    }
+    return 0;
+}
 static uint32_t wait_common(CPU *c, const uint32_t *h, unsigned n, int all,
                             uint32_t ms) {
     for (;;) {
+        if (wait_set_invalid(c, h, n)) return WAIT_FAILED;
         int idx = wait_set_ready(h, n, all);
         if (idx >= 0) return WAIT_OBJECT_0 + (uint32_t)idx;
         if (ms == 0) return WAIT_TIMEOUT;
@@ -389,6 +401,9 @@ const FnEntry *win32_sync_lookup(uint32_t addr) {
 int win32_sync_close(uint32_t handle) {
     int i = obj_index(handle);
     if (i < 0 || objects[i].kind == OBJ_FREE) return 0;
+    /* A waiter blocked on a handle that is being closed must run again; the
+     * wait loop then turns the missing object into ERROR_INVALID_HANDLE. */
+    if (waker) waker(handle);
     memset(&objects[i], 0, sizeof objects[i]);
     return 1;
 }

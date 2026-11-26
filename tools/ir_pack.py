@@ -88,6 +88,50 @@ def collect_functions(full, limit=None):
     return out
 
 
+def executable_ranges(exe):
+    """PE sections with IMAGE_SCN_MEM_EXECUTE as absolute [lo,hi) spans."""
+    import pefile
+    pe = pefile.PE(str(exe), fast_load=True)
+    base = pe.OPTIONAL_HEADER.ImageBase
+    out = []
+    for s in pe.sections:
+        if not (s.Characteristics & 0x20000000):
+            continue
+        lo = base + s.VirtualAddress
+        out.append((lo, lo + max(s.Misc_VirtualSize, s.SizeOfRawData)))
+    return out
+
+
+def in_exec(ranges, addr):
+    return any(lo <= addr < hi for lo, hi in ranges)
+
+
+def filter_executable(funcs, exe):
+    """Drop discovery entries/blocks in non-executable sections (.data).
+
+    functions.json scans the whole image, so .data tables appear as
+    zero-filled "functions". They are not callable code; keeping them makes
+    the dispatcher decode data bytes as instructions.
+    """
+    ex = executable_ranges(exe)
+    kept = []
+    dropped = 0
+    for entry, end, blocks in funcs:
+        if not in_exec(ex, entry):
+            dropped += 1
+            continue
+        live = [b for b in blocks if in_exec(ex, b[0])]
+        if len(live) != len(blocks):
+            dropped += len(blocks) - len(live)
+        if not live:
+            dropped += 1
+            continue
+        kept.append((entry, max(e for _, e in live), live))
+    if dropped:
+        print(f"dropped {dropped} non-executable discovery entries/blocks")
+    return kept
+
+
 def build_input(exe, funcs, path, expected_base=None, name="ir_container_input.bin"):
     import peimg
 
@@ -349,7 +393,8 @@ def main():
     funcs = collect_functions(full, args.limit)
     if not funcs:
         raise SystemExit("no functions selected")
-    print(f"functions: {len(funcs)} (from {args.functions})")
+    funcs = filter_executable(funcs, args.exe)
+    print(f"functions: {len(funcs)} (from {args.functions}, executable only)")
     inp = work / "ir_container_input.bin"
     inp_bytes, lo, hi = build_input(args.exe, funcs, inp,
                                     expected_base=full.get("image_base"))
