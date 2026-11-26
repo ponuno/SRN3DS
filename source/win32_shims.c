@@ -1335,7 +1335,14 @@ static int path_for_impl(const char *name,char *out,size_t cap) {
         const char *start=p;while(*p && *p!='/' && *p!='\\'){if(*p==':')return -1;++p;}
         size_t n=(size_t)(p-start);
         if(!n || (n==1 && *start=='.') || (n==2 && !memcmp(start,"..",2)) || len+n+1>=cap)return -1;
-        memcpy(out+len,start,n);len+=n;if(*p){++p;out[len++]='/';if(!*p)return -1;}
+        memcpy(out+len,start,n);len+=n;
+        if(*p){
+            ++p;
+            /* A trailing separator names a directory; accept it without
+             * emitting another slash. */
+            if(!*p)break;
+            out[len++]='/';
+        }
     }
     out[len]=0;
     size_t rl=strlen(root);
