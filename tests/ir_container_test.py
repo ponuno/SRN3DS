@@ -256,7 +256,6 @@ def main():
                           ROOT / "source" / "ir_decode.c",
                           ROOT / "source" / "ir_exec.c",
                           ROOT / "source" / "ir_core.c",
-                          ROOT / "source" / "n3ds_lift_runtime.c",
                           ROOT / "source" / "guest.c",
                           ROOT / "staged" / "fpu.c",
                           ROOT / "tests" / "ir_aot_fixture.c"],
@@ -266,7 +265,6 @@ def main():
                              ROOT / "source" / "ir_decode.c",
                              ROOT / "source" / "ir_exec.c",
                              ROOT / "source" / "ir_core.c",
-                             ROOT / "source" / "n3ds_lift_runtime.c",
                              ROOT / "source" / "guest.c",
                              ROOT / "staged" / "fpu.c"],
                      work / "ir_container_preentry.exe")

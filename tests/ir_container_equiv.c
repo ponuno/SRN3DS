@@ -78,6 +78,7 @@ void rt_cpuid(CPU *c, uint32_t *a, uint32_t *b, uint32_t *cc_, uint32_t *d) {
 }
 
 uint64_t rt_rdtsc(void) { return 1; }
+void n3ds_lift_set_ir_ip(uint32_t ip) { (void)ip; }
 
 static const FnEntry *aot_find(uint32_t addr) {
     unsigned lo = 0, hi = naot;

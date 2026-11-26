@@ -55,6 +55,7 @@ void rt_cpuid(CPU *c, uint32_t *a, uint32_t *b, uint32_t *cc, uint32_t *d) {
     (void)c; (void)a; (void)b; (void)cc; (void)d;
 }
 uint64_t rt_rdtsc(void) { return 1; }
+void n3ds_lift_set_ir_ip(uint32_t ip) { (void)ip; }
 
 int n3ds_rt_dispatch(CPU *c, uint32_t addr) {
     int rc = n3ds_irc_exec_status(irc, c, addr, 0);

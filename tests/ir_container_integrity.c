@@ -46,6 +46,7 @@ void rt_cpuid(CPU *c, uint32_t *a, uint32_t *b, uint32_t *cc, uint32_t *d) {
     (void)c; (void)a; (void)b; (void)cc; (void)d;
 }
 uint64_t rt_rdtsc(void) { return 0; }
+void n3ds_lift_set_ir_ip(uint32_t ip) { (void)ip; }
 int n3ds_rt_dispatch(CPU *c, uint32_t addr) { (void)c; (void)addr; return -1; }
 void rt_call(CPU *c, uint32_t addr) { rt_unimpl(c, addr, "unexpected rt_call"); }
 void rt_call_ic(CPU *c, uint32_t addr, const FnEntry **cache) {
