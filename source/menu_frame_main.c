@@ -503,8 +503,11 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
     for (unsigned i = 0; i < 2; ++i)
         if (entries[i].glyph_index == WHITE_GLYPH) white = &entries[i];
     if (!white || !white->has_rect) { free(shapes); free(display); return -1; }
-    uint32_t white_u = white->u + white->uw / 2u;
-    uint32_t white_v = white->v + white->vh / 2u;
+    /* The white marker is 1x1.  Its exact centre lands on the texel boundary;
+     * PICA point sampling can round up into the zero padding.  Bias the UV a
+     * quarter texel inside so the sample is unambiguously white. */
+    uint32_t white_u = white->u + white->uw / 4u;
+    uint32_t white_v = white->v + white->vh / 4u;
     for (uint32_t i = 0; i < stats->shape_vertices; ++i) {
         g_batch_vertices[i].u = white_u;
         g_batch_vertices[i].v = white_v;
