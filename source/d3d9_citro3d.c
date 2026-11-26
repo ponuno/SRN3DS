@@ -463,6 +463,14 @@ static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
     }
     if(count>FRAME_MENU_VERTICES-c->cursor_color)return -1;
     if(indices&&index_count>FRAME_INDICES-c->cursor_index)return -1;
+    static int menu_clip_logged;
+    if(!menu_clip_logged){
+        menu_clip_logged=1;
+        fprintf(stderr,"MENU_CLIP m00=%.6f m03=%.6f m11=%.6f m13=%.6f "
+                        "m22=%.6f m33=%.6f\n",
+                clip->m[0][0],clip->m[0][3],clip->m[1][1],clip->m[1][3],
+                clip->m[2][2],clip->m[3][3]);
+    }
     D9DrawState draw_state=*state;
     if(text_plan){
         /* The menu-text contract is point sampling with clamped UVs, regardless

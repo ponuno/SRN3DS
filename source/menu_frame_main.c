@@ -41,11 +41,14 @@ static int counted_apply_tev_ex(const D9TevProgram *program, C3D_Tex *texture0,
 static void counted_tex_bind(int unit, C3D_Tex *texture);
 static void counted_draw_elements(GPU_Primitive_t primitive, int count,
                                   int type, const void *indices);
+static void counted_set_viewport(int x, int y, int w, int h);
 
 #define d9_pica_citro3d_apply_tev_ex counted_apply_tev_ex
 #define C3D_TexBind counted_tex_bind
 #define C3D_DrawElements counted_draw_elements
+#define C3D_SetViewport counted_set_viewport
 #include "d3d9_citro3d.c"
+#undef C3D_SetViewport
 #undef C3D_DrawElements
 #undef C3D_TexBind
 #undef d9_pica_citro3d_apply_tev_ex
@@ -128,6 +131,14 @@ static void counted_tex_bind(int unit, C3D_Tex *texture) {
     ++g_bind_calls;
     if (unit == 0) g_last_bound = texture;
     C3D_TexBind(unit, texture);
+}
+
+static unsigned g_viewport_w, g_viewport_h;
+
+static void counted_set_viewport(int x, int y, int w, int h) {
+    g_viewport_w = (unsigned)w;
+    g_viewport_h = (unsigned)h;
+    C3D_SetViewport(x, y, w, h);
 }
 
 static void counted_draw_elements(GPU_Primitive_t primitive, int count,
@@ -769,7 +780,7 @@ int main(void) {
         fprintf(stderr, "PICA_DRAW apply=%u draw_elements=%u bind=%u indices=%u type=%u "
                         "index_hash=%08lx expected_hash=%08lx vertices=%u cursor_indices=%u "
                         "plan=menu_text stages=1 textures=1 env_rgb=%u env_a=%u "
-                        "texture=%ux%u format=%u\n",
+                        "texture=%ux%u format=%u viewport=%ux%u\n",
                 g_apply_calls, g_draw_calls, g_bind_calls, g_draw_index_count,
                 g_draw_index_type, (unsigned long)g_draw_index_hash,
                 (unsigned long)expected_index_hash,
@@ -778,7 +789,8 @@ int main(void) {
                 (unsigned)g_env_rgb, (unsigned)g_env_alpha,
                 g_last_bound ? g_last_bound->width : 0u,
                 g_last_bound ? g_last_bound->height : 0u,
-                g_last_bound ? (unsigned)g_last_bound->fmt : 0u);
+                g_last_bound ? (unsigned)g_last_bound->fmt : 0u,
+                g_viewport_w, g_viewport_h);
     }
     fprintf(stderr, "MENU_SUBMISSION: %s\n", g_errors ? "FAIL" : "PASS");
     fprintf(stderr, "MENU_FRAME_STATUS=%s cpu=%d submitted=%d present=%d checks=%d errors=%d\n",
