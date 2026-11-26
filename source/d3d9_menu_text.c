@@ -33,6 +33,16 @@ typedef struct {
 
 _Static_assert(sizeof(MenuTextVertex) == 24, "menu text FVF vertex size");
 
+static int text_vflip(void) {
+    static int value = -1;
+    if (value < 0) {
+        FILE *f = fopen("sdmc:/menu_debug_vflip.flag", "r");
+        value = f ? 1 : 0;
+        if (f) fclose(f);
+    }
+    return value;
+}
+
 static void text_reason(MenuTextDraw *ctx, const char *fmt, ...) {
     if (!ctx) return;
     va_list ap;
@@ -172,7 +182,8 @@ MenuTextDrawStatus menu_text_draw_batch(MenuTextDraw *ctx,
             dst[i].z = 0.0f;
             dst[i].color = v->color;
             dst[i].u = (float)v->u / 65536.0f;
-            dst[i].v = (float)v->v / 65536.0f;
+            dst[i].v = text_vflip() ? 1.0f - (float)v->v / 65536.0f
+                                   : (float)v->v / 65536.0f;
         }
         for (uint32_t i = 0; i < index_count; ++i) {
             uint32_t index = indices[i];
@@ -214,7 +225,8 @@ MenuTextDrawStatus menu_text_draw_batch(MenuTextDraw *ctx,
             dst[i].z = 0.0f;
             dst[i].color = v->color;
             dst[i].u = (float)v->u / 65536.0f;
-            dst[i].v = (float)v->v / 65536.0f;
+            dst[i].v = text_vflip() ? 1.0f - (float)v->v / 65536.0f
+                                   : (float)v->v / 65536.0f;
         }
     }
 
