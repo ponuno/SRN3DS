@@ -51,6 +51,11 @@ captured; the existing staged-DLL/hotpatch resolution keeps handling them.
   D3D9 bridge and the `d3dx` hotpatch path are unchanged. This is the single
   resolver mechanism shared with `d3dx_surface_shims.c`; that module owns
   `0xfd010000..0xfd010008`, this one owns `0xfd000000..0xfd000014`.
+  `d3dx_texture_shims_install()` returns `-1` if the fixed four-slot chain is
+  full, so it never reports a shim whose thunks are unreachable. The surface
+  module installs even without a D3D9 session (so `D3DXCompileShader` keeps
+  refusing by name); its two surface copies then return
+  `D3DERR_NOTAVAILABLE`.
 * `source/d3d9_com.c` exposes `d9_com_host_create_texture`,
   `d9_com_host_upload_texture_level` and `d9_com_host_release`; these are the
   only new entry points and they reuse the existing object table and D9Device.
