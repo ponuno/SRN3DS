@@ -127,5 +127,6 @@ Exact shim/renderer work:
 `docs/MENU_BSA_RUNTIME.md` implements and validates the read-only path:
 a bounded C BSA reader, the measured Interface-then-Update order,
 `Interface/StartMenu.swf` copied into guest memory within a byte budget, and
-SWF FWS/CWS/ZWS header checks.  It still does not decompress the GFx body or
-draw the menu.
+SWF FWS/CWS/ZWS header checks.  `docs/MENU_SWF.md` adds a bounded CWS/tag/name
+summary (the CWS body is inflated only to walk tags).  Neither builds a display
+list, runs AVM, decodes glyphs or draws the menu.

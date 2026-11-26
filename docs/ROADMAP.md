@@ -175,6 +175,11 @@ read stage without fake successes. *Not met.*
       resolver with the measured Interface-then-Update order, SWF header checks,
       guest-memory budget and named refusals; synthetic and real read-only tests
       pass. This is asset loading, not GFx draw. See `docs/MENU_BSA_RUNTIME.md`.
+- [x] Bounded SWF container/tag summary for the resolved `StartMenu.swf`:
+      exact CWS zlib stream, frame header, short/long tags, recursive
+      `DefineSprite` walk, counts and bounded ExportAssets/ImportAssets/
+      DefineFontName names; real movie reports 1,186 tags and 52 names. No
+      display list, AVM or draw. See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer

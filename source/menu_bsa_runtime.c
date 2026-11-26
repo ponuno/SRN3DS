@@ -24,15 +24,6 @@ const char *menu_bsa_status_name(MenuBsaStatus status) {
     }
 }
 
-const char *menu_swf_format_name(MenuSwfFormat format) {
-    switch (format) {
-    case MENU_SWF_FWS: return "FWS";
-    case MENU_SWF_CWS: return "CWS";
-    case MENU_SWF_ZWS: return "ZWS";
-    default: return "unknown";
-    }
-}
-
 static void set_reason(char *reason, size_t cap, const char *fmt, ...) {
     if (!reason || !cap) return;
     va_list ap;
@@ -40,11 +31,6 @@ static void set_reason(char *reason, size_t cap, const char *fmt, ...) {
     vsnprintf(reason, cap, fmt, ap);
     va_end(ap);
     reason[cap - 1] = 0;
-}
-
-static uint32_t get_u32(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
 static MenuBsaStatus map_archive_status(BsaStatus st, MenuBsaStatus fallback) {
@@ -73,78 +59,6 @@ int menu_bsa_sources_init(MenuBsaSources *out, const char *data_dir,
         out->source[i].name = menu_bsa_archive_names[i];
     }
     return 1;
-}
-
-BsaStatus menu_swf_header_parse(const uint8_t *data, size_t available,
-                                uint32_t file_bytes, MenuSwfHeader *out,
-                                char *reason, size_t reason_cap) {
-    if (reason && reason_cap) reason[0] = 0;
-    if (!data || !out) {
-        set_reason(reason, reason_cap,
-                   "swf: header parse needs data and an output header");
-        return BSA_ERR_ARGUMENT;
-    }
-    memset(out, 0, sizeof *out);
-    if (available < 8 || file_bytes < 8) {
-        set_reason(reason, reason_cap, "swf: header is shorter than 8 bytes");
-        return BSA_ERR_TRUNCATED;
-    }
-    memcpy(out->signature, data, 3);
-    out->file_bytes = file_bytes;
-    out->version = data[3];
-    out->declared_bytes = get_u32(data + 4);
-    if (!memcmp(data, "FWS", 3)) {
-        out->format = MENU_SWF_FWS;
-    } else if (!memcmp(data, "CWS", 3)) {
-        out->format = MENU_SWF_CWS;
-    } else if (!memcmp(data, "ZWS", 3)) {
-        out->format = MENU_SWF_ZWS;
-        set_reason(reason, reason_cap,
-                   "swf: ZWS (LZMA) compression is unsupported");
-        return BSA_ERR_UNSUPPORTED;
-    } else {
-        out->format = MENU_SWF_UNKNOWN;
-        set_reason(reason, reason_cap, "swf: signature %.3s is not FWS/CWS/ZWS",
-                   (const char *)data);
-        return BSA_ERR_UNSUPPORTED;
-    }
-    if (out->version == 0 || out->version > 32) {
-        set_reason(reason, reason_cap, "swf: version %u is unsupported",
-                   out->version);
-        return BSA_ERR_UNSUPPORTED;
-    }
-    if (out->declared_bytes < 8) {
-        set_reason(reason, reason_cap,
-                   "swf: declared size %u is smaller than the header",
-                   out->declared_bytes);
-        return BSA_ERR_FORMAT;
-    }
-    if (out->format == MENU_SWF_FWS) {
-        if (out->declared_bytes != file_bytes) {
-            set_reason(reason, reason_cap,
-                       "swf: FWS declares %u bytes but stores %u",
-                       out->declared_bytes, file_bytes);
-            return BSA_ERR_FORMAT;
-        }
-        return BSA_OK;
-    }
-    /* CWS: the body is zlib.  Only the two-byte zlib prefix is inspected; the
-     * GFx body is deliberately not decompressed here. */
-    if (available < 10 || file_bytes < 10) {
-        set_reason(reason, reason_cap, "swf: CWS body lacks a zlib prefix");
-        return BSA_ERR_TRUNCATED;
-    }
-    unsigned cmf = data[8], flg = data[9];
-    if ((cmf & 0x0f) != 8 || ((cmf << 8) | flg) % 31 != 0) {
-        set_reason(reason, reason_cap, "swf: CWS zlib header is invalid");
-        return BSA_ERR_FORMAT;
-    }
-    if (flg & 0x20) {
-        set_reason(reason, reason_cap,
-                   "swf: CWS preset dictionary is unsupported");
-        return BSA_ERR_UNSUPPORTED;
-    }
-    return BSA_OK;
 }
 
 static void result_fail(MenuBsaResult *out, MenuBsaStatus status,

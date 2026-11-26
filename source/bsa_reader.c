@@ -378,7 +378,8 @@ static uint32_t adler32_bytes(const uint8_t *p, size_t n) {
 static BsaStatus inflate_raw(const uint8_t *src, size_t src_len,
                              uint8_t *dst, size_t cap, size_t *out_len,
                              int allow_partial, uint32_t expected_adler,
-                             int verify_adler, char *reason, size_t reason_cap) {
+                             int verify_adler, size_t *consumed, int *ended,
+                             char *reason, size_t reason_cap) {
     InflateState s;
     memset(&s, 0, sizeof s);
     s.in = src;
@@ -446,13 +447,16 @@ static BsaStatus inflate_raw(const uint8_t *src, size_t src_len,
         set_reason(reason, reason_cap, "zlib: Adler-32 mismatch");
         return BSA_ERR_FORMAT;
     }
+    if (consumed) *consumed = s.in_pos;
+    if (ended) *ended = !s.partial;
     *out_len = s.out_pos;
     return BSA_OK;
 }
 
-BsaStatus bsa_inflate_zlib(const uint8_t *src, size_t src_len,
-                           uint8_t *dst, size_t cap, size_t *out_len,
-                           int allow_partial, char *reason, size_t reason_cap) {
+static BsaStatus zlib_stream(const uint8_t *src, size_t src_len,
+                             uint8_t *dst, size_t cap, size_t *out_len,
+                             int allow_partial, size_t *consumed, int *ended,
+                             char *reason, size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
     if (!src || src_len < 6 || (!dst && cap) || !out_len) {
         set_reason(reason, reason_cap,
@@ -473,7 +477,42 @@ BsaStatus bsa_inflate_zlib(const uint8_t *src, size_t src_len,
                         ((uint32_t)src[src_len - 2] << 8) |
                         (uint32_t)src[src_len - 1];
     return inflate_raw(src + 2, src_len - 6, dst, cap, out_len, allow_partial,
-                       expected, !allow_partial, reason, reason_cap);
+                       expected, !allow_partial, consumed, ended,
+                       reason, reason_cap);
+}
+
+BsaStatus bsa_inflate_zlib(const uint8_t *src, size_t src_len,
+                           uint8_t *dst, size_t cap, size_t *out_len,
+                           int allow_partial, char *reason, size_t reason_cap) {
+    return zlib_stream(src, src_len, dst, cap, out_len, allow_partial,
+                       NULL, NULL, reason, reason_cap);
+}
+
+BsaStatus bsa_inflate_zlib_exact(const uint8_t *src, size_t src_len,
+                                 uint8_t *dst, size_t cap, size_t *out_len,
+                                 char *reason, size_t reason_cap) {
+    size_t consumed = 0;
+    int ended = 0;
+    BsaStatus st = zlib_stream(src, src_len, dst, cap, out_len, 0,
+                               &consumed, &ended, reason, reason_cap);
+    if (st != BSA_OK) return st;
+    if (!ended) {
+        set_reason(reason, reason_cap, "zlib: stream did not reach its final block");
+        return BSA_ERR_DEFLATE;
+    }
+    if (*out_len != cap) {
+        set_reason(reason, reason_cap,
+                   "zlib: produced %llu bytes, expected %llu",
+                   (unsigned long long)*out_len, (unsigned long long)cap);
+        return BSA_ERR_FORMAT;
+    }
+    if (consumed != src_len - 6) {
+        set_reason(reason, reason_cap,
+                   "zlib: %llu trailing bytes after the deflate stream",
+                   (unsigned long long)(src_len - 6 - consumed));
+        return BSA_ERR_FORMAT;
+    }
+    return BSA_OK;
 }
 
 uint32_t bsa_crc32(const void *data, size_t size) {

@@ -150,3 +150,11 @@ uint32_t bsa_crc32(const void *data, size_t size);
 BsaStatus bsa_inflate_zlib(const uint8_t *src, size_t src_len,
                            uint8_t *dst, size_t cap, size_t *out_len,
                            int allow_partial, char *reason, size_t reason_cap);
+
+/* Strict single-stream variant: the deflate stream must end exactly at the
+ * payload boundary, produce exactly `cap` bytes and pass Adler-32.  Used by the
+ * SWF container reader, where a concatenated stream or trailing garbage is a
+ * format error rather than a partial success. */
+BsaStatus bsa_inflate_zlib_exact(const uint8_t *src, size_t src_len,
+                                 uint8_t *dst, size_t cap, size_t *out_len,
+                                 char *reason, size_t reason_cap);

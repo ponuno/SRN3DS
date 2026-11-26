@@ -23,6 +23,7 @@
 
 #include "bsa_reader.h"
 #include "guest_heap.h"
+#include "menu_swf.h"
 
 #define MENU_BSA_PATH_MAX 512u
 #define MENU_BSA_REASON_MAX 224u
@@ -41,22 +42,6 @@ typedef enum {
     MENU_BSA_GUEST_MEMORY,
     MENU_BSA_BAD_ARGUMENT
 } MenuBsaStatus;
-
-typedef enum {
-    MENU_SWF_FWS = 0,       /* uncompressed */
-    MENU_SWF_CWS = 1,       /* zlib body, header readable without decompression */
-    MENU_SWF_ZWS = 2,       /* LZMA body: named refusal */
-    MENU_SWF_UNKNOWN = 3
-} MenuSwfFormat;
-
-typedef struct {
-    MenuSwfFormat format;
-    uint8_t signature[3];
-    uint8_t version;
-    uint32_t declared_bytes; /* SWF's own uncompressed total size */
-    uint32_t file_bytes;     /* size of the SWF file in the BSA entry, before
-                                any internal CWS/ZWS decompression */
-} MenuSwfHeader;
 
 typedef struct {
     const char *path;        /* host path of the archive */
@@ -85,20 +70,11 @@ typedef struct {
 } MenuBsaSources;
 
 const char *menu_bsa_status_name(MenuBsaStatus status);
-const char *menu_swf_format_name(MenuSwfFormat format);
 
 /* Fill `out` with <data_dir>/Skyrim - Interface.bsa and <data_dir>/Update.bsa
  * in the measured order.  Returns 1 on success, 0 with a reason on failure. */
 int menu_bsa_sources_init(MenuBsaSources *out, const char *data_dir,
                           char *reason, size_t reason_cap);
-
-/* Parse and validate only the 8-byte SWF header plus the CWS zlib prefix.
- * `file_bytes` is the complete SWF file size inside the BSA entry (the BSA
- * record's unpacked size, still CWS-compressed internally).  FWS and CWS pass;
- * ZWS and unknown signatures return BSA_ERR_UNSUPPORTED with a named reason. */
-BsaStatus menu_swf_header_parse(const uint8_t *data, size_t available,
-                                uint32_t file_bytes, MenuSwfHeader *out,
-                                char *reason, size_t reason_cap);
 
 /* Resolve `virtual_path` through `sources` in order and copy the winning
  * stored bytes into `heap`.  The returned guest block is owned by the caller
