@@ -15,10 +15,12 @@
  *                                        pool 1/2; BC1/3/5 -> A8 decode.
  *                                        Real ABI has 14 args (pPalette at
  *                                        A(12)) and `ret 0x38`.
+ *   D3DXCreateCubeTextureFromFileInMemory  six-face DDS -> IDirect3DCubeTexture9
+ *                                        (A8/X8/DXT1/3/5, face-major mips)
  *
  * Named unsupported (never a fake success):
- *   D3DXCreateCubeTextureFromFileInMemory
  *   D3DXCreateVolumeTextureFromFileInMemory
+ *   D3DXCreateTextureFromFile(InMemory|ExA) on a cube DDS (E_NOTIMPL)
  */
 #include "guest.h"
 #include "pe_imports.h"

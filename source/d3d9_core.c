@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <math.h>
 
-enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
 typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
 typedef struct {
     D9Handle id;size_t offset,stride;
@@ -17,6 +17,7 @@ typedef struct {
 } Target;
 typedef struct {D9Handle id;unsigned w,h,format;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
+typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;unsigned face_mask;} CubeLevel;
 typedef struct {
     D9Handle id;unsigned w,h,format,levels,gpu_levels,locked,pool,usage;
     int cpu_only,gpu_only,disposable,cache_pinned;
@@ -25,9 +26,18 @@ typedef struct {
      * texture storage.  The Texture owns no separate native allocation. */
     D9Handle rt_target;
 } Texture;
+typedef struct {
+    D9Handle id;unsigned edge,levels,format,pool,usage;
+    int cpu_only;
+    size_t cost,cpu_bytes,face_bytes;
+    uint8_t *pixels; /* face-major: 6 * face_bytes */
+    void *native;
+    CubeLevel level[MAX_LEVELS];
+} CubeTexture;
 struct D9Device {
     D9Backend ops;void *ctx;size_t used,limit;D9Handle next;int teardown;
-    Buffer buffers[MAX_BUFFERS];Texture textures[MAX_TEXTURES];
+    Buffer buffers[MAX_BUFFERS];Texture textures[MAX_TEXTURES];CubeTexture cubes[MAX_CUBES];
+    size_t cube_used;
     Target targets[MAX_TARGETS];D9Handle target;size_t target_used;
     /* D3DPRESENTFLAG_LOCKABLE_BACKBUFFER: a retained offscreen colour target
      * that lives as a normal Target slot.  back_tex_w/h are its native
@@ -41,7 +51,7 @@ struct D9Device {
     float tev_constants[9][4];
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
     D9TnlState tnl;int tnl_proto;
-    D9Handle texture1;
+    D9Handle texture1,cube_texture,cube_texture1;
     D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
     D9ColorVertex color_scratch[MAX_DRAW_VERTICES];unsigned color_scratch_count;
     unsigned view_w,view_h;
@@ -130,12 +140,18 @@ D9Handle d9_texture_render_target(const D9Device *d,D9Handle h){
     for(unsigned i=0;i<MAX_TEXTURES;++i)if(d->textures[i].id==h)return d->textures[i].rt_target;
     return 0;
 }
+static CubeTexture *cube_texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id==id)return &d->cubes[i];return NULL;}
 int d9_destroy_device_ex(D9Device *d){
     if(!d)return D9_INVALID;d->teardown=1;
     if(d->scene){d->ops.end(d->ctx);d->scene=0;}
     int rc=d9_texcache_destroy_ex(&d->tex_cache);
     if(rc!=D9TEXCACHE_OK)return D9_RELEASE_FAILED;
     for(unsigned i=0;i<MAX_BUFFERS;++i)free(d->buffers[i].data);
+    for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id){
+        if(d->cubes[i].native)d->ops.texture_delete(d->ctx,d->cubes[i].native);
+        free(d->cubes[i].pixels);
+    }
+    d->cube_used=0;
     for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id){
         if(d->ops.target_delete)d->ops.target_delete(d->ctx,d->targets[i].native);
     }
@@ -327,6 +343,150 @@ int d9_release_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if
         return D9_BACKEND;
     }
     if(d->texture == h)d->texture=0;if(d->texture1 == h)d->texture1=0;memset(t,0,sizeof *t);return D9_OK;}
+/* ---- cube textures -------------------------------------------------------- */
+static int cube_rows(unsigned edge,unsigned format,size_t *rows,size_t *row_bytes){
+    unsigned bb=d9_bc_block_bytes(format);
+    if(bb){
+        *rows=(size_t)((edge+3u)/4u);
+        *row_bytes=(size_t)((edge+3u)/4u)*bb;
+    }else{
+        *rows=(size_t)edge;
+        *row_bytes=(size_t)edge*4u;
+    }
+    return 0;
+}
+int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
+                              unsigned format,unsigned pool,unsigned usage,
+                              D9Handle *out){
+    if(out)*out=0;
+    if(!d||d->scene||d->teardown||!out||!d->next||!pow2(edge)||pool>D9_POOL_SYSTEMMEM)
+        return D9_INVALID;
+    if(!d->ops.texture_create_cube||!d->ops.texture_upload_cube){
+        set_diagnosis(d,"cube textures require backend texture_create_cube/upload_cube; "
+                        "this backend has no cube-map texture API");
+        return D9_UNSUPPORTED;
+    }
+    if(d9_bc_block_bytes(format)&&edge<8u){
+        set_diagnosis(d,"compressed cube faces below 8x8 are not implemented");
+        return D9_UNSUPPORTED;
+    }
+    unsigned max=1,a=edge;
+    while(a>1){a>>=1;++max;}
+    if(!levels)levels=max;
+    if(levels>max||levels>MAX_LEVELS)return D9_INVALID;
+    CubeTexture t={.edge=edge,.levels=levels,.format=format,.pool=pool,.usage=usage,
+                   .cpu_only=pool==D9_POOL_SYSTEMMEM};
+    size_t offset=0;unsigned dim=edge;
+    for(unsigned i=0;i<levels;++i){
+        CubeLevel *l=&t.level[i];l->w=l->h=dim;l->offset=offset;
+        if(d9_texture_layout(dim,dim,format,&l->pitch,&l->bytes))return D9_INVALID;
+        offset+=l->bytes;
+        if(dim>1)dim>>=1;
+    }
+    t.face_bytes=offset;
+    if(t.face_bytes>SIZE_MAX/6u)return D9_MEMORY;
+    t.cpu_bytes=t.face_bytes*6u;t.cost=t.cpu_bytes;
+    if(budget_has_room(d,t.cost))return D9_MEMORY;
+    CubeTexture *slot=NULL;
+    for(unsigned i=0;i<MAX_CUBES;++i)if(!d->cubes[i].id){slot=&d->cubes[i];break;}
+    if(!slot)return D9_MEMORY;
+    t.pixels=calloc(1,t.cpu_bytes);
+    if(!t.pixels)return D9_MEMORY;
+    if(!t.cpu_only){
+        if(d->ops.texture_create_cube(d->ctx,edge,levels,&t.native)||!t.native){
+            free(t.pixels);return D9_BACKEND;
+        }
+    }
+    t.id=d->next++;*slot=t;d->cube_used+=t.cpu_bytes;*out=t.id;return D9_OK;
+}
+unsigned d9_cube_levels(D9Device *d,D9Handle h){CubeTexture *c=cube_texture(d,h);return c?c->levels:0;}
+int d9_cube_level_info(D9Device *d,D9Handle h,unsigned level,
+                       unsigned *edge,size_t *pitch,size_t *bytes){
+    CubeTexture *c=cube_texture(d,h);
+    if(!c||level>=c->levels)return D9_INVALID;
+    const CubeLevel *l=&c->level[level];
+    if(edge)*edge=l->w;
+    if(pitch)*pitch=l->pitch;
+    if(bytes)*bytes=l->bytes;
+    return D9_OK;
+}
+int d9_cube_face_level_info(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                            unsigned *w,unsigned *height,size_t *pitch,size_t *bytes){
+    CubeTexture *c=cube_texture(d,h);
+    if(!c||face>=D9_CUBE_FACES||level>=c->levels)return D9_INVALID;
+    const CubeLevel *l=&c->level[level];
+    if(w)*w=l->w;if(height)*height=l->h;if(pitch)*pitch=l->pitch;if(bytes)*bytes=l->bytes;
+    return D9_OK;
+}
+int d9_cube_face_level_view(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                            void **pixels,unsigned *w,unsigned *height,
+                            size_t *pitch,size_t *bytes){
+    CubeTexture *c=cube_texture(d,h);
+    if(!c||face>=D9_CUBE_FACES||level>=c->levels||!c->pixels)return D9_INVALID;
+    const CubeLevel *l=&c->level[level];
+    if(pixels)*pixels=c->pixels+(size_t)face*c->face_bytes+l->offset;
+    if(w)*w=l->w;if(height)*height=l->h;if(pitch)*pitch=l->pitch;if(bytes)*bytes=l->bytes;
+    return D9_OK;
+}
+int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                              const void *src,size_t src_pitch,size_t src_bytes){
+    CubeTexture *c=cube_texture(d,h);
+    if(!c||face>=D9_CUBE_FACES||level>=c->levels||!src||!src_pitch||d->scene||d->teardown)
+        return D9_INVALID;
+    CubeLevel *l=&c->level[level];
+    size_t rows,row_bytes;cube_rows(l->w,c->format,&rows,&row_bytes);
+    if(src_pitch<row_bytes)return D9_INVALID;
+    if(src_bytes&&((rows-1u)>((SIZE_MAX-row_bytes)/src_pitch)||
+       (rows-1u)*src_pitch+row_bytes>src_bytes))return D9_INVALID;
+    if((rows-1u)>(SIZE_MAX-row_bytes)/l->pitch||
+       (rows-1u)*l->pitch+row_bytes>l->bytes)return D9_INVALID;
+    uint8_t *dst=c->pixels+(size_t)face*c->face_bytes+l->offset;
+    for(size_t y=0;y<rows;++y)
+        memcpy(dst+y*l->pitch,(const uint8_t *)src+y*src_pitch,row_bytes);
+    if(!c->cpu_only){
+        if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,dst,l->bytes))
+            return D9_BACKEND;
+    }
+    l->uploaded=1;l->face_mask|=1u<<face;
+    return D9_OK;
+}
+int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level){
+    CubeTexture *c=cube_texture(d,h);
+    if(!c||face>=D9_CUBE_FACES||level>=c->levels)return D9_INVALID;
+    CubeLevel *l=&c->level[level];
+    if(!c->cpu_only){
+        uint8_t *src=c->pixels+(size_t)face*c->face_bytes+l->offset;
+        if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,src,l->bytes))
+            return D9_BACKEND;
+    }
+    l->uploaded=1;l->face_mask|=1u<<face;
+    return D9_OK;
+}
+int d9_release_cube_texture(D9Device *d,D9Handle h){
+    CubeTexture *c=cube_texture(d,h);
+    if(!c||d->scene||d->teardown)return D9_INVALID;
+    if(d->cube_texture==h)d->cube_texture=0;
+    if(d->cube_texture1==h)d->cube_texture1=0;
+    if(c->native)d->ops.texture_delete(d->ctx,c->native);
+    free(c->pixels);
+    if(d->cube_used>=c->cpu_bytes)d->cube_used-=c->cpu_bytes;
+    memset(c,0,sizeof *c);
+    return D9_OK;
+}
+int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
+    if(!d||stage>=d9_stage_count(d)){
+        if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");
+        return D9_UNSUPPORTED;
+    }
+    if(h){
+        CubeTexture *c=cube_texture(d,h);
+        if(!c||c->cpu_only||!c->native||c->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u))
+            return D9_INVALID;
+    }
+    if(stage){d->cube_texture1=h;d->texture1=0;}
+    else{d->cube_texture=h;d->texture=0;}
+    return D9_OK;
+}
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
 static Depth *depth_slot(D9Device *d,D9Handle h);
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
@@ -613,6 +773,7 @@ int d9_set_texture(D9Device *d,D9Handle h){return d9_bind_texture(d,0,h);}
 int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
     if(stage>=d9_stage_count(d)){if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");return D9_UNSUPPORTED;}
     Texture *t=d?texture(d,h):NULL;if(!d||d->teardown||(h&&(!t||t->locked||!t->native||!t->level[0].uploaded)))return D9_INVALID;
+    if(stage)d->cube_texture1=0;else d->cube_texture=0;
     if(h&&!t->rt_target){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
     if(stage)d->texture1=h;else d->texture=h;return D9_OK;}
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
@@ -963,6 +1124,10 @@ static int stage_uses_diffuse(const D9DrawState *s){
 }
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
+    if(d->cube_texture||d->cube_texture1){
+        set_diagnosis(d,"cube-map sampling is not implemented; bind a 2D texture for this draw");
+        return D9_UNSUPPORTED;
+    }
     if(up&&(!up->vertices||!up->stride||(up->indices&&up->index_size!=2&&up->index_size!=4)))return D9_INVALID;
     const uint8_t *ixdata=NULL;size_t ixbytes=0;unsigned step=2;
     if(indexed){
@@ -1227,7 +1392,7 @@ int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
     return d->ops.depth_clear(d->ctx,flags,packed)?D9_BACKEND:D9_OK;
 }
 size_t d9_memory_used(const D9Device *d){if(!d)return 0;D9TexCacheStats st;d9_texcache_stats(&d->tex_cache,&st);
-    return memory_sum(d->used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used)));}
+    return memory_sum(d->used,memory_sum(d->cube_used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used))));}
 int d9_get_draw_state(const D9Device *d,D9DrawState *out){
     if(!d||!out)return D9_INVALID;
     *out=d->state;

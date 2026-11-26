@@ -45,6 +45,13 @@
 #define DDSD_MIPMAPCOUNT 0x00020000u
 #define DDSD_DEPTH 0x00800000u
 #define DDSCAPS2_CUBEMAP 0x00000200u
+#define DDSCAPS2_CUBEMAP_POSITIVEX 0x00000400u
+#define DDSCAPS2_CUBEMAP_NEGATIVEX 0x00000800u
+#define DDSCAPS2_CUBEMAP_POSITIVEY 0x00001000u
+#define DDSCAPS2_CUBEMAP_NEGATIVEY 0x00002000u
+#define DDSCAPS2_CUBEMAP_POSITIVEZ 0x00004000u
+#define DDSCAPS2_CUBEMAP_NEGATIVEZ 0x00008000u
+#define DDSCAPS2_CUBEMAP_FACE_MASK 0x0000fc00u
 #define DDSCAPS2_VOLUME 0x00200000u
 #define DDPF_ALPHAPIXELS 0x00000001u
 #define DDPF_FOURCC 0x00000004u
@@ -53,6 +60,7 @@
 
 typedef struct {
     unsigned width,height,depth,mips,format,resource;
+    uint32_t caps2;
     size_t data_offset;
 } DdsImage;
 
@@ -156,7 +164,7 @@ static int parse_dds(const uint8_t *p,size_t n,DdsImage *out){
         if(!depth)depth=1;
     }
     out->width=width;out->height=height;out->depth=depth;out->mips=mips;
-    out->format=format;out->resource=resource;out->data_offset=128u;
+    out->format=format;out->resource=resource;out->caps2=caps2;out->data_offset=128u;
     return 0;
 }
 
@@ -293,8 +301,8 @@ static uint32_t create_2d_from_dds_ex(const char *who,uint32_t device,const uint
                                       unsigned pool,unsigned usage,unsigned levels,
                                       uint32_t *out){
     if(d->resource==D3DRTYPE_CUBETEXTURE||d->resource==D3DRTYPE_VOLUMETEXTURE){
-        reject("%s: %s DDS needs IDirect3D%sTexture9, which the D3D9 bridge does not "
-               "implement (d3d9_core/d3d9_com expose 2D textures only); E_NOTIMPL",
+        reject("%s: %s DDS is not a 2D texture; use the dedicated "
+               "IDirect3D%sTexture9 loader (E_NOTIMPL)",
                who,d->resource==D3DRTYPE_CUBETEXTURE?"cube":"volume",
                d->resource==D3DRTYPE_CUBETEXTURE?"Cube":"Volume");
         return D3DX_E_NOTIMPL;
@@ -664,14 +672,106 @@ static void shim_create_tex_ex_a(CPU *c){
     RET(D3DX_OK,14);
 }
 
+static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8_t *p,
+                                     size_t size,const DdsImage *d,uint32_t *out){
+    if(d->resource!=D3DRTYPE_CUBETEXTURE){
+        reject("%s: DDS is not a cube map (resource type %u)",who,d->resource);
+        return D3DXERR_INVALIDDATA;
+    }
+    if(d->width!=d->height){
+        reject("%s: cube map edge must be square; got %ux%u",who,d->width,d->height);
+        return D3DXERR_INVALIDDATA;
+    }
+    if((d->caps2&DDSCAPS2_CUBEMAP_FACE_MASK)!=DDSCAPS2_CUBEMAP_FACE_MASK){
+        reject("%s: cube DDS declares only 0x%04lx of the six required face bits",
+               who,(unsigned long)(d->caps2&DDSCAPS2_CUBEMAP_FACE_MASK));
+        return D3DXERR_INVALIDDATA;
+    }
+    if(!texture_format_supported(d->format)){
+        reject("%s: cube DDS format %s is not implemented",who,format_name(d->format));
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    unsigned edge=d->width,w=edge,h=edge,max_mips=1;
+    if(edge>1024u||(edge&(edge-1u))){
+        reject("%s: cube edge %u is not a power of two up to 1024",who,edge);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(bc_bytes(d->format)&&edge<8u){
+        reject("%s: compressed cube edge %u is below the 8x8 floor",who,edge);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    while(w>1||h>1){if(w>1)w>>=1;if(h>1)h>>=1;++max_mips;}
+    if(d->mips<1u||d->mips>max_mips){
+        reject("%s: %u cube mip levels do not fit edge %u",who,d->mips,edge);
+        return D3DXERR_INVALIDDATA;
+    }
+    size_t face_bytes=0;w=h=edge;
+    for(unsigned i=0;i<d->mips;++i){
+        size_t pitch,bytes;
+        if(level_layout(d->format,w,h,&pitch,&bytes))return D3DX_D3DERR_NOTAVAILABLE;
+        face_bytes+=bytes;if(w>1)w>>=1;if(h>1)h>>=1;
+    }
+    uint64_t needed=(uint64_t)face_bytes*D9_CUBE_FACES;
+    if(d->data_offset>size||needed>size-d->data_offset){
+        reject("%s: truncated cube payload: need %llu bytes for six faces, have %llu",
+               who,(unsigned long long)needed,
+               (unsigned long long)(d->data_offset<=size?size-d->data_offset:0));
+        return D3DXERR_INVALIDDATA;
+    }
+    uint32_t cube=0;
+    uint32_t hr=d9_com_host_create_cube_texture(device,edge,d->mips,0,d->format,
+                                                D9_POOL_MANAGED,&cube);
+    if(hr){
+        reject("%s: %s",who,d9_com_last_diagnostic());
+        return hr;
+    }
+    size_t offset=d->data_offset;w=h=edge;
+    for(unsigned face=0;face<D9_CUBE_FACES;++face){
+        w=h=edge;
+        for(unsigned level=0;level<d->mips;++level){
+            size_t pitch=0,bytes=0;
+            if(level_layout(d->format,w,h,&pitch,&bytes)){
+                d9_com_host_release(cube);return D3DX_D3DERR_NOTAVAILABLE;
+            }
+            hr=d9_com_host_upload_cube_face_level(cube,face,level,p+offset,pitch,bytes);
+            if(hr){
+                reject("%s: face %u level %u upload failed (%s)",who,face,level,
+                       d9_com_last_diagnostic());
+                d9_com_host_release(cube);
+                return hr;
+            }
+            offset+=bytes;if(w>1)w>>=1;if(h>1)h>>=1;
+        }
+    }
+    *out=cube;
+    fprintf(stderr,"[d3dx] %s: %ux%u cube %s, 6 faces x %u level(s)\n",
+            who,edge,edge,format_name(d->format),d->mips);
+    return D3DX_OK;
+}
+
 static void shim_create_cube_mem(CPU *c){
-    uint32_t out=A(3);
+    uint32_t device=A(0),src=A(1),size=A(2),out=A(3);
     uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
-    if(out_guest)*out_guest=0;
-    reject("D3DXCreateCubeTextureFromFileInMemory: the D3D9 bridge has no "
-           "IDirect3DCubeTexture9 object type, cube-face surfaces, or six-face backend "
-           "upload (d3d9_core/d3d9_com are 2D-only); E_NOTIMPL");
-    RET(D3DX_E_NOTIMPL,4);
+    if(!out_guest){
+        reject("D3DXCreateCubeTextureFromFileInMemory: invalid output pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,4);
+    }
+    *out_guest=0;
+    const uint8_t *p=src&&size&&g.memory?guest_ptr(g.memory,src,size):NULL;
+    if(!p){
+        reject("D3DXCreateCubeTextureFromFileInMemory: source buffer is null or "
+               "outside guest memory");
+        RET(D3DX_D3DERR_INVALIDCALL,4);
+    }
+    DdsImage d;
+    if(parse_checked("D3DXCreateCubeTextureFromFileInMemory",p,size,&d))
+        RET(D3DXERR_INVALIDDATA,4);
+    uint32_t cube=0;
+    uint32_t hr=create_cube_from_dds("D3DXCreateCubeTextureFromFileInMemory",device,p,size,&d,&cube);
+    if(hr)RET(hr,4);
+    *out_guest=cube;
+    g.last_error[0]=0;
+    RET(D3DX_OK,4);
 }
 static void shim_create_volume_mem(CPU *c){
     uint32_t out=A(3);

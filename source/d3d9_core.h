@@ -186,6 +186,15 @@ typedef struct {
      * NULL means the backend cannot sample its targets and RT-texture creation
      * is refused by name. */
     void *(*target_texture)(void *ctx,void *native);
+    /* Optional cube-map texture creation/upload.  The core owns all six faces
+     * and their mip chain as CPU pixels; these callbacks only create/update a
+     * backend-native cube handle.  NULL means the backend cannot represent
+     * cube maps, so d9_create_cube_texture_ex() returns D9_UNSUPPORTED instead
+     * of pretending a CPU-only cube can be sampled.  Deletion uses
+     * texture_delete(). */
+    int (*texture_create_cube)(void *ctx,unsigned edge_length,unsigned levels,void **native);
+    int (*texture_upload_cube)(void *ctx,void *native,unsigned face,unsigned level,
+                               const void *data,size_t bytes);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -234,6 +243,33 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
                              unsigned pool,unsigned usage,D9Handle *out);
 /* Returns the backing target handle for a render-target texture, or zero. */
 D9Handle d9_texture_render_target(const D9Device *d,D9Handle h);
+/* ---- cube textures -------------------------------------------------------
+ * Six CPU face stores (+X,-X,+Y,-Y,+Z,-Z) with a shared mip chain.  Cube
+ * creation requires the backend texture_create_cube/upload_cube callbacks;
+ * the null backend advertises them, the PICA backend does not.  Locking is
+ * exposed per face/level for host loaders and GetCubeMapSurface views. */
+enum {D9_CUBE_FACES=6};
+int d9_create_cube_texture_ex(D9Device *d,unsigned edge_length,unsigned levels,
+                              unsigned format,unsigned pool,unsigned usage,
+                              D9Handle *out);
+unsigned d9_cube_levels(D9Device *d,D9Handle h);
+int d9_cube_level_info(D9Device *d,D9Handle h,unsigned level,
+                       unsigned *edge_length,size_t *pitch,size_t *bytes);
+int d9_cube_face_level_info(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                            unsigned *w,unsigned *height,size_t *pitch,
+                            size_t *bytes);
+int d9_cube_face_level_view(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                            void **pixels,unsigned *w,unsigned *height,
+                            size_t *pitch,size_t *bytes);
+int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                              const void *src,size_t src_pitch,size_t src_bytes);
+/* Re-upload a face level after a GetCubeMapSurface view was written. */
+int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level);
+int d9_release_cube_texture(D9Device *d,D9Handle h);
+/* Bind a ready cube to stage 0/1.  h==0 clears that stage.  Cube sampling is
+ * not implemented by the draw path, so a later draw with a cube bound fails
+ * with D9_UNSUPPORTED rather than silently dropping the cube. */
+int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h);
 /* One LDR render target at a time.  Handle zero is the implicit back buffer. */
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,
                             int lockable,D9Handle *out);

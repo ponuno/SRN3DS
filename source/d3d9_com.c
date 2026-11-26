@@ -45,12 +45,13 @@ static void capture_present_event(void);
 #define USAGE_DYNAMIC 0x0200u
 #define USAGE_VB_MASK (USAGE_WRITEONLY|USAGE_DYNAMIC)
 #define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
-enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,KIND_COUNT};
+enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,KIND_COUNT};
 typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
 typedef struct Obj {
     unsigned kind,refs,deferred;uint32_t guest;D9Handle handle;
     unsigned bytes,width,height,format,usage,pool,fvf,pitch,lockable;
-    uint32_t lock_guest;unsigned lock_bytes,readonly,lock_level,lock_rows,lock_pitch,lock_row_bytes;void *lock_host;
+    unsigned block_bytes; /* non-zero for compressed cube-surface views */
+    uint32_t lock_guest;unsigned lock_bytes,readonly,lock_level,lock_face,lock_rows,lock_pitch,lock_row_bytes;void *lock_host;
     unsigned lock_x,lock_y,lock_w,lock_h;
     uint8_t *pixels;
     /* Explicit depth-stencil surface: a descriptor for the single PICA depth
@@ -64,12 +65,12 @@ typedef struct Obj {
     char menu_backend_why[D9_MENU_SHADER_REASON_MAX];
     D9Decl *declaration;
     /* Level surface view: pixels point into the parent texture's CPU store. */
-    struct Obj *view_parent;D9Handle view_texture;unsigned view_level;int is_view;
+    struct Obj *view_parent;D9Handle view_texture;unsigned view_level,view_face;int is_view,view_cube;
 } Obj;
 static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
     Obj o[MAX_OBJECTS];unsigned next;
-    Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*vs,*ps,*declaration;
+    Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*vs,*ps,*declaration;
     unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;float constants_c8[4];
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
     uint16_t gamma[3][256];size_t surface_bytes;
@@ -141,7 +142,7 @@ static uint32_t adapter_result(int rc){return rc==D9_ADAPTER_OK?OK:rc==D9_ADAPTE
 static const char *interface_name(unsigned kind){
     static const char *names[]={"unknown object","IDirect3D9","IDirect3DDevice9","IDirect3DVertexBuffer9",
         "IDirect3DIndexBuffer9","IDirect3DTexture9","IDirect3DVertexShader9","IDirect3DPixelShader9",
-        "IDirect3DVertexDeclaration9","IDirect3DSurface9"};
+        "IDirect3DVertexDeclaration9","IDirect3DSurface9","IDirect3DCubeTexture9"};
     return kind<sizeof names/sizeof *names?names[kind]:"D3D9 object";
 }
 static Obj *obj(uint32_t addr,unsigned kind){
@@ -163,6 +164,10 @@ static void destroy_obj(Obj *o){
     else if(o->kind==TEX){
         int rc=d9_release_texture(g.device,o->handle);
         if(rc==D9_RELEASE_FAILED){o->refs=1;o->deferred=1;return;}
+        parent=g.dev;
+    }
+    else if(o->kind==CUBE){
+        (void)d9_release_cube_texture(g.device,o->handle);
         parent=g.dev;
     }
     else if(o->kind==VS||o->kind==PS){free(o->code);o->code=NULL;parent=g.dev;}
@@ -195,7 +200,7 @@ static void destroy_obj(Obj *o){
         }
         Obj *back=g.back;g.back=NULL;g.rt=NULL;
         memset(g.streams,0,sizeof g.streams);memset(g.offsets,0,sizeof g.offsets);memset(g.strides,0,sizeof g.strides);
-        g.ib=g.tex=g.tex1=g.vs=g.ps=g.declaration=NULL;
+        g.ib=g.tex=g.tex1=g.cube=g.cube1=g.vs=g.ps=g.declaration=NULL;
         g.dev=NULL;release(back);parent=g.factory;
     }
     else if(o->kind==FACTORY)g.factory=NULL;
@@ -285,10 +290,13 @@ static const uint8_t guids[][16]={
     {0x9c,0xc5,0x13,0xdd,0xfa,0x36,0x98,0x40,0xa8,0xfb,0xc7,0xed,0x39,0xdc,0x85,0x46},
     {0x3a,0xaf,0xfb,0x0c,0xf6,0x99,0x4a,0x29,0x99,0xb3,0xa2,0x79,0x6a,0xf8,0xb8,0x9b},
     {0x5d,0x05,0xec,0x5e,0x7d,0x8f,0x62,0x43,0xb9,0x99,0xd1,0xba,0xf3,0x57,0xc7,4},
-    {0x7e,0xa8,0x0c,0x58,0x3c,0x1d,0x54,0x4d,0x99,0x1d,0xb7,0xd3,0xe3,0xc2,0x98,0xce}};
+    {0x7e,0xa8,0x0c,0x58,0x3c,0x1d,0x54,0x4d,0x99,0x1d,0xb7,0xd3,0xe3,0xc2,0x98,0xce},
+    {0x81,0x2f,0xf3,0xff,0x53,0xd9,0x3a,0x47,0x92,0x23,0x93,0xd6,0x52,0xab,0xa9,0x3f}};
 static void query(CPU *c){Obj *o=obj(A(0),0);const void *iid=ptr(A(1),16);uint32_t out=A(2);if(!o||!iid||!ptr(out,4))RET(INVALID,3);
-    M32(out)=0;if(memcmp(iid,guids[0],16)&&memcmp(iid,guids[o->kind],16)&&
-        !((o->kind>=VB&&o->kind<=TEX||o->kind==SURFACE)&&!memcmp(iid,guids[10],16))&&!(o->kind==TEX&&!memcmp(iid,guids[11],16)))RET(NOINTERFACE,3);
+    const uint8_t *concrete=o->kind==CUBE?guids[12]:guids[o->kind];
+    M32(out)=0;if(memcmp(iid,guids[0],16)&&memcmp(iid,concrete,16)&&
+        !((o->kind>=VB&&o->kind<=TEX||o->kind==SURFACE||o->kind==CUBE)&&!memcmp(iid,guids[10],16))&&
+        !((o->kind==TEX||o->kind==CUBE)&&!memcmp(iid,guids[11],16)))RET(NOINTERFACE,3);
     retain(o);M32(out)=o->guest;RET(OK,3);}
 static void adapter_count(CPU *c){
     if(!obj(A(0),FACTORY)){d3d_log("GetAdapterCount","invalid factory object");RET(0,1);}
@@ -884,6 +892,45 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||
     if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_texture_ex(g.device,A(1),A(2),A(5),A(3),A(6),A(4),0,&h);if(rc)RET(hr(rc),9);
     Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
     o->handle=h;o->width=A(1);o->height=A(2);o->bytes=(unsigned)bytes;o->pitch=(unsigned)pitch;o->format=A(5);o->usage=A(4);o->pool=A(6);retain(g.dev);M32(out)=o->guest;RET(OK,9);}
+static uint32_t cube_create_obj(uint32_t device,unsigned edge,unsigned levels,unsigned usage,
+                                unsigned format,unsigned pool,uint32_t *out){
+    if(out)*out=0;
+    if(!g.mem||!g.device||!out||g.phase||!obj(device,DEVICE))return INVALID;
+    if(usage&~0x00220200u)return UNAVAILABLE;
+    if(pool>2)return UNAVAILABLE;
+    if(g.next>=MAX_OBJECTS)return OUTMEM;
+    D9Handle h=0;int rc=d9_create_cube_texture_ex(g.device,edge,levels,format,pool,usage,&h);
+    if(rc){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"CreateCubeTexture: %s",
+                 d9_last_draw_diagnostic(g.device));
+        return hr(rc);
+    }
+    Obj *o=new_obj(CUBE);
+    if(!o){d9_release_cube_texture(g.device,h);return OUTMEM;}
+    o->handle=h;o->width=o->height=edge;o->format=format;o->usage=usage;o->pool=pool;
+    retain(g.dev);*out=o->guest;return OK;
+}
+static void create_cube_tex(CPU *c){uint32_t out=A(6);
+    if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,8);M32(out)=0;
+    if(A(7)){d3d_fail("CreateCubeTexture","shared handles are not supported",INVALID);RET(INVALID,8);}
+    uint32_t guest=0;uint32_t rc=cube_create_obj(A(0),A(1),A(2),A(3),A(4),A(5),&guest);
+    if(rc)RET(rc,8);
+    M32(out)=guest;RET(OK,8);}
+uint32_t d9_com_host_create_cube_texture(uint32_t device,unsigned edge,unsigned levels,
+                                         unsigned usage,unsigned format,unsigned pool,
+                                         uint32_t *out_cube){
+    return cube_create_obj(device,edge,levels,usage,format,pool,out_cube);
+}
+uint32_t d9_com_host_upload_cube_face_level(uint32_t cube,unsigned face,unsigned level,
+                                            const void *src,size_t src_pitch,
+                                            size_t src_bytes){
+    Obj *o=obj(cube,CUBE);
+    if(!o||!g.device||!src||!src_pitch||g.phase)return INVALID;
+    int rc=d9_cube_upload_face_level(g.device,o->handle,face,level,src,src_pitch,src_bytes);
+    if(rc){snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+        "UploadCubeFace: %s",d9_last_draw_diagnostic(g.device));return hr(rc);}
+    g.last_diagnostic[0]=0;return OK;
+}
 static uint32_t lock_addr(Obj *o){return LOCK_BASE+(unsigned)(o-g.o)*LOCK_STRIDE;}
 static int lock_buffer(Obj *o,unsigned offset,unsigned bytes,unsigned flags){
     if(!o||(o->kind!=VB&&o->kind!=IB)||o->lock_guest||g.phase||offset>=o->bytes||flags&~0x3010u)return D9_INVALID;
@@ -927,7 +974,7 @@ static void buffer_desc(CPU *c){Obj *o=obj(A(0),0);uint32_t p=A(1);if(!o||(o->ki
 static void level_count(CPU *c){Obj *o=obj(A(0),TEX);RET(o?d9_texture_levels(g.device,o->handle):0,1);}
 static void texture_desc(CPU *c){Obj *o=obj(A(0),TEX);uint32_t p=A(2);unsigned w,h;if(!o||!ptr(p,32)||d9_texture_level_info(g.device,o->handle,A(1),&w,&h,NULL,NULL))RET(INVALID,3);
     M32(p)=o->format;M32(p+4)=1;M32(p+8)=o->usage;M32(p+12)=o->pool;M32(p+16)=M32(p+20)=0;M32(p+24)=w;M32(p+28)=h;RET(OK,3);}
-static void resource_type(CPU *c){Obj *o=obj(A(0),0);RET(!o?0:o->kind==VB?6:o->kind==IB?7:o->kind==TEX?3:o->kind==SURFACE?1:0,1);}
+static void resource_type(CPU *c){Obj *o=obj(A(0),0);RET(!o?0:o->kind==VB?6:o->kind==IB?7:o->kind==TEX?3:o->kind==CUBE?5:o->kind==SURFACE?1:0,1);}
 /* IDirect3DTexture9::GetSurfaceLevel.  The returned surface is a view into the
  * parent texture's CPU level store.  Only uncompressed 32-bit levels are
  * exposed; BC levels have no 4-byte-per-pixel lock layout here. */
@@ -983,6 +1030,100 @@ static void texture_add_dirty_rect(CPU *c){
     trace_detail("AddDirtyRect%s",r?"":"(NULL)");
     RET(OK,2);
 }
+/* ---- IDirect3DCubeTexture9 ------------------------------------------------ */
+static void cube_level_count(CPU *c){Obj *o=obj(A(0),CUBE);RET(o?d9_cube_levels(g.device,o->handle):0,1);}
+static void cube_desc(CPU *c){
+    Obj *o=obj(A(0),CUBE);uint32_t p=A(2);
+    unsigned edge;size_t pitch,bytes;
+    if(!o||!ptr(p,32)||d9_cube_level_info(g.device,o->handle,A(1),&edge,&pitch,&bytes))RET(INVALID,3);
+    M32(p)=o->format;M32(p+4)=1;M32(p+8)=o->usage;M32(p+12)=o->pool;
+    M32(p+16)=M32(p+20)=0;M32(p+24)=edge;M32(p+28)=edge;RET(OK,3);
+}
+static void cube_get_surface(CPU *c){
+    Obj *t=obj(A(0),CUBE);uint32_t face=A(1),level=A(2),out=A(3);
+    if(!t||face>=D9_CUBE_FACES||!ptr(out,4))RET(INVALID,4);
+    M32(out)=0;
+    void *pixels=NULL;unsigned w=0,h=0;size_t pitch=0,bytes=0;
+    int rc=d9_cube_face_level_view(g.device,t->handle,face,level,&pixels,&w,&h,&pitch,&bytes);
+    if(rc){d3d_log("GetCubeMapSurface","invalid cube face or mip level");RET(INVALID,4);}
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,4);
+    Obj *o=new_obj(SURFACE);if(!o)RET(OUTMEM,4);
+    o->width=w;o->height=h;o->format=t->format;o->usage=t->usage;o->pool=t->pool;
+    o->pitch=(unsigned)pitch;o->bytes=(unsigned)bytes;o->pixels=pixels;
+    o->block_bytes=d9_bc_block_bytes(t->format);
+    o->is_view=1;o->view_cube=1;o->view_parent=t;o->view_face=face;o->view_level=level;
+    retain(t);M32(out)=o->guest;
+    trace_detail("Cube surface=0x%08lx cube=0x%08lx face=%lu level=%lu %lux%lu pitch=%lu",
+        (unsigned long)o->guest,(unsigned long)t->guest,(unsigned long)face,
+        (unsigned long)level,(unsigned long)w,(unsigned long)h,(unsigned long)pitch);
+    RET(OK,4);
+}
+static int lock_cube_rect(Obj *o,unsigned face,unsigned level,uint32_t locked,
+                          uint32_t rect,unsigned flags){
+    if(!o||o->kind!=CUBE||o->lock_guest||g.phase||!ptr(locked,8))return D9_INVALID;
+    if(flags&~0xf810u||(rect&&(flags&0x2000)))return D9_INVALID;
+    unsigned edge;size_t pitch,bytes;void *pixels=NULL;
+    if(d9_cube_face_level_info(g.device,o->handle,face,level,NULL,NULL,&pitch,&bytes)||
+       d9_cube_face_level_view(g.device,o->handle,face,level,&pixels,&edge,NULL,NULL,NULL))
+        return D9_INVALID;
+    int32_t r[4]={0,0,(int32_t)edge,(int32_t)edge};
+    if(rect){if(!ptr(rect,16))return D9_INVALID;memcpy(r,ptr(rect,16),16);}
+    if(r[0]<0||r[1]<0||r[2]<=r[0]||r[3]<=r[1]||(uint64_t)r[2]>edge||(uint64_t)r[3]>edge)
+        return D9_INVALID;
+    unsigned x=(unsigned)r[0],y=(unsigned)r[1],bb=d9_bc_block_bytes(o->format);
+    size_t row_bytes,rows,offset;
+    if(bb){
+        if((x&3u)||(y&3u))return D9_INVALID;
+        row_bytes=(size_t)(((unsigned)r[2]-x+3u)/4u)*bb;
+        rows=((unsigned)r[3]-y+3u)/4u;
+        offset=(size_t)(y/4u)*pitch+(size_t)(x/4u)*bb;
+    }else{
+        row_bytes=(size_t)((unsigned)r[2]-x)*4u;
+        rows=(unsigned)r[3]-y;
+        offset=(size_t)y*pitch+(size_t)x*4u;
+    }
+    size_t span=(rows-1)*pitch+row_bytes;
+    if(offset>bytes||span>bytes-offset||span>LOCK_STRIDE)return D9_INVALID;
+    uint32_t address=lock_addr(o);if(guest_map(g.mem,address,(uint32_t)span))return D9_MEMORY;
+    uint8_t *src=(uint8_t *)pixels+offset,*dst=ptr(address,(uint32_t)span);
+    if(!(flags&0x2000))
+        for(size_t i=0;i<rows;++i)memcpy(dst+i*pitch,src+i*pitch,row_bytes);
+    o->lock_guest=address;o->lock_host=src;o->lock_bytes=(unsigned)span;
+    o->readonly=!!(flags&0x10);o->lock_face=face;o->lock_level=level;
+    o->lock_rows=(unsigned)rows;o->lock_pitch=(unsigned)pitch;o->lock_row_bytes=(unsigned)row_bytes;
+    M32(locked)=pitch;M32(locked+4)=address;return D9_OK;
+}
+static void cube_lock(CPU *c){
+    Obj *o=obj(A(0),CUBE);
+    if(!o)RET(INVALID,6);
+    int rc=lock_cube_rect(o,A(1),A(2),A(3),A(4),A(5));
+    RET(hr(rc),6);
+}
+static void cube_unlock(CPU *c){
+    Obj *o=obj(A(0),CUBE);
+    if(!o||!o->lock_guest)RET(INVALID,3);
+    if(!o->readonly){
+        uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);
+        for(unsigned i=0;i<o->lock_rows;++i)
+            memcpy(host+(size_t)i*o->lock_pitch,src+(size_t)i*o->lock_pitch,o->lock_row_bytes);
+    }
+    unsigned face=o->lock_face,level=o->lock_level;
+    guest_unmap(g.mem,o->lock_guest);o->lock_guest=0;o->lock_host=NULL;
+    o->lock_bytes=o->lock_rows=o->lock_pitch=o->lock_row_bytes=0;
+    int rc=o->readonly?D9_OK:d9_cube_face_unlocked(g.device,o->handle,face,level);
+    RET(hr(rc),3);
+}
+static void cube_add_dirty_rect(CPU *c){
+    Obj *o=obj(A(0),CUBE);uint32_t face=A(1),r=A(2);
+    if(!o||face>=D9_CUBE_FACES)RET(INVALID,3);
+    if(r){
+        if(!ptr(r,16))RET(INVALID,3);
+        int32_t v[4];memcpy(v,ptr(r,16),16);
+        if(v[0]<0||v[1]<0||v[2]<=v[0]||v[3]<=v[1]||
+           (uint32_t)v[2]>o->width||(uint32_t)v[3]>o->height)RET(INVALID,3);
+    }
+    RET(OK,3);
+}
 static void surface_desc(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t p=A(1);
     if(!o||!ptr(p,32))RET(INVALID,2);
     M32(p)=o->format;M32(p+4)=1;M32(p+8)=o->usage;M32(p+12)=o->pool;
@@ -994,7 +1135,11 @@ static void surface_container(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(2)
     if(!memcmp(ptr(A(1),16),guids[0],16)||!memcmp(ptr(A(1),16),guids[DEVICE],16)){
         retain(g.dev);M32(out)=g.dev->guest;RET(OK,3);
     }
-    if(o->is_view&&o->view_parent&&!memcmp(ptr(A(1),16),guids[TEX],16)){
+    if(o->is_view&&!o->view_cube&&o->view_parent&&!memcmp(ptr(A(1),16),guids[TEX],16)){
+        retain(o->view_parent);M32(out)=o->view_parent->guest;RET(OK,3);
+    }
+    if(o->is_view&&o->view_cube&&o->view_parent&&
+       (!memcmp(ptr(A(1),16),guids[12],16)||!memcmp(ptr(A(1),16),guids[11],16))){
         retain(o->view_parent);M32(out)=o->view_parent->guest;RET(OK,3);
     }
     RET(NOINTERFACE,3);
@@ -1009,8 +1154,19 @@ static int lock_surface_rect(Obj *o,const int32_t r[4],unsigned flags,
     if(o->handle&&(!o->lockable||(flags&~0x8010u)))return D9_INVALID;
     if(!o->handle&&(flags&~0xc810u))return D9_INVALID;
     if(r[0]<0||r[1]<0||r[2]<=r[0]||r[3]<=r[1]||(uint64_t)r[2]>o->width||(uint64_t)r[3]>o->height)return D9_INVALID;
-    unsigned x=(unsigned)r[0],y=(unsigned)r[1],row_bytes=((unsigned)r[2]-x)*4,rows=(unsigned)r[3]-y;
-    size_t offset=(size_t)y*o->pitch+x*4,span=(size_t)(rows-1)*o->pitch+row_bytes;
+    unsigned x=(unsigned)r[0],y=(unsigned)r[1];
+    size_t row_bytes,rows,offset;
+    if(o->block_bytes){
+        if((x&3u)||(y&3u))return D9_INVALID;
+        row_bytes=(size_t)(((unsigned)r[2]-x+3u)/4u)*o->block_bytes;
+        rows=((unsigned)r[3]-y+3u)/4u;
+        offset=(size_t)(y/4u)*o->pitch+(size_t)(x/4u)*o->block_bytes;
+    }else{
+        row_bytes=(size_t)((unsigned)r[2]-x)*4u;
+        rows=(unsigned)r[3]-y;
+        offset=(size_t)y*o->pitch+(size_t)x*4u;
+    }
+    size_t span=(rows-1)*o->pitch+row_bytes;
     if(offset>o->bytes||span>o->bytes-offset||span>LOCK_STRIDE)return D9_INVALID;
     uint32_t address=lock_addr(o);if(guest_map(g.mem,address,(uint32_t)span))return D9_MEMORY;
     if(o->handle){
@@ -1043,6 +1199,7 @@ static int unlock_surface(Obj *o){
     if(!o->readonly&&!write_back){uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);
         for(unsigned i=0;i<o->lock_rows;++i)memcpy(host+(size_t)i*o->lock_pitch,src+(size_t)i*o->lock_pitch,o->lock_row_bytes);}
     int is_view=o->is_view;D9Handle view_texture=o->view_texture;unsigned view_level=o->view_level;int readonly=o->readonly;
+    int is_cube_view=o->view_cube;unsigned view_face=o->view_face;Obj *view_parent=o->view_parent;
     int rc=D9_OK;
     if(write_back)
         rc=d9_render_target_write(g.device,o->handle,ptr(o->lock_guest,o->lock_bytes),o->lock_pitch,
@@ -1057,9 +1214,12 @@ static int unlock_surface(Obj *o){
     }
     /* Writing a level view updates the parent texture's CPU store; the GPU copy
      * is re-uploaded here so a following SetTexture sees the new pixels. */
-    if(is_view&&!readonly){
-        int rc=d9_texture_surface_unlocked(g.device,view_texture,view_level);
-        if(rc)return rc;
+    if(is_cube_view&&!readonly&&view_parent){
+        int rc2=d9_cube_face_unlocked(g.device,view_parent->handle,view_face,view_level);
+        if(rc2)return rc2;
+    }else if(is_view&&!readonly){
+        int rc2=d9_texture_surface_unlocked(g.device,view_texture,view_level);
+        if(rc2)return rc2;
     }
     return D9_OK;
 }
@@ -1309,11 +1469,31 @@ static void get_stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||
 static void indices(CPU *c){Obj *o=obj(A(1),IB);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     int rc=d9_set_indices(g.device,o?o->handle:0);if(!rc)bind(&g.ib,o);RET(hr(rc),2);}
 static void get_indices(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ib);M32(A(1))=g.ib?g.ib->guest:0;RET(OK,2);}
-static void texture(CPU *c){Obj *o=obj(A(2),TEX);if(!obj(A(0),DEVICE)||(A(2)&&!o)||g.phase==2)RET(INVALID,3);
-    int rc=d9_bind_texture(g.device,A(1),o?o->handle:0);
-    if(rc==D9_UNSUPPORTED)d3d_log("SetTexture","unsupported texture unit");
-    if(!rc)bind(A(1)?&g.tex1:&g.tex,o);
+static void texture(CPU *c){
+    uint32_t addr=A(2);Obj *o=NULL;
+    if(addr){o=obj(addr,TEX);if(!o)o=obj(addr,CUBE);}
+    if(!obj(A(0),DEVICE)||(addr&&!o)||g.phase==2)RET(INVALID,3);
+    int rc;
+    if(o&&o->kind==CUBE)rc=d9_bind_cube_texture(g.device,A(1),o->handle);
+    else rc=d9_bind_texture(g.device,A(1),o?o->handle:0);
+    if(rc==D9_UNSUPPORTED)d3d_log("SetTexture","unsupported texture unit or cube sampling");
+    if(!rc){
+        if(o&&o->kind==CUBE){
+            bind(A(1)?&g.cube1:&g.cube,o);
+            bind(A(1)?&g.tex1:&g.tex,NULL);
+        }else{
+            bind(A(1)?&g.tex1:&g.tex,o);
+            bind(A(1)?&g.cube1:&g.cube,NULL);
+        }
+    }
     RET(hr(rc),3);}
+static void get_texture(CPU *c){
+    uint32_t out=A(2);
+    if(!obj(A(0),DEVICE)||!ptr(out,4))RET(INVALID,3);
+    Obj *o=A(1)?g.tex1:g.tex;
+    if(!o)o=A(1)?g.cube1:g.cube;
+    retain(o);M32(out)=o?o->guest:0;RET(OK,3);
+}
 /* ---- menu VS / material evidence ---------------------------------------- */
 /* The menu path does not guess normal/tangent availability.  It derives only
  * the bits the device can actually observe: bound LDR textures, the current
@@ -1812,15 +1992,16 @@ static void draw_indexed_up(CPU *c){
  X(adapter_identifier) X(adapter_mode_count) X(enum_modes) X(check_device_type) X(check_multisample) X(check_depth_stencil) X(check_format_conversion) \
  X(factory_caps) X(device_caps) X(adapter_monitor) X(register_software) \
  X(d3dperf_set_options) X(d3dperf_begin) X(d3dperf_end) X(d3dperf_status) \
- X(cooperative) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
+ X(cooperative) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(create_cube_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
  X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
  X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
- X(stream) X(indices) X(texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
+ X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
  X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
  X(set_scissor_rect) X(get_scissor_rect) X(set_gamma_ramp) X(get_gamma_ramp) X(set_npatch_mode) X(get_npatch_mode) \
- X(surface_desc) X(surface_container) X(surface_lock) X(surface_unlock) X(surface_dc) X(surface_release_dc)
+ X(surface_desc) X(surface_container) X(surface_lock) X(surface_unlock) X(surface_dc) X(surface_release_dc) \
+ X(cube_level_count) X(cube_desc) X(cube_get_surface) X(cube_lock) X(cube_unlock) X(cube_add_dirty_rect)
 #define ENUM(f) I_##f,
 enum {FUNCTIONS(ENUM) I_COUNT};
 #undef ENUM
@@ -1867,7 +2048,11 @@ static const char *const slot_names[KIND_COUNT][MAX_SLOTS]={
     [DECL]={"QueryInterface","AddRef","Release","GetDevice","GetDeclaration"},
     [SURFACE]={
         "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
-        "GetPriority","PreLoad","GetType","GetContainer","GetDesc","LockRect","UnlockRect","GetDC","ReleaseDC"}
+        "GetPriority","PreLoad","GetType","GetContainer","GetDesc","LockRect","UnlockRect","GetDC","ReleaseDC"},
+    [CUBE]={
+        "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
+        "GetPriority","PreLoad","GetType","SetLOD","GetLOD","GetLevelCount","SetAutoGenFilterType","GetAutoGenFilterType",
+        "GenerateMipSubLevels","GetLevelDesc","GetCubeMapSurface","LockRect","UnlockRect","AddDirtyRect"}
 };
 static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
     const char *name=slot_names[kind][slot];if(!name)name="Unimplemented";
@@ -1903,7 +2088,10 @@ static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
  X(VS,0) X(VS,1) X(VS,2) X(VS,3) X(VS,4) X(PS,0) X(PS,1) X(PS,2) X(PS,3) X(PS,4) \
  X(DECL,0) X(DECL,1) X(DECL,2) X(DECL,3) X(DECL,4) \
  X(SURFACE,0) X(SURFACE,1) X(SURFACE,2) X(SURFACE,3) X(SURFACE,4) X(SURFACE,5) X(SURFACE,6) X(SURFACE,7) \
- X(SURFACE,8) X(SURFACE,9) X(SURFACE,10) X(SURFACE,11) X(SURFACE,12) X(SURFACE,13) X(SURFACE,14) X(SURFACE,15) X(SURFACE,16)
+ X(SURFACE,8) X(SURFACE,9) X(SURFACE,10) X(SURFACE,11) X(SURFACE,12) X(SURFACE,13) X(SURFACE,14) X(SURFACE,15) X(SURFACE,16) \
+ X(CUBE,0) X(CUBE,1) X(CUBE,2) X(CUBE,3) X(CUBE,4) X(CUBE,5) X(CUBE,6) X(CUBE,7) \
+ X(CUBE,8) X(CUBE,9) X(CUBE,10) X(CUBE,11) X(CUBE,12) X(CUBE,13) X(CUBE,14) X(CUBE,15) \
+ X(CUBE,16) X(CUBE,17) X(CUBE,18) X(CUBE,19) X(CUBE,20) X(CUBE,21)
 #define COM_ENUM(k,s) I_com_##k##_##s,
 #define COM_ENTRY(k,s) {THUNK+(I_COUNT+I_com_##k##_##s)*4,com_##k##_##s},
 #define COM_WRAP(k,s) static void com_##k##_##s(CPU *c){com_dispatch(k,s,c);}
@@ -1919,11 +2107,11 @@ static const FnEntry all_entries[]={FUNCTIONS(ENTRY) COM_SLOTS(COM_ENTRY)};
 #undef ENTRY
 #undef COM_ENTRY
 #undef COM_SLOTS
-static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201};
+static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201,218};
 #define SLOT(k,s,f) do{g.handlers[k][s]=(f);uint32_t target=g.trace?THUNK+(I_COUNT+com_offsets[k]+(s))*4:THUNK+I_##f*4;guest_write32(g.mem,table_addr(k)+(s)*4,target);}while(0)
 static void init_tables(void){
-    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17};
-    for(unsigned k=1;k<=SURFACE;++k){for(unsigned i=0;i<counts[k];++i)SLOT(k,i,unsupported);SLOT(k,0,query);SLOT(k,1,addref);SLOT(k,2,release_fn);}
+    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17,22};
+    for(unsigned k=1;k<KIND_COUNT;++k){for(unsigned i=0;i<counts[k];++i)SLOT(k,i,unsupported);SLOT(k,0,query);SLOT(k,1,addref);SLOT(k,2,release_fn);}
     SLOT(FACTORY,3,register_software);SLOT(FACTORY,4,adapter_count);SLOT(FACTORY,5,adapter_identifier);
     SLOT(FACTORY,6,adapter_mode_count);SLOT(FACTORY,7,enum_modes);SLOT(FACTORY,8,display_mode);
     SLOT(FACTORY,9,check_device_type);SLOT(FACTORY,10,check_format);SLOT(FACTORY,11,check_multisample);
@@ -1931,13 +2119,13 @@ static void init_tables(void){
     SLOT(FACTORY,15,adapter_monitor);SLOT(FACTORY,16,create_device);
     SLOT(DEVICE,3,cooperative);SLOT(DEVICE,6,direct3d);SLOT(DEVICE,7,device_caps);SLOT(DEVICE,8,device_display_mode);
     SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
-    SLOT(DEVICE,23,create_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
+    SLOT(DEVICE,23,create_tex);SLOT(DEVICE,25,create_cube_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
     SLOT(DEVICE,36,create_offscreen);SLOT(DEVICE,37,set_render_target);SLOT(DEVICE,38,get_render_target);SLOT(DEVICE,34,stretch_rect);SLOT(DEVICE,39,set_depth_stencil);
     SLOT(DEVICE,40,get_depth_stencil);SLOT(DEVICE,41,begin_scene);SLOT(DEVICE,42,end_scene);SLOT(DEVICE,43,clear);SLOT(DEVICE,44,transform);
     SLOT(DEVICE,45,get_transform);SLOT(DEVICE,46,multiply_transform);
     SLOT(DEVICE,49,set_material);SLOT(DEVICE,50,get_material);
     SLOT(DEVICE,51,set_light);SLOT(DEVICE,52,get_light);SLOT(DEVICE,53,light_enable);SLOT(DEVICE,54,get_light_enable);
-    SLOT(DEVICE,47,set_viewport);SLOT(DEVICE,48,get_viewport);SLOT(DEVICE,65,texture);
+    SLOT(DEVICE,47,set_viewport);SLOT(DEVICE,48,get_viewport);SLOT(DEVICE,64,get_texture);SLOT(DEVICE,65,texture);
     SLOT(DEVICE,21,set_gamma_ramp);SLOT(DEVICE,22,get_gamma_ramp);
     SLOT(DEVICE,75,set_scissor_rect);SLOT(DEVICE,76,get_scissor_rect);
     SLOT(DEVICE,79,set_npatch_mode);SLOT(DEVICE,80,get_npatch_mode);
@@ -1950,6 +2138,9 @@ static void init_tables(void){
     for(unsigned k=VB;k<=IB;++k){SLOT(k,11,buffer_lock);SLOT(k,12,buffer_unlock);SLOT(k,13,buffer_desc);}
     SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,18,texture_get_surface_level);
     SLOT(TEX,19,texture_lock);SLOT(TEX,20,texture_unlock);SLOT(TEX,21,texture_add_dirty_rect);
+    SLOT(CUBE,3,resource_device);SLOT(CUBE,10,resource_type);SLOT(CUBE,13,cube_level_count);
+    SLOT(CUBE,17,cube_desc);SLOT(CUBE,18,cube_get_surface);SLOT(CUBE,19,cube_lock);
+    SLOT(CUBE,20,cube_unlock);SLOT(CUBE,21,cube_add_dirty_rect);
     for(unsigned k=VS;k<=PS;++k){SLOT(k,3,resource_device);SLOT(k,4,shader_function);}
     SLOT(DECL,3,resource_device);SLOT(DECL,4,declaration_data);
     SLOT(SURFACE,3,resource_device);SLOT(SURFACE,10,resource_type);SLOT(SURFACE,11,surface_container);SLOT(SURFACE,12,surface_desc);
@@ -1999,7 +2190,10 @@ void d9_com_shutdown(void){if(!g.mem)return;capture_stop();win32_set_external_re
     if(g.device)d9_set_pixel_shader(g.device,NULL);
     for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->lock_guest){
             if(o->kind==SURFACE)unlock_surface(o);else if(unlock(o))guest_unmap(g.mem,o->lock_guest);
-        }free(o->pixels);o->pixels=NULL;free(o->code);o->code=NULL;free(o->declaration);o->declaration=NULL;}
+        }
+        /* Texture/cube face views point into a parent store owned elsewhere. */
+        if(!(o->kind==SURFACE&&o->is_view))free(o->pixels);
+        o->pixels=NULL;free(o->code);o->code=NULL;free(o->declaration);o->declaration=NULL;}
     /* Only a device created by CreateDevice is destroyed here; an adopted
      * D9Device belongs to the caller. */
     if(g.owns_device&&g.device){d9_destroy_device(g.device);g.device=NULL;g.owns_device=0;}

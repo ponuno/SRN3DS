@@ -43,6 +43,25 @@ static void null_texture_delete(void *ctx,void *native){
     if(!t){null_log("ReleaseTexture","null native handle");return;}
     free(t);++s->texture_deletes;
 }
+typedef struct {unsigned edge,levels,face_uploads;} NullCube;
+static int null_cube_create(void *ctx,unsigned edge,unsigned levels,void **native){
+    D9NullStats *s=stats(ctx);
+    if(!native||!pow2(edge)||edge<8||edge>1024||!levels||levels>11){
+        null_log("CreateCubeTexture","only power-of-two 8..1024 cube edges with 1..11 levels are implemented");
+        return -1;
+    }
+    NullCube *c=calloc(1,sizeof *c);if(!c)return -1;
+    c->edge=edge;c->levels=levels;*native=c;++s->cube_creates;return 0;
+}
+static int null_cube_upload(void *ctx,void *native,unsigned face,unsigned level,
+                            const void *data,size_t bytes){
+    D9NullStats *s=stats(ctx);NullCube *c=native;
+    if(!c||face>=D9_CUBE_FACES||level>=c->levels||!data||!bytes){
+        null_log("UnlockRect","invalid cube, face, mip level or pixel data");
+        return -1;
+    }
+    ++c->face_uploads;++s->cube_uploads;return 0;
+}
 static int null_begin(void *ctx,uint32_t argb){
     D9NullStats *s=stats(ctx);
     if(s->scene){null_log("BeginScene","a scene is already active");return -1;}
@@ -241,7 +260,8 @@ static int null_draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
 }
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
-    null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture};
+    null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
+    null_cube_create,null_cube_upload};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

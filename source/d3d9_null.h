@@ -6,7 +6,8 @@
  * "presented screen" image, and records counters.  This makes lockable
  * back-buffer read/write and the Present blit host-testable pixel by pixel.
  * It advertises SM2 templates, one active LDR render target (implicit or
- * explicit), D24S8 depth clears and a validated StretchRect copy. */
+ * explicit), D24S8 depth clears, a validated StretchRect copy and six-face
+ * cube-map creation/upload counters. */
 #define D9_NULL_RESOURCE_LIMIT (4u<<20)
 
 typedef struct {
@@ -37,6 +38,9 @@ typedef struct {
     D9DrawState last_color_state;
     unsigned menu_draws,menu_textures;
     float last_menu_constants[9][4];
+    /* Cube-map creation/upload accounting.  The core owns the six face stores;
+     * these counters prove the null backend accepted every face/level. */
+    unsigned cube_creates,cube_uploads;
 } D9NullStats;
 
 const D9Backend *d9_null_backend(void);

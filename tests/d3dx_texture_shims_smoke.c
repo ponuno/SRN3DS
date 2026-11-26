@@ -10,8 +10,8 @@
  *   4. D3DXGetImageInfoFromFileA and D3DXCreateTextureFromFileExA read a
  *      synthetic file from the win32 sandbox root, reject paths outside it,
  *      and reject the unsupported Ex resize/format parameters by name.
- * Cube/volume creation and non-DDS input must fail with a named HRESULT,
- * never S_OK.
+ * Cube creation is covered by tests/d3dx_cube_texture_smoke.c; volume creation
+ * and non-DDS input must still fail with a named HRESULT, never S_OK.
  */
 #include "d3d9_com.h"
 #include "d3d9_null.h"
@@ -381,7 +381,7 @@ int main(void){
 
     /* 6. Cube and volume DDS: image info works, texture creation is named
      *    unsupported with a cleared out pointer. */
-    size_t cube_bytes=dds_header(ddsbuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200u,1);
+    size_t cube_bytes=dds_header(ddsbuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0xfe00u,1);
     assert(!guest_write(&h.memory,DATA,ddsbuf,cube_bytes));
     uint32_t ci[]={DATA,(uint32_t)cube_bytes,INFO};
     assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",ci,3)==HR_OK);
@@ -620,14 +620,15 @@ int main(void){
     assert(shim_call(&h,"D3DXCreateTextureFromFileExA",exa_default,14)==HR_INVALIDDATA);
     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"64 MiB"));
 
-    /* 7c. Dedicated cube/volume exports still fail by name: the D3D9 bridge
-     *     has no cube/volume object type or upload path. */
-    cube_bytes=dds_header(ddsbuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200u,1);
+    /* 7c. Dedicated cube/volume exports: the cube header here has no face
+     *     payload, so the new cube loader must reject it as truncated; volume
+     *     remains named unsupported. */
+    cube_bytes=dds_header(ddsbuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0xfe00u,1);
     assert(!guest_write(&h.memory,DATA,ddsbuf,cube_bytes));
     uint32_t cube[4]={h.device,DATA,(uint32_t)cube_bytes,OUT};
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cube,4)==HR_E_NOTIMPL);
-    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"IDirect3DCubeTexture9"));
+    assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cube,4)==HR_INVALIDDATA);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"truncated"));
     vol_bytes=dds_header(ddsbuf,8,8,1,0x4u,FMT_DXT1,0,0,0,0,0,0x200000u,4);
     assert(!guest_write(&h.memory,DATA,ddsbuf,vol_bytes));
     uint32_t vol[4]={h.device,DATA,(uint32_t)vol_bytes,OUT};

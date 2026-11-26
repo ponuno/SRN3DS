@@ -72,3 +72,12 @@ uint32_t d9_com_host_upload_texture_level(uint32_t texture,unsigned level,
                                           const void *src,size_t src_pitch,
                                           size_t src_bytes);
 uint32_t d9_com_host_release(uint32_t object);
+/* Host-ABI cube creation/upload for the D3DX cube loader.  Cube creation uses
+ * the core's six-face CPU store and requires the backend cube callbacks; the
+ * PICA backend returns D3DERR_NOTAVAILABLE with d9_com_last_diagnostic(). */
+uint32_t d9_com_host_create_cube_texture(uint32_t device,unsigned edge,unsigned levels,
+                                         unsigned usage,unsigned format,unsigned pool,
+                                         uint32_t *out_cube);
+uint32_t d9_com_host_upload_cube_face_level(uint32_t cube,unsigned face,unsigned level,
+                                            const void *src,size_t src_pitch,
+                                            size_t src_bytes);

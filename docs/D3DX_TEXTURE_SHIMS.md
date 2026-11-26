@@ -14,6 +14,7 @@ these six slots point at host thunks in the `0xfd000000` window.
 | `D3DXCreateTextureFromFileInMemory` | Parses the same DDS and creates a real `IDirect3DTexture9` through `d9_com_host_create_texture()` + per-level upload. Uses the file's format, the file's mip chain, `D3DPOOL_MANAGED`, usage 0. |
 | `D3DXGetImageInfoFromFileA` | Maps the guest path below the `win32_init()` sandbox root, reads **only the 128-byte DDS header**, and fills the same seven fields. A valid header is reported even when the payload is larger than 64 MiB. |
 | `D3DXCreateTextureFromFileExA` | Reads the whole file (64 MiB cap), parses the same DDS, accepts the real TESV tuple (Width/Height from the file, `MipLevels=D3DX_FROM_FILE`, `D3DUSAGE_DYNAMIC`, `A8R8G8B8`, `D3DPOOL_SYSTEMMEM`), and creates/uploads a real texture. BC1/3/5 files requested as `A8R8G8B8` are decoded through `d3d9_bc.c`. |
+| `D3DXCreateCubeTextureFromFileInMemory` | Parses a six-face cube DDS (`CUBEMAP` plus all six face bits), validates square/pow2/<=1024 and the face-major mip chain, then creates a real `IDirect3DCubeTexture9` through the new core cube path and uploads every face/level. A8R8G8B8, X8R8G8B8, DXT1, DXT3 and DXT5 are accepted. |
 
 Supported DDS payloads: `A8R8G8B8`, `X8R8G8B8`, `DXT1`, `DXT3`, `DXT5`;
 power-of-two dimensions up to 1024. Legacy DDS headers only; a `DX10` header is
@@ -74,27 +75,50 @@ Files shorter than 128 bytes are reported as such.
 * `D3DERR_OUTOFVIDEOMEMORY` (`0x8876017C`) for host buffer allocation failure;
   the earlier name `D3DERR_OUTOFMEMORY` was wrong.
 
+## Cube textures
+
+`d3d9_core` now owns a `CubeTexture` type with six face stores and a shared mip
+chain. `d3d9_com` exposes object kind `CUBE` /
+`IDirect3DCubeTexture9`: `CreateCubeTexture` (device slot 25),
+`GetLevelCount`, `GetLevelDesc`, `GetCubeMapSurface`, `LockRect`/`UnlockRect`
+and `AddDirtyRect`. `GetCubeMapSurface` returns a surface view into one
+face/level; compressed views use block-aligned LockRect geometry. `SetTexture`
+accepts a cube and `GetTexture` returns it. The cube's CPU faces are real; a
+draw with a cube bound fails with `D3DERR_NOTAVAILABLE` and
+`"cube-map sampling is not implemented"` rather than silently sampling face 0.
+
+Cube creation requires the backend `texture_create_cube/upload_cube` callbacks.
+The null backend advertises them and counts every face/level upload; the PICA
+backend does not, so `CreateCubeTexture` returns `D3DERR_NOTAVAILABLE` with
+`"this backend has no cube-map texture API"`. This keeps the PICA claim honest.
+
+The D3DX loader requires all six `DDSCAPS2_CUBEMAP_*` face bits, a square
+power-of-two edge (compressed faces at least 8x8), and a complete face-major
+payload. Missing bits, non-square edges, truncation and non-cube DDS return
+`D3DXERR_INVALIDDATA`. A cube DDS passed to the 2D loaders still returns
+`E_NOTIMPL`.
+
+Remaining in this layer: volume textures (`IDirect3DVolumeTexture9`) are still
+`E_NOTIMPL`; cube objects are not registered in the 2D texture cache
+(`D9TexCache`) and cube-map sampling/PICA cube faces are not implemented.
+
 ## Named unsupported
 
-These exports resolve to host thunks that return `E_NOTIMPL` and record the
-missing layer:
+`D3DXCreateVolumeTextureFromFileInMemory` still resolves to a host thunk that
+returns `E_NOTIMPL` and records the missing layer:
 
-* `D3DXCreateCubeTextureFromFileInMemory` - no `IDirect3DCubeTexture9` object
-  type, cube-face surfaces or six-face backend upload.
 * `D3DXCreateVolumeTextureFromFileInMemory` - no `IDirect3DVolumeTexture9`
   object type, depth slices or volume upload.
 
 Cube/volume DDS passed to `D3DXCreateTextureFromFile(InMemory|ExA)` is also
 rejected, never silently created as 2D.
 
-### Missing core layer for cube/volume
+### Missing core layer for volume
 
-`d3d9_core` stores one 2D `Texture` (single `native`, `Level level[MAX_LEVELS]`)
-and its backend API is `texture_create(ctx,w,h,levels,native)`. `d3d9_com` has
-no CUBE/VOLUME object kind or handlers, and the null/PICA backends only create
-2D textures. Cube support needs a new core texture type with six faces,
-texcache accounting, backend entry points, COM interfaces and `SetTexture`
-acceptance - a separate architectural change.
+`d3d9_core` now has a six-face `CubeTexture`, but no depth-slice object or
+volume backend API. Volume support needs a new core volume type, depth slices,
+COM interfaces, backend entry points and `SetTexture`/sampler acceptance - a
+separate change.
 
 ## Integration
 
@@ -105,6 +129,13 @@ acceptance - a separate architectural change.
 * `source/d3d9_com.c` exposes `d9_com_host_create_texture`,
   `d9_com_host_upload_texture_level` and `d9_com_host_release`; pool 2 and usage
   `0x200` are accepted by the existing bridge and stored in the texture object.
+  For cube maps it exposes `d9_com_host_create_cube_texture` and
+  `d9_com_host_upload_cube_face_level`, backed by the core six-face store.
+* `source/d3d9_core.c` owns `CubeTexture` (six faces, shared mips,
+  `cube_used` budget accounting) and only creates one when the backend
+  advertises `texture_create_cube/upload_cube`.
+* `source/d3d9_null.c` provides those callbacks and counts face uploads;
+  `source/d3d9_citro3d.c` leaves them NULL, which is the PICA refusal path.
 * `source/d3d9_bc.c` already provides `d9_bc_decode_block`; the shim uses it and
   converts RGBA to `A8R8G8B8` byte order (B,G,R,A) per level.
 * Thunk windows stay disjoint: texture `0xfd000000..0xfd000014`, surface
@@ -130,7 +161,15 @@ stdcall probe (which checks the exact `4 + 4*args` stack cleanup):
 * Path reasons: no root, empty, too long (300 bytes and no terminator), and
   outside the sandbox.
 
+`tests/d3dx_cube_texture_smoke.c` covers the cube path: 8x8 A8 with two mips
+and all six faces, X8, DXT1, DXT3 (2 mips) and DXT5 (alpha 0x80), every face
+via `GetCubeMapSurface` + `LockRect`, `SetTexture`/`GetTexture`/refcount,
+incomplete face bits, truncated payload, non-square edge, non-cube DDS, the 2D
+loader's cube refusal, and a backend without cube callbacks returning
+`D9_UNSUPPORTED`.
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\run_host_tests.ps1 `
-  -Only d3dx_texture_shims -OutDir C:\Users\vasya\AppData\Local\Temp\d3dxexa
+  -Only "d3dx_texture_shims,d3dx_cube_texture_shims" `
+  -OutDir C:\Users\vasya\AppData\Local\Temp\d3dxcube
 ```
