@@ -78,7 +78,8 @@ static struct {
     char last_diagnostic[224];
     char last_stretch_rejection[192];
     void (*handlers[KIND_COUNT][MAX_SLOTS])(CPU *c);
-    int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;int tnl_proto;
+    int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;
+    int hdr_ldr_fallback; /* measurement-only: store 0x71/0x72 RTs as A8R8G8B8 */int tnl_proto;
 } g;
 static void upload_tev_constants(void);
 static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
@@ -843,15 +844,20 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||
     if(A(8))RET(INVALID,9);
     if(A(4)==1u){
         unsigned w=A(1),height=A(2),levels=A(3),format=A(5),pool=A(6);
+        unsigned storage=format;
+        int hdr=format==0x71u||format==0x72u; /* A16B16G16R16F / A32B32G32R32F */
+        if(hdr&&g.hdr_ldr_fallback)storage=D9_A8R8G8B8;
         const char *why=pool!=0?"render-target textures require D3DPOOL_DEFAULT":
             levels!=1?"render-target textures are implemented with exactly one level":
             (w<8||height<8||w>1024||height>1024||(w&(w-1))||(height&(height-1)))?
                 "render-target textures must be power-of-two 8..1024":
-            (format!=D9_A8R8G8B8&&format!=D9_X8R8G8B8)?
+            (storage!=D9_A8R8G8B8&&storage!=D9_X8R8G8B8)?
                 "float/HDR render-target textures are not implemented; A8R8G8B8 and X8R8G8B8 only":NULL;
         if(why){d3d_fail("CreateTexture",why,UNAVAILABLE);RET(UNAVAILABLE,9);}
-        if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_render_texture(g.device,w,height,format,pool,1u,&h);
-        if(rc){d3d_log("CreateTexture",rc==D9_MEMORY?
+        if(hdr&&g.hdr_ldr_fallback)
+            trace_detail("MEASUREMENT ONLY: HDR target %ux%u format 0x%x stored as A8R8G8B8",w,height,format);
+        if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_render_texture(g.device,w,height,storage,pool,1u,&h);
+        if(rc){trace_detail("CreateTexture: render-target creation rc=%d",rc);d3d_log("CreateTexture",rc==D9_MEMORY?
                 "render-target texture memory budget exceeded":
                 "render-target texture creation failed");RET(rc==D9_MEMORY?OUTMEM:UNAVAILABLE,9);}
         Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
@@ -1943,6 +1949,9 @@ static int d9_com_start(GuestMemory *m,D9Device *d,const D9Backend *ops,void *ct
     const char *tnl=getenv("TESV_D3D9_TNL_PROTO");
     g.tnl_proto=tnl&&tnl[0]&&strcmp(tnl,"0")?1:0;
     if(g.tnl_proto)fprintf(stderr,"[d3d9] CPU T&L prototype enabled (host/test only; DevCaps are unchanged)\n");
+    const char *hdr=getenv("TESV_D3D9_HDR_LDR_FALLBACK");
+    g.hdr_ldr_fallback=hdr&&!strcmp(hdr,"1");
+    if(g.hdr_ldr_fallback)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: float render targets are stored as A8R8G8B8; not shippable\n");
     if(d)(void)d9_set_tnl_proto(d,g.tnl_proto);
     g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
     init_tables();win32_set_external_resolver(d9_com_resolve,NULL);
