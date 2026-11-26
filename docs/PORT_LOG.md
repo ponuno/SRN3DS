@@ -155,3 +155,4 @@ Hardware (CIA) before step 8: crash **before `main`** in
 - Do not skip a fault by stubbing; implement the named API or add the exact
   decoded function, with a test.
 - Hardware and emulator results are separate columns.
+| 130 | audit (read-only) | D3DX ExA gate vs the real TESV call site | Disassembly of the sole `D3DXCreateTextureFromFileExA` call (`E:\skyr\TESV.exe` RVA `0x8C06B8`, IAT `0x106B3FC`) shows nonzero Width/Height from `D3DXIMAGE_INFO`, `MipLevels=D3DX_FROM_FILE (-3)`, `Usage=D3DUSAGE_DYNAMIC (0x200)`, `Format=A8R8G8B8 (0x15)`, `Pool=D3DPOOL_SYSTEMMEM (2)`, `pSrcInfo=NULL`. The current “file-derived only” gate rejects five of six, so TESV loose textures always get `0x8876086A` before the file is read. The ABI itself is correct (14 args, `ret 0x38`). Fix is delegated to `d3dx-exa-tesv`, including BC>A8R8G8B8 conversion and pool/usage propagation. |
