@@ -2,14 +2,15 @@
 
 Status: the SWF **container, tag stream, structured font imports, exact-id font
 resolution, flattened display list, solid fill colours, DefineEditText
-parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch and host CPU ->
-COM indexed/UP menu submission** are implemented.  Real StartMenu declares
-imported font ids 34/41 from `gfxfontlib.swf`; that URL is absent and the
-`Interface/fonts_en.swf` fallback contains neither id, so all 57 text records are
-named refusals rather than name-substituted.  An exact-id match is wired through
-edit layout/tessellation into the COM geometry batch.  This is still not a menu
-frame: gradient/bitmap fill sampling, mask/clip rendering, AVM/AS2, full GFx
-text/assets and PICA sampling remain open.
+parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch, bounded AVM1/AS2
+action inventory with safe frame control, and host CPU -> COM indexed/UP menu
+submission** are implemented.  Real StartMenu declares imported font ids 34/41
+from `gfxfontlib.swf`; that URL is absent and the `Interface/fonts_en.swf`
+fallback contains neither id, so all 57 text records are named refusals rather
+than name-substituted.  An exact-id match is wired through edit
+layout/tessellation into the COM geometry batch.  This is still not a menu
+frame: gradient/bitmap fill sampling, mask/clip rendering, arbitrary AVM/AS2
+execution, full GFx text/assets and PICA sampling remain open.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -19,6 +20,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | File | Purpose |
 |---|---|
 | `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, recursive tag walk, bounded summary and structured ImportAssets/ImportAssets2 URL + id/symbol collection |
+| `source/menu_swf_avm.h` / `.c` | Bounded DoAction/DoInitAction AVM1 decoder, caller-owned opcode histogram/byte inventory, unknown-opcode refusals and side-effect-free Stop/Play/GotoFrame display annotation |
 | `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, caller-owned DefineFont2/3 collection, exact-id imported-font resolution and DefineEditText collection |
 | `source/menu_swf_display_list.h` / `.c` | First-frame flattened display list with recursive sprite expansion, accumulated 16.16 matrices/colour transforms, clip depth and cycle/depth limits |
 | `source/menu_swf_clip.h` / `.c` | Clip-depth mask pairs/rectangles, active-mask lists, intersection, fully-clipped flags and rectangle mask quads |
@@ -30,6 +32,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_batch.h` / `.c` | Text quad/index batch plus solid-filled shape triangle batch from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping and count-before-write overflow |
 | `source/d3d9_menu_text.h` / `.c` | Host/menu COM demo: A8 texture creation/upload and one DrawPrimitiveUP from the atlas+batch |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
+| `tests/menu_swf_avm_smoke.c` | Synthetic Stop/Play/GotoFrame/GotoLabel/Wait/Push/variable/function/unknown/truncated cases, DoInitAction ownership, safe display annotation and exact real StartMenu histogram |
 | `tests/menu_swf_display_smoke.c` | Synthetic PlaceObject2/3, RemoveObject2, sprite, ShowFrame and DefineFont3 fixtures; optional real display/font summary |
 | `tests/menu_swf_display_list_smoke.c` | Synthetic 2-sprite nesting/matrices/colour/RemoveObject2/clip-depth plus cycle, overflow and broken-tag refusals; optional real StartMenu flatten |
 | `tests/menu_swf_clip_smoke.c` | Synthetic 3-mask nesting/intersection/full-clip plus bad-pair, overflow, complex-mask and record-matrix cases; optional real display-list clip |
@@ -42,7 +45,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_fill_smoke.c` | Synthetic solid RGBA/loops, CXFORM, mirroring, gradient and bitmap refusals; optional real fill census and per-vertex colours |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
 | `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: URL/fallback font load, exact-id resolve/refusals, solid-fill shape batch + resolved edit-text tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
 | `tests/menu_indexed_draw_smoke.c` | Core recording backend: exact compact vertices/indices, >4,095-index batch, 32-bit and 65,536-vertex fallbacks, named expansion limit and DevCaps 0x00082000 |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
@@ -138,7 +141,102 @@ candidate namespace.  For an exact-id match, nonempty DefineEditText sources
 are laid out with the edit font height, tessellated, transformed by the display
 record and appended to the white-A8 geometry batch before COM submission.
 
-No AVM action payload is decoded.  `DoAction` is counted only.
+### AVM1/AS2 action inventory and safe frame control
+
+`menu_swf_avm_collect()` walks top-level and nested sprite tags and decodes
+`DoAction` (12) / `DoInitAction` (59) into caller-owned `MenuSwfAvmRecord`
+items.  Each record retains its sprite/frame, payload/code byte counts,
+opcode count, unknown/refused counters and top-level frame-control operations.
+The list keeps a 256-entry histogram, aggregate byte/instruction counts and
+named first refusal.  Limits are 256 records, 32 controls per record, 65,536
+instructions and 16 nested function/with/try levels.
+
+The decoder covers the AVM1 fixed-length and length-prefixed action forms,
+including Push value types, ConstantPool, DefineFunction/2 external bodies,
+With and Try block sizes.  Unknown length-prefixed opcodes are counted, named
+and skipped by their declared length so later actions remain visible.  Unknown
+fixed-length opcodes cannot be resumed safely and end that record with
+`NOTIMPL`; malformed/truncated lengths remain named `FORMAT`/`TRUNCATED`
+errors.  Function-body opcodes are inventoried but never become executable
+top-level controls.
+
+Only top-level `Stop` (`0x07`), `Play` (`0x06`) and in-range `GotoFrame`
+(`0x81`) update `MenuSwfAvmControlState`.  `GotoLabel` (`0x8c`), `SetTarget`
+(`0x8b`/`0x20`), WaitForFrame, Push/GetVariable/SetVariable, function
+definitions, calls and other side effects are counted but not executed.
+`menu_swf_avm_apply_display_controls()` annotates flattened records with
+`stopped`/`frame_index` for their parent timeline, considering only actions on
+the currently selected safe frame.  This is metadata/frame-control only: no
+arbitrary ActionScript, visual navigation or rendered frame is produced.
+
+Measured real StartMenu inventory:
+
+```text
+action records=87 (DoAction=53, DoInitAction=34)
+payload bytes=85,933; code bytes=85,865; opcodes=15,549; unknown=0
+Stop=53; Play=0; Goto=0; GotoLabel=0; SetTarget=0; Wait=0
+Push=5,503; GetVariable=626; SetVariable=3; function definitions=368
+calls=939; named not-executed opcodes=12,173
+frame-scoped display annotation: stopped=66, playing=150, refused=0
+```
+
+Exact real opcode histogram:
+
+| Opcode | Action | Count |
+|---:|---|---:|
+| `00` | End | 87 |
+| `07` | Stop | 53 |
+| `0b` | Subtract | 79 |
+| `0c` | Multiply | 21 |
+| `0d` | Divide | 17 |
+| `12` | Not | 866 |
+| `17` | Pop | 1,088 |
+| `1c` | GetVariable | 626 |
+| `1d` | SetVariable | 3 |
+| `26` | Trace | 3 |
+| `2b` | CastOp | 2 |
+| `3a` | Delete | 16 |
+| `3c` | DefineLocal | 12 |
+| `3d` | CallFunction | 47 |
+| `3e` | Return | 224 |
+| `40` | NewObject | 39 |
+| `42` | InitArray | 59 |
+| `43` | InitObject | 57 |
+| `44` | TypeOf | 2 |
+| `45` | TargetPath | 4 |
+| `47` | Add2 | 98 |
+| `48` | Less2 | 47 |
+| `49` | Equals2 | 377 |
+| `4c` | PushDuplicate | 151 |
+| `4e` | GetMember | 2,376 |
+| `4f` | SetMember | 858 |
+| `50` | Increment | 34 |
+| `51` | Decrement | 6 |
+| `52` | CallMethod | 892 |
+| `53` | NewMethod | 9 |
+| `54` | InstanceOf | 14 |
+| `55` | Enumerate2 | 6 |
+| `60` | BitAnd | 23 |
+| `61` | BitOr | 6 |
+| `62` | BitXor | 1 |
+| `63` | BitLShift | 4 |
+| `64` | BitRShift | 6 |
+| `65` | BitURShift | 3 |
+| `66` | StrictEquals | 62 |
+| `67` | Greater | 48 |
+| `69` | Extends | 13 |
+| `87` | StoreRegister | 350 |
+| `88` | ConstantPool | 25 |
+| `8e` | DefineFunction2 | 328 |
+| `96` | Push | 5,503 |
+| `99` | Jump | 215 |
+| `9b` | DefineFunction | 40 |
+| `9d` | If | 749 |
+
+All 53 frame-control actions are Stop operations.  They occur in sprites
+38/46/64/67/68/70/74/77/84/93/100/101 and the top-level timeline, at action
+frames including 0/1/4/5/7/9/10/14/19/22/29/36/39/44/51/59/66/74/81/89/96/104.
+No retail Play, GotoFrame, GotoLabel, SetTarget or WaitForFrame is present.
 
 ## 4. Measured real summary
 
@@ -704,7 +802,7 @@ Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
@@ -715,14 +813,15 @@ checks, 0 failures**; `menu_swf_raster` **44 checks, 0 failures**;
 failures**; `menu_swf_shape` **28 checks, 0 failures**; `menu_swf_clip` **17
 checks, 0 failures**; `menu_swf_display_list` **15 checks, 0 failures**;
 `menu_swf_display` **38 checks, 0 failures**; `menu_swf` **95 checks, 0
-failures**; `menu_bsa` **277 checks, 0 failures**.
+failures**; `menu_swf_avm` **26 checks, 0 failures**; `menu_bsa` **277 checks,
+0 failures**.
 
 Real read-only:
 
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
@@ -733,7 +832,8 @@ checks, 0 failures**; `menu_swf_raster` **60 checks, 0 failures**;
 failures**; `menu_swf_shape` **40 checks, 0 failures**; `menu_swf_clip` **24
 checks, 0 failures**; `menu_swf_display_list` **23 checks, 0 failures**;
 `menu_swf_display` **57 checks, 0 failures**; `menu_swf` **114 checks, 0
-failures**; `menu_bsa` **286 checks, 0 failures**.
+failures**; `menu_swf_avm` **35 checks, 0 failures**; `menu_bsa` **286 checks,
+0 failures**.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
 long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
@@ -742,7 +842,11 @@ body, missing End, nonzero End, ZWS `E_NOTIMPL`, bad CWS zlib header, declared
 output mismatch, trailing compressed bytes, oversized declared size and null
 input.  Structured-import coverage preserves both tag variants and URLs,
 recurses into sprites, finds numeric ids and refuses capacity, truncation and
-duplicate ids.  The display test adds PlaceObject2 move/update, RemoveObject2,
+duplicate ids.  The AVM test adds Stop/Play/GotoFrame/GotoLabel/WaitForFrame,
+Push/GetVariable/SetVariable, function-body scope, unknown-opcode skip,
+truncated/malformed refusals, DoInitAction ownership and frame-scoped display
+annotation; its real check asserts the complete histogram above.  The display
+test adds PlaceObject2 move/update, RemoveObject2,
 PlaceObject3 class name + opaque filter list, PlaceObject3 blend/cache/visible,
 clip-action presence, sprite frames, DefineFont3 codes/advances/bounds and the
 named DefineFont4/AVM2/filter-then-field refusals.  The shape test adds a
@@ -786,14 +890,11 @@ short-output refusal that leaves the buffer untouched; the real check reports
 40 solid fills with no gradients/bitmaps, a black shape 2, and 552/552 shape-2
 vertices carrying fill colours.
 
-Full host suite with real data and the main-tree generated slice/IR container:
-**135 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
-contributes 21 synthetic checks, `menu_swf_fill` 32, `menu_swf_atlas` 27,
-`menu_swf_raster` 44,
-`menu_swf_text` 33, `menu_swf_tess` 47, `menu_swf_shape` 28, `menu_swf_clip`
-17, `menu_swf_display_list` 15, `menu_swf_display` 38 and `menu_swf` 86;
-`menu_text_draw` is an assertion-based COM test outside that real-data matrix.
-No real-data checks are run in that suite.
+Full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
+`-TestTimeoutSec 300`: **128 passed, 0 diagnostic, 0 failed**.  This includes the
+real `menu_swf_avm` inventory (35 checks), `menu_swf` (114),
+`menu_swf_display_list` (23) and `menu_pipeline_e2e` (59), all with zero
+failures.
 
 ## 17. Real StartMenu CPU -> COM pipeline
 
@@ -845,7 +946,7 @@ raster=64x64 rect=24,1,40,63 sum=178003 atlas_used_height=62
 batch_vertices=57484 indices=86160 triangles=28720
 limits=262144 vertices / 786432 indices
 COM draw_calls=1 expanded_vertices=0 indexed_draws=1 indexed_vertices=57484 indexed_indices=86160
-FVF=0x142 A8=64x64 control_text_quads=1; 52 checks, 0 failures
+FVF=0x142 A8=64x64 control_text_quads=1; 59 checks, 0 failures
 ```
 
 The 57 real text records produce three nonempty plain sources (72 source glyph
@@ -856,23 +957,25 @@ resolved-text layout/tessellation path is wired but not exercised by this retail
 census.  The single local-font `!` control exercises the raster/atlas/batch/COM
 path.  Shape fills use the atlas's white texel and the parsed solid-fill RGBA
 multiplied by the record CXFORM; gradient and bitmap fills are named refusals,
-and the 182 stroke segments are counted and skipped.  On this pre-dedup HEAD the
-86,158-vertex batch exceeds the 16-bit indexed range, so the preserved UP path
-submits 22 chunks; after dedup brings it under 65,536 vertices the same test
-takes the strict indexed branch.  The host mock `Present` only closes the COM
+and the 182 stroke segments are counted and skipped.  The current deduplicated
+shape mesh keeps the source at 57,484 vertices, so the strict branch submits one
+compact 16-bit indexed draw; the UP fallback and its assertions remain present.
+The host mock `Present` only closes the COM
 scene state machine so releases are not deferred.  No pixel readback, GPU/PICA
 sampling, visual equivalence or frame is claimed.
 
 Verification:
 
-* targeted
-  `menu_swf_fill,menu_swf_batch,menu_swf_shape,menu_swf_tess,menu_indexed_draw,menu_pipeline_e2e`
-  with real data: **16 passed, 0 diagnostic, 0 failed**; check counts 43, 34,
-  40, 55, indexed PASS and 52;
-* fill + real e2e under ASan: **43 + 52 checks, 0 failures; harness 12
-  passed, 0 diagnostic, 0 failed**;
-* full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data`:
-  **135 passed, 1 diagnostic (`tesv_slice`), 0 failed**;
+* targeted `menu_swf_avm,menu_swf,menu_swf_display_list,menu_pipeline_e2e`
+  with real data: **4 C targets passed; harness 14 passed, 0 diagnostic, 0
+  failed**; check counts 35, 114, 23 and 59;
+* AVM + SWF + display-list + real e2e under ASan: **35 + 114 + 23 + 59 checks,
+  0 failures; harness 14 passed, 0 diagnostic, 0 failed**;
+* full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
+  `-TestTimeoutSec 300`: **128 passed, 0 diagnostic, 0 failed**;
+* ARM compile-only (`arm-none-eabi-gcc`, no link/run): all **5/5** changed C
+  translation units succeeded; `menu_swf_avm.c.o` text 11,771 B and
+  `menu_swf_display_list.c.o` text 6,189 B.  No ARM binary/hardware/frame claim;
 * ARM compile-only: `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B,
   `menu_swf_batch.o` 10,664 B, `d3d9_menu_text.o` 5,864 B;
 * ARM compile-only `-Mode com -Isolated edit_text`: `.elf` 6,178,376 B,
@@ -887,9 +990,12 @@ Verification:
    batch exist, but this is not a GFx display list: gradient/bitmap fill
    sampling, mask/clip rendering, clipping layers, button states, frame scripts
    and real draw submission remain.
-2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
-   the menu's script behaviour.  `DoAction`/clip-action payloads are not
-   executed.
+2. **Arbitrary AVM/AS2 execution** — the bounded inventory and safe
+   Stop/Play/in-range GotoFrame metadata are implemented, but constants,
+   variables, property/member access, function calls, event handlers, branches,
+   exceptions and the menu's full script behaviour are not executed.
+   `GotoLabel`, SetTarget, WaitForFrame and all side effects remain named
+   refusals/counters.
 3. **Atlas cache/real GFx fonts** — `gfxfontlib.swf` (imported font ids 34/41)
    is absent and the `fonts_en.swf` fallback lacks those exact ids; no name
    substitution is performed.  `fonts_en.swf`/`fonts_console.swf`,
@@ -1033,8 +1139,12 @@ frame.
   DrawPrimitiveUP calls).  The shape layer reuses its 57,480 shared mesh
   vertices instead of expanding to 86,154.  Sprite/text/mask/stroke/style gaps
   are counted, not silently rendered.
-* No AVM action is executed, no texture cache or real GFx draw/frame is built,
-  and no frame/pixel/Azahar/hardware result is claimed.
+* The AVM1 inventory decodes 87 action records / 15,549 opcodes with no
+   unknown opcode, finds 53 Stop controls and no Play/Goto/SetTarget/Wait, and
+   applies only frame-scoped Stop metadata to 66 of 216 display records.  No
+   arbitrary ActionScript or side effect is executed.
+* No texture cache or real GFx draw/frame is built, and no
+   frame/pixel/Azahar/hardware result is claimed.
 
 ## 17. SWF bitmap tags (2026-11-26)
 

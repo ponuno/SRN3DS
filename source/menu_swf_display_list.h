@@ -44,6 +44,8 @@ typedef struct {
     uint8_t has_clip_depth;
     uint8_t has_name;
     uint8_t is_sprite;
+    uint8_t stopped;      /* safe AVM Stop/Play state for the parent timeline */
+    uint16_t frame_index; /* safe in-range GotoFrame state */
     char name[MENU_SWF_DISPLAY_LIST_NAME_MAX];
     MenuSwfDisplayListMatrix matrix;
     MenuSwfDisplayListColor color;
