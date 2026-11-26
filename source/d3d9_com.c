@@ -45,7 +45,7 @@ static void capture_present_event(void);
 #define USAGE_DYNAMIC 0x0200u
 #define USAGE_VB_MASK (USAGE_WRITEONLY|USAGE_DYNAMIC)
 #define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
-enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,QUERY,STATEBLOCK,KIND_COUNT};
+enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,QUERY,STATEBLOCK,SWAPCHAIN,KIND_COUNT};
 typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
 struct Obj;
 typedef struct {
@@ -90,7 +90,7 @@ typedef struct Obj {
 static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
     Obj o[MAX_OBJECTS];unsigned next;
-    Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*volume,*volume1,*vs,*ps,*declaration,*recording_block;
+    Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*volume,*volume1,*vs,*ps,*declaration,*recording_block,*swapchain;
     unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;float constants_c8[4];
     uint32_t clip_status_union,clip_status_intersection;
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
@@ -105,6 +105,7 @@ static struct {
     int shader_skip_probe,shader_probe_logged; /* host-slice measurement-only */
 } g;
 static void upload_tev_constants(void);
+static uint32_t present_common(CPU *c);
 static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
 #define A(n) arg(c,n)
 static void trace_result(uint32_t value);
@@ -165,7 +166,7 @@ static const char *interface_name(unsigned kind){
     static const char *names[]={"unknown object","IDirect3D9","IDirect3DDevice9","IDirect3DVertexBuffer9",
         "IDirect3DIndexBuffer9","IDirect3DTexture9","IDirect3DVertexShader9","IDirect3DPixelShader9",
         "IDirect3DVertexDeclaration9","IDirect3DSurface9","IDirect3DCubeTexture9",
-        "IDirect3DVolumeTexture9","IDirect3DQuery9","IDirect3DStateBlock9"};
+        "IDirect3DVolumeTexture9","IDirect3DQuery9","IDirect3DStateBlock9","IDirect3DSwapChain9"};
     return kind<sizeof names/sizeof *names?names[kind]:"D3D9 object";
 }
 static Obj *obj(uint32_t addr,unsigned kind){
@@ -202,6 +203,7 @@ static void destroy_obj(Obj *o){
     else if(o->kind==VS||o->kind==PS){free(o->code);o->code=NULL;parent=g.dev;}
     else if(o->kind==DECL){free(o->declaration);o->declaration=NULL;parent=g.dev;}
     else if(o->kind==QUERY)parent=g.dev;
+    else if(o->kind==SWAPCHAIN){if(g.swapchain==o)g.swapchain=NULL;parent=g.dev;}
     else if(o->kind==SURFACE){
         if(o->is_depth){
             if(g.depth==o){g.depth=NULL;if(g.device)(void)d9_set_depth_surface(g.device,0);}
@@ -335,10 +337,11 @@ static const uint8_t guids[][16]={
     {0x81,0x2f,0xf3,0xff,0x53,0xd9,0x3a,0x47,0x92,0x23,0x93,0xd6,0x52,0xab,0xa9,0x3f},
     {0x6c,0x52,0x18,0x25,0x89,0xe7,0x11,0x41,0xa7,0xb9,0x47,0xef,0x32,0x8d,0x13,0xe6},
     {0x60,0x14,0x77,0xd9,0x95,0xa6,0x26,0x4f,0xbb,0xd3,0x27,0xb8,0x40,0xb5,0x41,0xcc},
-    {0xe5,0x4f,0x7c,0xb0,0x0d,0x31,0xa8,0x4b,0xa2,0x3c,0x4f,0x0f,0x20,0x6f,0x21,0x8b}};
+    {0xe5,0x4f,0x7c,0xb0,0x0d,0x31,0xa8,0x4b,0xa2,0x3c,0x4f,0x0f,0x20,0x6f,0x21,0x8b},
+    {0xf2,0x50,0x49,0x79,0xfc,0xad,0x8a,0x45,0x90,0x5e,0x10,0xa1,0x0b,0x0b,0x50,0x3b}};
 static void query(CPU *c){Obj *o=obj(A(0),0);const void *iid=ptr(A(1),16);uint32_t out=A(2);if(!o||!iid||!ptr(out,4))RET(INVALID,3);
     const uint8_t *concrete=o->kind==CUBE?guids[12]:o->kind==VOLUME?guids[13]:
-        o->kind==QUERY?guids[14]:o->kind==STATEBLOCK?guids[15]:guids[o->kind];
+        o->kind==QUERY?guids[14]:o->kind==STATEBLOCK?guids[15]:o->kind==SWAPCHAIN?guids[16]:guids[o->kind];
     M32(out)=0;if(memcmp(iid,guids[0],16)&&memcmp(iid,concrete,16)&&
         !((o->kind>=VB&&o->kind<=TEX||o->kind==SURFACE||o->kind==CUBE||o->kind==VOLUME)&&!memcmp(iid,guids[10],16))&&
         !((o->kind==TEX||o->kind==CUBE||o->kind==VOLUME)&&!memcmp(iid,guids[11],16)))RET(NOINTERFACE,3);
@@ -581,7 +584,7 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
     memset(&g.constants_c8,0,sizeof g.constants_c8);upload_tev_constants();
     M32(out)=g.dev->guest;RET(OK,7);}
 static int explicit_resources(void){
-    for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->refs&&o->kind!=FACTORY&&o->kind!=DEVICE&&!(o->kind==SURFACE&&o==g.back))return 1;}
+    for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->refs&&o->kind!=FACTORY&&o->kind!=DEVICE&&o->kind!=SWAPCHAIN&&!(o->kind==SURFACE&&o==g.back))return 1;}
     return 0;
 }
 static void reset_device(CPU *c){uint32_t pp=A(1);
@@ -635,6 +638,68 @@ static void get_back_buffer(CPU *c){uint32_t out=A(4);if(!ptr(out,4))RET(INVALID
     retain(g.back);M32(out)=g.back->guest;RET(OK,5);
 }
 static void number_swap_chains(CPU *c){RET(obj(A(0),DEVICE)?1:0,1);}
+/* ---- implicit swap chain ------------------------------------------------ */
+static void create_additional_swap_chain(CPU *c){
+    uint32_t pp=A(1),out=A(2);
+    if(!obj(A(0),DEVICE)||!ptr(pp,56)||!ptr(out,4)){
+        d3d_log("CreateAdditionalSwapChain","invalid device, presentation parameters or output pointer");
+        RET(INVALID,3);
+    }
+    M32(out)=0;
+    d3d_fail("CreateAdditionalSwapChain","second swap chains are not implemented",UNAVAILABLE);
+    RET(UNAVAILABLE,3);
+}
+static void get_swap_chain(CPU *c){
+    uint32_t out=A(2);
+    if(!obj(A(0),DEVICE)||!ptr(out,4))RET(INVALID,3);
+    M32(out)=0;
+    if(A(1)){
+        d3d_fail("GetSwapChain","only the implicit swap chain 0 exists",INVALID);RET(INVALID,3);
+    }
+    if(!g.dev||!g.device){
+        d3d_fail("GetSwapChain","there is no created device",UNAVAILABLE);RET(UNAVAILABLE,3);
+    }
+    if(!g.swapchain){
+        if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+        Obj *o=new_obj(SWAPCHAIN);
+        if(!o)RET(OUTMEM,3);
+        g.swapchain=o;retain(g.dev);
+        M32(out)=o->guest;RET(OK,3);
+    }
+    retain(g.swapchain);M32(out)=g.swapchain->guest;RET(OK,3);
+}
+static void swapchain_present(CPU *c){
+    if(!obj(A(0),SWAPCHAIN)||g.swapchain!=obj(A(0),SWAPCHAIN)||!g.dev)RET(INVALID,5);
+    RET(present_common(c),5);
+}
+static void swapchain_get_back_buffer(CPU *c){
+    uint32_t out=A(3);
+    if(!ptr(out,4))RET(INVALID,4);M32(out)=0;
+    if(!obj(A(0),SWAPCHAIN)||A(1)||A(2))RET(INVALID,4);
+    retain(g.back);M32(out)=g.back->guest;RET(OK,4);
+}
+static void swapchain_raster_status(CPU *c){
+    uint32_t out=A(1);
+    if(!obj(A(0),SWAPCHAIN)||!ptr(out,8))RET(INVALID,2);
+    M32(out)=0;M32(out+4)=0;
+    d3d_fail("GetRasterStatus","PICA has no scanline/vblank raster status",UNAVAILABLE);
+    RET(UNAVAILABLE,2);
+}
+static void swapchain_display_mode(CPU *c){
+    uint32_t out=A(1);
+    if(!obj(A(0),SWAPCHAIN)||!ptr(out,sizeof(D9DisplayMode)))RET(INVALID,2);
+    D9DisplayMode mode;
+    if(d9_adapter_display_mode(0,D9_X8R8G8B8,0,&mode))RET(UNAVAILABLE,2);
+    memcpy(ptr(out,sizeof mode),&mode,sizeof mode);RET(OK,2);
+}
+static void swapchain_get_device(CPU *c){
+    if(!obj(A(0),SWAPCHAIN)||!ptr(A(1),4))RET(INVALID,2);
+    retain(g.dev);M32(A(1))=g.dev?g.dev->guest:0;RET(OK,2);
+}
+static void swapchain_present_parameters(CPU *c){
+    if(!obj(A(0),SWAPCHAIN)||!ptr(A(1),56))RET(INVALID,2);
+    memcpy(ptr(A(1),56),g.pp,sizeof g.pp);RET(OK,2);
+}
 static void create_render_target(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(INVALID,9);M32(out)=0;
     if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,9);
     if(A(8)){d3d_log("CreateRenderTarget","shared handles are not supported");RET(INVALID,9);}
@@ -1772,13 +1837,20 @@ static void begin_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,1);
     }
     RET(hr(rc),1);}
 static void end_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1)RET(INVALID,1);g.phase=2;RET(OK,1);}
-static void present(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=2||A(1)||A(2)||A(3)||A(4))RET(INVALID,5);int rc=d9_present(g.device);if(!rc){g.phase=0;
+/* Device and implicit-swap-chain Present share the exact same scene state
+ * machine and presentation flags; only the COM `this` object differs. */
+static uint32_t present_common(CPU *c){
+    if(g.phase!=2||A(1)||A(2)||A(3)||A(4))return INVALID;
+    int rc=d9_present(g.device);if(!rc){g.phase=0;
 #if D9_CAPTURE_HOOK
         g.capture_present=1;g.capture_present_flags=A(4);
         capture_present_event();
 #endif
         collect();
-    }RET(hr(rc),5);}
+    }
+    return hr(rc);
+}
+static void present(CPU *c){if(!obj(A(0),DEVICE))RET(INVALID,5);RET(present_common(c),5);}
 static int transform_index(unsigned which){
     return which==256?D9_WORLD:which==2?D9_VIEW:which==3?D9_PROJECTION:-1;
 }
@@ -2951,6 +3023,8 @@ static void draw_indexed_up(CPU *c){
  X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) \
  X(set_vs_const_i) X(get_vs_const_i) X(set_vs_const_b) X(get_vs_const_b) \
  X(set_clip_plane) X(get_clip_plane) X(set_clip_status) X(get_clip_status) X(set_software_vp) X(get_software_vp) \
+ X(create_additional_swap_chain) X(get_swap_chain) X(swapchain_present) X(swapchain_get_back_buffer) \
+ X(swapchain_raster_status) X(swapchain_display_mode) X(swapchain_get_device) X(swapchain_present_parameters) \
  X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(create_query) \
  X(query_get_device) X(query_get_type) X(query_get_data_size) X(query_issue) X(query_get_data) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
@@ -3017,7 +3091,9 @@ static const char *const slot_names[KIND_COUNT][MAX_SLOTS]={
         "GetPriority","PreLoad","GetType","SetLOD","GetLOD","GetLevelCount","SetAutoGenFilterType","GetAutoGenFilterType",
         "GenerateMipSubLevels","GetLevelDesc","GetVolumeLevel","LockBox","UnlockBox","AddDirtyBox"},
     [QUERY]={"QueryInterface","AddRef","Release","GetDevice","GetType","GetDataSize","Issue","GetData"},
-    [STATEBLOCK]={"QueryInterface","AddRef","Release","GetDevice","Capture","Apply"}
+    [STATEBLOCK]={"QueryInterface","AddRef","Release","GetDevice","Capture","Apply"},
+    [SWAPCHAIN]={"QueryInterface","AddRef","Release","Present","GetBackBuffer","GetRasterStatus",
+                 "GetDisplayMode","GetDevice","GetPresentParameters"}
 };
 static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
     const char *name=slot_names[kind][slot];if(!name)name="Unimplemented";
@@ -3061,7 +3137,9 @@ static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
  X(VOLUME,8) X(VOLUME,9) X(VOLUME,10) X(VOLUME,11) X(VOLUME,12) X(VOLUME,13) X(VOLUME,14) X(VOLUME,15) \
  X(VOLUME,16) X(VOLUME,17) X(VOLUME,18) X(VOLUME,19) X(VOLUME,20) X(VOLUME,21) \
  X(QUERY,0) X(QUERY,1) X(QUERY,2) X(QUERY,3) X(QUERY,4) X(QUERY,5) X(QUERY,6) X(QUERY,7) \
- X(STATEBLOCK,0) X(STATEBLOCK,1) X(STATEBLOCK,2) X(STATEBLOCK,3) X(STATEBLOCK,4) X(STATEBLOCK,5)
+ X(STATEBLOCK,0) X(STATEBLOCK,1) X(STATEBLOCK,2) X(STATEBLOCK,3) X(STATEBLOCK,4) X(STATEBLOCK,5) \
+ X(SWAPCHAIN,0) X(SWAPCHAIN,1) X(SWAPCHAIN,2) X(SWAPCHAIN,3) X(SWAPCHAIN,4) X(SWAPCHAIN,5) \
+ X(SWAPCHAIN,6) X(SWAPCHAIN,7) X(SWAPCHAIN,8)
 #define COM_ENUM(k,s) I_com_##k##_##s,
 #define COM_ENTRY(k,s) {THUNK+(I_COUNT+I_com_##k##_##s)*4,com_##k##_##s},
 #define COM_WRAP(k,s) static void com_##k##_##s(CPU *c){com_dispatch(k,s,c);}
@@ -3077,10 +3155,10 @@ static const FnEntry all_entries[]={FUNCTIONS(ENTRY) COM_SLOTS(COM_ENTRY)};
 #undef ENTRY
 #undef COM_ENTRY
 #undef COM_SLOTS
-static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201,218,240,262,270};
+static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201,218,240,262,270,276};
 #define SLOT(k,s,f) do{g.handlers[k][s]=(f);uint32_t target=g.trace?THUNK+(I_COUNT+com_offsets[k]+(s))*4:THUNK+I_##f*4;guest_write32(g.mem,table_addr(k)+(s)*4,target);}while(0)
 static void init_tables(void){
-    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17,22,22,8,6};
+    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17,22,22,8,6,9};
     for(unsigned k=1;k<KIND_COUNT;++k){for(unsigned i=0;i<counts[k];++i)SLOT(k,i,unsupported);SLOT(k,0,query);SLOT(k,1,addref);SLOT(k,2,release_fn);}
     SLOT(FACTORY,3,register_software);SLOT(FACTORY,4,adapter_count);SLOT(FACTORY,5,adapter_identifier);
     SLOT(FACTORY,6,adapter_mode_count);SLOT(FACTORY,7,enum_modes);SLOT(FACTORY,8,display_mode);
@@ -3091,7 +3169,7 @@ static void init_tables(void){
     SLOT(DEVICE,4,available_texture_mem);SLOT(DEVICE,5,evict_managed);
     SLOT(DEVICE,19,raster_status);SLOT(DEVICE,20,dialog_box_mode);
     SLOT(DEVICE,70,validate_device);
-    SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
+    SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,13,create_additional_swap_chain);SLOT(DEVICE,14,get_swap_chain);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
     SLOT(DEVICE,23,create_tex);SLOT(DEVICE,24,create_volume_tex);SLOT(DEVICE,25,create_cube_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
     SLOT(DEVICE,30,update_surface);SLOT(DEVICE,31,update_texture);SLOT(DEVICE,35,color_fill);
     SLOT(DEVICE,32,get_render_target_data);SLOT(DEVICE,33,get_front_buffer_data);
@@ -3122,6 +3200,9 @@ static void init_tables(void){
     SLOT(DEVICE,118,create_query);
     SLOT(QUERY,3,query_get_device);SLOT(QUERY,4,query_get_type);SLOT(QUERY,5,query_get_data_size);
     SLOT(QUERY,6,query_issue);SLOT(QUERY,7,query_get_data);
+    SLOT(SWAPCHAIN,3,swapchain_present);SLOT(SWAPCHAIN,4,swapchain_get_back_buffer);
+    SLOT(SWAPCHAIN,5,swapchain_raster_status);SLOT(SWAPCHAIN,6,swapchain_display_mode);
+    SLOT(SWAPCHAIN,7,swapchain_get_device);SLOT(SWAPCHAIN,8,swapchain_present_parameters);
     for(unsigned k=VB;k<=TEX;++k){SLOT(k,3,resource_device);SLOT(k,10,resource_type);}
     for(unsigned k=VB;k<=IB;++k){SLOT(k,11,buffer_lock);SLOT(k,12,buffer_unlock);SLOT(k,13,buffer_desc);}
     SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,18,texture_get_surface_level);
