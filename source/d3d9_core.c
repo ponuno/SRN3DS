@@ -1654,7 +1654,13 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
  * targets map the full logical surface through a native 512x512 viewpoint, so
  * NDC still covers the whole image instead of clipping at native_w/h. */
 static int apply_target_viewport(D9Device *d,Target *t){
-    if(!t)return D9_OK;
+    /* No Target means the implicit screen: its viewport is the logical back
+     * buffer size.  Leaving it unprogrammed kept PICA at 0x0 and discarded
+     * every fragment while Clear/draw/Present still returned success. */
+    if(!t)
+        return d->back_valid&&d->ops.target_viewport&&
+               d->ops.target_viewport(d->ctx,d->back_w,d->back_h)
+                   ?D9_BACKEND:D9_OK;
     if(t->id==d->back_target)
         return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,d->back_w,d->back_h)?D9_BACKEND:D9_OK;
     if(t->native_w!=t->w||t->native_h!=t->h){
