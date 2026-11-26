@@ -2749,6 +2749,22 @@ static uint32_t shader_probe_object(unsigned kind,uint32_t out,const char *reaso
     }
     return OK;
 }
+/* D3D9-visible diagnostic for a creation refusal: the same text is logged and
+ * returned by d9_com_last_diagnostic(). */
+static void shader_note_rejection(void){
+    snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",g.last_shader_rejection);
+}
+/* Measurement-only fallback for a structurally valid stream that this device
+ * cannot execute.  With the skip probe it becomes a non-executable object;
+ * without it the caller's named D3DERR_NOTAVAILABLE refusal stands. */
+static uint32_t shader_not_executable(unsigned kind,uint32_t out,uint32_t *code,
+                                      size_t words,const char *reason,uint32_t hr){
+    if(g.shader_skip_probe&&hr==UNAVAILABLE&&code&&words){
+        uint32_t *exact=realloc(code,words*4);if(exact)code=exact;
+        return shader_probe_object(kind,out,reason,code,words);
+    }
+    free(code);return hr;
+}
 static void shader_map_debug(uint32_t address){
     if(!g.mem)return;
     const char *v=getenv("TESV_SHADER_MAP_DEBUG");
@@ -2811,6 +2827,20 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     }
     if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
     uint32_t *code=malloc(count*4);if(!code)return OUTMEM;for(size_t i=0;i<count;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
+    /* Structural validity is a device contract, not a backend capability: a
+     * pointer that is not a D3D9 token stream (bad version, unknown opcode,
+     * broken framing) is D3DERR_INVALIDCALL in both normal and measurement
+     * runs.  A *valid* stream this device cannot execute stays a named
+     * D3DERR_NOTAVAILABLE refusal unless the measurement-only skip probe is
+     * requested, in which case it becomes a non-executable object. */
+    D9ShaderInfo shape;
+    if(d9_shader_analyze(code,count,&shape)==D9_SHADER_INVALID){
+        char diagnostic[320];d9_shader_diagnostic(&shape,diagnostic,sizeof diagnostic);
+        snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"%s",diagnostic);
+        fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+        free(code);return INVALID;
+    }
+    size_t stream_words=shape.saw_end&&shape.words?shape.words:count;
     /* Measurement-only skip probe: a shader outside the certified closure is
      * represented by a named, non-executable object so the census can pass the
      * renderer's shader wall.  Draws with it are explicitly refused below.
@@ -2827,14 +2857,10 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             char reason[D9_MENU_CLOSURE_REASON_MAX];
             snprintf(reason,sizeof reason,"%s",probe_verdict.reason[0]?
                      probe_verdict.reason:"shader outside the certified closure");
-            /* GetFunction must report the real token-stream length.  The
-             * scan is the same one the legacy path uses; it never mutates. */
-            D9ShaderInfo info;
-            d9_shader_analyze_tev(code,count,&info,NULL);
-            size_t words=info.saw_end&&info.words?info.words:count;
-            uint32_t *exact=realloc(code,words*4);
+            /* GetFunction must report the real token-stream length. */
+            uint32_t *exact=realloc(code,stream_words*4);
             if(exact)code=exact;
-            return shader_probe_object(kind,out,reason,code,words);
+            return shader_probe_object(kind,out,reason,code,stream_words);
         }
     }
     /* Named first-menu closure.  While the TESV menu path has armed this
@@ -2847,7 +2873,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
                                  code,count,&closure)){
         snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
                  "menu shader closure: %s",closure.reason);
-        fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+        fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
         free(code);
         return closure.match==D9_MENU_BAD_ARGUMENT?INVALID:UNAVAILABLE;
     }
@@ -2863,7 +2889,9 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         if(menu_result<0){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
                       "menu shader: %s",menu_why);
-            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+            if(g.shader_skip_probe)
+                return shader_not_executable(kind,out,code,stream_words,menu_why,UNAVAILABLE);
             d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
             free(code);return UNAVAILABLE;
         }
@@ -2874,7 +2902,9 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         if(menu_result<0){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
                       "menu shader: %s",menu_why);
-            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+            if(g.shader_skip_probe)
+                return shader_not_executable(kind,out,code,stream_words,menu_why,UNAVAILABLE);
             d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
             free(code);return UNAVAILABLE;
         }
@@ -2884,9 +2914,15 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         D9PicaTevReject reason;char backend_why[256];
         if(d9_pica_tev_preflight_pixel(code,count,&reason,backend_why,sizeof backend_why)){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
-            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+            if(reason==D9_PICA_TEV_MALFORMED||reason==D9_PICA_TEV_PROGRAM_VERSION){
+                d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+                free(code);return INVALID;
+            }
+            if(g.shader_skip_probe)
+                return shader_not_executable(kind,out,code,stream_words,backend_why,UNAVAILABLE);
             d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
-            free(code);return (reason==D9_PICA_TEV_MALFORMED||reason==D9_PICA_TEV_PROGRAM_VERSION)?INVALID:UNAVAILABLE;}
+            free(code);return UNAVAILABLE;}
     }
     D9ShaderInfo info;D9TevProgram tev;int result;
     if(has_menu||has_menu_vs){
@@ -2907,7 +2943,9 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         if(result!=wanted&&!(kind==PS&&result==D9_SHADER_TEV)){
             char diagnostic[320];d9_shader_diagnostic(&info,diagnostic,sizeof diagnostic);
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"%s",diagnostic);
-            fprintf(stderr,"D3D9 shader rejected: %s (hash %08lx, mismatch %u)\n",diagnostic,(unsigned long)info.signature,info.first_mismatch);
+            fprintf(stderr,"D3D9 shader rejected: %s (hash %08lx, mismatch %u)\n",diagnostic,(unsigned long)info.signature,info.first_mismatch);shader_note_rejection();
+            if(g.shader_skip_probe)
+                return shader_not_executable(kind,out,code,stream_words,diagnostic,UNAVAILABLE);
             d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
             free(code);return result==D9_SHADER_INVALID?INVALID:UNAVAILABLE;}
     }
@@ -2932,7 +2970,9 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
                           "PICA200 backend: %s",backend_why);
             }else{
                 snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
-                fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+                fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+                if(g.shader_skip_probe)
+                    return shader_not_executable(kind,out,code,stream_words,backend_why,UNAVAILABLE);
                 d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
                 free(code);return UNAVAILABLE;}
         }
@@ -3109,10 +3149,19 @@ static void shader_function(CPU *c){Obj *o=obj(A(0),0);uint32_t size_ptr=A(2);if
     if(provided<need||!ptr(A(1),need))RET(INVALID,3);memcpy(ptr(A(1),need),o->code,need);RET(OK,3);}
 static void create_decl(CPU *c){uint32_t p=A(1),out=A(2);if(!obj(A(0),DEVICE)||!p||!ptr(out,4)||g.phase==2)RET(INVALID,3);M32(out)=0;
     if(OBJ_LIMIT_HIT())RET(OUTMEM,3);D9VertexElement elements[D9_MAX_DECL];unsigned n;
-    for(n=0;n<=D9_MAX_DECL;++n){uint64_t at=(uint64_t)p+(uint64_t)n*8;if(at>UINT32_MAX||!ptr((uint32_t)at,8))RET(INVALID,3);
-        D9VertexElement e;memcpy(&e,ptr((uint32_t)at,8),8);if(e.stream==0xff){if(e.offset||e.type!=D9_DECL_UNUSED||e.method||e.usage||e.usage_index)RET(INVALID,3);break;}
-        if(n==D9_MAX_DECL)RET(INVALID,3);elements[n]=e;}
-    D9Decl *decl=malloc(sizeof *decl);if(!decl)RET(OUTMEM,3);if(d9_decl_init(decl,elements,n)){free(decl);RET(INVALID,3);}
+    for(n=0;n<=D9_MAX_DECL;++n){uint64_t at=(uint64_t)p+(uint64_t)n*8;if(at>UINT32_MAX||!ptr((uint32_t)at,8)){
+            d3d_fail("CreateVertexDeclaration","element list is not readable guest memory",INVALID);RET(INVALID,3);}
+        D9VertexElement e;memcpy(&e,ptr((uint32_t)at,8),8);if(e.stream==0xff){
+            if(e.offset||e.type!=D9_DECL_UNUSED||e.method||e.usage||e.usage_index){
+                d3d_fail("CreateVertexDeclaration","the D3DDECL_END terminator carries non-zero fields",INVALID);RET(INVALID,3);}
+            break;}
+        if(n==D9_MAX_DECL){
+            d3d_fail("CreateVertexDeclaration","the declaration has no D3DDECL_END terminator",INVALID);RET(INVALID,3);}
+        elements[n]=e;}
+    D9Decl *decl=malloc(sizeof *decl);if(!decl)RET(OUTMEM,3);
+    char why[160];
+    if(d9_decl_init_why(decl,elements,n,why,sizeof why)){
+        d3d_fail("CreateVertexDeclaration",why,INVALID);free(decl);RET(INVALID,3);}
     Obj *o=new_obj(DECL);o->declaration=decl;retain(g.dev);M32(out)=o->guest;RET(OK,3);}
 static void set_decl(CPU *c){Obj *o=obj(A(1),DECL);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     int rc=d9_set_vertex_declaration(g.device,o?o->declaration:NULL);if(!rc){bind(&g.declaration,o);g.fvf=0;}RET(hr(rc),2);}

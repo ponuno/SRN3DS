@@ -1,4 +1,5 @@
 #include "d3d9_vertex.h"
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 
@@ -28,34 +29,86 @@ int d9_decl_decode(unsigned t,const void *data,size_t bytes,float out[4]){
     else if(t==D9_DECL_FLOAT16_2||t==D9_DECL_FLOAT16_4){for(unsigned i=0;i<n;++i)out[i]=half(rd16(p+2*i));}
     else return -1;return 0;
 }
-/* Colour must remain data until a colour-capable backend consumes it.  The
- * previous code rejected COLOR outright, which hid the reason behind a generic
- * declaration failure. */
-static int color_type(unsigned t){return t==D9_DECL_COLOR||t==D9_DECL_UBYTE4||t==D9_DECL_UBYTE4N||t==D9_DECL_FLOAT4;}
-int d9_decl_init(D9Decl *d,const D9VertexElement *e,unsigned n){
-    if(!d||!e||!n||n>D9_MAX_DECL)return -1;
+/* Colour must remain data until a colour-capable backend consumes it.
+ * Four-component forms the decoder produces as RGBA; FLOAT16_4 is the retail
+ * menu declaration (the 8 measured CreateVertexDeclaration refusals): a
+ * half-float RGBA colour that d9_decl_decode already yields like FLOAT4.
+ * Three-component forms remain outside the admitted tint contract. */
+static int color_type(unsigned t){return t==D9_DECL_COLOR||t==D9_DECL_UBYTE4||
+    t==D9_DECL_UBYTE4N||t==D9_DECL_FLOAT4||t==D9_DECL_FLOAT16_4;}
+static const char *decl_type_name(unsigned t){
+    static const char *names[]={"FLOAT1","FLOAT2","FLOAT3","FLOAT4","D3DCOLOR","UBYTE4",
+        "SHORT2","SHORT4","UBYTE4N","SHORT2N","SHORT4N","USHORT2N","USHORT4N",
+        "UDEC3","DEC3N","FLOAT16_2","FLOAT16_4","UNUSED"};
+    return t<sizeof names/sizeof *names?names[t]:"type?";
+}
+static const char *decl_usage_name(unsigned u){
+    static const char *names[]={"position","blendweight","blendindices","normal",
+        "psize","texcoord","tangent","binormal","tessfactor","positiont","color",
+        "fog","depth","sample"};
+    return u<sizeof names/sizeof *names?names[u]:"usage?";
+}
+#define DECL_REJECT(...) do{if(why&&cap)snprintf(why,cap,__VA_ARGS__);return -1;}while(0)
+int d9_decl_init_why(D9Decl *d,const D9VertexElement *e,unsigned n,char *why,size_t cap){
+    if(why&&cap)why[0]=0;
+    if(!d||!e||!n||n>D9_MAX_DECL)
+        DECL_REJECT("declaration needs 1..%u elements",D9_MAX_DECL);
     D9Decl tmp={.count=n,.position=UINT32_MAX,.uv=UINT32_MAX,.color=UINT32_MAX,.normal=UINT32_MAX};
     unsigned position_seen=0,positiont_seen=0;
     for(unsigned i=0;i<n;++i){const D9VertexElement *x=e+i;unsigned size=d9_decl_type_size(x->type),end=(unsigned)x->offset+size;
-        if(x->stream>=D9_MAX_STREAMS||!size||x->method||x->usage>13||x->usage_index>15||end>4096)return -1;
-        if(i&&x->stream<e[i-1].stream)return -1;
-        if(x->offset<tmp.required[x->stream])return -1;tmp.required[x->stream]=end;tmp.stream_mask|=1u<<x->stream;
-        for(unsigned j=0;j<i;++j)if(e[j].usage==x->usage&&e[j].usage_index==x->usage_index)return -1;
-        if(x->usage==D9_USAGE_POSITION&&!x->usage_index){if(d9_decl_components(x->type)<2)return -1;tmp.position=i;++position_seen;}
+        if(x->stream>=D9_MAX_STREAMS)
+            DECL_REJECT("element %u stream %u is outside 0..%u",i,x->stream,D9_MAX_STREAMS-1);
+        if(!size)
+            DECL_REJECT("element %u type %u is not a D3D9 declaration type",i,x->type);
+        if(x->method)
+            DECL_REJECT("element %u method %u (tessellator) is not supported",i,x->method);
+        if(x->usage>13||x->usage_index>15)
+            DECL_REJECT("element %u usage %u index %u is out of range",i,x->usage,x->usage_index);
+        if(end>4096)
+            DECL_REJECT("element %u offset %u + %u bytes exceeds 4096",i,x->offset,size);
+        if(i&&x->stream<e[i-1].stream)
+            DECL_REJECT("element %u stream %u is out of order after stream %u",i,x->stream,e[i-1].stream);
+        if(x->offset<tmp.required[x->stream])
+            DECL_REJECT("element %u offset %u overlaps the previous element in stream %u (needs >= %u)",
+                        i,x->offset,x->stream,tmp.required[x->stream]);
+        tmp.required[x->stream]=end;tmp.stream_mask|=1u<<x->stream;
+        for(unsigned j=0;j<i;++j)if(e[j].usage==x->usage&&e[j].usage_index==x->usage_index)
+            DECL_REJECT("element %u duplicates %s%u",i,decl_usage_name(x->usage),x->usage_index);
+        if(x->usage==D9_USAGE_POSITION&&!x->usage_index){if(d9_decl_components(x->type)<2)
+            DECL_REJECT("element %u position0 %s has fewer than 2 components",i,decl_type_name(x->type));
+            tmp.position=i;++position_seen;}
         if(x->usage==D9_USAGE_POSITIONT&&!x->usage_index){
             /* XYZRHW carries an explicit w; the current PICA pass-through
              * shader has a fixed w=1, so only FLOAT4 is honest here. */
-            if(x->type!=D9_DECL_FLOAT4)return -1;tmp.position=i;tmp.position_t=1;++positiont_seen;}
-        if(x->usage==D9_USAGE_TEXCOORD&&!x->usage_index){if(d9_decl_components(x->type)<2)return -1;tmp.uv=i;}
-        if(x->usage==D9_USAGE_COLOR&&!x->usage_index){if(!color_type(x->type))return -1;tmp.color=i;}
+            if(x->type!=D9_DECL_FLOAT4)
+                DECL_REJECT("element %u positiont0 is %s; only FLOAT4 carries the explicit w",
+                            i,decl_type_name(x->type));
+            tmp.position=i;tmp.position_t=1;++positiont_seen;}
+        if(x->usage==D9_USAGE_TEXCOORD&&!x->usage_index){if(d9_decl_components(x->type)<2)
+            DECL_REJECT("element %u texcoord0 %s has fewer than 2 components",i,decl_type_name(x->type));
+            tmp.uv=i;}
+        if(x->usage==D9_USAGE_COLOR&&!x->usage_index){
+            /* 4-component RGBA forms only (measured retail FLOAT16_4 included). */
+            if(!color_type(x->type))
+                DECL_REJECT("element %u color0 type %s is not COLOR/UBYTE4/UBYTE4N/FLOAT4/FLOAT16_4",
+                            i,decl_type_name(x->type));
+            tmp.color=i;}
         /* NORMAL is decoded only by the test-only CPU T&L prototype.  It is
          * admitted here so a declaration carrying it is not misreported as
          * malformed; an unlit draw still ignores it. */
-        if(x->usage==D9_USAGE_NORMAL&&!x->usage_index){if(d9_decl_components(x->type)<3)return -1;tmp.normal=i;}
+        if(x->usage==D9_USAGE_NORMAL&&!x->usage_index){if(d9_decl_components(x->type)<3)
+            DECL_REJECT("element %u normal0 %s has fewer than 3 components",i,decl_type_name(x->type));
+            tmp.normal=i;}
         tmp.elements[i]=*x;
     }
-    if(tmp.position==UINT32_MAX||position_seen>1||positiont_seen>1||(position_seen&&positiont_seen))return -1;
+    if(tmp.position==UINT32_MAX)
+        DECL_REJECT("no POSITION or POSITIONT element in the declaration");
+    if(position_seen>1||positiont_seen>1||(position_seen&&positiont_seen))
+        DECL_REJECT("declaration carries more than one POSITION/POSITIONT element");
     *d=tmp;return 0;
+}
+int d9_decl_init(D9Decl *d,const D9VertexElement *e,unsigned n){
+    return d9_decl_init_why(d,e,n,NULL,0);
 }
 static int push_element(D9Decl *d,unsigned stream,unsigned type,unsigned usage,unsigned offset,const char **why){
     if(d->count>=4){if(why)*why="declaration exceeds four elements";return -1;}

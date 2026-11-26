@@ -124,15 +124,36 @@ static int d9_shader_scan(const uint32_t *p,size_t n,D9ShaderInfo *out,D9ShaderC
         }
         const D9Opcode *oi=&d9_opcodes[op];
         size_t total=((token>>24)&15)+1;
-        if(total<oi->min_words||(oi->max_words&&total>oi->max_words)){
-            out->opcode=op;out->opcode_offset=(unsigned)(pos*4);out->bad_length=1;
-            out->need_words=oi->min_words;out->have_words=(unsigned)total;
-            return D9_SHADER_INVALID;
-        }
         if(total>n-pos){
             out->opcode=op;out->opcode_offset=(unsigned)(pos*4);
             out->stream=D9_SHADER_STREAM_TRUNCATED;out->need_words=(unsigned)total;
             out->have_words=(unsigned)(n-pos);return D9_SHADER_INVALID;
+        }
+        /* The length field is authoritative; the per-opcode maximum counts the
+         * *nominal* register operands only.  D3D9 lets a source register use
+         * relative addressing (D3DSP_ADDRESSMODE, bit 13): such an operand is
+         * followed by one address-register token, and both tokens count in
+         * the length field.  fxc emits this for e.g.
+         *   mad r1.xyz, c0[a0.x], v1, c0[a0.x]   -> 7 words (nominal 5)
+         *   mul  o3.xyz, r0,      c10[a0.x]      -> 5 words (nominal 4)
+         * so a surplus token is valid only when it is the address register of
+         * a preceding relative constant.  def/defi/defb carry literal data,
+         * never relative operands. */
+        size_t relative=0;
+        if(op!=0x51u&&op!=0x30u&&op!=0x2fu){
+            for(size_t k=2;k+1<total;++k){
+                uint32_t src=p[pos+k];
+                if(!(src&0x2000u))continue;
+                if(((src>>28)&7u)!=2u)continue;
+                unsigned addr_type=(unsigned)((p[pos+k+1]>>28)&7u);
+                if(addr_type==3u||addr_type==7u)++relative;
+            }
+        }
+        size_t operands=total-1-relative;
+        if(operands+1<oi->min_words||(oi->max_words&&operands+1>oi->max_words)){
+            out->opcode=op;out->opcode_offset=(unsigned)(pos*4);out->bad_length=1;
+            out->need_words=oi->min_words;out->have_words=(unsigned)total;
+            return D9_SHADER_INVALID;
         }
         if(!out->instructions){out->first_opcode=op;out->first_opcode_offset=(unsigned)(pos*4);}
         if(!oi->supported&&!out->opcode_offset){out->opcode=op;out->opcode_offset=(unsigned)(pos*4);}

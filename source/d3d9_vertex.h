@@ -29,6 +29,10 @@ int d9_decl_decode(unsigned type,const void *data,size_t bytes,float out[4]);
  * as data here; whether a backend can consume it is a separate draw-time
  * gate (see d9_draw_* and D9Backend.draw_colored). */
 int d9_decl_init(D9Decl *decl,const D9VertexElement *elements,unsigned count);
+/* Same admission contract as d9_decl_init, but names the first rejected
+ * element (stream/type/usage/offset) when why/cap are given. */
+int d9_decl_init_why(D9Decl *decl,const D9VertexElement *elements,unsigned count,
+                     char *why,size_t why_cap);
 /* Map a supported D3D9 FVF to a declaration.  On failure *why names the exact
  * rejected bit or combination.  D9_OK, D9_INVALID or D9_UNSUPPORTED.
  * allow_normal admits D3DFVF_NORMAL for the test-only CPU T&L prototype; the

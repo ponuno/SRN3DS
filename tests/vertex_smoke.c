@@ -22,6 +22,7 @@ static void decode(void){float f[4];uint16_t half[]={1,0x3c00,0xbc00,0x7c00};
     D9VertexElement color_elements[]={{0,0,D9_DECL_FLOAT3,0,D9_USAGE_POSITION,0},{0,12,D9_DECL_COLOR,0,D9_USAGE_COLOR,0}};
     assert(!d9_decl_init(&d,color_elements,2)&&d.color!=UINT32_MAX); /* COLOR0 is admitted as data */
     color_elements[1].type=D9_DECL_FLOAT4;assert(!d9_decl_init(&d,color_elements,2)); /* float colour too */
+    color_elements[1].type=D9_DECL_FLOAT16_4;assert(!d9_decl_init(&d,color_elements,2)&&d.color!=UINT32_MAX); /* retail half-float RGBA */
     color_elements[1].type=D9_DECL_FLOAT3;assert(d9_decl_init(&d,color_elements,2)<0); /* three components are not */
     color_elements[1].type=D9_DECL_COLOR;color_elements[1].usage_index=1;
     assert(!d9_decl_init(&d,color_elements,2)&&d.color==UINT32_MAX); /* COLOR1 is unused, not the draw tint */

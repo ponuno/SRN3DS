@@ -555,4 +555,59 @@ fixed pipeline and satisfies its preconditions.
   All headline counts above use the 122-package base archive to match
   `docs/ASSETS.md`; the report JSON can be regenerated with `--update`.
 
+## 9. Token-walk contract for `CreateVertexShader`
+
+The retail archive has 854 `BSVS` chunks and 9,621 `BSPS` chunks; every one
+is `vs_3_0`/`ps_3_0`. The D3D9 instruction-length field (`D3DSP_INSTLENGTH`,
+bits 24..27, "extra operand count") is authoritative, and the per-opcode table
+in `source/d3d9_shader.c` is only a nominal floor/ceiling.
+
+A source operand with `D3DSP_ADDRESSMODE` (bit 13) set is followed by one
+address-register token (`a0`/`aL`), and **both** tokens count in the length
+field. fxc emits this for relative-addressed constants:
+
+```
+mul o3.xyz, r0,  c10[a0.x]              -> 5 words (nominal 4)
+mad r1.xyz, c0[a0.x], v1, c0[a0.x]      -> 7 words (nominal 5)
+```
+
+Before this layer the walker compared the raw token count with the nominal
+width and called the surplus "bad length"; a read-only scan of the archive
+shows that rule rejects **320 of the 854** retail VS chunks (all 854 VS and
+9,621 PS chunks validate after counting operands). The census shows the
+consequence: of its 320 `CreateVertexShader` `D3DERR_NOTAVAILABLE` calls, **166
+printed `menu.generic.vs: malformed vs token stream`** — this parser bug — while
+149 named `input normal0 is outside the static menu family`, 4 named opcode
+`0x23`, and 1 named `color1`. The latter 154 are valid streams refused by the
+menu family gate, a separate bug in the skip probe (see below).
+`def`/`defi`/`defb` payloads are literal data and are excluded from the
+relative scan, and a relative source without its address token still fails
+(the nominal operand count is then short).
+
+Creation status for a valid stream is a separate decision from parsing:
+
+| stream | normal run | `TESV_D3D9_SHADER_SKIP_PROBE=1` |
+|---|---|---|
+| not a D3D9 token stream (bad version/framing/unknown opcode) | `D3DERR_INVALIDCALL` | `D3DERR_INVALIDCALL` |
+| valid, inside the executable closure | `S_OK` | `S_OK` |
+| valid, outside the closure (any retail SM3 shader) | named `D3DERR_NOTAVAILABLE` | `S_OK`, non-executable object; `GetFunction` returns the real tokens and every draw is refused by name |
+
+The probe no longer stops at the closure certifier: streams that *look* like
+`menu.generic.vs` but fail its runtime family check (missing color0/color1,
+`normal0`/`blendweight0` input, opcode `abs` at 0x23) now also become
+non-executable objects instead of `D3DERR_NOTAVAILABLE`. The probe is a
+measurement flag only; DevCaps stay `0x00082000` and VS/PS caps stay 2.0.
+
+`CreateVertexDeclaration` (`source/d3d9_vertex.c`) now names the first rejected
+element through `d9_decl_init_why()` — stream, type, usage index, offset
+overlap/order, POSITION/POSITIONT/COLOR/TEXCOORD component rules, and the
+`D3DDECL_END` terminator — instead of returning a bare `D3DERR_INVALIDCALL`.
+The measured census had 8 refusals among 368 declarations: **4 with COLOR0 at
+element 1 and 4 with COLOR0 at element 3, all `D3DDECLTYPE_FLOAT16_4` (16)**.
+The old colour whitelist (COLOR/UBYTE4/UBYTE4N/FLOAT4) omitted the half-float
+RGBA form even though `d9_decl_decode()` already decodes it; admitting
+FLOAT16_4 fixes the false `D3DERR_INVALIDCALL` without widening the tint
+contract to 3-component colours. Other admission rules are unchanged.
+
+
 
