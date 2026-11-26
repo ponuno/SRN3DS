@@ -1979,7 +1979,20 @@ int d9_com_set_backend(const D9Backend *ops,void *ctx,size_t limit){
 }
 int d9_null_register(void){
     d9_null_reset();
-    return d9_com_set_backend(d9_null_backend(),d9_null_context(),D9_NULL_RESOURCE_LIMIT)?0:-1;
+    size_t limit=D9_NULL_RESOURCE_LIMIT;
+    /* Measurement-only budget override.  The default 4 MiB null-backend limit
+     * is deliberately smaller than the measured renderer's target set; this
+     * env lets a census reach depth/shaders/draw without becoming a shipping
+     * memory promise. */
+    const char *v=getenv("TESV_D3D9_BUDGET_MB");
+    if(v&&v[0]){
+        char *end=NULL;unsigned long mb=strtoul(v,&end,10);
+        if(end&&*end=='\0'&&mb>=8&&mb<=512){
+            limit=(size_t)mb<<20;
+            fprintf(stderr,"[d3d9] MEASUREMENT ONLY: null-backend resource budget %lu MiB; not shippable\n",mb);
+        }
+    }
+    return d9_com_set_backend(d9_null_backend(),d9_null_context(),limit)?0:-1;
 }
 void d9_com_shutdown(void){if(!g.mem)return;capture_stop();win32_set_external_resolver(NULL,NULL);
     if(g.phase)d9_present(g.device);g.phase=0;
