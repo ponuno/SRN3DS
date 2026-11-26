@@ -266,6 +266,14 @@ int main(void) {
     g_region_mib = (unsigned)(region >> 20);
     g_free_mib = (unsigned)(free_mem >> 20);
     printf("App region: %u MiB, free %u MiB\n\n", g_region_mib, g_free_mib);
+    /* Measurement-only surface gate: when this flag file exists on the SD
+     * card, the adapter probe advertises HW T&L so the next layer can be
+     * measured.  Never present on a shipping card. */
+    if (access("sdmc:/Skyrim/tesv_caps_probe.flag", F_OK) == 0) {
+        setenv("TESV_D3D9_CAPS_PROBE", "1", 1);
+        fprintf(stderr, "[probe] caps flag present: HW T&L advertised "
+                        "(measurement only, not shippable)\n");
+    }
     if (n3ds) run("sdmc:/Skyrim/TESV.exe", "sdmc:/Skyrim", TESV_ARM_STEPS, budget, "sdmc:/Skyrim_N3DS_tesv.log",
                   gpu?d9_citro_backend():NULL,gpu);
     else puts("New Nintendo 3DS required");
