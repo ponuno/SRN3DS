@@ -95,14 +95,14 @@
    "owner": "sm3-agent-skinning",
    "chunks": 2162,
    "unique_hashes": 1194,
-   "translated": 0,
+   "translated": 83,
    "draw_enabled": 0,
-   "refused": 1194,
-   "contract_only": 97,
+   "refused": 1111,
+   "contract_only": 14,
    "refused_classes": {
     "def_literal_out_of_range": 1044,
-    "pica_vs": 97,
     "unsupported_opcode": 42,
+    "pica_vs": 14,
     "too_many_vs_varyings (8 > 7)": 9,
     "too_many_vs_varyings (9 > 7)": 2
    },
@@ -140,9 +140,9 @@
   }
  ],
  "total": {
-  "translated": 3,
+  "translated": 86,
   "draw-enabled": 1,
-  "refused": 6655,
+  "refused": 6572,
   "chunks": 10475,
   "unique_hashes": 6659
  },

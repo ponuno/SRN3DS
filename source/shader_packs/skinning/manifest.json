@@ -14,10 +14,10 @@
   "vs": 290
  },
  "coverage": {
-  "translated": 0,
+  "translated": 83,
   "draw-enabled": 0,
-  "refused": 1194,
-  "contract_only": 97
+  "refused": 1111,
+  "contract_only": 14
  },
  "refusal_classes": {
   "def_literal_out_of_range": 1044,
@@ -32,7 +32,589 @@
   "class",
   "chunks"
  ],
- "plans": [],
+ "plans": [
+  {
+   "id": "skin.vs.0c2b8f06",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "0c2b8f06911f874394bcc45f790ae7e05a40216e7c117c5d23d37021045da955"
+  },
+  {
+   "id": "skin.vs.0d77900e",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "0d77900e3aa88882e80c980cd2fa408da388feceaaf7657a8a76a81d11afff56"
+  },
+  {
+   "id": "skin.vs.0e1c9b9d",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "0e1c9b9dd1b23101ac84b932879fa635c8c7b08b5adec8826c94393509314032"
+  },
+  {
+   "id": "skin.vs.0e2e4f3c",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "0e2e4f3c7cc35b7c0707c1ed5939bf7e975cb2b0b2bd82728da0eb937624a7c0"
+  },
+  {
+   "id": "skin.vs.104aeb56",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "104aeb56280d415fdbb17a18e0267a9dd36bec286ea9f0882b57c321f26423d0"
+  },
+  {
+   "id": "skin.vs.126f2542",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "126f254256685d2ca91fdb468b2e4e2452e09997ba869a13a42d33d3a2997e96"
+  },
+  {
+   "id": "skin.vs.1952056a",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "1952056a29a5284dec526ef9b8afc805270e989e3f25c8280d15ff392f28649b"
+  },
+  {
+   "id": "skin.vs.1a05880d",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "1a05880d77981369fb9fba7e424b6eb2a0e2deb00b2f75e90414a9066e63964a"
+  },
+  {
+   "id": "skin.vs.1dda1cfd",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "1dda1cfd27a5d99281fe0124ae56e579ad90a7f1f396d68edbc8f552e0af8893"
+  },
+  {
+   "id": "skin.vs.1e0cb622",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "1e0cb622c2ac414fb03207a17d4c37b09080fa6dff190ba34acae2da9ec8b359"
+  },
+  {
+   "id": "skin.vs.1e178795",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "1e17879520abcc002f74e15703cf8f63d213134f94d57a4f1d93c59540253e25"
+  },
+  {
+   "id": "skin.vs.1e642d78",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "1e642d789402cca94d34628aa4bb2d9ad35bc243f8c6a5fdaccf38a78480a41d"
+  },
+  {
+   "id": "skin.vs.20f4db07",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "20f4db07add12d807b5cdd81a8457b93ae913998f7d21ca09194ba177dd70275"
+  },
+  {
+   "id": "skin.vs.212f9444",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "212f9444273d2d18da621ebc18dcfb78174da2dc898168a1e792d90c29041f0d"
+  },
+  {
+   "id": "skin.vs.213d9dca",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "213d9dca29da703211b8cbf651d4cd58c86128e210703bb4ea92a39e2e3e1357"
+  },
+  {
+   "id": "skin.vs.22bb7a82",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "22bb7a8220f63701690d711eecf7435ab7b4fb6da26681007862b628a95b8d61"
+  },
+  {
+   "id": "skin.vs.2b82e237",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "2b82e237ab84fdbb6fb530d33646c8a66e7d8ae7f5180cbe0d7389569de3094c"
+  },
+  {
+   "id": "skin.vs.2c1e19a1",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "2c1e19a16903ad18502884b5bda554d7249664871a2f47bfea98b6a77b263f26"
+  },
+  {
+   "id": "skin.vs.390df5b3",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "390df5b3acbc77df4055e6b3d0c20e5eb09b9a889a1e0170fbf9e3a7845e434d"
+  },
+  {
+   "id": "skin.vs.3a74151e",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "3a74151ee982bfc91ab28b25958db6ec0d8bfbb9c7e4257bb9adbbd07e12c706"
+  },
+  {
+   "id": "skin.vs.4384c577",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "4384c577f228c02ca45c48859e461e15056557f9e53f1fc5abcf79f0ccb3f4ed"
+  },
+  {
+   "id": "skin.vs.44aad7c9",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "44aad7c993546f7aa9ee596bd22fd540d7518d3a8603180e693d6ea0f8f6a381"
+  },
+  {
+   "id": "skin.vs.45b42ca2",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "45b42ca21e278d290b795af221936f1fcba65adf49985dc4b6531c46c295a13c"
+  },
+  {
+   "id": "skin.vs.45b71408",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "45b71408895c0c679ecbaaf7a7dc8db66c660e7269d65c6f477508a96c1eb366"
+  },
+  {
+   "id": "skin.vs.48a35659",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "48a356599ffba356bd7fd05c9be4c5db1485bc04788b011b8374f67c56d73188"
+  },
+  {
+   "id": "skin.vs.4edcc95e",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "4edcc95e8315c44ba5d1be0d4bccb18583ad7336275c308da2ab7027bf399808"
+  },
+  {
+   "id": "skin.vs.50602fb0",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "50602fb07a73755f1ca7a17b69396b5e8081de286307990eb4bd01e1a86ffd87"
+  },
+  {
+   "id": "skin.vs.51cd43f7",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "51cd43f79d7cc90ec2e100b774b354e397d49074f29e1bf7dfad1165fe7d7072"
+  },
+  {
+   "id": "skin.vs.548b5f37",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "548b5f374b344102701463d0891f25aeb38d8b511bc96586e7f933e835f61942"
+  },
+  {
+   "id": "skin.vs.5ab955cd",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "5ab955cd5f637fc290e3c6120fae2f8308945e827d57beca7188aec3b60e9ce7"
+  },
+  {
+   "id": "skin.vs.5fed43a0",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "5fed43a06d3c79b75fe7090e2ef90cef147c5a75fae6309ac798024bb8e284cf"
+  },
+  {
+   "id": "skin.vs.60dbd11a",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "60dbd11a23ffbf74517f1256edaadadb62441fe1ed120d413540b220b9833407"
+  },
+  {
+   "id": "skin.vs.64b904fc",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "64b904fcc121907f3043eddb429ea444e8d3eab3735ce3ed311b208f9e54707b"
+  },
+  {
+   "id": "skin.vs.65531fc9",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "65531fc95f77a4262b401cabfcb442023c427ee1f8ac967e0d1a7468c6a4e26a"
+  },
+  {
+   "id": "skin.vs.69076c6a",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "69076c6ad17d6ef6d9ae88f641821e99d48b687d69a40f4686eb4963eb515606"
+  },
+  {
+   "id": "skin.vs.6e0af6ab",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "6e0af6ab6c1681099a8a1035e4b5040c6024b51c5a450c3131dcdfe6c08e31d0"
+  },
+  {
+   "id": "skin.vs.7372e121",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "7372e121a01391ce947d2ecc8789835dca81f5621d0482a2fce637fca43230df"
+  },
+  {
+   "id": "skin.vs.7615490e",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "7615490ef686749f215a6fa3a07553c36d2bcc7b1355261c0bc64a54971a0d33"
+  },
+  {
+   "id": "skin.vs.7632863f",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "7632863ffec10cfef35d1912ddeb42ee8c8837190152d8f431b2e08fff4d1880"
+  },
+  {
+   "id": "skin.vs.83208853",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "83208853cd762fc5c767dc3555596881c0d3159f8025393c345e66f186a40817"
+  },
+  {
+   "id": "skin.vs.834ec980",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "834ec980bb843ad4e47d1f1267fe5cb275d62917ed7f0df4ee449c6f1aa2f7d9"
+  },
+  {
+   "id": "skin.vs.8513aaac",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "8513aaac88efadcd52639d9b1b87692f1242e6d21d7f4383f7133762e104d3a6"
+  },
+  {
+   "id": "skin.vs.89f1cf43",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "89f1cf43c87795ebf9a5ce034f63295260d39ccc1caa26b448874fdb14525d53"
+  },
+  {
+   "id": "skin.vs.8cf43375",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "8cf433751d5754e3417ac028c9836bc02186767d98bba6c6ae5dec22f2798317"
+  },
+  {
+   "id": "skin.vs.96afdb59",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "96afdb5973abb379c88a653466ee14dede789c10a49f882997575987dcc6171f"
+  },
+  {
+   "id": "skin.vs.97c760e4",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "97c760e4b9324f5d1c455fc801810d7e34d4aa6b6725a7f7ed231f7f0c68ef81"
+  },
+  {
+   "id": "skin.vs.99a20432",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "99a2043240f24d84a4918cab4d082e3091cd049eaa7b372b3b75652bcca54876"
+  },
+  {
+   "id": "skin.vs.9bc8f862",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "9bc8f862d1affde064b2f6e24888f61e062e60c8a8591610fe7518050439ebcb"
+  },
+  {
+   "id": "skin.vs.9dfe7119",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "9dfe71198365f51c3fbdbcddbc60608edb9f14f0dbf5145ea57c5bbaa267b57a"
+  },
+  {
+   "id": "skin.vs.9fc141f8",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "9fc141f8a04ebc57c47aeca18dd642bee91aaf4c16ce2a06d8fc8ec618ee9206"
+  },
+  {
+   "id": "skin.vs.a124896b",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "a124896b57fae0ffa2a5dea312417b00c3b747aec14b2acc2f24a5446fc56972"
+  },
+  {
+   "id": "skin.vs.a17731a2",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "a17731a2fddb12a521b6781396368f7ae76f289c18e9b23a777ac1320dc204d5"
+  },
+  {
+   "id": "skin.vs.a2235908",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "a2235908df5cf2066c9c4d531793116c5017f06137eb7d163e2b461293b78041"
+  },
+  {
+   "id": "skin.vs.a70ca6ae",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "a70ca6aee2d341d3e3fff7d6c5f1b69381f4048e00d742f9804525c8fe036aef"
+  },
+  {
+   "id": "skin.vs.a9fbcb50",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "a9fbcb50632af8d8a4355a6f84d4b4e11a31fe31e844b4c904dc017f3cf89875"
+  },
+  {
+   "id": "skin.vs.ab511d09",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "ab511d093bbabe091a3defa47a6e92e9013ea1b2fa1bc819dafa7304b4c43742"
+  },
+  {
+   "id": "skin.vs.afbf142e",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "afbf142e12e93723ea9ee3e8fb9172d57e949e8b7939eebf516d1cccda4892ce"
+  },
+  {
+   "id": "skin.vs.b818b927",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "b818b92751e98fd94f7eb8090e9dd3fc130f479d2fb8bcbe3a7c64eeee19089b"
+  },
+  {
+   "id": "skin.vs.b8960b22",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "b8960b2223a77ee602a48c2c02f0a7aa644b386029847e6448164c9eeba50d0f"
+  },
+  {
+   "id": "skin.vs.b89a1279",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "b89a1279a2c614d7e3ca3bb4e6df46697f89b26d486b556165b702f59f711588"
+  },
+  {
+   "id": "skin.vs.ba59cb28",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "ba59cb28153566307a9c4fbc7f543be0681c9a345373107c83ca7d03520fe119"
+  },
+  {
+   "id": "skin.vs.bd25bfc5",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "bd25bfc5c6002e145162dde44936ccad136b70efaa8f2538ea5e4edc4244cc8e"
+  },
+  {
+   "id": "skin.vs.bf0e21e8",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "bf0e21e833989aa6523dcfaff2de5516bab86a5c62569f818836442b0203f293"
+  },
+  {
+   "id": "skin.vs.c0cb8593",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "c0cb859387b4d2923f7249b3daf05bbcbc560965bf18106c58818cd0dc0e770f"
+  },
+  {
+   "id": "skin.vs.c4ae6ae5",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "c4ae6ae55a9d03cf934adc4e3f5930ecf4fbcc9a1e30bd35dce866f76a486a2b"
+  },
+  {
+   "id": "skin.vs.c8adcfde",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "c8adcfde52cfad6b6e6263bf8cd952f31d0fef0c67951e6ae9b302758c5517f0"
+  },
+  {
+   "id": "skin.vs.d2e4a693",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "d2e4a693fb4d3ba0838ddf5b501b6d81bc98df0c5a6e152d5bcb112b8f81b0e5"
+  },
+  {
+   "id": "skin.vs.d3ca8b31",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "d3ca8b3110edb5afa3f811073e58026ac0caae51c3438e29fb39ec4ec0dd7841"
+  },
+  {
+   "id": "skin.vs.d639961e",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "d639961e95b757b608f3c5205d2ab208e07da7f54763e7912efe13cdb0656d0a"
+  },
+  {
+   "id": "skin.vs.db4f046d",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "db4f046d31056254393e2ea82b893eddb14201941c0f24c1acf6b1cca21e9de1"
+  },
+  {
+   "id": "skin.vs.deda3abf",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "deda3abf0e11ce4b2cac894694122b851c8ae98c95b1b835fb1c39b5c2f4fbd1"
+  },
+  {
+   "id": "skin.vs.e22ae9fd",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "e22ae9fd454efd0f1ecee9d09636a62e56f6aa91abf0df68d0a5f3dee0a04bd1"
+  },
+  {
+   "id": "skin.vs.e5aaacb8",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "e5aaacb8443568095312dc2cab57d1bd9c163ba53fcab2e410e418973fdb9719"
+  },
+  {
+   "id": "skin.vs.ebd27fb3",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "ebd27fb324103d319d8801700e23422adb39c747cff32f233098f66fdda338f3"
+  },
+  {
+   "id": "skin.vs.f7e324ca",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "f7e324caeb01cc3e515ed69d3f325e3d655d38c42c71ddaf885644030ec10e90"
+  },
+  {
+   "id": "skin.vs.f8dc18e7",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "f8dc18e78ad11b6026fbc6fec8a732a4b5dcc17e0056f5b0eda2cf784590ef16"
+  },
+  {
+   "id": "skin.vs.f8ffaecd",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "f8ffaecd431d4416a4503b2e8ca80b6dad57a128dc1782c941f97db346072efa"
+  },
+  {
+   "id": "skin.vs.f9c03c2e",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "f9c03c2e5c760b30e43c5539af0470028ec4fa0680ae014e4c1d99aa66ac049f"
+  },
+  {
+   "id": "skin.vs.fa964a33",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "fa964a3300c0ae2712dab26b34a4a42211971219327f2022b0130e0dbb138cea"
+  },
+  {
+   "id": "skin.vs.fc9bebc3",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "fc9bebc3783ab7d4cd7be9020c221db12a098d610bfeb7375750c71f533e717b"
+  },
+  {
+   "id": "skin.vs.fcbea299",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "fcbea299fd419f6c92500b6a56d56a83f1e3c7c2a1d53d702b621971b56c94e3"
+  },
+  {
+   "id": "skin.vs.feddaf4d",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "feddaf4d30d501ce7db1b7259f81babd5418094189bd3d2554b4a8b307d60d69"
+  },
+  {
+   "id": "skin.vs.ffa43f35",
+   "status": "translated",
+   "kind": "pica_vs",
+   "family": "skinning",
+   "sha256": "ffa43f3518193589c24ba1effdd4e95a29338f3112102d2b29c7eb39428f870b"
+  }
+ ],
  "hashes": [
   [
    "00164b2fddba0263de8255bf0b2fd7165236ea212d357f8e65ba50da417d6a2a",

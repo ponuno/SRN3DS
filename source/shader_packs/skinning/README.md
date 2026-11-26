@@ -7,8 +7,9 @@ character/normal-map/tint-mask shaders and skinned VS
 * census families: `skinning/characters`
 * chunks: **2162** / unique hashes: **1194**
 * pack catalog coverage: **83 translated**, **0 draw-enabled**, **1111 refused**
-  (`plans.json` / `refusals.json`; the phase-1 `manifest.json` coverage still
-  counts only the shared runtime table, which this pack does not rewrite)
+  (`plans.json` / `refusals.json`; `manifest.json` and
+  `docs/shader_coverage.json` index the catalog since `8abe218`, while the
+  16-slot runtime table stays untouched because no entry sets `"runtime": 1`)
 * first step: land the VS skinning contract before any PS work
 
 `manifest.json` lists every bytecode SHA-256 in this pack together with its
@@ -42,9 +43,11 @@ total), 8-16 uniform registers, no control flow, and `skinning: true`.  The
 plan is a descriptor, not an executable shader; `draw_enabled` is 0 by the
 schema rule and `codegen` stays `pending`.
 
-The catalog deliberately does not touch `docs/shader_plans.json`: the runtime
-table is capped at `D9_SHADER_PLAN_MAX_ENTRIES == 16` and exists for
-draw-certified descriptors, not for 83 contract-only VS rows.
+The catalog is merged into coverage by `tools/fxp_compile.py manifest` /
+`tools/shader_packs.py` since `8abe218`.  No entry sets `"runtime": 1`, so the
+16-slot runtime table (`D9_SHADER_PLAN_MAX_ENTRIES`) keeps its four canonical
+entries; the 83 contract-only descriptors exist for diagnostics and future
+codegen, not for a draw.
 
 ## Named refusals (`refusals.json`)
 
@@ -75,12 +78,9 @@ The pack stays inside its directory; these need the shared owner:
    `position` is an output.  Fourteen VS descriptors (7 varyings + position)
    are therefore planner-accepted but schema-invalid.  Align `plan_vs` with the
    schema (or document the position exception) before those hashes are claimed.
-3. **Catalog integration.**  `docs/shader_plans.json` /
-   `source/d3d9_shader_plan_table.inc` only index the shared runtime table
-   (`D9_SHADER_PLAN_MAX_ENTRIES == 16`, draw-certified descriptors).  Teaching
-   `tools/shader_packs.py` and `plan_verify.py --data` to read per-pack
-   `plans.json` catalogs would make `docs/shader_coverage.json` show the 83
-   translations without inflating the runtime table.
+3. ~~**Catalog integration.**~~  **Closed in `8abe218`**: pack catalogs are
+   discovered and indexed for coverage; only `"runtime": 1` entries enter the
+   shared table.  This pack contributes 83 `translated` rows and zero slots.
 4. **Opcode lowering** for the 42 `cmp`/`if`/loop/`rcp`/derivative/`texldd`
    PS hashes, and **varying packing / multi-pass VS** for the 11 VS hashes
    that declare 8-9 varyings.
