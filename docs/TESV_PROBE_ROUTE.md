@@ -508,6 +508,59 @@ Next layer: initialize/validate the `f_CECDC0` `[esp+0x18]` base array before
 recorded earlier; that is a guest stack/path precondition, not a D3D9 cube
 create HRESULT.
 
+
+### CECDC0 call-site skip probe (2026-11-26)
+
+`TESV_CECDC0_SKIP=1` is host-slice only and not shippable. It targets the
+direct calls to `0x00cecdc0` (`NiDX9TextureBufferData` creation):
+
+- **Primary `0x00cd4e63` (f_CD4E40):** verified `E8 58 7F 01 00` (target
+  `0x00cecdc0`), continuation `83 C4 08`, and the NULL check `8B F8` /
+  `85 FF` / `0F 95 C0`. The five call bytes become
+  `33 C0 90 90 90` (`xor eax,eax` + NOPs); the caller's existing
+  `add esp,8` removes the two pushed arguments, so the stack is balanced and
+  `eax=0` reaches the tested failure path.
+- **Secondary `0x00ce77f8`:** verified `E8 C3 55 00 00` then
+  `83 C4 08 5E 83 C4 48 C3`; the caller discards EAX (no test), so it is
+  deliberately **not patched** and the probe prints a named line.
+
+The AOT/IR shadow `tesv_cecdc0_probe_shadow()` covers the generated
+`f_CD4E40` call at return address `0x00cd4e68`: it returns `eax=0`, pops only
+the return address (`c->r[4] += 4`), and lets the existing `add esp,8` remove
+the arguments. The measurement build renames that one generated
+`f_CECDC0(c)` call with `tools/instrument_cecdc0.py`; every other caller runs
+the real function. Host test `tesv_cecdc0_probe` PASS (exact primary
+call/target/continuation/NULL-test bytes, only the five call bytes change,
+repeat refusal, wrong opcode/target/continuation/NULL-test refusal, secondary
+site untouched, unmapped memory).
+
+Census on a fresh `0ecb6a9` slice (`growth_probe/gen01`) with MEMPROBE + CAPS +
+TRACE + SM3 + HDR fallback + budget64 + cube skip + shader skip +
+`TESV_CECDC0_SKIP=1`, 2e9 steps: **4.053 s**, exit 1, and **no D3D trace
+lines at all** (`CreateTexture` = 0). The first fatal event is:
+
+```text
+[guest] unmapped addr=00000008 bytes=4 last_call=00ac6400
+eax=0 ebx=3 ecx=0 edx=011191d8 esi=0 edi=01b37fb0 ebp=01b37fe4 esp=1007fcf4
+backtrace: f_A67590 -> f_A68770 -> f_69D1D0 -> f_F568A1
+```
+
+The fault is `[this+0x34] == NULL` at the caller's texture-list walk, before
+`Direct3DCreate9`; the skipped `f_CD4E40`/`f_CECDC0` call is the **first**
+texture/cube data creation, not the water-reflection cube. Thus the
+unconditional call-site skip is not cube-specific: it breaks the first cube
+data object and the process dies earlier. `CreateCubeTexture`,
+`GetCubeMapSurface`, `CreateDepthStencilSurface`, `SetRenderTarget`,
+`SetDepthStencilSurface`, `CreateVertexShader`, `CreatePixelShader`,
+`SetTexture`, both draw entry points and `Present` are all 0; no frame is
+claimed.
+
+**Route closed for this call-site skip.** The only honest next option is a
+conditional skip inside `f_CECDC0` when the descriptor lookup is actually
+NULL (`0x00ced19d` / the `[esp+0x18]` base slot), or initialize that slot
+before `0x00ced04b`; both are different probes, not an unconditional call-site
+replacement.
+
 ### Fault-register / face-writer probe (2026-11-26)
 
 Base: `main` at `ca60984` (default native render-target cap 256). Added the
