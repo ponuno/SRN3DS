@@ -29,7 +29,8 @@ static void capture_present_event(void);
 #define OBJ_BASE (BASE+0x2000)
 #define LOCK_BASE 0x31000000u
 #define LOCK_STRIDE 0x00400000u
-#define MAX_OBJECTS 128u
+#define MAX_OBJECTS 2048u
+#define OBJ_MAP_BYTES (0x2000u + MAX_OBJECTS * 16u)
 #define MAX_SLOTS 119u
 #define SURFACE_BUDGET (8u<<20)
 #define OK 0u
@@ -103,7 +104,7 @@ typedef struct Obj {
 } Obj;
 static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
-    Obj o[MAX_OBJECTS];unsigned next;
+    Obj *o;unsigned next;unsigned object_table_logged;
     Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*volume,*volume1,*vs,*ps,*declaration,*recording_block,*swapchain;
     unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;float constants_c8[4];
     uint32_t clip_status_union,clip_status_intersection;
@@ -143,6 +144,13 @@ const char *d9_com_last_diagnostic(void){return g.last_diagnostic;}
 static void *ptr(uint32_t address,size_t n){return address&&g.mem?guest_ptr(g.mem,address,n):NULL;}
 static void trace_detail(const char *fmt,...);
 static void d3d_log(const char *method,const char *reason){fprintf(stderr,"[d3d9] %s: %s\n",method,reason);if(g.trace)trace_detail("diagnostic: %s",reason);}
+static void object_table_exhausted(void){
+    char why[96];
+    snprintf(why,sizeof why,"COM object table exhausted (%u objects)",MAX_OBJECTS);
+    snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"D3D9 %s",why);
+    if(!g.object_table_logged){g.object_table_logged=1;d3d_log("D3D9",why);}
+}
+#define OBJ_LIMIT_HIT() (g.next>=MAX_OBJECTS?(object_table_exhausted(),1):0)
 static uint32_t stretch_reject(uint32_t result,const char *reason){
     snprintf(g.last_stretch_rejection,sizeof g.last_stretch_rejection,"%s",reason);
     d3d_log("StretchRect",reason);return result;
@@ -194,7 +202,7 @@ static Obj *obj(uint32_t addr,unsigned kind){
 }
 static uint32_t table_addr(unsigned kind){return BASE+kind*0x200;}
 static Obj *new_obj(unsigned kind){
-    if(g.next>=MAX_OBJECTS)return NULL;
+    if(OBJ_LIMIT_HIT())return NULL;
     unsigned i=g.next++;Obj *o=&g.o[i];memset(o,0,sizeof *o);o->kind=kind;o->refs=1;o->guest=OBJ_BASE+i*16;
     guest_write32(g.mem,o->guest,table_addr(kind));return o;
 }
@@ -379,7 +387,7 @@ uint32_t d9_com_host_create_texture(uint32_t device,unsigned w,unsigned h,
     if(d9_texture_layout(w,h,format,&pitch,&bytes)){
         d3d_fail("CreateTexture",
             "texture format/dimensions are not implemented by the D3D9 bridge",INVALID);return INVALID;}
-    if(g.next>=MAX_OBJECTS)return OUTMEM;
+    if(OBJ_LIMIT_HIT())return OUTMEM;
     D9Handle handle;int rc=d9_create_texture_ex(g.device,w,h,format,levels,pool,usage,0,&handle);
     if(rc){
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
@@ -746,7 +754,7 @@ static void get_swap_chain(CPU *c){
         d3d_fail("GetSwapChain","there is no created device",UNAVAILABLE);RET(UNAVAILABLE,3);
     }
     if(!g.swapchain){
-        if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+        if(OBJ_LIMIT_HIT())RET(OUTMEM,3);
         Obj *o=new_obj(SWAPCHAIN);
         if(!o)RET(OUTMEM,3);
         g.swapchain=o;retain(g.dev);
@@ -793,7 +801,7 @@ static void create_render_target(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     if(A(1)<8||A(2)<8||A(1)>1024||A(2)>1024||(A(1)&(A(1)-1))||(A(2)&(A(2)-1))){
         d3d_log("CreateRenderTarget","only power-of-two dimensions from 8 through 1024 are implemented");RET(INVALID,9);}
     if(!SURFACE_FORMAT(A(3))){d3d_log("CreateRenderTarget","only 32-bit X8R8G8B8/A8R8G8B8 targets are implemented");RET(UNAVAILABLE,9);}
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,9);
     D9Handle h=0;int rc=d9_create_render_target(g.device,A(1),A(2),A(3),A(6)!=0,&h);
     if(rc){
         const char *why=d9_last_draw_diagnostic(g.device);
@@ -826,7 +834,7 @@ static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     if(A(3)!=D9_D24S8&&A(3)!=D9_D24X8){
         d3d_fail("CreateDepthStencilSurface","only D3DFMT_D24S8/D24X8 (the PICA depth attachment) is implemented",UNAVAILABLE);
         RET(UNAVAILABLE,9);}
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,9);
     D9Handle h=0;int rc=d9_create_depth_surface(g.device,A(1),A(2),A(3),A(4),A(5),A(6)!=0,&h);
     if(rc){
         d3d_log("CreateDepthStencilSurface",rc==D9_MEMORY?"depth-stencil slot table is full":
@@ -851,7 +859,7 @@ static void create_offscreen(CPU *c){uint32_t out=A(5);if(!ptr(out,4))RET(INVALI
     if(!SURFACE_FORMAT(A(3))){d3d_log("CreateOffscreenPlainSurface","only 32-bit X8R8G8B8/A8R8G8B8 CPU surfaces are implemented");RET(UNAVAILABLE,7);}
     uint64_t bytes=(uint64_t)A(1)*A(2)*4;
     if(bytes>LOCK_STRIDE||bytes>SURFACE_BUDGET-g.surface_bytes){d3d_log("CreateOffscreenPlainSurface","surface memory budget exceeded");RET(OUTMEM,7);}
-    if(g.next>=MAX_OBJECTS){d3d_log("CreateOffscreenPlainSurface","COM object table is full");RET(OUTMEM,7);}
+    if(OBJ_LIMIT_HIT()){d3d_log("CreateOffscreenPlainSurface","COM object table is full");RET(OUTMEM,7);}
     uint8_t *pixels=calloc(1,(size_t)bytes);if(!pixels){d3d_log("CreateOffscreenPlainSurface","out of memory");RET(OUTMEM,7);}
     Obj *o=new_obj(SURFACE);if(!o){free(pixels);RET(OUTMEM,7);}
     o->pixels=pixels;o->bytes=(unsigned)bytes;o->width=A(1);o->height=A(2);o->format=A(3);o->pool=A(4);o->pitch=A(1)*4;
@@ -1261,7 +1269,7 @@ static void create_query(CPU *c){
                  query_type_name(type),type);
         d3d_fail("CreateQuery",why,UNAVAILABLE);RET(UNAVAILABLE,3);
     }
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,3);
     Obj *o=new_obj(QUERY);
     if(!o)RET(OUTMEM,3);
     o->query_type=type;o->query_issued=0;retain(g.dev);
@@ -1318,7 +1326,7 @@ static void create_vb(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!
     }
     if(A(4)==1)d3d_log("CreateVertexBuffer","MANAGED accepted as CPU-backed bridge storage; device-loss restoration is not implemented");
     if(A(2)&USAGE_DYNAMIC)d3d_log("CreateVertexBuffer","DYNAMIC accepted as CPU-staged storage; every Lock/Unlock is copied and upload is deferred to the draw");
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,7);D9Handle h;int rc=d9_create_vertex_buffer(g.device,A(1),&h);if(rc)RET(hr(rc),7);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,7);D9Handle h;int rc=d9_create_vertex_buffer(g.device,A(1),&h);if(rc)RET(hr(rc),7);
     Obj *o=new_obj(VB);if(!o){d9_release_buffer(g.device,h);RET(OUTMEM,7);}
     o->handle=h;o->bytes=A(1);o->usage=A(2);o->fvf=A(3);o->pool=A(4);retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,7);}
 static void create_ib(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,7);M32(out)=0;
@@ -1329,7 +1337,7 @@ static void create_ib(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!
     }
     if(A(4)==1)d3d_log("CreateIndexBuffer","MANAGED accepted as CPU-backed bridge storage; device-loss restoration is not implemented");
     if(A(2)&USAGE_DYNAMIC)d3d_log("CreateIndexBuffer","DYNAMIC accepted as CPU-staged storage; every Lock/Unlock is copied");
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,7);D9Handle h;int rc=d9_create_index_buffer(g.device,A(1),A(3),&h);if(rc)RET(hr(rc),7);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,7);D9Handle h;int rc=d9_create_index_buffer(g.device,A(1),A(3),&h);if(rc)RET(hr(rc),7);
     Obj *o=new_obj(IB);if(!o){d9_release_buffer(g.device,h);RET(OUTMEM,7);}
     o->handle=h;o->bytes=A(1);o->usage=A(2);o->format=A(3);o->pool=A(4);retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,7);}
 static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,9);M32(out)=0;
@@ -1348,7 +1356,7 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||
         if(why){d3d_fail("CreateTexture",why,UNAVAILABLE);RET(UNAVAILABLE,9);}
         if(hdr&&g.hdr_ldr_fallback)
             trace_detail("MEASUREMENT ONLY: HDR target %ux%u format 0x%x stored as A8R8G8B8",w,height,format);
-        if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_render_texture(g.device,w,height,storage,pool,1u,&h);
+        if(OBJ_LIMIT_HIT())RET(OUTMEM,9);D9Handle h;int rc=d9_create_render_texture(g.device,w,height,storage,pool,1u,&h);
         if(rc){
             trace_detail("CreateTexture: render-target creation rc=%d",rc);
             const char *why=d9_last_draw_diagnostic(g.device);
@@ -1367,7 +1375,7 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||
     if(A(6)==2)d3d_log("CreateTexture","SYSTEMMEM is CPU-only and cannot be bound as a GPU texture");
     if(A(4)&USAGE_DYNAMIC)d3d_log("CreateTexture","DYNAMIC accepted; LockRect/UnlockRect re-upload the level like MANAGED");
     size_t pitch,bytes;if(d9_texture_layout(A(1),A(2),A(5),&pitch,&bytes))RET(INVALID,9);
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_texture_ex(g.device,A(1),A(2),A(5),A(3),A(6),A(4),0,&h);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,9);D9Handle h;int rc=d9_create_texture_ex(g.device,A(1),A(2),A(5),A(3),A(6),A(4),0,&h);
     if(rc){
         if(rc==D9_MEMORY){
             const char *why=d9_last_draw_diagnostic(g.device);
@@ -1411,7 +1419,7 @@ static uint32_t cube_create_obj(uint32_t device,unsigned edge,unsigned levels,un
             return UNAVAILABLE;
         }
     }
-    if(g.next>=MAX_OBJECTS)return OUTMEM;
+    if(OBJ_LIMIT_HIT())return OUTMEM;
     D9Handle h=0;int rc=d9_create_cube_texture_ex(g.device,edge,levels,storage,pool,usage,&h);
     if(rc){
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"CreateCubeTexture: %s",
@@ -1451,7 +1459,7 @@ static uint32_t volume_create_obj(uint32_t device,unsigned w,unsigned h,unsigned
     if(!g.mem||!g.device||!out||g.phase||!obj(device,DEVICE))return INVALID;
     if(usage&~0x00220200u)return UNAVAILABLE;
     if(pool>2)return UNAVAILABLE;
-    if(g.next>=MAX_OBJECTS)return OUTMEM;
+    if(OBJ_LIMIT_HIT())return OUTMEM;
     D9Handle handle=0;
     int rc=d9_create_volume_texture_ex(g.device,w,h,depth,levels,format,pool,usage,&handle);
     if(rc){
@@ -1543,7 +1551,7 @@ static void texture_get_surface_level(CPU *c){
     D9Handle rt=d9_texture_render_target(g.device,t->handle);
     if(rt){
         if(level){d3d_log("GetSurfaceLevel","a render-target texture exposes only level 0");RET(INVALID,3);}
-        if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+        if(OBJ_LIMIT_HIT())RET(OUTMEM,3);
         Obj *o=new_obj(SURFACE);if(!o)RET(OUTMEM,3);
         o->width=t->width;o->height=t->height;o->format=t->format;o->usage=t->usage;o->pool=t->pool;
         o->pitch=t->pitch;o->bytes=t->bytes;o->handle=rt;
@@ -1562,7 +1570,7 @@ static void texture_get_surface_level(CPU *c){
             "invalid texture level");
         RET(rc==D9_UNSUPPORTED?UNAVAILABLE:INVALID,3);
     }
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,3);
     Obj *o=new_obj(SURFACE);if(!o)RET(OUTMEM,3);
     o->width=w;o->height=h;o->format=t->format;o->usage=t->usage;o->pool=t->pool;
     o->pitch=(unsigned)pitch;o->bytes=(unsigned)bytes;o->pixels=pixels;
@@ -1610,7 +1618,7 @@ static void cube_get_surface(CPU *c){
         if(d9_cube_level_info(g.device,t->handle,level,&edge,&pitch,&bytes)){
             d3d_log("GetCubeMapSurface","invalid cube mip level");RET(INVALID,4);
         }
-        if(g.next>=MAX_OBJECTS)RET(OUTMEM,4);
+        if(OBJ_LIMIT_HIT())RET(OUTMEM,4);
         D9Handle target=0;
         int rc=d9_cube_face_target(g.device,t->handle,face,level,&target);
         if(rc){
@@ -1631,7 +1639,7 @@ static void cube_get_surface(CPU *c){
     void *pixels=NULL;unsigned w=0,h=0;size_t pitch=0,bytes=0;
     int rc=d9_cube_face_level_view(g.device,t->handle,face,level,&pixels,&w,&h,&pitch,&bytes);
     if(rc){d3d_log("GetCubeMapSurface","invalid cube face or mip level");RET(INVALID,4);}
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,4);
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,4);
     Obj *o=new_obj(SURFACE);if(!o)RET(OUTMEM,4);
     o->width=w;o->height=h;o->format=t->format;o->usage=t->usage;o->pool=t->pool;
     o->pitch=(unsigned)pitch;o->bytes=(unsigned)bytes;o->pixels=pixels;
@@ -2467,7 +2475,7 @@ static uint32_t state_block_new(unsigned type,int capture,Obj **out){
     if(!state_block_mask(type)){
         d3d_fail("CreateStateBlock","unsupported D3DSTATEBLOCKTYPE",UNAVAILABLE);return UNAVAILABLE;
     }
-    if(g.next>=MAX_OBJECTS)return OUTMEM;
+    if(OBJ_LIMIT_HIT())return OUTMEM;
     Obj *o=new_obj(STATEBLOCK);if(!o)return OUTMEM;
     o->state_block=calloc(1,sizeof *o->state_block);if(!o->state_block){release(o);return OUTMEM;}
     o->state_block->type=type;retain(g.dev);
@@ -2692,7 +2700,7 @@ static int menu_ps_state(void){
 static uint32_t shader_probe_object(unsigned kind,uint32_t out,const char *reason,
                                     uint32_t *code,size_t words){
     if(!code||!words)return INVALID;
-    if(g.next>=MAX_OBJECTS){free(code);return OUTMEM;}
+    if(OBJ_LIMIT_HIT()){free(code);return OUTMEM;}
     Obj *o=new_obj(kind);if(!o){free(code);return OUTMEM;}
     /* The request asked for a named, non-executable object: keep the original
      * token stream only so GetFunction can report it, but install no menu
@@ -2709,9 +2717,15 @@ static uint32_t shader_probe_object(unsigned kind,uint32_t out,const char *reaso
     return OK;
 }
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
-    if(!address||(address&3)||!ptr(out,4)||g.next>=MAX_OBJECTS)return INVALID;M32(out)=0;
+    if(!address||(address&3)||!ptr(out,4)||OBJ_LIMIT_HIT())return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
-    if(!count)return INVALID;if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
+    if(!count){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "shader bytecode address 0x%08x is not in any guest region",
+                 address);
+        return INVALID;
+    }
+    if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
     uint32_t *code=malloc(count*4);if(!code)return OUTMEM;for(size_t i=0;i<count;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
     /* Measurement-only skip probe: a shader outside the certified closure is
      * represented by a named, non-executable object so the census can pass the
@@ -3010,7 +3024,7 @@ static void shader_function(CPU *c){Obj *o=obj(A(0),0);uint32_t size_ptr=A(2);if
     uint32_t need=o->words*4,provided=M32(size_ptr);M32(size_ptr)=need;if(!A(1))RET(OK,3);
     if(provided<need||!ptr(A(1),need))RET(INVALID,3);memcpy(ptr(A(1),need),o->code,need);RET(OK,3);}
 static void create_decl(CPU *c){uint32_t p=A(1),out=A(2);if(!obj(A(0),DEVICE)||!p||!ptr(out,4)||g.phase==2)RET(INVALID,3);M32(out)=0;
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);D9VertexElement elements[D9_MAX_DECL];unsigned n;
+    if(OBJ_LIMIT_HIT())RET(OUTMEM,3);D9VertexElement elements[D9_MAX_DECL];unsigned n;
     for(n=0;n<=D9_MAX_DECL;++n){uint64_t at=(uint64_t)p+(uint64_t)n*8;if(at>UINT32_MAX||!ptr((uint32_t)at,8))RET(INVALID,3);
         D9VertexElement e;memcpy(&e,ptr((uint32_t)at,8),8);if(e.stream==0xff){if(e.offset||e.type!=D9_DECL_UNUSED||e.method||e.usage||e.usage_index)RET(INVALID,3);break;}
         if(n==D9_MAX_DECL)RET(INVALID,3);elements[n]=e;}
@@ -3484,8 +3498,11 @@ static void init_tables(void){
     SLOT(SURFACE,13,surface_lock);SLOT(SURFACE,14,surface_unlock);SLOT(SURFACE,15,surface_dc);SLOT(SURFACE,16,surface_release_dc);
 }
 static int d9_com_start(GuestMemory *m,D9Device *d,const D9Backend *ops,void *ctx,size_t limit){
-    if(!m||g.mem||guest_map(m,BASE,0x3000))return -1;
-    memset(&g,0,sizeof g);g.mem=m;g.device=d;g.backend=ops;g.backend_ctx=ctx;g.backend_limit=limit;g.clear=0xff000000u;g.clear_flags=1;
+    if(!m||g.mem||guest_map(m,BASE,OBJ_MAP_BYTES))return -1;
+    memset(&g,0,sizeof g);
+    g.o=calloc(MAX_OBJECTS,sizeof *g.o);
+    if(!g.o){guest_unmap(m,BASE);return -1;}
+    g.mem=m;g.device=d;g.backend=ops;g.backend_ctx=ctx;g.backend_limit=limit;g.clear=0xff000000u;g.clear_flags=1;
     const char *trace=getenv("TESV_D3D9_TRACE");g.trace=trace&&!strcmp(trace,"1");
     const char *tnl=getenv("TESV_D3D9_TNL_PROTO");
     g.tnl_proto=tnl&&tnl[0]&&strcmp(tnl,"0")?1:0;
@@ -3540,6 +3557,7 @@ void d9_com_shutdown(void){if(!g.mem)return;capture_stop();win32_set_external_re
     /* Only a device created by CreateDevice is destroyed here; an adopted
      * D9Device belongs to the caller. */
     if(g.owns_device&&g.device){d9_destroy_device(g.device);g.device=NULL;g.owns_device=0;}
+    free(g.o);g.o=NULL;
     guest_unmap(g.mem,BASE);memset(&g,0,sizeof g);}
 int d9_com_pixel_shader_tev(uint32_t address,D9TevProgram *out){
     Obj *o=obj(address,PS);
