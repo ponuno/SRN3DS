@@ -68,6 +68,27 @@ $cacheRoot = [System.IO.Path]::GetFullPath($cacheRoot)
 New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
 $script:objCache = $cacheRoot
 $script:clangId = "{0}|{1}|{2}" -f $clang, (Get-Item $clang).Length, (Get-Item $clang).LastWriteTimeUtc.Ticks
+# Source content alone is not enough: a header change must invalidate every
+# cached object that includes it.  Hash the shared header set once (the cache
+# then stays warm until a header actually changes).
+$headerParts = @()
+foreach ($dir in @("source", "staged")) {
+    $hdrDir = Join-Path $root $dir
+    if (-not (Test-Path -LiteralPath $hdrDir)) { continue }
+    foreach ($hdr in Get-ChildItem -LiteralPath $hdrDir -Filter *.h -File -Recurse |
+                       Sort-Object FullName) {
+        $rel = $hdr.FullName.Substring($root.Length).Replace('\', '/')
+        $headerParts += "$rel=$((Get-FileHash -LiteralPath $hdr.FullName -Algorithm SHA256).Hash)"
+    }
+}
+$headerSha = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $headerBytes = [System.Text.Encoding]::UTF8.GetBytes(($headerParts -join "`n"))
+    $script:headerId = -join ($headerSha.ComputeHash($headerBytes) |
+        ForEach-Object { $_.ToString('x2') })
+} finally {
+    $headerSha.Dispose()
+}
 
 $outDir = if ($OutDir) { $OutDir } else { Join-Path $root "build_host" }
 # TEMP/TMP must be absolute: relative paths break the CRT's tmpfile_s in the
@@ -124,7 +145,8 @@ function Get-ObjectKey([string]$src, [string]$flagText, [string]$clangId) {
     $rel = ($src -replace '\\', '/')
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $head = [System.Text.Encoding]::UTF8.GetBytes("$rel`n$flagText`n$clangId`n")
+        $head = [System.Text.Encoding]::UTF8.GetBytes(
+            "$rel`n$flagText`n$clangId`n$script:headerId`n")
         $body = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $src).Path)
         $buf = New-Object byte[] ($head.Length + $body.Length)
         [Array]::Copy($head, 0, $buf, 0, $head.Length)
@@ -413,6 +435,7 @@ Add-Test "menu_swf_atlas" $common @("source/bsa_reader.c", "source/menu_swf.c", 
 Add-Test "menu_swf_batch" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "source/menu_swf_raster.c", "source/menu_swf_atlas.c", "source/menu_swf_batch.c", "tests/menu_swf_batch_smoke.c") @()
 Add-Test "menu_swf_fill" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_batch.c", "tests/menu_swf_fill_smoke.c") @()
 Add-Test "menu_swf_mask_batch" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "source/menu_swf_clip.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_batch.c", "tests/menu_swf_mask_batch_smoke.c") @()
+Add-Test "menu_swf_partial_mask" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "source/menu_swf_clip.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_batch.c", "tests/menu_swf_partial_mask_smoke.c") @()
 Add-Test "menu_swf_gradient" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_batch.c", "tests/menu_swf_gradient_smoke.c") @()
 Add-Test "menu_swf_html" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "source/menu_swf_batch.c", "tests/menu_swf_html_smoke.c") @()
 Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "tests/d3d9_capture_smoke.c") @()

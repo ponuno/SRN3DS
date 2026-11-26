@@ -28,7 +28,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement/tessellation, 16.16 transform, ARGB vertices, GFx HTML runs (colour/size/face/flags/alignment), plus DefineEditText WordWrap/Multiline/alignment/Justify/indent/leading/Password layout |
 | `source/menu_swf_raster.h` / `.c` | Bounded A8 coverage rasterisation of tessellated glyph triangles with 4x4 subpixel samples, caller buffers, 16.16-quantised matrix/pen and named refusals |
 | `source/menu_swf_atlas.h` / `.c` | Deterministic shelf packing of A8 coverage rectangles into a caller atlas, zero-filled padding, per-glyph rect/UV and named refusals |
-| `source/menu_swf_batch.h` / `.c` | Text quad/index batch with per-run colours and optional record CXFORM, plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping, clip-mask culling (full/outside; partial named refusal) and count-before-write overflow |
+| `source/menu_swf_batch.h` / `.c` | Text quad/index batch with per-run colours and optional record CXFORM, plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping, full/outside culling plus Sutherland-Hodgman partial clipping for axis-aligned masks, rotated-mask/text named refusals and count-before-write overflow |
 | `source/d3d9_menu_text.h` / `.c` | Host/menu COM demo: A8 texture creation/upload and one DrawPrimitiveUP from the atlas+batch |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_avm_smoke.c` | Synthetic Stop/Play/GotoFrame/GotoLabel/Wait/Push/variable/function/unknown/truncated cases, DoInitAction ownership, safe display annotation and exact real StartMenu histogram |
@@ -44,7 +44,8 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
 | `tests/menu_swf_fill_smoke.c` | Synthetic solid RGBA/loops, CXFORM, mirroring, accepted linear/radial batches, focal/bitmap refusals; optional real fill census and per-vertex colours |
 | `tests/menu_swf_gradient_smoke.c` | Synthetic exact 2/3-stop linear, radial, pad/reflect/repeat, named invalid stops/matrix/interpolation/spread/focal/bitmap refusals; optional real StartMenu gradient census |
-| `tests/menu_swf_mask_batch_smoke.c` | Synthetic clip records: fully inside/outside, partial named refusal, rotated partial, missing bounds and fully clipped; real StartMenu zero-mask batch equivalence |
+| `tests/menu_swf_mask_batch_smoke.c` | Synthetic clip records: fully inside/outside, axis-aligned partial clipping, rotated-style clipping, missing bounds and fully clipped; real StartMenu zero-mask batch equivalence |
+| `tests/menu_swf_partial_mask_smoke.c` | Edge-crossing triangle positions/area/colour/winding, inside/outside, source dedup, partially clipped text UVs, rotated-mask and rotated-text named refusals, real StartMenu zero-mask equivalence |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
 | `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: URL/fallback font load, exact-id resolve/refusals, solid-fill shape batch + resolved edit-text tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
 | `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_html`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_swf_gradient`, `menu_swf_mask_batch`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
@@ -576,10 +577,16 @@ rectangle order reflects height/width sorting (35, 36, 33 at height 62, then
   omitted.  A rotated/skewed matrix with viewport clipping is the named
   `ERR_CLIP` rather than a silently wrong AABB clip.
 * `menu_swf_batch_text_clip()` additionally applies a menu clip record:
-  glyphs wholly outside the intersected `clip_rect` are omitted, wholly inside
-  glyphs are kept unchanged, and a partial overlap is the exact named refusal
-  `partial clip-mask culling is not implemented`.  The clip rect is screen
-  twips; the output AABB is compared as pixels*20.
+  glyphs wholly outside the intersected `clip_rect` are omitted and wholly
+  inside glyphs are kept unchanged.  For an axis-aligned style matrix a partial
+  glyph is clipped to the mask rectangle as a smaller quad, interpolating the
+  atlas UVs over the kept fraction; the run colour is unchanged.  A partial
+  glyph under a rotated/skewed style is the named
+  `partial clip-mask culling of rotated text is not implemented` refusal, and a
+  partial overlap with a rotated mask is
+  `partial clip-mask culling of rotated masks is not implemented`.  The clip
+  rect is screen twips; positions are compared as pixels*20 and the mask edge
+  is converted to output pixels for the sub-quad.
 * The required quad/vertex/index counts are computed before any write.
   Capacity or hard-limit overflow is `ERR_OVERFLOW` and leaves both buffers
   untouched.  Limits: 4,096 quads, 16,384 vertices, 24,576 indices.
@@ -628,9 +635,29 @@ table.  Each triangle uses the 1-based style in `triangle_fills[]`:
 * `menu_swf_batch_shape_clip()` applies the record's intersected clip rect:
   a fully clipped record returns an empty batch without writing, wholly outside
   triangles are culled, and wholly inside triangles keep the existing
-  winding/colour/dedup.  Partial or rotated overlap is the exact named refusal
-  `partial clip-mask culling is not implemented`; the real StartMenu has zero
-  masks, so its batch is byte-for-byte unchanged at 57,480 vertices.
+  winding/colour/dedup.  A partially overlapping triangle is clipped in screen
+  space with Sutherland-Hodgman against the four rectangle edges; positions are
+  rounded back to output pixels, per-vertex ARGB and the white-texel UV are
+  interpolated along cut edges, duplicate/zero-area results are dropped, and
+  the fan preserves the same positive winding as the unclipped path (mask
+  mirrors reverse it back).  Source corners keep the existing per-fill dedup;
+  only new edge intersections become appended vertices.
+* Partial clipping is supported only for axis-aligned masks.  A mask whose
+  transformed quad is rotated/skewed is flagged
+  (`MenuSwfClipMask.axis_aligned=0`,
+  `MenuSwfClipRecord.has_rotated_mask=1`); a partial overlap with it is the
+  exact named refusal
+  `partial clip-mask culling of rotated masks is not implemented`.  Its AABB is
+  still used for the fully-inside/outside decisions, so those remain the
+  documented AABB approximation rather than an overdrawing clip.
+* The first pass computes the exact output vertex/index counts including the
+  up-to-four generated intersections per partial triangle.  Capacity uses
+  `vertex_count + index_count + new_intersections` vertices (source vertices,
+  the existing one-copy-per-index dedup bound and intersections) and the exact
+  kept index count; `ERR_OVERFLOW` still precedes any write.  The caller's
+  65,536-vertex 16-bit indexed limit applies to the expanded count.
+* The real StartMenu has zero masks, so its batch is byte-for-byte unchanged at
+  57,480 vertices.
 * No allocation, texture, upload or GPU call is performed.
 
 The real pipeline tessellates 28,718 triangles and emits 57,480 shape vertices
@@ -732,7 +759,11 @@ outside the module, and no frame is produced.
 * Each output record gets its transformed screen-space AABB, the intersection
   of all active mask AABBs, active mask indices, `fully_clipped`, and the record
   index.  Masks are emitted in record order with their four transformed quad
-  corners and AABB.
+  corners and AABB.  Each mask also records `axis_aligned` (its four quad edges
+  parallel to the screen axes); a record with any rotated/skewed active mask
+  sets `has_rotated_mask`.  These flags let the batch layer clip axis-aligned
+  partial overlaps and refuse the rotated case by name instead of clipping to an
+  over-approximating AABB.
 * `menu_swf_clip_mask_quad()` exposes the four transformed rectangle corners
   independently.  `menu_swf_clip_rect_intersect()` is the axis-aligned helper.
 * Limits: 8,192 records, 256 masks, 8 active masks per record.  Pair, mask,
@@ -935,18 +966,20 @@ the 12px advance, checks per-run glyph and batch colours plus CXFORM, and the
 real check reports 22 HTML-flagged definitions, 4 payloads (3 nonempty), 3
 runs, 14 tags and 0 unknown tags.  The mask-batch test adds a synthetic clip
 record with a fully inside triangle (kept unchanged), a fully outside triangle
-(culled), partial and rotated-partial overlaps (exact named refusal), a
-fully-clipped record and a clip without record bounds; the real StartMenu
-zero-mask clip records leave the shape-2 batch counts identical.
+(culled), an axis-aligned partial triangle (clipped fan with exact edge
+vertices/area/colour), a rotated-style partial triangle (screen-space clip), a
+fully-clipped record and a clip without record bounds; a partially clipped text
+glyph checks the sub-quad and interpolated UVs.  The new partial-mask test adds
+the edge-crossing triangle area/winding, inside/outside byte equality, source
+dedup beside a clipped triangle, rotated-mask and rotated-text named refusals;
+the real StartMenu zero-mask clip records leave the shape-2 batch counts
+identical (552 vertices / 828 indices for shape 2).
 
-Full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
-`-TestTimeoutSec 300`: **130 passed, 0 diagnostic, 0 failed**.  This includes the
-real `menu_swf_avm` inventory (35 checks), `menu_swf` (114),
-`menu_swf_display_list` (23) and `menu_pipeline_e2e` (60), all with zero
-failures.
-
-Full host suite with the main-tree generated slice/IR container:
-**141 passed, 1 diagnostic (`tesv_slice`), 0 failed**.
+Full host suite in this worktree with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data`,
+the optional pilot/closure fixtures and `-TestTimeoutSec 300`:
+**146 passed, 0 diagnostic, 0 failed**.  The main-tree run with the generated
+slice/IR container additionally reports the known `tesv_slice` diagnostic
+(**145 passed, 1 diagnostic, 0 failed**).
 
 ## 17. Real StartMenu CPU -> COM pipeline
 
@@ -1029,24 +1062,27 @@ Verification:
   with real data: **16 passed, 0 diagnostic, 0 failed**; check counts 58, 93,
   34, 45, indexed PASS and 60;
 * targeted
-  `menu_swf_mask_batch,menu_swf_clip,menu_swf_batch,menu_swf_shape,menu_pipeline_e2e`
-  with real data: **15 passed, 0 diagnostic, 0 failed**; check counts 20, 24,
-  34, 40 and 60;
+  `menu_swf_partial_mask,menu_swf_mask_batch,menu_swf_clip,menu_swf_batch,menu_swf_shape,menu_pipeline_e2e`
+  with real data: **6/6 C targets passed, 0 failed**; check counts 27, 28, 24,
+  34, 40 and 60 (plus 10 Python targets, all passing);
 * mask + real e2e under ASan: **20 + 60 checks, 0 failures; harness 12
   passed, 0 diagnostic, 0 failed**;
 * AVM + SWF + display-list + real e2e under ASan: **35 + 114 + 23 + 60 checks,
   0 failures; harness 14 passed, 0 diagnostic, 0 failed**;
 * HTML + real e2e under ASan: **58 + 60 checks, 0 failures; harness 12
   passed, 0 diagnostic, 0 failed**;
-* full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
-  `-TestTimeoutSec 300`: **130 passed, 0 diagnostic, 0 failed**;
-* full host suite with the main-tree generated slice/IR container:
-  **141 passed, 1 diagnostic (`tesv_slice`), 0 failed**;
-* ARM compile-only (`arm-none-eabi-gcc`, no link/run): all **5/5** changed C
-  translation units succeeded; `menu_swf_avm.c.o` text 11,771 B and
-  `menu_swf_display_list.c.o` text 6,189 B.  No ARM binary/hardware/frame claim;
-* ARM compile-only: `menu_swf_text.o` 22,192 B, `menu_swf_batch.o` 15,144 B,
-  `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B;
+* full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data`, the optional
+  pilot/closure fixtures and `-TestTimeoutSec 300`: **146 passed, 0
+  diagnostic, 0 failed**; the main-tree slice/IR run additionally reports the
+  known `tesv_slice` diagnostic (**145 passed, 1 diagnostic, 0 failed**);
+* ARM compile-only (`arm-none-eabi-gcc`, no link/run): all changed C
+  translation units succeeded; `menu_swf_batch.o` text **15,958 B** and
+  `menu_swf_clip.o` text **3,423 B** (devkitARM 15.2.0, `-O2`, `-march=armv6k`);
+* ARM `-Mode com -NoClean -Jobs 8`: `.elf` 6,294,280 B, SHA256
+  `927684b1328d9661dc39ad8167973c11da76c0df45d828b15b6fc5cd89990d65`;
+  `.3dsx` 936,180 B, SHA256
+  `ca08df4e5ca93a48c17b0ccf78b85f23284627117128357b443ebaad8b297bd1`;
+  compile/link only, no hardware or frame claim;
 * ARM compile-only `-Mode com -Isolated edit_text`: `.elf` 6,178,376 B,
   SHA256 `2fd3e1af9ec6de706e762f20012340a90f74ad61dec2b64ccdf339cfecc4191e`;
   `.3dsx` 913,460 B, SHA256
@@ -1055,11 +1091,12 @@ Verification:
 ## 18. What remains
 
 1. **Renderable display list** — bounded state, flattened CPU transform records,
-   shape geometry, solid/gradient fills, tessellation, full/outside clip-mask
-   culling and a host COM triangle batch exist, but this is not a GFx display
-   list: partial mask clipping/tessellation, bitmap fill sampling, clip
-   rendering, clipping layers, button states, frame scripts and real draw
-   submission remain.
+   shape geometry, solid/gradient fills, tessellation, full/outside and
+   axis-aligned partial clip-mask clipping, plus a host COM triangle batch
+   exist, but this is not a GFx display list: exact rotated-mask clipping (a
+   rotated-mask partial overlap is currently a named refusal using its AABB),
+   bitmap fill sampling, clip rendering, clipping layers, button states, frame
+   scripts and real draw submission remain.
 2. **Arbitrary AVM/AS2 execution** — the bounded inventory and safe
    Stop/Play/in-range GotoFrame metadata are implemented, but constants,
    variables, property/member access, function calls, event handlers, branches,

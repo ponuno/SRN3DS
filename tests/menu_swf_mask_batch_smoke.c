@@ -127,28 +127,32 @@ static void test_shape_masks(void) {
               indices[0] == 0 && indices[1] == 1 && indices[2] == 2,
           "mask culls only the outside triangle");
 
-    /* Partial overlap is an honest named refusal. */
+    /* Partial overlap is clipped to the mask edge. */
     m = make_mesh(&f, 1);
     set_triangle(&f, 0, 80, 0, 120, 0, 80, 40);
     clip = clip_rect(0, 0, 100, 100);
-    memset(vertices, 0x33, sizeof vertices);
     st = menu_swf_batch_shape_clip(&m, &style, NULL, &clip, vertices, 16,
                                    indices, 12, &br, reason, sizeof reason);
-    check(st == MENU_SWF_BATCH_ERR_MASK &&
-              !strcmp(reason, "partial clip-mask culling is not implemented") &&
-              vertices[0].color == 0x33333333u,
-          "partial shape clip is a named refusal");
+    check(st == MENU_SWF_BATCH_OK && br.triangle_count == 2 &&
+              br.vertex_count == 5 && br.index_count == 6,
+          "partial shape clip emits a clipped fan");
+    check(vertices[0].x == 4 && vertices[0].y == 0 && vertices[3].x == 5 &&
+              vertices[3].y == 0 && vertices[4].x == 5 && vertices[4].y == 1,
+          "clipped shape vertices meet the mask edge");
+    for (unsigned i = 0; i < br.index_count; ++i)
+        check(vertices[indices[i]].color == 0xff112233u,
+              "clipped shape vertices keep the solid colour");
 
-    /* A rotated/partial style uses the same refusal. */
+    /* A rotated style is still clipped in screen space. */
     m = make_mesh(&f, 1);
     set_triangle(&f, 0, 80, 0, 120, 0, 80, 40);
     style.m01 = 0x1000;
     style.m10 = -0x1000;
     st = menu_swf_batch_shape_clip(&m, &style, NULL, &clip, vertices, 16,
                                    indices, 12, &br, reason, sizeof reason);
-    check(st == MENU_SWF_BATCH_ERR_MASK &&
-              strstr(reason, "partial clip-mask culling"),
-          "rotated partial clip refuses by name");
+    check(st == MENU_SWF_BATCH_OK && br.triangle_count > 0 &&
+              br.vertex_count > 3,
+          "rotated shape transform still clips to the mask");
     identity_shape_style(&style);
 
     /* Fully clipped record returns an empty batch. */
@@ -220,14 +224,18 @@ static void test_text_masks(void) {
           "text mask outside culls the glyph");
 
     clip = clip_rect(100, 100, 200, 200);
-    memset(vertices, 0x44, sizeof vertices);
     st = menu_swf_batch_text_clip(&text, &atlas, 1, &style, NULL, &clip,
                                   vertices, 4, indices, 6, &br, reason,
                                   sizeof reason);
-    check(st == MENU_SWF_BATCH_ERR_MASK &&
-              !strcmp(reason, "partial clip-mask culling is not implemented") &&
-              vertices[0].color == 0x44444444u,
-          "partial text clip is a named refusal");
+    check(st == MENU_SWF_BATCH_OK && br.quad_count == 1 &&
+              br.vertex_count == 4 && br.index_count == 6 &&
+              vertices[0].x == 5 && vertices[0].y == 5 &&
+              vertices[2].x == 10 && vertices[2].y == 10,
+          "partial text clip emits the masked sub-quad");
+    check(vertices[0].u == 32768 && vertices[0].v == 32768 &&
+              vertices[2].u == 65536 && vertices[2].v == 65536 &&
+              vertices[0].color == 0xff00ff00u,
+          "partial text clip interpolates UVs and keeps the run colour");
 
     clip = clip_rect(0, 0, 200, 200);
     clip.fully_clipped = 1;

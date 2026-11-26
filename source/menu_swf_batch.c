@@ -122,7 +122,8 @@ static int64_t area2(const BatchQuad *q) {
 }
 
 static int make_quad(const BatchCtx *c, const MenuSwfShapeRect *bounds,
-                     const MenuSwfAtlasEntry *e, BatchQuad *q) {
+                     const MenuSwfAtlasEntry *e, const MenuSwfClipRect *mask,
+                     BatchQuad *q) {
     if (bounds->xmax <= bounds->xmin || bounds->ymax <= bounds->ymin)
         return 0;
     if (!e->has_rect || !e->w || !e->h) return 0;
@@ -146,10 +147,20 @@ static int make_quad(const BatchCtx *c, const MenuSwfShapeRect *bounds,
         double yhi = flip_v ? ya : yb;
         double xc0 = xlo, xc1 = xhi, yc0 = ylo, yc1 = yhi;
         if (c->viewport) {
-            if (xlo < c->viewport->x0) xc0 = c->viewport->x0;
-            if (xhi > c->viewport->x1) xc1 = c->viewport->x1;
-            if (ylo < c->viewport->y0) yc0 = c->viewport->y0;
-            if (yhi > c->viewport->y1) yc1 = c->viewport->y1;
+            if (xc0 < c->viewport->x0) xc0 = c->viewport->x0;
+            if (xc1 > c->viewport->x1) xc1 = c->viewport->x1;
+            if (yc0 < c->viewport->y0) yc0 = c->viewport->y0;
+            if (yc1 > c->viewport->y1) yc1 = c->viewport->y1;
+        }
+        if (mask) {
+            double mx0 = (double)mask->xmin / 20.0;
+            double mx1 = (double)mask->xmax / 20.0;
+            double my0 = (double)mask->ymin / 20.0;
+            double my1 = (double)mask->ymax / 20.0;
+            if (xc0 < mx0) xc0 = mx0;
+            if (xc1 > mx1) xc1 = mx1;
+            if (yc0 < my0) yc0 = my0;
+            if (yc1 > my1) yc1 = my1;
         }
         if (xc1 <= xc0 || yc1 <= yc0) return 0;
         int32_t px0 = pixel(xc0), px1 = pixel(xc1);
@@ -183,6 +194,7 @@ static int make_quad(const BatchCtx *c, const MenuSwfShapeRect *bounds,
     }
 
     if (c->viewport) return -1; /* rotated clipping is not implemented */
+    if (mask) return -1;        /* rotated quads need polygon clipping */
 
     double xs[4], ys[4];
     const int32_t bx[4] = {bounds->xmin, bounds->xmax, bounds->xmax,
@@ -200,6 +212,18 @@ static int make_quad(const BatchCtx *c, const MenuSwfShapeRect *bounds,
     q->u[2] = u1; q->v[2] = v1;
     q->u[3] = u0; q->v[3] = v1;
     return area2(q) > 0;
+}
+
+static void quad_aabb(const BatchQuad *q, int32_t *xmin, int32_t *xmax,
+                      int32_t *ymin, int32_t *ymax) {
+    *xmin = *xmax = q->x[0];
+    *ymin = *ymax = q->y[0];
+    for (unsigned k = 1; k < 4; ++k) {
+        if (q->x[k] < *xmin) *xmin = q->x[k];
+        if (q->x[k] > *xmax) *xmax = q->x[k];
+        if (q->y[k] < *ymin) *ymin = q->y[k];
+        if (q->y[k] > *ymax) *ymax = q->y[k];
+    }
 }
 
 static MenuSwfBatchStatus batch_text_impl(
@@ -269,35 +293,42 @@ static MenuSwfBatchStatus batch_text_impl(
         const MenuSwfTextGlyph *g = &text->glyphs[i];
         if (!g->has_geometry || g->missing) continue;
         BatchQuad q;
-        int rc = make_quad(&c, &g->bounds, &atlas_entries[i], &q);
+        int rc = make_quad(&c, &g->bounds, &atlas_entries[i], NULL, &q);
         if (rc < 0) {
             batch_reason(reason, reason_cap,
                          "swf batch: glyph %u cannot be transformed",
                          g->code);
             return MENU_SWF_BATCH_ERR_CLIP;
         }
-        if (rc) {
-            int32_t xmin = q.x[0], xmax = q.x[0];
-            int32_t ymin = q.y[0], ymax = q.y[0];
-            for (unsigned k = 1; k < 4; ++k) {
-                if (q.x[k] < xmin) xmin = q.x[k];
-                if (q.x[k] > xmax) xmax = q.x[k];
-                if (q.y[k] < ymin) ymin = q.y[k];
-                if (q.y[k] > ymax) ymax = q.y[k];
-            }
-            BatchClip cs = batch_clip_aabb(clip, xmin, xmax, ymin, ymax);
-            if (cs == BATCH_CLIP_BAD) {
-                batch_reason(reason, reason_cap,
-                             "clip-mask record bounds are missing");
-                return MENU_SWF_BATCH_ERR_MASK;
-            }
-            if (cs == BATCH_CLIP_PARTIAL) {
-                batch_reason(reason, reason_cap,
-                             "partial clip-mask culling is not implemented");
-                return MENU_SWF_BATCH_ERR_MASK;
-            }
-            if (cs == BATCH_CLIP_KEEP) ++quads;
+        if (!rc) continue;
+        int32_t xmin, xmax, ymin, ymax;
+        quad_aabb(&q, &xmin, &xmax, &ymin, &ymax);
+        BatchClip cs = batch_clip_aabb(clip, xmin, xmax, ymin, ymax);
+        if (cs == BATCH_CLIP_BAD) {
+            batch_reason(reason, reason_cap,
+                         "clip-mask record bounds are missing");
+            return MENU_SWF_BATCH_ERR_MASK;
         }
+        if (cs == BATCH_CLIP_DROP) continue;
+        if (cs == BATCH_CLIP_PARTIAL) {
+            if (clip->has_rotated_mask) {
+                batch_reason(reason, reason_cap,
+                             "partial clip-mask culling of rotated masks is "
+                             "not implemented");
+                return MENU_SWF_BATCH_ERR_MASK;
+            }
+            if (c.q01 != 0 || c.q10 != 0) {
+                batch_reason(reason, reason_cap,
+                             "partial clip-mask culling of rotated text is "
+                             "not implemented");
+                return MENU_SWF_BATCH_ERR_MASK;
+            }
+            BatchQuad cq;
+            if (!make_quad(&c, &g->bounds, &atlas_entries[i], &clip->clip_rect,
+                           &cq))
+                continue;
+        }
+        ++quads;
     }
     uint32_t need_vertices = quads * 4u;
     uint32_t need_indices = quads * 6u;
@@ -321,20 +352,30 @@ static MenuSwfBatchStatus batch_text_impl(
         const MenuSwfTextGlyph *g = &text->glyphs[i];
         if (!g->has_geometry || g->missing) continue;
         BatchQuad q;
-        if (!make_quad(&c, &g->bounds, &atlas_entries[i], &q)) continue;
-        int32_t xmin = q.x[0], xmax = q.x[0];
-        int32_t ymin = q.y[0], ymax = q.y[0];
-        for (unsigned k = 1; k < 4; ++k) {
-            if (q.x[k] < xmin) xmin = q.x[k];
-            if (q.x[k] > xmax) xmax = q.x[k];
-            if (q.y[k] < ymin) ymin = q.y[k];
-            if (q.y[k] > ymax) ymax = q.y[k];
-        }
+        if (!make_quad(&c, &g->bounds, &atlas_entries[i], NULL, &q)) continue;
+        int32_t xmin, xmax, ymin, ymax;
+        quad_aabb(&q, &xmin, &xmax, &ymin, &ymax);
         BatchClip cs = batch_clip_aabb(clip, xmin, xmax, ymin, ymax);
         if (cs == BATCH_CLIP_DROP) continue;
-        if (cs != BATCH_CLIP_KEEP) {
+        if (cs == BATCH_CLIP_PARTIAL) {
+            if (clip->has_rotated_mask) {
+                batch_reason(reason, reason_cap,
+                             "partial clip-mask culling of rotated masks is "
+                             "not implemented");
+                return MENU_SWF_BATCH_ERR_MASK;
+            }
+            if (c.q01 != 0 || c.q10 != 0) {
+                batch_reason(reason, reason_cap,
+                             "partial clip-mask culling of rotated text is "
+                             "not implemented");
+                return MENU_SWF_BATCH_ERR_MASK;
+            }
+            if (!make_quad(&c, &g->bounds, &atlas_entries[i], &clip->clip_rect,
+                           &q))
+                continue;
+        } else if (cs != BATCH_CLIP_KEEP) {
             batch_reason(reason, reason_cap,
-                         "partial clip-mask culling is not implemented");
+                         "clip-mask record bounds are missing");
             return MENU_SWF_BATCH_ERR_MASK;
         }
         uint32_t base = vcount;
@@ -602,27 +643,198 @@ static MenuSwfBatchStatus shape_vertex_color(const MenuSwfTessFill *fill,
     return MENU_SWF_BATCH_OK;
 }
 
-static int shape_triangle_aabb(const MenuSwfBatchShapeStyle *s,
-                               const MenuSwfTessMesh *mesh, uint32_t t,
-                               int32_t *xmin, int32_t *xmax, int32_t *ymin,
-                               int32_t *ymax) {
+static int shape_triangle_points(const MenuSwfBatchShapeStyle *s,
+                                 const MenuSwfTessMesh *mesh, uint32_t t,
+                                 int32_t px[3], int32_t py[3]) {
     for (unsigned k = 0; k < 3; ++k) {
         uint32_t index = mesh->indices[t * 3u + k];
-        int32_t x, y;
         if (shape_transform(s, mesh->vertices[index].x,
-                            mesh->vertices[index].y, &x, &y))
+                            mesh->vertices[index].y, &px[k], &py[k]))
             return -1;
-        if (!k) {
-            *xmin = *xmax = x;
-            *ymin = *ymax = y;
-        } else {
-            if (x < *xmin) *xmin = x;
-            if (x > *xmax) *xmax = x;
-            if (y < *ymin) *ymin = y;
-            if (y > *ymax) *ymax = y;
-        }
     }
     return 0;
+}
+
+static void shape_aabb(const int32_t px[3], const int32_t py[3],
+                       int32_t *xmin, int32_t *xmax, int32_t *ymin,
+                       int32_t *ymax) {
+    *xmin = *xmax = px[0];
+    *ymin = *ymax = py[0];
+    for (unsigned k = 1; k < 3; ++k) {
+        if (px[k] < *xmin) *xmin = px[k];
+        if (px[k] > *xmax) *xmax = px[k];
+        if (py[k] < *ymin) *ymin = py[k];
+        if (py[k] > *ymax) *ymax = py[k];
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Screen-space convex clipping (Sutherland-Hodgman)                  */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    double x, y;
+    uint32_t u, v;
+    uint32_t color;
+    int32_t source; /* >=0: source mesh vertex; -1: generated point */
+} BatchClipVert;
+
+typedef struct {
+    double x0, x1, y0, y1; /* output pixels, half-open max */
+} BatchClipPx;
+
+static void clip_px_rect(const MenuSwfClipRect *r, BatchClipPx *out) {
+    out->x0 = (double)r->xmin / 20.0;
+    out->x1 = (double)r->xmax / 20.0;
+    out->y0 = (double)r->ymin / 20.0;
+    out->y1 = (double)r->ymax / 20.0;
+}
+
+static uint32_t clip_color_lerp(uint32_t a, uint32_t b, double t) {
+    uint32_t out = 0;
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        double av = (double)((a >> shift) & 255u);
+        double bv = (double)((b >> shift) & 255u);
+        double v = av + (bv - av) * t;
+        if (v < 0.0) v = 0.0;
+        if (v > 255.0) v = 255.0;
+        out |= ((uint32_t)(v + 0.5) & 255u) << shift;
+    }
+    return out;
+}
+
+static uint32_t clip_uv_lerp(uint32_t a, uint32_t b, double t) {
+    double v = (double)a + ((double)b - (double)a) * t;
+    if (v < 0.0) v = 0.0;
+    if (v > 131072.0) v = 131072.0;
+    return (uint32_t)llround(v);
+}
+
+static int clip_inside(const BatchClipVert *v, unsigned edge,
+                       const BatchClipPx *r) {
+    switch (edge) {
+    case 0: return v->x >= r->x0;
+    case 1: return v->x <= r->x1;
+    case 2: return v->y >= r->y0;
+    default: return v->y <= r->y1;
+    }
+}
+
+static double clip_edge_bound(unsigned edge, const BatchClipPx *r) {
+    switch (edge) {
+    case 0: return r->x0;
+    case 1: return r->x1;
+    case 2: return r->y0;
+    default: return r->y1;
+    }
+}
+
+static BatchClipVert clip_intersect(const BatchClipVert *a,
+                                    const BatchClipVert *b, unsigned edge,
+                                    double bound) {
+    double denom = edge < 2 ? b->x - a->x : b->y - a->y;
+    double t = denom != 0.0
+                   ? (bound - (edge < 2 ? a->x : a->y)) / denom
+                   : 0.0;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    BatchClipVert out;
+    out.x = a->x + (b->x - a->x) * t;
+    out.y = a->y + (b->y - a->y) * t;
+    out.u = clip_uv_lerp(a->u, b->u, t);
+    out.v = clip_uv_lerp(a->v, b->v, t);
+    out.color = clip_color_lerp(a->color, b->color, t);
+    out.source = -1;
+    return out;
+}
+
+/* One half-plane pass.  `in`/`out` may alias?  The caller uses separate
+ * arrays; at most 7 convex vertices survive the four rectangle edges. */
+static int clip_polygon_edge(const BatchClipVert *in, int n, unsigned edge,
+                             const BatchClipPx *r, BatchClipVert *out) {
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        const BatchClipVert *cur = &in[i];
+        const BatchClipVert *prev = &in[(i + n - 1) % n];
+        int cur_in = clip_inside(cur, edge, r);
+        int prev_in = clip_inside(prev, edge, r);
+        if (cur_in) {
+            if (!prev_in)
+                out[m++] = clip_intersect(prev, cur, edge,
+                                          clip_edge_bound(edge, r));
+            out[m++] = *cur;
+        } else if (prev_in) {
+            out[m++] = clip_intersect(prev, cur, edge,
+                                      clip_edge_bound(edge, r));
+        }
+    }
+    return m;
+}
+
+static int clip_triangle_polygon(const BatchClipVert in[3],
+                                 const BatchClipPx *r, BatchClipVert out[8]) {
+    BatchClipVert a[8], b[8];
+    int n = 3;
+    memcpy(a, in, 3 * sizeof *in);
+    for (unsigned edge = 0; edge < 4 && n; ++edge) {
+        n = clip_polygon_edge(a, n, edge, r, b);
+        memcpy(a, b, (size_t)n * sizeof *b);
+    }
+    if (!n) return 0;
+    memcpy(out, a, (size_t)n * sizeof *a);
+    return n;
+}
+
+/* Round the clipped polygon to output pixels, dropping duplicate points and
+ * zero-area results.  `reverse` restores the positive winding used by the
+ * unclipped path when the record matrix mirrors the geometry. */
+static int clip_polygon_pixels(const BatchClipVert *poly, int n, int reverse,
+                               int keep[8], int32_t xs[8], int32_t ys[8]) {
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        int index = reverse ? n - 1 - i : i;
+        int32_t x = pixel(poly[index].x);
+        int32_t y = pixel(poly[index].y);
+        if (m && xs[m - 1] == x && ys[m - 1] == y) continue;
+        xs[m] = x;
+        ys[m] = y;
+        keep[m] = index;
+        ++m;
+    }
+    if (m > 1 && xs[0] == xs[m - 1] && ys[0] == ys[m - 1]) --m;
+    if (m < 3) return 0;
+    int64_t area = 0;
+    for (int i = 0; i < m; ++i) {
+        int j = (i + 1) % m;
+        area += (int64_t)xs[i] * ys[j] - (int64_t)ys[i] * xs[j];
+    }
+    return area != 0 ? m : 0;
+}
+
+static MenuSwfBatchStatus shape_vertex_index(
+    uint32_t source, uint32_t color, uint8_t *seen,
+    MenuSwfBatchVertex *vertices, uint32_t *vcount, uint32_t vertex_capacity,
+    uint32_t *index, char *reason, size_t reason_cap) {
+    uint8_t mask = (uint8_t)(1u << (source & 7u));
+    if (!(seen[source >> 3] & mask)) {
+        seen[source >> 3] |= mask;
+        vertices[source].color = color;
+        *index = source;
+    } else if (vertices[source].color == color) {
+        *index = source;
+    } else {
+        if (*vcount >= vertex_capacity ||
+            *vcount >= MENU_SWF_BATCH_MAX_SHAPE_VERTICES) {
+            batch_reason(reason, reason_cap,
+                         "shape batch: %u vertex copies exceed %u",
+                         *vcount + 1, vertex_capacity);
+            return MENU_SWF_BATCH_ERR_OVERFLOW;
+        }
+        vertices[*vcount] = vertices[source];
+        vertices[*vcount].color = color;
+        *index = (*vcount)++;
+    }
+    return MENU_SWF_BATCH_OK;
 }
 
 static MenuSwfBatchStatus batch_shape_impl(
@@ -681,6 +893,11 @@ static MenuSwfBatchStatus batch_shape_impl(
         }
     }
     uint32_t kept = 0;
+    uint64_t new_vertices = 0;
+    uint64_t out_indices = 0;
+    BatchClipPx clip_px;
+    int clip_active = clip && clip->mask_count;
+    if (clip_active) clip_px_rect(&clip->clip_rect, &clip_px);
     for (uint32_t t = 0; t < triangles; ++t) {
         uint16_t style_index = mesh->triangle_fills[t];
         if (!style_index || style_index > mesh->fill_count) {
@@ -701,41 +918,69 @@ static MenuSwfBatchStatus batch_shape_impl(
                 return MENU_SWF_BATCH_ERR_ARGUMENT;
             }
         }
-        int32_t xmin, xmax, ymin, ymax;
-        if (shape_triangle_aabb(style, mesh, t, &xmin, &xmax, &ymin, &ymax)) {
+        int32_t px[3], py[3], xmin, xmax, ymin, ymax;
+        if (shape_triangle_points(style, mesh, t, px, py)) {
             batch_reason(reason, reason_cap,
                          "shape batch: transformed point overflow");
             return MENU_SWF_BATCH_ERR_OVERFLOW;
         }
+        shape_aabb(px, py, &xmin, &xmax, &ymin, &ymax);
         BatchClip cs = batch_clip_aabb(clip, xmin, xmax, ymin, ymax);
         if (cs == BATCH_CLIP_BAD) {
             batch_reason(reason, reason_cap,
                          "clip-mask record bounds are missing");
             return MENU_SWF_BATCH_ERR_MASK;
         }
+        if (cs == BATCH_CLIP_DROP) continue;
         if (cs == BATCH_CLIP_PARTIAL) {
-            batch_reason(reason, reason_cap,
-                         "partial clip-mask culling is not implemented");
-            return MENU_SWF_BATCH_ERR_MASK;
+            if (clip->has_rotated_mask) {
+                batch_reason(reason, reason_cap,
+                             "partial clip-mask culling of rotated masks is "
+                             "not implemented");
+                return MENU_SWF_BATCH_ERR_MASK;
+            }
+            BatchClipVert in[3], poly[8];
+            for (unsigned k = 0; k < 3; ++k) {
+                memset(&in[k], 0, sizeof in[k]);
+                in[k].x = (double)px[k];
+                in[k].y = (double)py[k];
+                in[k].source = (int32_t)mesh->indices[t * 3u + k];
+            }
+            int n = clip_triangle_polygon(in, &clip_px, poly);
+            int keep[8];
+            int32_t xs[8], ys[8];
+            int m = clip_polygon_pixels(poly, n, flip, keep, xs, ys);
+            if (!m) continue;
+            for (int i = 0; i < m; ++i)
+                if (poly[keep[i]].source < 0) ++new_vertices;
+            out_indices += (uint64_t)(m - 2) * 3u;
+        } else {
+            out_indices += 3u;
         }
-        if (cs == BATCH_CLIP_KEEP) ++kept;
+        ++kept;
     }
     if (!kept) return MENU_SWF_BATCH_OK;
 
-    uint64_t worst64 = (uint64_t)mesh->vertex_count + mesh->index_count;
-    uint32_t worst_vertices = worst64 > UINT32_MAX
-                                  ? UINT32_MAX
-                                  : (uint32_t)worst64;
+    /* Source vertices plus at most one copy per source index keep the existing
+     * dedup contract; generated intersections add up to four per partial
+     * triangle (one per clip-rect edge). */
+    uint64_t need_v64 = (uint64_t)mesh->vertex_count + mesh->index_count +
+                        new_vertices;
+    uint32_t need_vertices = need_v64 > UINT32_MAX
+                                 ? UINT32_MAX
+                                 : (uint32_t)need_v64;
     if (mesh->vertex_count > MENU_SWF_BATCH_MAX_SHAPE_VERTICES ||
-        mesh->index_count > MENU_SWF_BATCH_MAX_SHAPE_INDICES ||
-        worst_vertices > MENU_SWF_BATCH_MAX_SHAPE_VERTICES ||
-        worst_vertices > vertex_capacity ||
-        mesh->index_count > index_capacity ||
-        (worst_vertices && (!vertices || !indices))) {
+        out_indices > MENU_SWF_BATCH_MAX_SHAPE_INDICES ||
+        need_vertices > MENU_SWF_BATCH_MAX_SHAPE_VERTICES ||
+        need_vertices > vertex_capacity ||
+        out_indices > index_capacity ||
+        (need_vertices && (!vertices || !indices))) {
         batch_reason(reason, reason_cap,
                      "shape batch: %u source vertices / %u indices need up to "
-                     "%u vertices (capacity %u/%u)",
-                     mesh->vertex_count, mesh->index_count, worst_vertices,
+                     "%u vertices and %u indices (capacity %u/%u)",
+                     mesh->vertex_count, mesh->index_count, need_vertices,
+                     (uint32_t)(out_indices > UINT32_MAX ? UINT32_MAX
+                                                         : out_indices),
                      vertex_capacity, index_capacity);
         return MENU_SWF_BATCH_ERR_OVERFLOW;
     }
@@ -774,64 +1019,101 @@ static MenuSwfBatchStatus batch_shape_impl(
     }
 
     uint32_t icount = 0;
-    if (clip && clip->mask_count) have_bounds = 0;
+    if (clip_active) have_bounds = 0;
     for (uint32_t t = 0; t < triangles; ++t) {
         uint16_t style_index = mesh->triangle_fills[t];
         const MenuSwfTessFill *fill = &mesh->fills[style_index - 1];
-        int32_t txmin, txmax, tymin, tymax;
-        if (shape_triangle_aabb(style, mesh, t, &txmin, &txmax, &tymin,
-                                &tymax)) {
+        int32_t px[3], py[3], txmin, txmax, tymin, tymax;
+        if (shape_triangle_points(style, mesh, t, px, py)) {
             batch_reason(reason, reason_cap,
                          "shape batch: transformed point overflow");
             return MENU_SWF_BATCH_ERR_OVERFLOW;
         }
+        shape_aabb(px, py, &txmin, &txmax, &tymin, &tymax);
         BatchClip cs = batch_clip_aabb(clip, txmin, txmax, tymin, tymax);
         if (cs == BATCH_CLIP_DROP) continue;
-        if (cs != BATCH_CLIP_KEEP) {
-            batch_reason(reason, reason_cap,
-                         "partial clip-mask culling is not implemented");
-            return MENU_SWF_BATCH_ERR_MASK;
-        }
-        uint32_t tri[3];
-        for (unsigned k = 0; k < 3; ++k) {
-            uint32_t s = mesh->indices[t * 3u + k];
-            uint32_t color;
-            MenuSwfBatchStatus st = shape_vertex_color(
-                fill, style, &mesh->vertices[s], &color, reason, reason_cap);
-            if (st != MENU_SWF_BATCH_OK) return st;
-            uint32_t index;
-            uint8_t mask = (uint8_t)(1u << (s & 7u));
-            if (!(seen[s >> 3] & mask)) {
-                seen[s >> 3] |= mask;
-                vertices[s].color = color;
-                index = s;
-            } else if (vertices[s].color == color) {
-                index = s;
-            } else {
-                /* A source vertex shared across fills needs one copy. */
-                if (vcount >= vertex_capacity ||
-                    vcount >= MENU_SWF_BATCH_MAX_SHAPE_VERTICES) {
-                    batch_reason(reason, reason_cap,
-                                 "shape batch: %u vertex copies exceed %u",
-                                 vcount + 1, vertex_capacity);
-                    return MENU_SWF_BATCH_ERR_OVERFLOW;
-                }
-                vertices[vcount] = vertices[s];
-                vertices[vcount].color = color;
-                index = vcount++;
+        uint32_t emitted[15];
+        unsigned ecount = 0;
+        if (cs == BATCH_CLIP_KEEP) {
+            uint32_t tri[3];
+            for (unsigned k = 0; k < 3; ++k) {
+                uint32_t s = mesh->indices[t * 3u + k];
+                uint32_t color;
+                MenuSwfBatchStatus st = shape_vertex_color(
+                    fill, style, &mesh->vertices[s], &color, reason,
+                    reason_cap);
+                if (st != MENU_SWF_BATCH_OK) return st;
+                st = shape_vertex_index(s, color, seen, vertices, &vcount,
+                                        vertex_capacity, &tri[k], reason,
+                                        reason_cap);
+                if (st != MENU_SWF_BATCH_OK) return st;
             }
-            tri[k] = index;
+            if (flip) {
+                uint32_t swap = tri[1];
+                tri[1] = tri[2];
+                tri[2] = swap;
+            }
+            emitted[ecount++] = tri[0];
+            emitted[ecount++] = tri[1];
+            emitted[ecount++] = tri[2];
+        } else {
+            /* Partial overlap with an axis-aligned mask: clip the screen-space
+             * triangle and keep per-vertex colours/UVs interpolated. */
+            BatchClipVert in[3], poly[8];
+            for (unsigned k = 0; k < 3; ++k) {
+                uint32_t s = mesh->indices[t * 3u + k];
+                memset(&in[k], 0, sizeof in[k]);
+                in[k].x = (double)px[k];
+                in[k].y = (double)py[k];
+                in[k].u = style->u;
+                in[k].v = style->v;
+                MenuSwfBatchStatus st = shape_vertex_color(
+                    fill, style, &mesh->vertices[s], &in[k].color, reason,
+                    reason_cap);
+                if (st != MENU_SWF_BATCH_OK) return st;
+                in[k].source = (int32_t)s;
+            }
+            int n = clip_triangle_polygon(in, &clip_px, poly);
+            int keep[8];
+            int32_t xs[8], ys[8];
+            int m = clip_polygon_pixels(poly, n, flip, keep, xs, ys);
+            if (m < 3) continue;
+            uint32_t polyidx[8];
+            for (int i = 0; i < m; ++i) {
+                const BatchClipVert *cp = &poly[keep[i]];
+                if (cp->source >= 0) {
+                    MenuSwfBatchStatus st = shape_vertex_index(
+                        (uint32_t)cp->source, cp->color, seen, vertices,
+                        &vcount, vertex_capacity, &polyidx[i], reason,
+                        reason_cap);
+                    if (st != MENU_SWF_BATCH_OK) return st;
+                } else {
+                    if (vcount >= vertex_capacity ||
+                        vcount >= MENU_SWF_BATCH_MAX_SHAPE_VERTICES) {
+                        batch_reason(reason, reason_cap,
+                                     "shape batch: clipped vertices exceed %u",
+                                     vertex_capacity);
+                        return MENU_SWF_BATCH_ERR_OVERFLOW;
+                    }
+                    MenuSwfBatchVertex *nv = &vertices[vcount];
+                    nv->x = xs[i];
+                    nv->y = ys[i];
+                    nv->u = cp->u;
+                    nv->v = cp->v;
+                    nv->color = cp->color;
+                    polyidx[i] = vcount++;
+                }
+            }
+            for (int i = 0; i + 2 < m; ++i) {
+                emitted[ecount++] = polyidx[0];
+                emitted[ecount++] = polyidx[i + 1];
+                emitted[ecount++] = polyidx[i + 2];
+            }
         }
-        if (flip) {
-            uint32_t swap = tri[1];
-            tri[1] = tri[2];
-            tri[2] = swap;
-        }
-        indices[icount++] = tri[0];
-        indices[icount++] = tri[1];
-        indices[icount++] = tri[2];
-        for (unsigned k = 0; k < 3; ++k) {
-            const MenuSwfBatchVertex *v = &vertices[tri[k]];
+        for (unsigned i = 0; i < ecount; ++i)
+            indices[icount++] = emitted[i];
+        for (unsigned i = 0; i < ecount; ++i) {
+            const MenuSwfBatchVertex *v = &vertices[emitted[i]];
             if (!have_bounds) {
                 bxmin = bxmax = v->x;
                 bymin = bymax = v->y;

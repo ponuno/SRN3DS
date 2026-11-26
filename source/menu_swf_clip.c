@@ -89,6 +89,11 @@ MenuSwfClipStatus menu_swf_clip_mask_quad(
     return make_quad(record, shape, out, reason, reason_cap);
 }
 
+static int quad_axis_aligned(const MenuSwfClipPoint q[4]) {
+    return q[0].y == q[1].y && q[1].x == q[2].x &&
+           q[2].y == q[3].y && q[3].x == q[0].x;
+}
+
 static void quad_rect(const MenuSwfClipPoint q[4], MenuSwfClipRect *r) {
     r->xmin = r->xmax = q[0].x;
     r->ymin = r->ymax = q[0].y;
@@ -218,6 +223,7 @@ MenuSwfClipStatus menu_swf_clip_build(
                                          reason_cap);
         if (st != MENU_SWF_CLIP_OK) return st;
         quad_rect(m->quad, &m->rect);
+        m->axis_aligned = (uint8_t)quad_axis_aligned(m->quad);
         ++mi;
     }
     out->mask_count = mask_count;
@@ -245,6 +251,7 @@ MenuSwfClipStatus menu_swf_clip_build(
                     return MENU_SWF_CLIP_ERR_CYCLE;
                 }
             o->mask_indices[o->mask_count++] = j;
+            if (!m->axis_aligned) o->has_rotated_mask = 1;
             if (o->has_rect &&
                 !menu_swf_clip_rect_intersect(&o->clip_rect, &m->rect,
                                               &o->clip_rect)) {

@@ -16,8 +16,11 @@
  *
  * The *_clip entry points apply a MenuSwfClipRecord: fully outside glyphs or
  * triangles are culled, fully inside ones are unchanged, and partial overlap
- * is the named "partial clip-mask culling is not implemented" refusal.  No
- * vertex clamping, re-winding or vertex expansion is performed.
+ * with an axis-aligned mask is clipped in screen space (Sutherland-Hodgman for
+ * shape triangles, a sub-quad for axis-aligned text) with colour/UV
+ * interpolation.  A partially overlapping rotated mask is the named
+ * "partial clip-mask culling of rotated masks is not implemented" refusal; a
+ * partial rotated text quad is the analogous "rotated text" refusal.
  *
  * Glyph bounds are taken from the text mesh's layout space and the batch style
  * is applied on top; for one final transform, lay out text with an identity
@@ -116,9 +119,12 @@ MenuSwfBatchStatus menu_swf_batch_text(
 /* Clip-mask variants.  `clip` is the MenuSwfClipRecord for this display-list
  * record (NULL or mask_count==0 means no clip).  A fully clipped record emits
  * nothing; a glyph/triangle wholly inside the intersected clip rectangle is
- * kept; a wholly outside one is culled.  A partially overlapping glyph/triangle
- * is the named refusal "partial clip-mask culling is not implemented"; this
- * layer never clamps or re-winds geometry.  `clip->clip_rect` is in screen
+ * kept; a wholly outside one is culled.  An axis-aligned partial overlap is
+ * clipped: text becomes a smaller quad with interpolated UVs, and shape
+ * triangles become a convex fan with interpolated colour/UV and preserved
+ * winding.  `clip->has_rotated_mask` makes a partial overlap the named refusal
+ * "partial clip-mask culling of rotated masks is not implemented"; a rotated
+ * text transform similarly refuses by name.  `clip->clip_rect` is in screen
  * twips and is compared against the integer output AABB (*20). */
 MenuSwfBatchStatus menu_swf_batch_text_clip(
     const MenuSwfTextMesh *text, const MenuSwfAtlasEntry *atlas_entries,
@@ -152,9 +158,14 @@ MenuSwfBatchStatus menu_swf_batch_shape(
     MenuSwfBatchResult *out, char *reason, size_t reason_cap);
 
 /* Shape clip-mask variant.  Fully clipped triangles are culled; fully inside
- * triangles keep the existing winding/colour/dedup; a partially overlapping
- * triangle is the named "partial clip-mask culling is not implemented"
- * refusal.  A fully clipped record returns an empty result without writing. */
+ * triangles keep the existing winding/colour/dedup.  For an axis-aligned mask,
+ * a partially overlapping triangle is clipped with Sutherland-Hodgman, its
+ * per-vertex colour/UV interpolated, and its source corners still deduplicated;
+ * an output vertex can be a generated edge intersection.  A partial overlap
+ * with a rotated mask is the named refusal
+ * "partial clip-mask culling of rotated masks is not implemented".  A fully
+ * clipped record returns an empty result without writing.  The first pass
+ * counts up to four generated vertices per partial triangle before any write. */
 MenuSwfBatchStatus menu_swf_batch_shape_clip(
     const MenuSwfTessMesh *mesh, const MenuSwfBatchShapeStyle *style,
     const MenuSwfBatchViewport *viewport, const MenuSwfClipRecord *clip,

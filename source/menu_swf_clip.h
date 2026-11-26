@@ -3,10 +3,13 @@
  *
  * A record with ClipDepth creates a mask active for display depths
  * (mask.depth, mask.clip_depth].  Masks compose by intersection; up to eight
- * may be active on one record.  Mask rectangles are axis-aligned screen-space
- * AABBs from the record matrix and caller-provided local shape bounds.  A mask
- * whose shape is not a rectangle/quad is refused by name; shape tessellation is
- * not implemented here.  No AVM, GPU or frame is produced.
+ * may be active on one record.  Mask rectangles are screen-space AABBs from the
+ * record matrix and caller-provided local shape bounds.  Each mask also records
+ * whether its transformed quad is axis-aligned; a record with any rotated
+ * active mask sets has_rotated_mask so the batch layer can clip axis-aligned
+ * partial overlaps and refuse the rotated case by name.  A mask whose shape is
+ * not a rectangle/quad is refused by name; shape tessellation is not
+ * implemented here.  No AVM, GPU or frame is produced.
  */
 
 #include <stddef.h>
@@ -49,6 +52,10 @@ typedef struct {
     uint16_t clip_depth;
     MenuSwfClipRect rect;
     MenuSwfClipPoint quad[4];
+    /* 1 when quad's four edges are parallel to the screen axes.  A rotated
+     * mask keeps an AABB in `rect`; partial overlap with it is refused by the
+     * batch layer rather than clipped to that over-approximation. */
+    uint8_t axis_aligned;
 } MenuSwfClipMask;
 
 typedef struct {
@@ -58,6 +65,9 @@ typedef struct {
     uint8_t has_rect;
     uint8_t fully_clipped;
     uint8_t mask_count;
+    /* 1 when at least one active mask is rotated/skewed.  Zero-initialised
+     * records (and all-axis-aligned intersections) leave this 0. */
+    uint8_t has_rotated_mask;
     uint32_t mask_indices[MENU_SWF_CLIP_MAX_ACTIVE];
 } MenuSwfClipRecord;
 
