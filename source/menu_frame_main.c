@@ -353,11 +353,10 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
     char plain[MENU_SWF_TEXT_MAX_CHARS + 1];
     PHASE("shape_loop");
     for (uint32_t i = 0; i < list.record_count; ++i) {
-        if ((i & 7u) == 0) {
-            fprintf(stderr, "PHASE shape_loop record=%u/%u\n", i, list.record_count);
-            fflush(stderr);
-        }
         const MenuSwfDisplayListRecord *record = &g_records[i];
+        fprintf(stderr, "REC %u/%u id=%u sprite=%u clip=%u\n", i, list.record_count,
+                record->character_id, record->is_sprite, record->has_clip_depth);
+        fflush(stderr);
         if (record->is_sprite) { ++stats->sprite_records; continue; }
         if (record->has_clip_depth) { ++stats->mask_records; continue; }
         const MenuSwfShapeSummary *shape = menu_swf_shape_find(shapes, record->character_id);
@@ -365,6 +364,8 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
             ++stats->shape_records;
             MenuSwfTessMesh mesh;
             tess_init(&mesh);
+            fprintf(stderr, "TESS %u begin\n", record->character_id);
+            fflush(stderr);
             status = menu_swf_tess_shape(swf, swf_size, record->character_id,
                                          MENU_SWF_TESS_EVEN_ODD, &mesh,
                                          reason, reason_cap);
@@ -372,6 +373,9 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
                 fprintf(stderr, "shape %u tessellation: %s\n", record->character_id, reason);
                 free(shapes); free(display); return -1;
             }
+            fprintf(stderr, "TESS %u done v=%u t=%u\n", record->character_id,
+                    mesh.vertex_count, mesh.triangle_count);
+            fflush(stderr);
             stats->tess_vertices += mesh.vertex_count;
             stats->tess_triangles += mesh.triangle_count;
             stats->strokes += mesh.line_count;
