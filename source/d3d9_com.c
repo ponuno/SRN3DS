@@ -3151,26 +3151,22 @@ static void shader_usage_log(unsigned kind,uint32_t address,uint32_t hr,uint32_t
     }
     if(!count){GuestSlab *s=guest_slab_find(g.mem,address,4);if(s)count=(s->size-(address-s->base))/4;}
     uint32_t *code=NULL;D9ShaderInfo shape;memset(&shape,0,sizeof shape);
-    size_t words=0;
     if(count){
         if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
         code=malloc(count*4);
         if(code){
             for(size_t i=0;i<count;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
             (void)d9_shader_analyze(code,count,&shape);
-            words=shape.saw_end&&shape.words?shape.words:count;
         }
     }
-    /* D3DX-compiled blobs in TESV's .rdata carry a CTAB block and put the code
-     * length in the high half of the second token (GFx's built-ins).  Raw FXP
-     * token streams (Shaders001/002) do not; the walker's END length is right
-     * for those and matches docs/shader_plans.json. */
-    size_t hash_words=words;
-    if(caller>=0x00f88000u&&caller<0x00f89000u&&code&&count>=3&&
-       code[2]==0x42415443u){
-        size_t n=(code[1]>>16)&0xffffu;
-        if(n>0&&n<=count)hash_words=n;
-    }
+    /* The identity of a shader is the bytes of its declared token stream
+     * through END, for GFx and for raw FXP alike.  An earlier version hashed
+     * only the leading CTAB comment for GFx callers (the high half of the
+     * second token), which made every shader in a CTAB group share one
+     * prefix hash; that is a measurement defect, not an identity.  A stream
+     * without a reachable END is reported as null instead of hashing an
+     * arbitrary window. */
+    size_t hash_words=(shape.saw_end&&shape.words)?shape.words:0;
     char sha[65];sha[0]='\0';
     if(code&&hash_words){
         uint8_t dig[D9_MENU_CLOSURE_SHA256_BYTES];

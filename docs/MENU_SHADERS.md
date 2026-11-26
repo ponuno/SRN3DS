@@ -22,8 +22,18 @@ Evidence run: host slice from `E:\Skyrim_N3DS_build\analysis\growth_probe\gen01`
 | Engine Shaders001/002 preload | `0xccbbc5` | **874** | **309** | 232–2068 | world/renderer package preload, not the SWF overlay |
 | Engine PS | — | **0** | 0 | — | PS preload/menu-logo path not reached |
 
-So the **menu overlay** priority is **5 VS + 40 PS objects = 3 + 7 distinct
-hash families**, not the 9,621-PS corpus and not the 874-VS preload.
+So the **menu overlay** priority is **5 VS + 40 PS objects**, not the
+9,621-PS corpus and not the 874-VS preload.
+
+**Measured correction (UI pack, phase 2).** The counts above are *prefix*
+groups: the original usage census hashed `high16(second_token) * 4` bytes from
+offset 0, which for a D3DX blob is the leading CTAB comment, not the shader.
+Hashing the full token stream through `END` gives **5 distinct VS blobs** and
+**38 distinct PS blobs** among the 40 objects (the 14 objects of the
+`2c4a7280` group are not one program). The seven PS rows below are one
+representative per prefix group, which is what the first plans cover; they are
+not a full menu-pixel set. `source/d3d9_com.c` now hashes the walked stream
+only, so a fresh census reports the real identity.
 
 ## 2. GFx vertex shaders (5 objects, 3 hashes)
 
@@ -48,9 +58,10 @@ Table `0x12dfca8`, 6 slots (slot 0 NULL). All are `vs_3_0`.
 | 332 | `cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918` | 4 |
 
 Table `0x12dfcd8`, 45 slots (5 NULL), all `ps_3_0`. They are D3DX blobs with a
-CTAB block; the code length is the high half of the second token. Hash and size
-are computed over the **whole blob from offset 0** with that length, which is
-why the usage log and `--gfx-shaders` agree.
+CTAB block, so the naive "length = high half of the second token" is the CTAB
+comment size. The SHA-256 values above are of the **whole token stream through
+`END`**, one representative per prefix group; among the 40 objects there are
+38 distinct full streams.
 
 Level-3 extra table `0x12dfa80` (25 slots, 24 non-NULL, 4 hashes, 272–432 B) is
 **not** created at the honest level 2. Keep it out of the first port pass.
