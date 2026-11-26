@@ -491,12 +491,22 @@ int d9_get_tev_constants(const D9Device *d,float out[9][4]);
 #define D9_PS_CONST_F_REGS 8u
 #define D9_PS_CONST_I_REGS 8u
 #define D9_PS_CONST_B_REGS 8u
+#define D9_VS_CONST_I_REGS 8u
+#define D9_VS_CONST_B_REGS 8u
 int d9_set_ps_constants_f(D9Device *d,unsigned start,const float *values,unsigned count);
 int d9_get_ps_constants_f(const D9Device *d,unsigned start,float *values,unsigned count);
 int d9_set_ps_constants_i(D9Device *d,unsigned start,const int32_t *values,unsigned count);
 int d9_get_ps_constants_i(const D9Device *d,unsigned start,int32_t *values,unsigned count);
 int d9_set_ps_constants_b(D9Device *d,unsigned start,const int32_t *values,unsigned count);
 int d9_get_ps_constants_b(const D9Device *d,unsigned start,int32_t *values,unsigned count);
+/* Vertex-shader integer/bool registers.  Same bounded API-state treatment as
+ * PS I/B: exact round-trip, but the accepted vertex subset has no integer,
+ * predicate or flow-control opcode, so they do not feed a draw.  The float
+ * c0..c8 bank remains the legacy menu material bank documented above. */
+int d9_set_vs_constants_i(D9Device *d,unsigned start,const int32_t *values,unsigned count);
+int d9_get_vs_constants_i(const D9Device *d,unsigned start,int32_t *values,unsigned count);
+int d9_set_vs_constants_b(D9Device *d,unsigned start,const int32_t *values,unsigned count);
+int d9_get_vs_constants_b(const D9Device *d,unsigned start,int32_t *values,unsigned count);
 /* Bits 0..7 of the float registers that have been written. */
 unsigned d9_ps_constants_f_mask(const D9Device *d);
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m);

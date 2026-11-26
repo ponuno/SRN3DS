@@ -86,6 +86,8 @@ struct D9Device {
     int32_t ps_constants_i[D9_PS_CONST_I_REGS][4];
     uint8_t ps_constants_b[D9_PS_CONST_B_REGS];
     uint32_t ps_constants_f_mask;
+    int32_t vs_constants_i[D9_VS_CONST_I_REGS][4];
+    uint8_t vs_constants_b[D9_VS_CONST_B_REGS];
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
     D9TnlState tnl;int tnl_proto;
     D9Handle texture1,cube_texture,cube_texture1,volume_texture,volume_texture1;
@@ -1307,16 +1309,24 @@ int d9_get_tev_constants(const D9Device *d,float out[9][4]){
     memcpy(out,d->tev_constants,sizeof d->tev_constants);
     return D9_OK;
 }
-static int ps_range(const D9Device *d,const char *method,unsigned start,
-                    unsigned count,unsigned limit){
+static int const_range(const D9Device *d,const char *method,const char *label,
+                       unsigned start,unsigned count,unsigned limit){
     if(start>limit||count>limit-start){
         char why[160];
-        snprintf(why,sizeof why,"%s: c%u + %u is outside the %u-register PS window",
-                 method,start,count,limit);
+        snprintf(why,sizeof why,"%s: c%u + %u is outside the %u-register %s window",
+                 method,start,count,limit,label);
         set_diagnosis((D9Device *)d,why);
         return D9_INVALID;
     }
     return D9_OK;
+}
+static int ps_range(const D9Device *d,const char *method,unsigned start,
+                    unsigned count,unsigned limit){
+    return const_range(d,method,"PS",start,count,limit);
+}
+static int vs_range(const D9Device *d,const char *method,unsigned start,
+                    unsigned count,unsigned limit){
+    return const_range(d,method,"VS",start,count,limit);
 }
 int d9_set_ps_constants_f(D9Device *d,unsigned start,const float *values,unsigned count){
     if(!d)return D9_INVALID;
@@ -1380,6 +1390,42 @@ int d9_get_ps_constants_b(const D9Device *d,unsigned start,int32_t *values,unsig
     if(rc)return rc;
     if(count&&!values)return D9_INVALID;
     for(unsigned i=0;i<count;++i)values[i]=d->ps_constants_b[start+i];
+    return D9_OK;
+}
+int d9_set_vs_constants_i(D9Device *d,unsigned start,const int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=vs_range(d,"SetVertexShaderConstantI",start,count,D9_VS_CONST_I_REGS);
+    if(rc)return rc;
+    if(!count)return D9_OK;
+    if(!values){set_diagnosis(d,"SetVertexShaderConstantI: constant data is not readable");return D9_INVALID;}
+    memcpy(&d->vs_constants_i[start][0],values,(size_t)count*16);
+    set_diagnosis(d,"");
+    return D9_OK;
+}
+int d9_get_vs_constants_i(const D9Device *d,unsigned start,int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=vs_range(d,"GetVertexShaderConstantI",start,count,D9_VS_CONST_I_REGS);
+    if(rc)return rc;
+    if(count&&!values)return D9_INVALID;
+    if(count)memcpy(values,&d->vs_constants_i[start][0],(size_t)count*16);
+    return D9_OK;
+}
+int d9_set_vs_constants_b(D9Device *d,unsigned start,const int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=vs_range(d,"SetVertexShaderConstantB",start,count,D9_VS_CONST_B_REGS);
+    if(rc)return rc;
+    if(!count)return D9_OK;
+    if(!values){set_diagnosis(d,"SetVertexShaderConstantB: constant data is not readable");return D9_INVALID;}
+    for(unsigned i=0;i<count;++i)d->vs_constants_b[start+i]=values[i]?1u:0u;
+    set_diagnosis(d,"");
+    return D9_OK;
+}
+int d9_get_vs_constants_b(const D9Device *d,unsigned start,int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=vs_range(d,"GetVertexShaderConstantB",start,count,D9_VS_CONST_B_REGS);
+    if(rc)return rc;
+    if(count&&!values)return D9_INVALID;
+    for(unsigned i=0;i<count;++i)values[i]=d->vs_constants_b[start+i];
     return D9_OK;
 }
 unsigned d9_ps_constants_f_mask(const D9Device *d){return d?d->ps_constants_f_mask&0xFFu:0u;}

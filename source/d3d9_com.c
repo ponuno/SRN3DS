@@ -2022,6 +2022,58 @@ static void get_ps_const_b(CPU *c){
     if(rc){d3d_fail("GetPixelShaderConstantB",d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
     g.last_diagnostic[0]=0;RET(OK,4);
 }
+/* ---- vertex-shader integer/bool constants ------------------------------- */
+/* Same bounded API-state treatment as PS I/B.  The accepted VS subset has no
+ * integer/predicate/flow-control opcode, so these do not feed a draw. */
+static int vs_const_range(const char *method,unsigned start,unsigned n,unsigned limit){
+    if(start>limit||n>limit-start){
+        char why[160];
+        snprintf(why,sizeof why,"c%u + %u is outside the %u-register VS window",
+                 start,n,limit);
+        d3d_fail(method,why,INVALID);
+        return INVALID;
+    }
+    return OK;
+}
+static uint32_t vs_const_setup(CPU *c,const char *method,unsigned limit,size_t unit,void **data){
+    unsigned start=A(1),n=A(3);uint32_t p=A(2);
+    if(!obj(A(0),DEVICE))return INVALID;
+    uint32_t range=vs_const_range(method,start,n,limit);if(range!=OK)return range;
+    if(g.phase==2){d3d_fail(method,"cannot set vertex-shader constants after EndScene",INVALID);return INVALID;}
+    *data=n?ptr(p,(size_t)n*unit):NULL;
+    if(n&&!*data){d3d_fail(method,"constant data is not readable guest memory",INVALID);return INVALID;}
+    return OK;
+}
+static void vs_const_finish(CPU *c,const char *method,int rc){
+    if(rc){d3d_fail(method,d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void set_vs_const_i(CPU *c){
+    void *data=NULL;uint32_t setup=vs_const_setup(c,"SetVertexShaderConstantI",D9_VS_CONST_I_REGS,16,&data);
+    if(setup!=OK)RET(setup,4);
+    vs_const_finish(c,"SetVertexShaderConstantI",d9_set_vs_constants_i(g.device,A(1),(const int32_t *)data,A(3)));
+}
+static void get_vs_const_i(CPU *c){
+    unsigned start=A(1),n=A(3);uint32_t range=vs_const_range("GetVertexShaderConstantI",start,n,D9_VS_CONST_I_REGS);
+    if(!obj(A(0),DEVICE)||range!=OK)RET(INVALID,4);
+    if(n&&!ptr(A(2),(size_t)n*16))RET(INVALID,4);
+    int rc=d9_get_vs_constants_i(g.device,start,n?(int32_t *)ptr(A(2),(size_t)n*16):NULL,n);
+    if(rc){d3d_fail("GetVertexShaderConstantI",d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void set_vs_const_b(CPU *c){
+    void *data=NULL;uint32_t setup=vs_const_setup(c,"SetVertexShaderConstantB",D9_VS_CONST_B_REGS,4,&data);
+    if(setup!=OK)RET(setup,4);
+    vs_const_finish(c,"SetVertexShaderConstantB",d9_set_vs_constants_b(g.device,A(1),(const int32_t *)data,A(3)));
+}
+static void get_vs_const_b(CPU *c){
+    unsigned start=A(1),n=A(3);uint32_t range=vs_const_range("GetVertexShaderConstantB",start,n,D9_VS_CONST_B_REGS);
+    if(!obj(A(0),DEVICE)||range!=OK)RET(INVALID,4);
+    if(n&&!ptr(A(2),(size_t)n*4))RET(INVALID,4);
+    int rc=d9_get_vs_constants_b(g.device,start,n?(int32_t *)ptr(A(2),(size_t)n*4):NULL,n);
+    if(rc){d3d_fail("GetVertexShaderConstantB",d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
 static void shader_function(CPU *c){Obj *o=obj(A(0),0);uint32_t size_ptr=A(2);if(!o||(o->kind!=VS&&o->kind!=PS)||!ptr(size_ptr,4))RET(INVALID,3);
     uint32_t need=o->words*4,provided=M32(size_ptr);M32(size_ptr)=need;if(!A(1))RET(OK,3);
     if(provided<need||!ptr(A(1),need))RET(INVALID,3);memcpy(ptr(A(1),need),o->code,need);RET(OK,3);}
@@ -2284,6 +2336,7 @@ static void draw_indexed_up(CPU *c){
  X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
  X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
  X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) \
+ X(set_vs_const_i) X(get_vs_const_i) X(set_vs_const_b) X(get_vs_const_b) \
  X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
@@ -2433,6 +2486,8 @@ static void init_tables(void){
     SLOT(DEVICE,81,draw_primitive);SLOT(DEVICE,82,draw_indexed);SLOT(DEVICE,83,draw_primitive_up);SLOT(DEVICE,84,draw_indexed_up);SLOT(DEVICE,89,set_fvf);SLOT(DEVICE,90,get_fvf);SLOT(DEVICE,100,stream);SLOT(DEVICE,104,indices);
     SLOT(DEVICE,86,create_decl);SLOT(DEVICE,87,set_decl);SLOT(DEVICE,88,get_decl);SLOT(DEVICE,101,get_stream);SLOT(DEVICE,102,stream_freq);SLOT(DEVICE,103,get_stream_freq);SLOT(DEVICE,105,get_indices);
     SLOT(DEVICE,91,create_vs);SLOT(DEVICE,92,set_vs);SLOT(DEVICE,93,get_vs);SLOT(DEVICE,94,set_vs_const);SLOT(DEVICE,95,get_vs_const);
+    SLOT(DEVICE,96,set_vs_const_i);SLOT(DEVICE,97,get_vs_const_i);
+    SLOT(DEVICE,98,set_vs_const_b);SLOT(DEVICE,99,get_vs_const_b);
     SLOT(DEVICE,106,create_ps);SLOT(DEVICE,107,set_ps);SLOT(DEVICE,108,get_ps);
     SLOT(DEVICE,109,set_ps_const_f);SLOT(DEVICE,110,get_ps_const_f);
     SLOT(DEVICE,111,set_ps_const_i);SLOT(DEVICE,112,get_ps_const_i);

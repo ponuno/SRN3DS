@@ -105,7 +105,12 @@ a material c3/c4/c7.  The observed mask admits c0..c7 evidence from either
 bank, and alpha evidence from PS c4 when present.  `SetPixelShaderConstantI/B`
 also round-trip through Get but are not claimed as draw inputs: the accepted
 ps_3_0 subset has no integer, predicate or flow-control opcode that could
-consume them.  Bool values are normalised to 0/1 on write.
+consume them.  The same bounded 8-register treatment applies to
+`SetVertexShaderConstantI/B` (`slots 96..99`); the accepted vertex subset also
+has no integer/predicate/flow-control opcode, so those values never affect a
+draw.  Bool values are normalised to 0/1 on write, and the VS float
+c0..c8 bank remains separate from both integer/bool banks and from PS
+constants.
 
 `SetVertexShaderConstantF` still accepts c0..c7 so this evidence can exist.
 The advertised `MaxVertexShaderConst` stays **4**; c4..c7 are stored only as
@@ -266,7 +271,7 @@ powershell -File tools\run_host_tests.ps1 `
   -OutDir C:\Users\vasya\Documents\Skyrim_N3DS_wt\menu-shader-vs\build_host_full_menu_abs
 ```
 
-Result: **98 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
+Result: **102 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
 hitting the documented guest memory gate (`Not enough memory to run
 application.`), not a rendering PASS.
 
