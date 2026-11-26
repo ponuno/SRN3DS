@@ -389,6 +389,35 @@ cube, depth or scene call. This is not evidence of a missing host cube API. The
 fallback, bounded native targets and 64 MiB budget remain measurement-only; no
 frame is claimed.
 
+### Water-off config census (2026-11-26)
+
+A fresh slice was built from `main` at `bc23f42`
+(`E:\Skyrim_N3DS_build\analysis\growth_probe\gen01`; 85.7 s census, exit 1).
+`F:\Skyrim\Documents\My Games\Skyrim\SkyrimPrefs.ini` was backed up and a
+`[Water]` section was added with `bUseWaterReflections=0`,
+`bUseCubeMapReflections=0`, `bReflectSky=0`, `bReflectLand=0`,
+`bReflectLODLand=0`, `bReflectLODObjects=0`, `bReflectLODTrees=0`. HDR/shadow
+keys were not touched, and the INI was restored byte-for-byte afterwards
+(SHA-256 `C0768CCC...D938CD`).
+
+Result: **the fault is identical** — `last_call=00fb5bd0`, address
+`0000000c`, stack `545b4c50 545b4c50 54114d58 2 2 2`, last D3D call
+`Release(0x500022c0)` refcount 3. `CreateCubeTexture`, `GetCubeMapSurface`,
+`SetRenderTarget`, `CreateDepthStencilSurface`, `SetDepthStencilSurface`,
+`CreateVertexShader`, `CreatePixelShader`, `SetTexture`, both draw entry points
+and `Present` are all still 0. The nine 2D RTs are still created.
+
+Reason: the `0xc92676` group is built unconditionally in `0xc92410`; the
+renderer init reads the water-reflect dimensions (`iWaterReflectWidth/Height`
+via `0x12cfa2c/0x12cfa30`) but not the `bUseWaterReflections` boolean (table
+entry `0x126ef84`). The boolean is consumed later by the water pass. A
+config-only skip is therefore not possible. The minimal honest skip is the
+cube branch in `0xc91540` (`0xc9163e test dl,0x10` / `0xc91650 call 0xfb5c20`):
+return a checked NULL before `0xfb5c20` when water reflections are off, or skip
+the `0xc92676` call and store 0. A port-side D3D refusal cannot intercept
+because the fault is before `CreateCubeTexture`. Full analysis:
+`docs/CUBE_RENDER_TARGETS.md` section 10.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the

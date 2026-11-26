@@ -283,3 +283,71 @@ bridge (a draw with a cube bound is `D3DERR_NOTAVAILABLE`).
    depth/`SetRenderTarget`/draw. The 2D RT set is already real.
 3. Log device slot 29 (`CreateDepthStencilSurface`) and the depth handle; the
    cube faces need a shared/per-face depth before any face render.
+
+## 10. Config-only test: `bUseWaterReflections=0` (2026-11-26)
+
+Tested on a fresh host slice built from `main` at `bc23f42`
+(`E:\Skyrim_N3DS_build\analysis\growth_probe\gen01`), with the same census
+environment (`TESV_MEMPROBE=1`, `TESV_D3D9_CAPS_PROBE=1`,
+`TESV_D3D9_TRACE=1`, `TESV_D3D9_SM3_GATE_PROBE=1`,
+`TESV_D3D9_CAPTURE_DRAWS=8`, `TESV_D3D9_HDR_LDR_FALLBACK=1`,
+`TESV_D3D9_BUDGET_MB=64`, `N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc`) and
+args `F:\Skyrim\TESV.exe F:\Skyrim 2000000000 167772160`.
+
+`F:\Skyrim\Documents\My Games\Skyrim\SkyrimPrefs.ini` was backed up, then a
+`[Water]` section was added:
+
+```ini
+[Water]
+bUseWaterReflections=0
+bUseCubeMapReflections=0
+bReflectSky=0
+bReflectLand=0
+bReflectLODLand=0
+bReflectLODObjects=0
+bReflectLODTrees=0
+```
+
+Result (85.7 s, exit 1):
+
+- **The fault is unchanged**: `[guest] unmapped addr=0000000c ... last_call=00fb5bd0`,
+  same stack `545b4c50 545b4c50 54114d58 2 2 2`, same last D3D call
+  `Release(0x500022c0)` refcount 3.
+- `CreateCubeTexture` = 0, `GetCubeMapSurface` = 0, `SetRenderTarget` = 0,
+  `CreateDepthStencilSurface` = 0, `SetDepthStencilSurface` = 0,
+  `CreateVertexShader` = 0, `CreatePixelShader` = 0, `SetTexture` = 0,
+  `DrawPrimitive`/`DrawIndexedPrimitive` = 0. There is no
+  `IDirect3DDevice9::Present`; the only `Present` string is the capture-enable
+  line.
+- The nine 2D RTs are still created; the 0x71 `0x500022c0` is still the last
+  one.
+
+The INI was restored to its original bytes (SHA-256
+`C0768CCC224FB3A8E7F8433BF28EA5B368C12A86EA293D99D0B6AB6DD4D938CD`)
+and the `[Water]` section is gone.
+
+### Why the config did not help
+
+The group at `0xc92676` is built unconditionally in `0xc92410`. The
+`bUseWaterReflections` value is a `:Water` setting (table entry `0x126ef84`,
+default **0**); `bUseCubeMapReflections` is at `0x126ef9c`, default **1**.
+Setting both off still built the group. The renderer-init path reads the
+water-reflect **dimensions**
+(`0x12cfa2c`/`0x12cfa30`, set from `iWaterReflectWidth/Height` at
+`0xc6e0ca`/`0xc6e0d0`) but not the reflection boolean. The boolean is consumed
+by the water rendering pass later, after the group has been built. A
+config-only change therefore cannot skip the cube creation/fault.
+
+### Minimal honest skip (no fake cube)
+
+The fault is before `CreateCubeTexture`, so a port-side D3D refusal cannot
+intercept it. The minimal guest-side point is `0xc91540`'s cube branch:
+`0xc9163e test dl,0x10` -> `0xc91650 call 0xfb5c20`. If water reflections are
+off, return a **checked NULL** there (skip the `0xfb5c20` call and fall through
+to the `0xc916d1` epilogue) so `0xc91ba0` stores 0 and the renderer's
+null-target diagnostic (`0x01153a60`) handles the group. The alternative is to
+skip the `0xc92676` call and store 0 in its group slot; that requires the
+slot/count bookkeeping to stay consistent. Do not fabricate a cube face.
+
+A config-only path would require the engine to read `bUseWaterReflections`
+before `0xc92676`; it does not today.
