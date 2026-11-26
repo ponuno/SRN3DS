@@ -28,9 +28,12 @@ static int record_menu(void *ctx, const D9ColorVertex *vertices, size_t count,
     assert(state->pixel_shader->stages == 1);
     assert(state->pixel_shader->textures == 1);
     assert(state->pixel_shader->uses_vertex_color == 1);
-    assert(state->pixel_shader->stage[0].func_rgb == D9TEV_FUNC_MODULATE);
-    assert(state->pixel_shader->stage[0].src_rgb[0] == D9TEV_SRC_TEX0);
-    assert(state->pixel_shader->stage[0].src_rgb[1] == D9TEV_SRC_PRIMARY);
+    /* A8 carries coverage only: RGB is the vertex colour, alpha is the mask. */
+    assert(state->pixel_shader->stage[0].func_rgb == D9TEV_FUNC_REPLACE);
+    assert(state->pixel_shader->stage[0].src_rgb[0] == D9TEV_SRC_PRIMARY);
+    assert(state->pixel_shader->stage[0].func_a == D9TEV_FUNC_MODULATE);
+    assert(state->pixel_shader->stage[0].src_a[0] == D9TEV_SRC_TEX0);
+    assert(state->pixel_shader->stage[0].src_a[1] == D9TEV_SRC_PRIMARY);
     assert(state->address_u == 3 && state->address_v == 3);
     assert(state->mag_filter == 1 && state->min_filter == 1 &&
            state->mip_filter == 0);

@@ -2889,10 +2889,17 @@ static void core_text_plan(D9TevProgram *p){
     p->input[0].reg_index=1u;p->input[0].tev_source=D9TEV_SRC_PRIMARY;
     p->uses_vertex_color=1u;
     D9TevStage *s=&p->stage[0];
-    s->func_rgb=s->func_a=D9TEV_FUNC_MODULATE;
-    s->src_rgb[0]=s->src_a[0]=D9TEV_SRC_TEX0;
-    s->src_rgb[1]=s->src_a[1]=D9TEV_SRC_PRIMARY;
-    s->src_rgb[2]=s->src_a[2]=D9TEV_SRC_PRIMARY;
+    /* The menu atlas is A8: it carries coverage in alpha only, so its RGB is
+     * zero.  MODULATE(TEX0, PRIMARY) therefore produced black pixels.  RGB
+     * comes from the vertex colour and alpha from the glyph coverage. */
+    s->func_rgb=D9TEV_FUNC_REPLACE;
+    s->src_rgb[0]=D9TEV_SRC_PRIMARY;
+    s->src_rgb[1]=D9TEV_SRC_PRIMARY;
+    s->src_rgb[2]=D9TEV_SRC_PRIMARY;
+    s->func_a=D9TEV_FUNC_MODULATE;
+    s->src_a[0]=D9TEV_SRC_TEX0;
+    s->src_a[1]=D9TEV_SRC_PRIMARY;
+    s->src_a[2]=D9TEV_SRC_PRIMARY;
     for(unsigned i=0;i<3;++i){s->op_rgb[i]=D9TEV_RGB_COLOR;s->op_a[i]=D9TEV_A_ALPHA;}
     s->const_reg=0xFFu;
 }
