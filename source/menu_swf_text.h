@@ -6,9 +6,9 @@
  * MenuSwfFontSummary.  Each glyph's SHAPE is tessellated through
  * menu_swf_tess_glyph() in raw font units, then transformed into the caller's
  * output buffers.  DefineEditText adds WordWrap/Multiline/alignment/Justify,
- * margins/indent/leading, Password masking and bounded HTML plain extraction.
- * There is no rasterisation, atlas, rich-text spans, shaping beyond
- * advance+kerning, bidi, or frame.
+ * margins/indent/leading, Password masking and a bounded GFx HTML run model.
+ * There is no rasterisation, atlas, shaping beyond advance+kerning, bidi, or
+ * frame.
  *
  * Font3 coordinates and advances are in 20x font units; Font2 uses 1x units.
  * The 16.16 matrix in MenuSwfTextStyle is the caller's unit conversion (for
@@ -27,14 +27,42 @@
 #define MENU_SWF_TEXT_MAX_INDICES 786432u
 #define MENU_SWF_TEXT_MAX_TRIANGLES 262144u
 #define MENU_SWF_TEXT_MAX_LINES 256u
+#define MENU_SWF_TEXT_MAX_RUNS 128u
+#define MENU_SWF_TEXT_FACE_MAX 32u
+#define MENU_SWF_TEXT_HTML_STACK 16u
 #define MENU_SWF_TEXT_MISSING_GLYPH 0xffffu
 
 typedef struct {
     /* 16.16 affine matrix followed by twip translation. */
     int32_t m00, m01, m10, m11;
     int32_t tx, ty;
-    uint32_t color; /* ARGB copied to each output vertex */
+    uint32_t color; /* default ARGB (record/style tint) */
+    uint8_t has_color_transform; /* apply color_mult/add to run colours */
+    int32_t color_mult[4];       /* 8.8, 256 = 1.0 */
+    int32_t color_add[4];
 } MenuSwfTextStyle;
+
+typedef struct {
+    uint32_t text_first, text_length; /* range in the plain text buffer */
+    uint32_t glyph_first, glyph_count; /* filled by edit layout */
+    uint32_t color;                    /* explicit run ARGB */
+    uint16_t size;                     /* explicit HTML size, 0 = default */
+    uint8_t has_color, has_size, has_face;
+    uint8_t bold, italic, underline;
+    uint8_t align;                     /* MenuSwfEditTextAlign */
+    char face[MENU_SWF_TEXT_FACE_MAX];
+} MenuSwfTextRun;
+
+typedef struct {
+    uint32_t runs;
+    uint32_t tags;
+    uint32_t start_tags, end_tags;
+    uint32_t font_tags, b_tags, i_tags, u_tags, br_tags, p_tags, li_tags;
+    uint32_t unknown_tags;
+    uint32_t entities;
+    uint32_t color_attrs, size_attrs, face_attrs, align_attrs;
+    uint32_t unknown_attrs;
+} MenuSwfTextHtmlSummary;
 
 typedef struct {
     int32_t x, y;       /* transformed placement */
@@ -49,6 +77,9 @@ typedef struct {
     uint8_t has_geometry;
     uint8_t missing;
     uint16_t line_index;
+    uint16_t run_index;
+    uint8_t has_color;
+    uint32_t color; /* per-run ARGB, used by the text batch */
 } MenuSwfTextGlyph;
 
 typedef struct {
@@ -76,6 +107,10 @@ typedef struct {
     MenuSwfTextLine *lines;
     uint32_t line_capacity;
 
+    /* Optional caller-owned runs for edit-text layout. */
+    MenuSwfTextRun *runs;
+    uint32_t run_capacity;
+
     /* Caller scratch for one glyph.  The caller fills the buffers/capacities
      * exactly as for menu_swf_tess_shape(); its output counts are reset. */
     MenuSwfTessMesh glyph_tess;
@@ -86,6 +121,7 @@ typedef struct {
     uint32_t triangle_count;
     uint32_t glyph_count;
     uint32_t line_count;
+    uint32_t run_count;
     uint32_t missing_glyphs;
     int32_t pen_x, pen_y; /* raw font-unit pen after the last advance */
     MenuSwfShapeRect bounds;
@@ -94,6 +130,7 @@ typedef struct {
     uint16_t em_square;
     uint8_t shape_scale;
     MenuSwfTextStyle style;
+    MenuSwfTextHtmlSummary html;
 } MenuSwfTextMesh;
 
 /* Lay out and tessellate `text_len` Latin-1 bytes using `font` (usually from
@@ -116,8 +153,10 @@ MenuSwfStatus menu_swf_text_layout(const uint8_t *data, size_t size,
  * first-line indent/leading are applied, and Justify distributes extra space
  * after spaces on non-final lines.  Password fields display '*' when the font
  * provides it, otherwise NOTIMPL.  Retail GFx HTML payloads stored in the
- * variable-name slot are stripped to bounded plain text.  Empty text keeps the
- * transformed edit bounds and emits one empty line/zero glyphs. */
+ * variable-name slot are parsed into runs; explicit run colours/sizes/flags
+ * affect layout and per-vertex colour, while face names are metadata-only and
+ * unknown tags preserve their text.  Empty text keeps the transformed edit
+ * bounds and emits one empty line/zero glyphs. */
 MenuSwfStatus menu_swf_text_layout_edit(
     const uint8_t *data, size_t size, const MenuSwfFontSummary *font,
     const MenuSwfEditText *edit, const MenuSwfTextStyle *style,
@@ -128,3 +167,17 @@ MenuSwfStatus menu_swf_text_layout_edit(
 MenuSwfStatus menu_swf_text_edit_plain(
     const MenuSwfEditText *edit, char *dst, size_t capacity, size_t *out_len,
     char *reason, size_t reason_cap);
+
+/* Parse the same source into plain text plus bounded style runs.  Supported
+ * HTML: <font color="#RRGGBB" size="N" face="...">, <b>, <i>, <u>, <br>,
+ * <p align=...> and <li> (paragraph break).  Entities: amp/lt/gt/quot/apos/
+ * nbsp.  Unknown tags are skipped while their inner text is preserved and are
+ * counted in `summary->unknown_tags`; malformed tags and unknown entities are
+ * named refusals.  Face names are retained but this layer has no face-to-font
+ * matching: layout uses the supplied font for every run.  `runs` may be NULL
+ * only with `run_capacity` zero; `summary` is optional. */
+MenuSwfStatus menu_swf_text_edit_runs(
+    const MenuSwfEditText *edit, char *text, size_t text_capacity,
+    size_t *text_len, MenuSwfTextRun *runs, uint32_t run_capacity,
+    uint32_t *run_count, MenuSwfTextHtmlSummary *summary, char *reason,
+    size_t reason_cap);

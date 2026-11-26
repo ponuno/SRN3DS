@@ -133,6 +133,16 @@ typedef struct {
     uint32_t text_nonempty_definitions;
     uint32_t text_source_records;
     uint32_t text_nonempty_records;
+    uint32_t html_definitions;
+    uint32_t html_payloads;
+    uint32_t html_nonempty;
+    uint32_t html_runs;
+    uint32_t html_tags;
+    uint32_t html_unknown_tags;
+    uint32_t html_colors;
+    uint32_t html_sizes;
+    uint32_t html_faces;
+    uint32_t html_entities;
     uint32_t text_source_lines;
     uint32_t text_source_chars;
     uint32_t text_refused_records;
@@ -1019,6 +1029,37 @@ static void run_real(const char *data_dir) {
                    edit_items[i].character_id, (unsigned)len, (int)len, plain);
         }
     }
+    /* Definition-level HTML runs; imported ids 34/41 are absent, so no
+     * real-font glyphs are laid out here. */
+    for (uint32_t i = 0; i < edit_list.count; ++i) {
+        const MenuSwfEditText *edit = &edit_items[i];
+        if (!edit->html) continue;
+        ++stats.html_definitions;
+        char html_text[MENU_SWF_TEXT_MAX_CHARS + 1];
+        MenuSwfTextRun html_runs[MENU_SWF_TEXT_MAX_RUNS];
+        MenuSwfTextHtmlSummary html_summary;
+        size_t html_len = 0;
+        uint32_t html_run_count = 0;
+        st = menu_swf_text_edit_runs(
+            edit, html_text, sizeof html_text, &html_len, html_runs,
+            MENU_SWF_TEXT_MAX_RUNS, &html_run_count, &html_summary, reason,
+            sizeof reason);
+        if (st != MENU_SWF_OK) {
+            printf("real: edit id=%u HTML runs refused: %s (%s)\n",
+                   edit->character_id, menu_swf_status_name(st), reason);
+            ++failures;
+            goto done;
+        }
+        if (html_len || html_summary.tags) ++stats.html_payloads;
+        if (html_len) ++stats.html_nonempty;
+        stats.html_runs += html_run_count;
+        stats.html_tags += html_summary.tags;
+        stats.html_unknown_tags += html_summary.unknown_tags;
+        stats.html_colors += html_summary.color_attrs;
+        stats.html_sizes += html_summary.size_attrs;
+        stats.html_faces += html_summary.face_attrs;
+        stats.html_entities += html_summary.entities;
+    }
 
     uint32_t vertex_count = 0, index_count = 0;
     int cpu_ok = 1;
@@ -1171,6 +1212,12 @@ static void run_real(const char *data_dir) {
               (stats.text_refused_font_mask & (1u << 2)) &&
               (stats.text_refused_font_mask & (1u << 9)),
           "real edit-text sources counted and imported fonts refused by exact id");
+    check(stats.html_definitions == 22 && stats.html_payloads == 4 &&
+              stats.html_nonempty == 3 && stats.html_runs == 3 &&
+              stats.html_tags == 14 && stats.html_unknown_tags == 0 &&
+              stats.html_colors == 3 && stats.html_sizes == 3 &&
+              stats.html_faces == 3 && stats.html_entities == 0,
+          "real HTML payload/run census without resolved glyphs");
     if (!cpu_ok) goto done;
 
     const MenuSwfFontSummary *font = NULL;
@@ -1373,6 +1420,12 @@ static void run_real(const char *data_dir) {
            stats.text_refused_font_mask, stats.text_real_glyphs,
            stats.text_missing_glyphs, stats.text_real_vertices,
            stats.text_real_indices);
+    printf("real: html_defs=%u payloads=%u nonempty=%u runs=%u tags=%u "
+           "unknown=%u colors=%u sizes=%u faces=%u entities=%u\n",
+           stats.html_definitions, stats.html_payloads, stats.html_nonempty,
+           stats.html_runs, stats.html_tags, stats.html_unknown_tags,
+           stats.html_colors, stats.html_sizes, stats.html_faces,
+           stats.html_entities);
     printf("real: empty_shapes=%u degenerate_shapes=%u strokes_skipped=%u\n",
            stats.empty_shape_records, stats.degenerate_shape_records,
            stats.stroke_segments);

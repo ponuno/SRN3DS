@@ -25,6 +25,28 @@ static void batch_reason(char *reason, size_t cap, const char *fmt, ...) {
     reason[cap - 1] = 0;
 }
 
+static uint8_t batch_channel(uint32_t base, int32_t mult, int32_t add) {
+    int64_t value = ((int64_t)base * mult + (int64_t)add * 256ll) / 256ll;
+    if (value < 0) value = 0;
+    if (value > 255) value = 255;
+    return (uint8_t)value;
+}
+
+static uint32_t batch_text_color(const MenuSwfBatchStyle *style,
+                                 const MenuSwfTextGlyph *glyph) {
+    uint32_t rgba = glyph->has_color ? glyph->color : style->color;
+    if (!style->has_color_transform) return rgba;
+    uint8_t r = batch_channel((rgba >> 16) & 255u, style->color_mult[0],
+                              style->color_add[0]);
+    uint8_t g = batch_channel((rgba >> 8) & 255u, style->color_mult[1],
+                              style->color_add[1]);
+    uint8_t b = batch_channel(rgba & 255u, style->color_mult[2],
+                              style->color_add[2]);
+    uint8_t a = batch_channel((rgba >> 24) & 255u, style->color_mult[3],
+                              style->color_add[3]);
+    return ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
 const char *menu_swf_batch_status_name(MenuSwfBatchStatus status) {
     switch (status) {
     case MENU_SWF_BATCH_OK: return "ok";
@@ -255,12 +277,13 @@ MenuSwfBatchStatus menu_swf_batch_text(
         BatchQuad q;
         if (!make_quad(&c, &g->bounds, &atlas_entries[i], &q)) continue;
         uint32_t base = vcount;
+        uint32_t color = batch_text_color(style, g);
         for (unsigned k = 0; k < 4; ++k) {
             vertices[vcount].x = q.x[k];
             vertices[vcount].y = q.y[k];
             vertices[vcount].u = q.u[k];
             vertices[vcount].v = q.v[k];
-            vertices[vcount].color = style->color;
+            vertices[vcount].color = color;
             ++vcount;
             if (!have_bounds) {
                 bxmin = bxmax = q.x[k];

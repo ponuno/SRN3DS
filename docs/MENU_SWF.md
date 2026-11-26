@@ -25,10 +25,10 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_clip.h` / `.c` | Clip-depth mask pairs/rectangles, active-mask lists, intersection, fully-clipped flags and rectangle mask quads |
 | `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, retained solid RGBA/gradient stops+matrix/bitmap ids, streaming geometry sink, and DefineFont2/3 glyph SHAPE contours/bounds |
 | `source/menu_swf_tess.h` / `.c` | Bounded even-odd/non-zero tessellation of one shape or DefineFont2/3 glyph into caller-owned vertex/index/triangle-style pools, optional fill-style table and separate stroked line segments |
-| `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement/tessellation, 16.16 transform, ARGB vertices, plus DefineEditText WordWrap/Multiline/alignment/Justify/indent/leading/Password/HTML layout |
+| `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement/tessellation, 16.16 transform, ARGB vertices, GFx HTML runs (colour/size/face/flags/alignment), plus DefineEditText WordWrap/Multiline/alignment/Justify/indent/leading/Password layout |
 | `source/menu_swf_raster.h` / `.c` | Bounded A8 coverage rasterisation of tessellated glyph triangles with 4x4 subpixel samples, caller buffers, 16.16-quantised matrix/pen and named refusals |
 | `source/menu_swf_atlas.h` / `.c` | Deterministic shelf packing of A8 coverage rectangles into a caller atlas, zero-filled padding, per-glyph rect/UV and named refusals |
-| `source/menu_swf_batch.h` / `.c` | Text quad/index batch plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping and count-before-write overflow |
+| `source/menu_swf_batch.h` / `.c` | Text quad/index batch with per-run colours and optional record CXFORM, plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping and count-before-write overflow |
 | `source/d3d9_menu_text.h` / `.c` | Host/menu COM demo: A8 texture creation/upload and one DrawPrimitiveUP from the atlas+batch |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_avm_smoke.c` | Synthetic Stop/Play/GotoFrame/GotoLabel/Wait/Push/variable/function/unknown/truncated cases, DoInitAction ownership, safe display annotation and exact real StartMenu histogram |
@@ -38,6 +38,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_shape_smoke.c` | Synthetic rectangle/curve/two-style/glyph shapes plus truncation, bitmap-id, segment-limit and AVM2/DefineFont4 refusals; optional real shape/glyph summary |
 | `tests/menu_swf_tess_smoke.c` | Synthetic square in both orientations, even-odd hole, non-zero star/nested contours, curve, multiple styles, stroked square, empty contour, overflow and missing-shape refusals; optional real tessellation summary |
 | `tests/menu_swf_text_smoke.c` | Synthetic font/edit-text fixtures: parse/collect, wrap/multiline, all alignments/Justify, HTML, empty bounds, Password/unknown-font/overflow refusals and GFx sentinels; optional real StartMenu text/import census |
+| `tests/menu_swf_html_smoke.c` | Synthetic GFx HTML tags/entities/nesting/unknown tags, run layout size scaling, per-run batch colours/CXFORM and named refusals; optional real StartMenu HTML payload census |
 | `tests/menu_swf_raster_smoke.c` | Synthetic square/triangle exact coverage, hole rules, subpixel/rotation/mirror/clip, empty glyph and named refusals; optional real code-33 32x32 and 64x64 coverage |
 | `tests/menu_swf_atlas_smoke.c` | Synthetic varied-size pack/determinism/UV/composition/overflow/empty cases; optional real codes 33..36 coverage-sum comparison |
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
@@ -45,7 +46,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_gradient_smoke.c` | Synthetic exact 2/3-stop linear, radial, pad/reflect/repeat, named invalid stops/matrix/interpolation/spread/focal/bitmap refusals; optional real StartMenu gradient census |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
 | `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: URL/fallback font load, exact-id resolve/refusals, solid-fill shape batch + resolved edit-text tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_html`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_swf_gradient`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
 | `tests/menu_indexed_draw_smoke.c` | Core recording backend: exact compact vertices/indices, >4,095-index batch, 32-bit and 65,536-vertex fallbacks, named expansion limit and DevCaps 0x00082000 |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
@@ -560,8 +561,10 @@ rectangle order reflects height/width sorting (35, 36, 33 at height 62, then
   `(0,1,2)`/`(0,2,3)`.  Empty, missing and zero-size glyphs are skipped without
   leaving index holes.  Glyph order follows the text mesh's pen order.
 * The style matrix/translation is quantised to signed 16.16 and applied to the
-  layout-space glyph bounds.  Every vertex carries the caller's ARGB colour.
-  A zero or negative determinant is `ERR_SCALE`; non-finite terms are
+  layout-space glyph bounds.  Every vertex carries its glyph run's ARGB;
+  glyphs without an explicit run colour fall back to `style->color`.  Optional
+  `color_mult`/`color_add` applies the record CXFORM to the selected run
+  colour.  A zero or negative determinant is `ERR_SCALE`; non-finite terms are
   `ERR_NAN`.
 * Positions are rounded to integer pixel edges with no +0.5 bias.  Atlas UVs
   map texel edges to those quad edges, which is the half-pixel convention used
@@ -752,11 +755,16 @@ nested sprite tags into a caller-owned array.  Limits are **64 definitions**,
 its NUL at tag end.  Trailing bytes are reported explicitly.
 
 `menu_swf_text_edit_plain()` extracts the bounded plain source without a font.
-For the measured GFx HTML convention the payload lives in the variable-name
-slot and its first opening `<` is omitted; the extractor normalizes that one
-case, strips supported tags (`p`, `br`, `li`, `font`, formatting tags), decodes
-`lt/gt/amp/quot/apos`, and names unsupported entities.  HTML font size,
-colour, letter-spacing and class changes are not applied as rich-text spans.
+`menu_swf_text_edit_runs()` parses the same source into `MenuSwfTextRun`
+records.  For the measured GFx convention the payload lives in the
+variable-name slot and its first opening `<` is omitted; the parser normalizes
+that one case.  Supported tags are `<font color="#RRGGBB" size="N" face="...">`,
+`<b>`, `<i>`, `<u>`, `<br>`, `<p align=...>` and `<li>`; entities are
+`amp/lt/gt/quot/apos/nbsp`.  Runs retain colour, size, face, bold/italic/
+underline and alignment.  Unknown tags are skipped while their inner text is
+preserved and counted; malformed tags and unknown entities are named refusals.
+Face names are metadata only (no face-to-font match in this layer).  The plain
+extractor decodes the same entities and refuses unsupported ones.
 
 `menu_swf_text_layout_edit()` requires an axis-aligned positive raw-font-to-
 pixel style and matching font id.  It applies bounds/margins, first-line indent,
@@ -765,13 +773,18 @@ Center/Justify (extra space after spaces on non-final lines), kerning and
 advances.  Password text becomes `*` only when the font has that glyph,
 otherwise named `NOTIMPL`; unknown font id is named `ARGUMENT`; output capacity
 and line/glyph limits are named `BUDGET`.  Empty text emits zero glyphs/vertices
-and one empty line while preserving the transformed edit bounds.
+and one empty line while preserving the transformed edit bounds.  HTML runs are
+laid out in order: a run's `size` scales advances and glyph outlines relative
+to the edit font height, line ascent/height use the largest run, alignment comes
+from the run/paragraph state, and every glyph/vertex carries the run's ARGB.
+`MenuSwfTextMesh.runs` reports caller-owned spans with glyph ranges.
 
 Measured real `Update.bsa` StartMenu:
 
 ```text
 DefineEditText definitions=22 ids=22
-HTML payload definitions=5; nonempty plain definitions=3
+HTML-flagged definitions=22; payloads=4 (3 nonempty + 1 empty <p>)
+HTML runs=3 tags=14 unknown=0 colours=3 sizes=3 faces=3 entities=0
 id=82  "$Loading extra content."                 23 chars
 id=86  "$Loading downloadable content..."        32 chars
 id=95  "Start a New Game?"                       17 chars
@@ -809,14 +822,15 @@ Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
+  -Only menu_swf_batch,menu_swf_fill,menu_swf_gradient,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_html,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
-Result: `menu_swf_batch` **21 checks, 0 failures**; `menu_swf_fill` **32
+Result: `menu_swf_batch` **21 checks, 0 failures**; `menu_swf_fill` **34
 checks, 0 failures**; `menu_swf_atlas` **27
 checks, 0 failures**; `menu_swf_raster` **44 checks, 0 failures**;
-`menu_swf_text` **76 checks, 0 failures**; `menu_swf_tess` **47 checks, 0
+`menu_swf_text` **76 checks, 0 failures**; `menu_swf_html` **31 checks, 0
+failures**; `menu_swf_tess` **47 checks, 0
 failures**; `menu_swf_shape` **28 checks, 0 failures**; `menu_swf_clip` **17
 checks, 0 failures**; `menu_swf_display_list` **15 checks, 0 failures**;
 `menu_swf_display` **38 checks, 0 failures**; `menu_swf` **95 checks, 0
@@ -828,14 +842,15 @@ Real read-only:
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_fill,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
+  -Only menu_swf_batch,menu_swf_fill,menu_swf_gradient,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_html,menu_swf_tess,menu_swf_shape,menu_swf_clip,menu_swf_display_list,menu_swf_display,menu_swf,menu_swf_avm,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe -TestTimeoutSec 300
 ```
 
-Result: `menu_swf_batch` **34 checks, 0 failures**; `menu_swf_fill` **43
+Result: `menu_swf_batch` **34 checks, 0 failures**; `menu_swf_fill` **45
 checks, 0 failures**; `menu_swf_atlas` **37
 checks, 0 failures**; `menu_swf_raster` **60 checks, 0 failures**;
-`menu_swf_text` **93 checks, 0 failures**; `menu_swf_tess` **55 checks, 0
+`menu_swf_text` **93 checks, 0 failures**; `menu_swf_html` **58 checks, 0
+failures**; `menu_swf_tess` **55 checks, 0
 failures**; `menu_swf_shape` **40 checks, 0 failures**; `menu_swf_clip` **24
 checks, 0 failures**; `menu_swf_display_list` **23 checks, 0 failures**;
 `menu_swf_display` **57 checks, 0 failures**; `menu_swf` **114 checks, 0
@@ -898,13 +913,22 @@ untouched; the real check reports 40 solid fills with no gradients/bitmaps, a
 black shape 2, and 552/552 shape-2 vertices carrying fill colours.
 `menu_swf_gradient` adds exact two- and three-stop linear colours, radial
 center/mid/radius, pad/reflect/repeat at `t=1.25`, and named descending-stop,
-truncated-stop, interpolation, spread and singular-matrix refusals.
+truncated-stop, interpolation, spread and singular-matrix refusals.  The HTML
+test adds `<font color/size/face>`, `<b>`, `<i>`, `<u>`, `<br>`, `<p align>`,
+all supported entities, nested style restore, unknown-tag text preservation,
+malformed/unknown-entity and capacity refusals; it lays out a 24px run at twice
+the 12px advance, checks per-run glyph and batch colours plus CXFORM, and the
+real check reports 22 HTML-flagged definitions, 4 payloads (3 nonempty), 3
+runs, 14 tags and 0 unknown tags.
 
 Full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
-`-TestTimeoutSec 300`: **128 passed, 0 diagnostic, 0 failed**.  This includes the
+`-TestTimeoutSec 300`: **129 passed, 0 diagnostic, 0 failed**.  This includes the
 real `menu_swf_avm` inventory (35 checks), `menu_swf` (114),
-`menu_swf_display_list` (23) and `menu_pipeline_e2e` (59), all with zero
+`menu_swf_display_list` (23) and `menu_pipeline_e2e` (60), all with zero
 failures.
+
+Full host suite with the main-tree generated slice/IR container:
+**140 passed, 1 diagnostic (`tesv_slice`), 0 failed**.
 
 ## 17. Real StartMenu CPU -> COM pipeline
 
@@ -947,6 +971,8 @@ source_records=57 nonempty_records=3 source_lines=3 source_glyph_slots=72
 refused_records=57 resolved_records=0 layout_records=0
 refused_font_mask=00000204 resolved_text_glyphs=0 missing_glyphs=0
 real_text_vertices=0 real_text_indices=0
+html_defs=22 payloads=4 nonempty=3 runs=3 tags=14 unknown=0
+html_colors=3 html_sizes=3 html_faces=3 html_entities=0
 empty_shapes=0 degenerate_shapes=0 strokes_skipped=182
 tessellated_vertices=57480 triangles=28718
 shape_colour_vertices=57480/57480
@@ -956,22 +982,22 @@ raster=64x64 rect=24,1,40,63 sum=178003 atlas_used_height=62
 batch_vertices=57484 indices=86160 triangles=28720
 limits=262144 vertices / 786432 indices
 COM draw_calls=1 expanded_vertices=0 indexed_draws=1 indexed_vertices=57484 indexed_indices=86160
-FVF=0x142 A8=64x64 control_text_quads=1; 59 checks, 0 failures
+FVF=0x142 A8=64x64 control_text_quads=1; 60 checks, 0 failures
 ```
 
 The 57 real text records produce three nonempty plain sources (72 source glyph
 slots), but all reference imported fonts 34/41.  The declared `gfxfontlib.swf`
 URL is absent and the `fonts_en.swf` fallback has neither exact id, so all 57
-are named refusals and add zero real-text glyphs/vertices.  The exact-id
-resolved-text layout/tessellation path is wired but not exercised by this retail
-census.  The single local-font `!` control exercises the raster/atlas/batch/COM
-path.  Shape fills use the atlas's white texel and the parsed solid-fill RGBA
+are named refusals and add zero real-text glyphs/vertices.  The four HTML
+payloads (three nonempty plus one empty `<p>`) are parsed into three runs and
+14 tags without glyph layout, honestly reporting the unresolved fonts.  The
+single local-font `!` control exercises the raster/atlas/batch/COM path.
+Shape fills use the atlas's white texel and the parsed solid-fill RGBA
 multiplied by the record CXFORM; linear/radial gradient fills are evaluated per
-vertex, focal/bitmap fills are named refusals,
-and the 182 stroke segments are counted and skipped.  On this pre-dedup HEAD the
-86,158-vertex batch exceeds the 16-bit indexed range, so the preserved UP path
-submits 22 chunks; after dedup brings it under 65,536 vertices the same test
-takes the strict indexed branch.  The host mock `Present` only closes the COM
+vertex, focal/bitmap fills are named refusals, and the 182 stroke segments are
+counted and skipped.  The deduped batch is 57,484 vertices / 86,160 indices,
+within the 16-bit indexed range, and is submitted as one indexed draw.  The
+host mock `Present` only closes the COM
 scene state machine so releases are not deferred.  No pixel readback, GPU/PICA
 sampling, visual equivalence or frame is claimed.
 
@@ -979,16 +1005,24 @@ Verification:
 
 * targeted `menu_swf_avm,menu_swf,menu_swf_display_list,menu_pipeline_e2e`
   with real data: **4 C targets passed; harness 14 passed, 0 diagnostic, 0
-  failed**; check counts 35, 114, 23 and 59;
-* AVM + SWF + display-list + real e2e under ASan: **35 + 114 + 23 + 59 checks,
+  failed**; check counts 35, 114, 23 and 60;
+* targeted
+  `menu_swf_html,menu_swf_text,menu_swf_batch,menu_swf_fill,menu_indexed_draw,menu_pipeline_e2e`
+  with real data: **16 passed, 0 diagnostic, 0 failed**; check counts 58, 93,
+  34, 45, indexed PASS and 60;
+* AVM + SWF + display-list + real e2e under ASan: **35 + 114 + 23 + 60 checks,
   0 failures; harness 14 passed, 0 diagnostic, 0 failed**;
+* HTML + real e2e under ASan: **58 + 60 checks, 0 failures; harness 12
+  passed, 0 diagnostic, 0 failed**;
 * full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data` and
-  `-TestTimeoutSec 300`: **128 passed, 0 diagnostic, 0 failed**;
+  `-TestTimeoutSec 300`: **129 passed, 0 diagnostic, 0 failed**;
+* full host suite with the main-tree generated slice/IR container:
+  **140 passed, 1 diagnostic (`tesv_slice`), 0 failed**;
 * ARM compile-only (`arm-none-eabi-gcc`, no link/run): all **5/5** changed C
   translation units succeeded; `menu_swf_avm.c.o` text 11,771 B and
   `menu_swf_display_list.c.o` text 6,189 B.  No ARM binary/hardware/frame claim;
-* ARM compile-only: `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B,
-  `menu_swf_batch.o` 10,664 B, `d3d9_menu_text.o` 5,864 B;
+* ARM compile-only: `menu_swf_text.o` 22,192 B, `menu_swf_batch.o` 12,940 B,
+  `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B;
 * ARM compile-only `-Mode com -Isolated edit_text`: `.elf` 6,178,376 B,
   SHA256 `2fd3e1af9ec6de706e762f20012340a90f74ad61dec2b64ccdf339cfecc4191e`;
   `.3dsx` 913,460 B, SHA256
@@ -1012,10 +1046,10 @@ Verification:
    is absent and the `fonts_en.swf` fallback lacks those exact ids; no name
    substitution is performed.  `fonts_en.swf`/`fonts_console.swf`,
    `FontConfig.txt`, texture cache/rehydration, richer shaping (ligatures,
-   bidi, fallback fonts), HTML style spans and text metrics beyond
-   advance+kerning remain.  The host COM demo can create/upload an A8 atlas and
-   draw the combined shape/control-text batch; there is no persistent cache,
-   PICA A8 sampling or real GFx text object yet.
+   bidi, fallback fonts), HTML face-to-font matching/letter-spacing/class spans
+   and text metrics beyond advance+kerning remain.  The host COM demo can
+   create/upload an A8 atlas and draw the combined shape/control-text batch;
+   there is no persistent cache, PICA A8 sampling or real GFx text object yet.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
 5. **Draw path** - real GFx display list/masks, dynamic vertex buffer/FVF,

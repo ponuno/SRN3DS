@@ -56,7 +56,11 @@ typedef struct {
     /* Matrix is quantised to signed 16.16; translation is in output pixels. */
     double m00, m01, m10, m11;
     double tx, ty;
-    uint32_t color; /* ARGB copied to all four vertices */
+    uint32_t color; /* default ARGB for glyphs without a per-run colour */
+    /* Optional record CXFORM applied to the chosen per-glyph/run colour. */
+    uint8_t has_color_transform;
+    int32_t color_mult[4]; /* 8.8, 256 = 1.0 */
+    int32_t color_add[4];
 } MenuSwfBatchStyle;
 
 /* Shape batch inputs: the record matrix is 16.16 with twip translation, and
