@@ -56,6 +56,11 @@ int main(void) {
     CHECK(copy && copy->kind == D9_SHADER_PLAN_TEV, "copy is TEV");
     CHECK(copy && copy->draw_enabled == 1, "copy is draw-enabled");
     CHECK(copy && copy->tev.stages == 1, "copy has one stage");
+    CHECK(copy && copy->tev.stage_limit == D9TEV_MAX_STAGES,
+          "copy keeps the PICA stage limit");
+    CHECK(copy && copy->tev.backend_flags == 0 &&
+          copy->tev.requires_alpha_test == 0 && copy->tev.texkill_count == 0,
+          "copy optional flags stay zero");
     CHECK(copy && copy->tev.stage[0].func_rgb == D9TEV_FUNC_REPLACE,
           "copy stage 0 replaces");
     CHECK(copy && copy->tev.stage[0].src_rgb[0] == D9TEV_SRC_TEX0,

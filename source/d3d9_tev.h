@@ -144,10 +144,10 @@ typedef struct {
     uint8_t constant_reg[D9TEV_MAX_CONSTANTS];
     unsigned uses_vertex_color;
     unsigned requires_alpha_fixup;/* final alpha was undefined and forced to 1 */
-    unsigned requires_alpha_test; /* texkill proved equivalent to oC0.a > 0 */
-    unsigned texkill_count;       /* number of folded texkill instructions */
     unsigned stage_limit;         /* 6: PICA200 hardware limit */
     uint32_t backend_flags;       /* D9TEV_PLAN_*; 0 for generic translation */
+    unsigned requires_alpha_test; /* texkill proved equivalent to oC0.a > 0 */
+    unsigned texkill_count;       /* number of folded texkill instructions */
 } D9TevProgram;
 
 /* Translate one ps_3_0 program.
