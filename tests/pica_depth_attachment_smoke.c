@@ -87,7 +87,7 @@ int main(void) {
     D9Handle ptarget = 0, p16 = 0, p8 = 0;
     setup(p, &ptarget, &p16, &p8);
     assert(!d9_set_depth_surface(p, p16));
-    assert(d9_set_depth_surface(p, p8) == D9_UNSUPPORTED);
+    assert(d9_set_depth_surface(p, p8) == D9_INVALID);
     assert(strstr(d9_last_draw_diagnostic(p), "does not match") != NULL);
     assert(d9_get_depth_surface(p) == p16);
     assert(!d9_end_scene(p));
