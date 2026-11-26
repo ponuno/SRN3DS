@@ -351,3 +351,49 @@ slot/count bookkeeping to stay consistent. Do not fabricate a cube face.
 
 A config-only path would require the engine to read `bUseWaterReflections`
 before `0xc92676`; it does not today.
+
+## 11. Cube-skip probe census (2026-11-26)
+
+`TESV_D3D9_CUBE_SKIP_PROBE=1` implements the checked-NULL skip as a
+measurement-only host-slice probe (`source/tesv_cube_probe.c` and
+`source/tesv_cube_probe_slice.c`; test `tests/tesv_cube_probe_smoke.c`). It
+byte-verifies `0xc9163e` (`F6 C2 10`), `0xc9164d` (`52 51 50`), `0xc91650`
+(`E8 CB 45 32 00`, target `0xfb5c20`) and `0xc916d1` (`83 7C 24 38 00`), then
+writes the ten-byte patch:
+
+```text
+83 C4 0C 33 F6 E9 77 00 00 00
+add esp,0xc; xor esi,esi; jmp 0x00c916d1
+```
+
+The AOT/IR shadow `tesv_cube_probe_fb5c20()` returns `eax=0` for the same call
+site (return address `0xC91655`) so the predecoded `f_C91540`/`f_C915AC`/
+`f_C91630` path takes the existing `test eax,eax` -> `0xC916D1` branch. The
+measurement build renames the three generated `f_FB5C20(c)` call sites in
+`gen01/tesv_16.c` to the shadow and restores the generated file after the
+build. The probe prints `MEASUREMENT ONLY ... not shippable`; caps, SM3 words
+and T&L are unchanged.
+
+Host test: `tesv_cube_probe` PASS (exact 10-byte patch, only those bytes
+changed, repeat refusal, wrong flag/push/call/target/epilogue refusals,
+unmapped memory refusal). Registered in `tools/run_host_tests.ps1`.
+
+Fresh slice from `main` `bc6ae69` (`growth_probe/gen01`), census with SM3,
+HDR-fallback and 64 MiB budget probes: **90.243 s**, exit 1.
+
+- `0xfb5bd0` is **gone**; the cube branch no longer calls `0xfb5c20`.
+- New first blocker: `last_call=0x00fb6090`, address `0xb`. `0xfb6090` is
+  `NiRenderTargetGroup` vtable `0x011b019c` slot 34 (`0x88`):
+  `mov eax,[ecx+eax*4+0xc]; mov eax,[eax+0xc]`. The selected buffer slot is
+  the `0xffffffff` sentinel, so `[[-1]+0xc]` faults at `0xb`. The active group
+  is `[0x1b913f0+0x628]`; the skipped cube group left a `-1` face/buffer entry
+  instead of a zeroed checked NULL.
+- Still 0: `CreateCubeTexture`, `GetCubeMapSurface`, `SetRenderTarget`,
+  `CreateDepthStencilSurface`, `SetDepthStencilSurface`, `CreateVertexShader`,
+  `CreatePixelShader`, `SetTexture`, both draw entry points and `Present`.
+  The last D3D call is still `Release(0x500022c0)` (the 0x71 2D target).
+
+Next minimal step: zero the skipped group's buffer array (or skip the
+`0xc92676` group build and its slot bookkeeping) so `GetBufferData` at
+`0xfb6090` sees NULL and returns 0; then re-run for depth/shaders/draw. Do not
+fabricate a cube.

@@ -11,6 +11,7 @@
 #include "d3dx_texture_shims.h"
 #include "d3dx_surface_shims.h"
 #include "tesv_sm3_probe.h"
+#include "tesv_cube_probe.h"
 #include "ir_core.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
@@ -126,6 +127,10 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
     }
     if (tesv_sm3_gate_probe(&b.memory)) {
         printf("sm3 probe: refused; guest run not started\n");
+        goto out;
+    }
+    if (tesv_cube_skip_probe(&b.memory)) {
+        printf("cube probe: refused; guest run not started\n");
         goto out;
     }
     if (n3ds_ir_cache_init(4u << 20) != 0) printf("IR cache: 4 MiB allocation failed; using default\n");

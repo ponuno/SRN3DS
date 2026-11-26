@@ -418,6 +418,63 @@ the `0xc92676` call and store 0. A port-side D3D refusal cannot intercept
 because the fault is before `CreateCubeTexture`. Full analysis:
 `docs/CUBE_RENDER_TARGETS.md` section 10.
 
+### Cube-skip measurement probe (2026-11-26)
+
+`TESV_D3D9_CUBE_SKIP_PROBE=1` is **host-slice only and not shippable**. It
+byte-verifies the retail window in `0xc91540` and patches the 10 bytes at
+`0xc91650`:
+
+```text
+00c9163e: F6 C2 10              test dl,0x10        (verified)
+00c9164d: 52 51 50              push edx/ecx/eax    (verified)
+00c91650: E8 CB 45 32 00        call 0x00fb5c20     (verified, target checked)
+00c916d1: 83 7C 24 38 00        cmp [esp+0x38],0    (verified)
+
+patch:    83 C4 0C 33 F6 E9 77 00 00 00
+          add esp,0xc; xor esi,esi; jmp 0x00c916d1
+```
+
+The AOT/IR path never re-fetches patched instruction bytes, so the slice also
+links a narrow call-site shadow: `tesv_cube_probe_fb5c20()` returns `eax=0`
+when the probe is active and the guest return address is `0x00c91655`, and
+calls the real `f_FB5C20()` otherwise. The measurement build renames the three
+generated `f_FB5C20(c)` call sites in `gen01/tesv_16.c` (the lifted
+`f_C91540`, `f_C915AC`, `f_C91630` entries) to `tesv_cube_probe_fb5c20(c)` and
+adds the prototype; `gen01/tesv_16.c` is restored byte-for-byte after the
+build. Without that rename the AOT function bypasses the guest byte patch.
+Both paths reach `0xc916d1` with `esi=0`, so `0xc91ba0` stores a NULL group and
+the renderer's null-target diagnostic handles it. Caps, SM3 words and T&L are
+unchanged; the probe prints `MEASUREMENT ONLY ... not shippable`.
+
+Host test `tesv_cube_probe` (registered in `run_host_tests.ps1`) passes: exact
+10-byte patch, only those bytes changed, repeat call refuses without writing,
+wrong flag/push/call/target/epilogue bytes refuse without writing, and an
+unmapped `GuestMemory` refuses. The fresh slice was built from `main` at
+`bc6ae69` (`growth_probe/gen01`) and the census ran with the SM3, HDR-fallback
+and 64 MiB budget probes for **90.243 s**, exit 1.
+
+Result:
+
+- **`0xfb5bd0` is gone.** The cube branch no longer calls
+  `NiRenderedCubeMap::Create`.
+- **New first blocker:** `[guest] unmapped addr=0000000b bytes=4
+  last_call=00fb6090`. `0xfb6090` is `NiRenderTargetGroup` vtable
+  `0x011b019c` slot 34 (`0x88`), `mov eax,[ecx+eax*4+0xc]; mov eax,[eax+0xc]`;
+  the selected buffer slot is the `0xffffffff` sentinel, so `[[-1]+0xc]`
+  faults at `0xb`. The active group is `[0x1b913f0+0x628]`; the skipped cube
+  group's face/buffer entry was left as the `-1` sentinel rather than a zeroed
+  checked NULL.
+- No `CreateDepthStencilSurface`, `SetRenderTarget`, `CreateVertexShader`,
+  `CreatePixelShader`, `SetTexture`, draw or `Present` yet. The last D3D call
+  is still `Release(0x500022c0)` (the 512x512 `0x71` 2D target).
+- `CreateCubeTexture` and `GetCubeMapSurface` are still 0 (the cube creation is
+  skipped, not replaced by a fake cube).
+
+Next layer: make the skipped group's buffer array a real zeroed checked NULL
+(or skip the `0xc92676` group build and its slot bookkeeping) so the
+`GetBufferData` query at `0xfb6090` sees NULL and returns 0; then re-run the
+census for depth/shaders/draw.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
