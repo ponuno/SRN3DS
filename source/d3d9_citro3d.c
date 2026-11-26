@@ -220,6 +220,8 @@ static void configure_native_texture(void *texture,const D9DrawState *state){
     C3D_TexSetFilter(&t->tex,config.mag_filter==2?GPU_LINEAR:GPU_NEAREST,config.min_filter==2?GPU_LINEAR:GPU_NEAREST);
     /* NONE disables interpolation between mip levels, not mip selection itself. */
     C3D_TexSetFilterMipmap(&t->tex,config.mip_filter==2?GPU_LINEAR:GPU_NEAREST);C3D_TexSetWrap(&t->tex,wrap(state->address_u),wrap(state->address_v));
+    /* D3DSAMP_MIPMAPLODBIAS: exact hardware lod bias, clamped to [-16,16). */
+    C3D_TexSetLodBias(&t->tex,config.lod_bias);
 }
 /* The LCD framebuffer is stored rotated 240x400, so every clip matrix the core
  * builds carries a screen rotation.  An offscreen colour target is a normal D3D
@@ -371,6 +373,7 @@ static void configure_native_cube(NativeCube *t,const D9DrawState *state){
                      state&&state->min_filter==2?GPU_LINEAR:GPU_NEAREST);
     C3D_TexSetFilterMipmap(&t->tex,state&&state->mip_filter==2?GPU_LINEAR:GPU_NEAREST);
     C3D_TexSetWrap(&t->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
+    C3D_TexSetLodBias(&t->tex,state?d9_sampler_lod_bias(state->lod_bias):0.0f);
 }
 static void prepare_draw_cube(D9Citro *c){
     C3D_BindProgram(&c->program_cube);

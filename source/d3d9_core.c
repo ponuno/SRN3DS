@@ -279,7 +279,7 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
         free(d);return NULL;
     }
     d->state=(D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
-        .address_u=1,.address_v=1,.mag_filter=1,.min_filter=1,.mip_filter=0,
+        .address_u=1,.address_v=1,.address_w=1,.mag_filter=1,.min_filter=1,.mip_filter=0,.max_anisotropy=1,
         .stage_colorop=D9_TOP_SELECTARG1,.stage_colorarg1=D9_TA_TEXTURE,.stage_colorarg2=D9_TA_CURRENT,
         .stage_alphaop=D9_TOP_SELECTARG1,.stage_alphaarg1=D9_TA_TEXTURE,.stage_alphaarg2=D9_TA_CURRENT,
         .stage_texcoordindex=0};
@@ -1104,9 +1104,13 @@ static int rehydrate_cube(D9Device *d,CubeTexture *c){
     return D9_OK;
 }
 int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
-    if(!d||stage>=d9_stage_count(d)){
-        if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");
-        return D9_UNSUPPORTED;
+    if(!d||stage>=D9_SAMP_STAGES){if(d){char why[96];snprintf(why,sizeof why,"stage %u is outside D3D9's 16 texture stages",stage);set_diagnosis(d,why);}return D9_INVALID;}
+    if(stage>=d9_stage_count(d)){
+        if(!h){set_diagnosis(d,"");return D9_OK;}
+        char why[160];
+        snprintf(why,sizeof why,"stage %u has no PICA texture unit (backend backs %u 2D stages)",
+                 stage,d9_stage_count(d));
+        set_diagnosis(d,why);return D9_UNSUPPORTED;
     }
     if(h){
         CubeTexture *c=cube_texture(d,h);
@@ -1406,9 +1410,13 @@ static int rehydrate_volume(D9Device *d,VolumeTexture *v){
     return D9_OK;
 }
 int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
-    if(!d||stage>=d9_stage_count(d)){
-        if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");
-        return D9_UNSUPPORTED;
+    if(!d||stage>=D9_SAMP_STAGES){if(d){char why[96];snprintf(why,sizeof why,"stage %u is outside D3D9's 16 texture stages",stage);set_diagnosis(d,why);}return D9_INVALID;}
+    if(stage>=d9_stage_count(d)){
+        if(!h){set_diagnosis(d,"");return D9_OK;}
+        char why[160];
+        snprintf(why,sizeof why,"stage %u has no PICA texture unit (backend backs %u 2D stages)",
+                 stage,d9_stage_count(d));
+        set_diagnosis(d,why);return D9_UNSUPPORTED;
     }
     if(h){
         VolumeTexture *v=volume_texture(d,h);
@@ -1942,7 +1950,7 @@ int d9_reset_device_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int loc
     d->target=0;
     memset(d->depths,0,sizeof d->depths);d->depth=0;
     d->state=(D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
-        .address_u=1,.address_v=1,.mag_filter=1,.min_filter=1,.mip_filter=0,
+        .address_u=1,.address_v=1,.address_w=1,.mag_filter=1,.min_filter=1,.mip_filter=0,.max_anisotropy=1,
         .stage_colorop=D9_TOP_SELECTARG1,.stage_colorarg1=D9_TA_TEXTURE,.stage_colorarg2=D9_TA_CURRENT,
         .stage_alphaop=D9_TOP_SELECTARG1,.stage_alphaarg1=D9_TA_TEXTURE,.stage_alphaarg2=D9_TA_CURRENT,
         .stage_texcoordindex=0};
@@ -2124,7 +2132,16 @@ int d9_set_indices(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(d&&!h
 unsigned d9_stage_count(const D9Device *d){return d&&d->ops.draw_two?2:1;}
 int d9_set_texture(D9Device *d,D9Handle h){return d9_bind_texture(d,0,h);}
 int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
-    if(stage>=d9_stage_count(d)){if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");return D9_UNSUPPORTED;}
+    if(!d||stage>=D9_SAMP_STAGES){if(d){char why[96];snprintf(why,sizeof why,"stage %u is outside D3D9's 16 texture stages",stage);set_diagnosis(d,why);}return D9_INVALID;}
+    if(stage>=d9_stage_count(d)){
+        /* D3D9 has 16 texture stages and SetTexture(stage, NULL) is always a
+         * valid clear; only a real binding needs a PICA texture unit. */
+        if(!h){set_diagnosis(d,"");return D9_OK;}
+        char why[160];
+        snprintf(why,sizeof why,"stage %u has no PICA texture unit (backend backs %u 2D stages)",
+                 stage,d9_stage_count(d));
+        set_diagnosis(d,why);return D9_UNSUPPORTED;
+    }
     Texture *t=d?texture(d,h):NULL;
     if(!d||d->teardown||(h&&(!t||t->locked)))return D9_INVALID;
     if(h&&t->lost){
@@ -2464,10 +2481,156 @@ static unsigned *render_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned *
     case 22:*min=1;*max=3;return &s->cull;case 23:*min=1;*max=8;return &s->z_func;
     case 24:*max=255;return &s->alpha_ref;case 25:*min=1;*max=8;return &s->alpha_func;
     case 168:*max=15;return &s->color_write;case 171:*min=1;*max=5;return &s->blend_op;default:return NULL;}}
-static unsigned *sampler_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned *max){*min=1;*max=2;switch(id){
-    case 1:*max=3;return &s->address_u;case 2:*max=3;return &s->address_v;
-    case 5:return &s->mag_filter;case 6:return &s->min_filter;case 7:*min=0;return &s->mip_filter;
-    case 9:*min=0;*max=10;return &s->max_mip;default:return NULL;}}
+/* D3DSAMPLERSTATETYPE decode.  The switch below names every state so a refusal
+ * can state the exact type and value instead of returning a generic INVALID. */
+static const char *sampler_name(unsigned id){switch(id){
+    case D9_SAMP_ADDRESSU:return "D3DSAMP_ADDRESSU";
+    case D9_SAMP_ADDRESSV:return "D3DSAMP_ADDRESSV";
+    case D9_SAMP_ADDRESSW:return "D3DSAMP_ADDRESSW";
+    case D9_SAMP_BORDERCOLOR:return "D3DSAMP_BORDERCOLOR";
+    case D9_SAMP_MAGFILTER:return "D3DSAMP_MAGFILTER";
+    case D9_SAMP_MINFILTER:return "D3DSAMP_MINFILTER";
+    case D9_SAMP_MIPFILTER:return "D3DSAMP_MIPFILTER";
+    case D9_SAMP_MIPMAPLODBIAS:return "D3DSAMP_MIPMAPLODBIAS";
+    case D9_SAMP_MAXMIPLEVEL:return "D3DSAMP_MAXMIPLEVEL";
+    case D9_SAMP_MAXANISOTROPY:return "D3DSAMP_MAXANISOTROPY";
+    case D9_SAMP_SRGBTEXTURE:return "D3DSAMP_SRGBTEXTURE";
+    case D9_SAMP_ELEMENTINDEX:return "D3DSAMP_ELEMENTINDEX";
+    case D9_SAMP_DMAPOFFSET:return "D3DSAMP_DMAPOFFSET";
+    default:return NULL;}}
+/* D3D9 default for one sampler state; also the value of an untouched stage. */
+static int sampler_default(unsigned id,unsigned *v){switch(id){
+    case D9_SAMP_ADDRESSU:case D9_SAMP_ADDRESSV:case D9_SAMP_ADDRESSW:
+    case D9_SAMP_MAGFILTER:case D9_SAMP_MINFILTER:*v=1;return 0; /* WRAP / POINT */
+    case D9_SAMP_MAXANISOTROPY:*v=1;return 0;
+    case D9_SAMP_MIPFILTER:case D9_SAMP_MIPMAPLODBIAS:case D9_SAMP_MAXMIPLEVEL:
+    case D9_SAMP_SRGBTEXTURE:case D9_SAMP_BORDERCOLOR:
+    case D9_SAMP_ELEMENTINDEX:case D9_SAMP_DMAPOFFSET:*v=0;return 0;
+    default:return -1;}}
+static unsigned sampler_value(const D9DrawState *s,unsigned id){switch(id){
+    case D9_SAMP_ADDRESSU:return s->address_u;
+    case D9_SAMP_ADDRESSV:return s->address_v;
+    case D9_SAMP_ADDRESSW:return s->address_w;
+    case D9_SAMP_BORDERCOLOR:return s->border_color;
+    case D9_SAMP_MAGFILTER:return s->mag_filter;
+    case D9_SAMP_MINFILTER:return s->min_filter;
+    case D9_SAMP_MIPFILTER:return s->mip_filter;
+    case D9_SAMP_MIPMAPLODBIAS:return s->lod_bias;
+    case D9_SAMP_MAXMIPLEVEL:return s->max_mip;
+    case D9_SAMP_MAXANISOTROPY:return s->max_anisotropy;
+    case D9_SAMP_SRGBTEXTURE:return s->srgb;
+    default:return 0; /* ELEMENTINDEX/DMAPOFFSET are always zero here */}}
+static int sampler_refuse(D9Device *d,const char *what,unsigned id,unsigned v,int rc){
+    char why[200];
+    snprintf(why,sizeof why,"%s=0x%08x refused: %s",sampler_name(id),v,what);
+    set_diagnosis(d,why);return rc;
+}
+static int sampler_set(D9DrawState *s,D9Device *d,unsigned id,unsigned v){
+    char why[200];
+    switch(id){
+    case D9_SAMP_ADDRESSU:case D9_SAMP_ADDRESSV:case D9_SAMP_ADDRESSW:
+        if(v<D9_TADDRESS_WRAP||v>D9_TADDRESS_MIRRORONCE){
+            snprintf(why,sizeof why,"%s=%u is outside D3DTADDRESS_WRAP..MIRRORONCE",
+                     sampler_name(id),v);
+            set_diagnosis(d,why);return D9_INVALID;}
+        if(v==D9_TADDRESS_BORDER||v==D9_TADDRESS_MIRRORONCE)
+            return sampler_refuse(d,v==D9_TADDRESS_BORDER?"D3DTADDRESS_BORDER":
+                                  "D3DTADDRESS_MIRRORONCE",id,v,D9_UNSUPPORTED);
+        if(id==D9_SAMP_ADDRESSU)s->address_u=v;
+        else if(id==D9_SAMP_ADDRESSV)s->address_v=v;
+        else s->address_w=v;
+        set_diagnosis(d,"");return D9_OK;
+    case D9_SAMP_BORDERCOLOR:
+        /* Stored exactly.  D3D9 only observes it with D3DTADDRESS_BORDER, which
+         * the PICA sampler refuses by name, so no draw changes. */
+        s->border_color=v;set_diagnosis(d,"");return D9_OK;
+    case D9_SAMP_MAGFILTER:case D9_SAMP_MINFILTER:
+        if(v==D9_TEXF_POINT||v==D9_TEXF_LINEAR){
+            if(id==D9_SAMP_MAGFILTER)s->mag_filter=v;else s->min_filter=v;
+            set_diagnosis(d,"");return D9_OK;}
+        if(v==D9_TEXF_ANISOTROPIC)
+            return sampler_refuse(d,"D3DTEXF_ANISOTROPIC (PICA filters are POINT/LINEAR)",
+                                  id,v,D9_UNSUPPORTED);
+        if(v==D9_TEXF_PYRAMIDALQUAD||v==D9_TEXF_GAUSSIANQUAD)
+            return sampler_refuse(d,"a mip-filter mode, not a min/mag filter",id,v,D9_INVALID);
+        snprintf(why,sizeof why,"%s=%u is not D3DTEXF_POINT/LINEAR/ANISOTROPIC",
+                 sampler_name(id),v);
+        set_diagnosis(d,why);return D9_INVALID;
+    case D9_SAMP_MIPFILTER:
+        if(v<=D9_TEXF_LINEAR){s->mip_filter=v;set_diagnosis(d,"");return D9_OK;}
+        if(v==D9_TEXF_ANISOTROPIC||v==D9_TEXF_PYRAMIDALQUAD||v==D9_TEXF_GAUSSIANQUAD)
+            return sampler_refuse(d,"not a D3D9 mip filter (NONE/POINT/LINEAR only)",id,v,D9_INVALID);
+        snprintf(why,sizeof why,"%s=%u is outside D3DTEXF_NONE..LINEAR",
+                 sampler_name(id),v);
+        set_diagnosis(d,why);return D9_INVALID;
+    case D9_SAMP_MIPMAPLODBIAS:{
+        /* D3D9 passes the float by value in the DWORD argument. */
+        float f;uint32_t bits=v;memcpy(&f,&bits,sizeof f);
+        if(!isfinite(f)){
+            snprintf(why,sizeof why,"MIPMAPLODBIAS=0x%08x is not a finite float",v);
+            set_diagnosis(d,why);return D9_INVALID;}
+        s->lod_bias=v;set_diagnosis(d,"");return D9_OK;}
+    case D9_SAMP_MAXMIPLEVEL:
+        if(v>D9_SAMP_MAX_LEVEL){
+            snprintf(why,sizeof why,"MAXMIPLEVEL=%u is above %u",v,D9_SAMP_MAX_LEVEL);
+            set_diagnosis(d,why);return D9_INVALID;}
+        s->max_mip=v;set_diagnosis(d,"");return D9_OK;
+    case D9_SAMP_MAXANISOTROPY:
+        if(v<1||v>D9_SAMP_MAX_ANISO){
+            snprintf(why,sizeof why,"MAXANISOTROPY=%u is outside 1..%u",v,D9_SAMP_MAX_ANISO);
+            set_diagnosis(d,why);return D9_INVALID;}
+        /* Only a D3DTEXF_ANISOTROPIC filter consumes this value, and that filter
+         * is refused above, so storing it leaves every POINT/LINEAR draw exact. */
+        s->max_anisotropy=v;set_diagnosis(d,"");return D9_OK;
+    case D9_SAMP_SRGBTEXTURE:
+        if(v>1){
+            snprintf(why,sizeof why,"SRGBTEXTURE=%u is not a boolean",v);
+            set_diagnosis(d,why);return D9_INVALID;}
+        if(v)return sampler_refuse(d,"no per-sample sRGB decode on the PICA texture path "
+                                   "(see docs/RENDERER_REQUIREMENTS.md format.srgb_read)",
+                                   id,v,D9_UNSUPPORTED);
+        s->srgb=0;set_diagnosis(d,"");return D9_OK;
+    case D9_SAMP_ELEMENTINDEX:
+        if(v>15){
+            snprintf(why,sizeof why,"ELEMENTINDEX=%u is outside 0..15",v);
+            set_diagnosis(d,why);return D9_INVALID;}
+        if(v)return sampler_refuse(d,"a vertex-texture element index; no vertex-texture path exists",
+                                   id,v,D9_UNSUPPORTED);
+        set_diagnosis(d,"");return D9_OK;
+    case D9_SAMP_DMAPOFFSET:
+        if(v)return sampler_refuse(d,"a displacement-map offset; displacement sampling is not implemented",
+                                   id,v,D9_UNSUPPORTED);
+        set_diagnosis(d,"");return D9_OK;
+    default:{
+        snprintf(why,sizeof why,"unknown D3DSAMPLERSTATETYPE %u (value 0x%08x)",id,v);
+        set_diagnosis(d,why);return D9_INVALID;}
+    }
+}
+int d9_set_sampler_state(D9Device *d,unsigned id,unsigned v){return d9_set_unit_sampler(d,0,id,v);}
+int d9_set_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned v){
+    if(!d||stage>=D9_SAMP_STAGES){if(d){char why[96];snprintf(why,sizeof why,"stage %u is outside D3D9's 16 texture stages",stage);set_diagnosis(d,why);}return D9_INVALID;}
+    unsigned def;char why[200];
+    if(!sampler_name(id)||sampler_default(id,&def)){
+        snprintf(why,sizeof why,"unknown D3DSAMPLERSTATETYPE %u (value 0x%08x)",id,v);
+        set_diagnosis(d,why);return D9_INVALID;}
+    if(stage>=d9_stage_count(d)){
+        /* The D3D9 stage exists but has no PICA texture unit.  Accepting the
+         * default is exact; any other value would be silently lost. */
+        if(v==def){set_diagnosis(d,"");return D9_OK;}
+        snprintf(why,sizeof why,"stage %u has no PICA texture unit (backend backs %u 2D stages); %s=0x%08x",
+                 stage,d9_stage_count(d),sampler_name(id),v);
+        set_diagnosis(d,why);return D9_UNSUPPORTED;
+    }
+    return sampler_set(stage?&d->second:&d->state,d,id,v);
+}
+int d9_get_sampler_state(D9Device *d,unsigned id,unsigned *v){return d9_get_unit_sampler(d,0,id,v);}
+int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *v){
+    if(!d||!v||stage>=D9_SAMP_STAGES)return D9_INVALID;
+    unsigned def;
+    if(!sampler_name(id)||sampler_default(id,&def))return D9_INVALID;
+    if(stage>=d9_stage_count(d)){*v=def;return D9_OK;}
+    *v=sampler_value(stage?&d->second:&d->state,id);return D9_OK;
+}
 static int tnl_set_state(D9Device *d,unsigned id,unsigned v){
     switch(id){
     case D9_RS_SPECULARENABLE:
@@ -2538,14 +2701,6 @@ int d9_get_render_state(D9Device *d,unsigned id,unsigned *v){
     unsigned lo,hi,*p=render_slot(&d->state,id,&lo,&hi);
     if(!p)return D9_INVALID;*v=*p;return D9_OK;
 }
-int d9_set_sampler_state(D9Device *d,unsigned id,unsigned v){return d9_set_unit_sampler(d,0,id,v);}
-int d9_set_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned v){
-    if(stage>=d9_stage_count(d))return D9_UNSUPPORTED;
-    unsigned lo,hi,*p=d?sampler_slot(stage?&d->second:&d->state,id,&lo,&hi):NULL;if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;}
-int d9_get_sampler_state(D9Device *d,unsigned id,unsigned *v){return d9_get_unit_sampler(d,0,id,v);}
-int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *v){
-    if(stage>=d9_stage_count(d))return D9_UNSUPPORTED;
-    unsigned lo,hi,*p=d?sampler_slot(stage?&d->second:&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
 int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
     if(!d||d->teardown||d->scene)return D9_INVALID;
     /* The default back buffer is the retained target when lockable. */
@@ -3111,8 +3266,10 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         D9DrawState unit1=d->second;
         while(unit1.resident_mips<second->gpu_levels&&second->level[unit1.resident_mips].uploaded)++unit1.resident_mips;
         if(t==second && (state.address_u!=unit1.address_u||state.address_v!=unit1.address_v||
+            state.address_w!=unit1.address_w||state.lod_bias!=unit1.lod_bias||
             state.min_filter!=unit1.min_filter||state.mag_filter!=unit1.mag_filter||
-            state.mip_filter!=unit1.mip_filter||state.max_mip!=unit1.max_mip)){
+            state.mip_filter!=unit1.mip_filter||state.max_mip!=unit1.max_mip||
+            state.max_anisotropy!=unit1.max_anisotropy)){
             set_diagnosis(d,"Shared texture with conflicting sampler settings is unsupported");return D9_UNSUPPORTED;
         }
         if(d->ops.draw_two(d->ctx,d->color_scratch,n,&clip,t->native,&state,second->native,&unit1)){

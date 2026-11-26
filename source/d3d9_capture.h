@@ -34,7 +34,7 @@
 /* On-disk schema version for both files.  Version 1 (no render-target
  * identity, no Present event) remains readable; version 2 appends the target
  * section/keys and introduces the present event files. */
-#define D9_CAPTURE_SCHEMA_VERSION       2u
+#define D9_CAPTURE_SCHEMA_VERSION       3u
 
 /* Return values.  D9_CAPTURE_SKIP is a normal "policy says no" result. */
 enum {

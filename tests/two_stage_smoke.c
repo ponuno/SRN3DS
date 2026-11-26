@@ -70,7 +70,11 @@ int main(void){
         assert(!d9_bind_texture(d,stage,tex));
         textures[stage]=tex;
     }
-    assert(d9_bind_texture(d,2,0)==D9_UNSUPPORTED);
+    /* D3D9 has 16 texture stages; a NULL clear is valid everywhere, a real
+     * binding on an unbacked stage is a named refusal, stage 16 is invalid. */
+    assert(!d9_bind_texture(d,2,0));
+    assert(!d9_bind_texture(d,15,0));
+    assert(d9_bind_texture(d,16,0)==D9_INVALID);
     assert(!d9_set_unit_sampler(d,1,1,3));
     assert(d9_set_texture_stage_state(d,1,D9_TSS_COLOROP,999)==D9_UNSUPPORTED);
     assert(!d9_set_texture_stage_state(d,1,D9_TSS_COLOROP,D9_TOP_MODULATE));

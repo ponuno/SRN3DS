@@ -150,14 +150,18 @@ static void null_end(void *ctx){
     s->scene=0;++s->ends;++s->presents;s->target_active=0;
 }
 static int state_ok(const D9DrawState *st){
+    /* address_w/max_anisotropy are zero in a zero-initialised host test state
+     * and 1..3/1..16 after SetSamplerState.  srgb can only be 0 because
+     * SRGBTEXTURE=1 is refused by name. */
     return st->z_enable<=1&&st->z_write<=1&&st->alpha_test<=1&&st->blend<=1&&
         st->z_func>=1&&st->z_func<=8&&st->cull>=1&&st->cull<=3&&
         st->alpha_func>=1&&st->alpha_func<=8&&st->alpha_ref<=255&&
         st->src_blend>=1&&st->src_blend<=11&&st->dst_blend>=1&&st->dst_blend<=11&&
         st->blend_op>=1&&st->blend_op<=5&&st->color_write<=15&&
         st->address_u>=1&&st->address_u<=3&&st->address_v>=1&&st->address_v<=3&&
+        st->address_w<=3&&st->max_anisotropy<=D9_SAMP_MAX_ANISO&&st->srgb==0&&
         st->mag_filter>=1&&st->mag_filter<=2&&st->min_filter>=1&&st->min_filter<=2&&
-        st->mip_filter<=2&&st->max_mip<=10&&st->resident_mips<=10;
+        st->mip_filter<=2&&st->max_mip<=D9_SAMP_MAX_LEVEL&&st->resident_mips<=10;
 }
 static int stage_op_ok(unsigned op){
     return op==D9_TOP_DISABLE||op==D9_TOP_SELECTARG1||op==D9_TOP_SELECTARG2||op==D9_TOP_MODULATE;

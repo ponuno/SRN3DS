@@ -30,12 +30,50 @@ enum {D9_TOP_DISABLE=1,D9_TOP_SELECTARG1=2,D9_TOP_SELECTARG2=3,D9_TOP_MODULATE=4
 enum {D9_TA_DIFFUSE=0,D9_TA_CURRENT=1,D9_TA_TEXTURE=2,D9_TA_CONSTANT=5};
 /* D3DTEXTUREFILTERTYPE values accepted by StretchRect. */
 enum {D9_FILTER_NONE=0,D9_FILTER_POINT=1,D9_FILTER_LINEAR=2};
+/* D3DSAMPLERSTATETYPE (D3D9 numeric values).  Every state is a DWORD at the COM
+ * boundary: ADDRESSU/V/W, filters, MAXMIPLEVEL, MAXANISOTROPY, SRGBTEXTURE,
+ * ELEMENTINDEX and DMAPOFFSET are integers; BORDERCOLOR is a D3DCOLOR and
+ * MIPMAPLODBIAS is the IEEE-754 bit pattern of a float (0x00000000 = 0.0f).
+ * D3D9 has 16 sampler stages; this bridge backs stages 0..d9_stage_count()-1
+ * and answers the untouched stages with their D3D9 defaults. */
+enum {D9_SAMP_ADDRESSU=1,D9_SAMP_ADDRESSV=2,D9_SAMP_ADDRESSW=3,
+      D9_SAMP_BORDERCOLOR=4,D9_SAMP_MAGFILTER=5,D9_SAMP_MINFILTER=6,
+      D9_SAMP_MIPFILTER=7,D9_SAMP_MIPMAPLODBIAS=8,D9_SAMP_MAXMIPLEVEL=9,
+      D9_SAMP_MAXANISOTROPY=10,D9_SAMP_SRGBTEXTURE=11,D9_SAMP_ELEMENTINDEX=12,
+      D9_SAMP_DMAPOFFSET=13};
+enum {D9_TADDRESS_WRAP=1,D9_TADDRESS_MIRROR=2,D9_TADDRESS_CLAMP=3,
+      D9_TADDRESS_BORDER=4,D9_TADDRESS_MIRRORONCE=5};
+enum {D9_TEXF_NONE=0,D9_TEXF_POINT=1,D9_TEXF_LINEAR=2,D9_TEXF_ANISOTROPIC=3,
+      D9_TEXF_PYRAMIDALQUAD=4,D9_TEXF_GAUSSIANQUAD=5};
+#define D9_SAMP_STAGES 16u       /* D3D9 SetSamplerState/SetTexture stage limit */
+#define D9_SAMP_MAX_LEVEL 15u    /* D3DSAMP_MAXMIPLEVEL upper bound */
+#define D9_SAMP_MAX_ANISO 16u    /* D3DSAMP_MAXANISOTROPY upper bound */
+#define D9_SAMP_LOD_BIAS_LIMIT 16.0f /* PICA lodBias is [-16,16) in 1/256 steps */
+/* D3DSAMP_MIPMAPLODBIAS arrives as the IEEE-754 bit pattern of a float.  A
+ * non-finite pattern is refused at SetSamplerState, so it cannot reach a draw;
+ * this maps it to 0 for zero-initialised host states and clamps to the PICA
+ * hardware range.  Every other int/dword sampler state is stored verbatim. */
+#include <math.h>
+#include <string.h>
+static inline float d9_sampler_lod_bias(uint32_t bits){
+    float f;memcpy(&f,&bits,sizeof f);
+    if(!isfinite(f))return 0.0f;
+    if(f>D9_SAMP_LOD_BIAS_LIMIT)return D9_SAMP_LOD_BIAS_LIMIT;
+    if(f<-D9_SAMP_LOD_BIAS_LIMIT)return -D9_SAMP_LOD_BIAS_LIMIT;
+    return f;
+}
 /* A rectangle in top-left surface pixels.  D3D RECT uses LONG; INT_MIN and
  * negative coordinates are rejected by d9_blit() rather than normalised. */
 typedef struct {int left,top,right,bottom;} D9Rect;
 typedef struct {
     unsigned z_enable,z_write,z_func,cull,alpha_test,alpha_func,alpha_ref,blend,src_blend,dst_blend,blend_op,color_write;
     unsigned address_u,address_v,mag_filter,min_filter,mip_filter,max_mip,resident_mips;
+    /* Remaining D3DSAMPLERSTATETYPE values.  lod_bias keeps the D3D9 DWORD (the
+     * float's bit pattern); border_color is D3DCOLOR 0xAARRGGBB.  address_w is
+     * inert for 2D PICA sampling (a 2D texture has no W axis) and volume draws
+     * still use the V mode for W; srgb can only be 0 because SRGBTEXTURE=1 is
+     * refused by name.  See docs/PICA_BACKEND.md section 5.10. */
+    unsigned address_w,border_color,lod_bias,max_anisotropy,srgb;
     /* Stage 0 fixed-function state.  Defaults are SELECTARG1(TEXTURE) so the
      * existing fixed-function backend result is unchanged. */
     unsigned stage_colorop,stage_colorarg1,stage_colorarg2;
@@ -652,7 +690,10 @@ int d9_set_shader_clip(D9Device *d,const D9Matrix *rows);
 #define D9_MAX_CLIP_PLANES 6u
 int d9_set_clip_plane(D9Device *d,unsigned index,const float plane[4]);
 int d9_get_clip_plane(const D9Device *d,unsigned index,float plane[4]);
-/* D3D9 numeric D3DRS/D3DSAMP values. Unsupported enum/state returns D9_INVALID. */
+/* D3D9 numeric D3DRS/D3DSAMP values.  An out-of-range value or an unknown state
+ * is D9_INVALID; a valid D3D9 value the PICA sampler cannot express is a named
+ * D9_UNSUPPORTED refusal (d9_last_draw_diagnostic carries type and value).  A
+ * stage beyond the backed units accepts only its D3D9 default value. */
 int d9_set_render_state(D9Device *d,unsigned id,unsigned value);
 int d9_get_render_state(D9Device *d,unsigned id,unsigned *value);
 int d9_set_sampler_state(D9Device *d,unsigned id,unsigned value);

@@ -1484,6 +1484,82 @@ claimed**. The user must launch the artifact manually and archive a screenshot
 plus `Skyrim_N3DS_stderr.log`; actual `GPU_A8` sampling/visible pixels are the
 next blocker.
 
+## 5.11 Complete sampler-state surface (2026-11-26)
+
+The depth-pair census (`E:\Skyrim_N3DS_build\analysis\depthpair_census2.log`)
+contains two `SetSamplerState` calls, both `slot 69`, and both failed with
+`0x8876086c` (`D3DERR_INVALIDCALL`):
+
+```
+SetSamplerState(stage=0, type=8, value=0x00000000) -> 0x8876086c
+```
+
+Type 8 is **`D3DSAMP_MIPMAPLODBIAS`**, not `MAXMIPLEVEL` (type 9); the DWORD is
+the IEEE-754 bit pattern of the float, so `0x00000000` is the valid value
+`0.0f`.  The old `sampler_slot()` only knew types 1, 2, 5, 6, 7 and 9, so a
+valid LOD bias fell through to the generic `INVALIDCALL`.  The same census has
+32 `SetTexture` calls: 4 `S_OK` (stages 0/1) and **28 `0x8876086a`** for
+`SetTexture(stage 2..15, NULL)`, which is also a valid D3D9 clear.  Both classes
+are fixed without changing any cap bit.
+
+### Type table
+
+| Type | D3D9 name | Storage | Behaviour |
+| --- | --- | --- | --- |
+| 1,2,3 | `ADDRESSU/V/W` | `address_u/v/w` | `WRAP`/`MIRROR`/`CLAMP` stored; `BORDER` and `MIRRORONCE` are valid D3D9 values but have no PICA wrap mode: named `D3DERR_NOTAVAILABLE`. 2D sampling has no W axis, so `address_w` is stored but inert; volume W keeps following V (section 5.9). |
+| 4 | `BORDERCOLOR` | `border_color` | Any D3DCOLOR stored and returned verbatim. Only observable with `D3DTADDRESS_BORDER`, which is refused above, so it never changes a draw. |
+| 5,6 | `MAGFILTER`/`MINFILTER` | `mag_filter`/`min_filter` | `POINT`/`LINEAR` stored. `ANISOTROPIC` is a valid D3D9 filter but PICA has no anisotropic sampler: named `NOTAVAILABLE`. `PYRAMIDALQUAD`/`GAUSSIANQUAD` and 0 are `INVALIDCALL` (not min/mag filters). |
+| 7 | `MIPFILTER` | `mip_filter` | `NONE`/`POINT`/`LINEAR` stored (NONE keeps the resident range and selects one level). 3..5 are `INVALIDCALL`. |
+| 8 | `MIPMAPLODBIAS` | `lod_bias` (DWORD float bits) | Any finite float stored exactly and applied as `C3D_TexSetLodBias` (1/256 steps) to 2D and cube natives after clamping to the PICA range `[-16,16)`. NaN/Inf is `INVALIDCALL` with the value. |
+| 9 | `MAXMIPLEVEL` | `max_mip` | 0..15 accepted (larger is `INVALIDCALL`); the draw clamps it to the resident mip range as before. |
+| 10 | `MAXANISOTROPY` | `max_anisotropy` | 1..16 stored. Only an `ANISOTROPIC` filter consumes it and that filter is refused, so every accentible POINT/LINEAR draw is exact. 0 or >16 is `INVALIDCALL`. |
+| 11 | `SRGBTEXTURE` | `srgb` | 0 accepted; 1 is a named `NOTAVAILABLE` (`no per-sample sRGB decode on the PICA texture path`); >1 is `INVALIDCALL`. |
+| 12 | `ELEMENTINDEX` | none | 0 accepted; 1..15 is a named `NOTAVAILABLE` (no vertex-texture sampling); >15 is `INVALIDCALL`. |
+| 13 | `DMAPOFFSET` | none | 0 accepted; any other value is a named `NOTAVAILABLE` (no displacement-map sampling). |
+| 14+ | unknown | none | `INVALIDCALL` with the numeric type and value. |
+
+Named refusals use `D3DERR_NOTAVAILABLE` and carry the exact state name and
+value in `d9_last_draw_diagnostic`/`[d3d9] SetSamplerState: ...`; out-of-range
+or malformed values stay `D3DERR_INVALIDCALL`, also named. A refusal never
+changes the previous value.
+
+### Stage model
+
+D3D9 has 16 sampler stages and 16 texture stages; the PICA backend binds two
+(`ops.draw_two`), one otherwise. The bridge now keeps the full D3D9 surface:
+
+* `GetSamplerState(stage 0..15, type)` answers the D3D9 defaults
+  (`WRAP`, `POINT`, `MIPFILTER_NONE`, LOD bias 0, `MAXMIPLEVEL=0`,
+  `MAXANISOTROPY=1`, sRGB 0, border 0) for stages without a PICA unit.
+* `SetSamplerState` on such a stage succeeds only when the value **is** that
+  default (a genuinely exact no-op); any other value is a named
+  `NOTAVAILABLE` that names the stage and the state instead of silently
+  dropping it.
+* `SetTexture(stage 0..15, NULL)` is `S_OK` for every stage, including the
+  unbound ones (this removes the 28 census failures); `SetTexture(stage,
+  non-NULL)` on an unbacked stage is a named `NOTAVAILABLE`; stage >= 16 is
+  `INVALIDCALL`. `GetTexture` mirrors that: NULL for an unbacked stage,
+  `INVALIDCALL` at 16.
+* State blocks capture the additional sampler states (arrays grow to 32
+  entries: 11 states x 2 stages) and restore them through the same validating
+  setter.
+
+### Caps and tests
+
+Nothing in `D3DCAPS9` changed: `DevCaps` stays `0x00082000`,
+`MaxAnisotropy` stays 1, `TextureFilterCaps` stays
+`MAGPOINT|MAGLINEAR|MINPOINT|MINLINEAR|MIPPOINT|MIPLINEAR`, `TextureAddressCaps`
+stays `WRAP|MIRROR|CLAMP|INDEPENDENTUV`, and VS/PS stay 2.0 (SM3 slots 0).
+`tests/sampler_state_smoke.c` (`sampler_state`) pins every int/float/dword
+value, the named refusals with unchanged previous values, the 16-stage
+defaults and texture clears, the LOD-bias projection, and those caps.
+
+Remaining (named, not silently approximated): anisotropic filtering,
+border/mirror-once addressing, per-sample sRGB decode, vertex-texture element
+indexing, displacement mapping, and a third texture unit. A real frame is not
+claimed.
+
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.

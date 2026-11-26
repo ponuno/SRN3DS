@@ -430,10 +430,14 @@ corresponding NULL argument, i.e. the full target. No pixel bytes follow.
 
 ## Versioning and compatibility
 
-`D9_CAPTURE_SCHEMA_VERSION` is `2`. Text readers should branch on the
-`version=` line and tolerate unknown keys; binary readers should walk
-`{id, size}` records and skip unknown ids. Version-1 files remain fully
-readable: they simply have no `TARGET` section and no `target.*` text keys.
+`D9_CAPTURE_SCHEMA_VERSION` is `3`. Version 3 appends five sampler values to
+the `DRAWSTATE` section (payload `80` -> `100` bytes) and to the text output:
+`state.address_w`, `state.lod_bias` (decoded float, PICA-clamped),
+`state.max_anisotropy`, `state.srgb`, `state.border_color` (`0xAARRGGBB`).
+Text readers should branch on the `version=` line and tolerate unknown keys;
+binary readers should walk `{id, size}` records and skip unknown ids. Version-1
+files remain fully readable: they simply have no `TARGET` section and no
+`target.*` text keys. Version-2 files lack only the five sampler keys above.
 Draw signatures are unchanged between versions, so a `UNIQUE_ONLY` comparison
 across old and new files remains meaningful.
 

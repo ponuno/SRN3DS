@@ -2,9 +2,12 @@
 #include "d3d9_core.h"
 /* Pure sampler-state projection shared by the backend and host state tests.
  * Filter fields retain D3D9 values: point=1, linear=2; mip_filter also allows
- * none=0.  MIPFILTER_NONE keeps the full resident range and selects one mip. */
+ * none=0.  MIPFILTER_NONE keeps the full resident range and selects one mip.
+ * lod_bias is the decoded D3DSAMP_MIPMAPLODBIAS float, clamped to the PICA
+ * range [-16,16); it is applied with C3D_TexSetLodBias (1/256 steps). */
 typedef struct {
     unsigned min_level,max_level,mag_filter,min_filter,mip_filter;
+    float lod_bias;
 } D9CitroTextureConfig;
 static inline D9CitroTextureConfig d9_citro_texture_config(unsigned levels,const D9DrawState *state){
     D9CitroTextureConfig config={0};
@@ -16,6 +19,7 @@ static inline D9CitroTextureConfig d9_citro_texture_config(unsigned levels,const
     config.mag_filter=state->mag_filter;
     config.min_filter=state->min_filter;
     config.mip_filter=state->mip_filter;
+    config.lod_bias=d9_sampler_lod_bias(state->lod_bias);
     return config;
 }
 /* Requires gfxInitDefault() before opening. Destroy device before closing. */

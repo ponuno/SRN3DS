@@ -160,6 +160,8 @@ static void make_base(D9CaptureSnapshot *s) {
     s->state.color_write = 15;
     s->state.address_u = 1;
     s->state.address_v = 1;
+    s->state.address_w = 1;
+    s->state.max_anisotropy = 1;
     s->state.mag_filter = 1;
     s->state.min_filter = 1;
     s->state.resident_mips = 1;
@@ -269,8 +271,12 @@ static void test_first_draw(void) {
     assert(exists(info.text_path) && exists(info.binary_path));
 
     assert(file_contains(info.text_path, "format=d9_capture"));
-    assert(file_contains(info.text_path, "version=2"));
+    assert(file_contains(info.text_path, "version=3"));
     assert(file_contains(info.text_path, "signature=0x"));
+    assert(file_contains(info.text_path, "state.lod_bias=0"));
+    assert(file_contains(info.text_path, "state.address_w=1"));
+    assert(file_contains(info.text_path, "state.max_anisotropy=1"));
+    assert(file_contains(info.text_path, "state.border_color=0x00000000"));
     assert(file_contains(info.text_path, "state.z_enable=1"));
     assert(file_contains(info.text_path, "world.r0=1,0,0,0"));
     assert(file_contains(info.text_path, "vs.hash=0x"));
@@ -576,7 +582,7 @@ static void test_present_only(void) {
     assert(exists(info.text_path) && exists(info.binary_path));
 
     assert(file_contains(info.text_path, "format=d9_capture_present"));
-    assert(file_contains(info.text_path, "version=2"));
+    assert(file_contains(info.text_path, "version=3"));
     assert(file_contains(info.text_path, "present.frame_index=7"));
     assert(file_contains(info.text_path, "present.source.valid=0"));
     assert(file_contains(info.text_path, "present.dest.valid=0"));

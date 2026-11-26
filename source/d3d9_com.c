@@ -58,7 +58,7 @@ struct Obj;
 typedef struct {
     unsigned type,captured;
     unsigned rs_count;uint32_t rs_ids[32],rs_values[32];
-    unsigned sampler_count;uint8_t sampler_stage[16],sampler_id[16];uint32_t sampler_values[16];
+    unsigned sampler_count;uint8_t sampler_stage[32],sampler_id[32];uint32_t sampler_values[32];
     unsigned tss_count;uint8_t tss_stage[16],tss_id[16];uint32_t tss_values[16];
     struct Obj *tex[2];
     unsigned fvf;struct Obj *decl;
@@ -2303,7 +2303,16 @@ static void set_render(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);
         d3d_fail("SetRenderState",d9_last_draw_diagnostic(g.device),UNAVAILABLE);RET(UNAVAILABLE,3);}
     RET(hr(rc),3);}
 static void get_render(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(2),4)||d9_get_render_state(g.device,A(1),&v))RET(INVALID,3);M32(A(2))=v;RET(OK,3);}
-static void set_sampler(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,4);RET(hr(d9_set_unit_sampler(g.device,A(1),A(2),A(3))),4);}
+static void set_sampler(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,4);
+    int rc=d9_set_unit_sampler(g.device,A(1),A(2),A(3));
+    if(rc){
+        /* Named refusal: the core diagnosis carries stage, D3DSAMPLERSTATETYPE
+         * name and the exact value. */
+        const char *why=d9_last_draw_diagnostic(g.device);
+        d3d_fail("SetSamplerState",why&&*why?why:"sampler state rejected by the core",hr(rc));
+        RET(hr(rc),4);
+    }
+    g.last_diagnostic[0]=0;RET(OK,4);}
 /* D3D9 IDirect3DDevice9 slot 67.  The GFx UI batch uses stage 0
  * MODULATE(TEXTURE,DIFFUSE); the value is stored even when the current
  * backend has no vertex-colour shader, so the draw gate is the only failure. */
@@ -2314,7 +2323,10 @@ static void set_texture_stage_state(CPU *c){
     g.last_diagnostic[0]=0;
     RET(OK,4);
 }
-static void get_sampler(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(3),4)||d9_get_unit_sampler(g.device,A(1),A(2),&v))RET(INVALID,4);M32(A(3))=v;RET(OK,4);}
+static void get_sampler(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(3),4))RET(INVALID,4);
+    int rc=d9_get_unit_sampler(g.device,A(1),A(2),&v);
+    if(rc){d3d_fail("GetSamplerState",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),4);}
+    M32(A(3))=v;RET(OK,4);}
 static void get_texture_stage_state(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(3),4)||d9_get_texture_stage_state(g.device,A(1),A(2),&v))RET(INVALID,4);M32(A(3))=v;RET(OK,4);}
 static void stream(CPU *c){Obj *o=obj(A(2),VB);unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||(A(2)&&!o)||g.phase==2)RET(INVALID,5);
     int rc=d9_set_stream(g.device,s,o?o->handle:0,A(3),A(4));if(!rc){bind(&g.streams[s],o);g.offsets[s]=A(3);g.strides[s]=A(4);}RET(hr(rc),5);}
@@ -2327,6 +2339,12 @@ static void indices(CPU *c){Obj *o=obj(A(1),IB);if(!obj(A(0),DEVICE)||(A(1)&&!o)
 static void get_indices(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ib);M32(A(1))=g.ib?g.ib->guest:0;RET(OK,2);}
 static uint32_t bind_texture_obj(unsigned stage,Obj *o){
     int rc;
+    if(stage>=d9_stage_count(g.device)&&!o){
+        /* D3D9 SetTexture(stage, NULL) on a D3D9 stage the backend does not
+         * back is a valid clear that changes nothing.  Stages 0/1 are handled
+         * below so their object ref and cube/volume bookkeeping are released. */
+        return (uint32_t)d9_bind_texture(g.device,stage,0);
+    }
     if(o&&o->kind==CUBE)rc=d9_bind_cube_texture(g.device,stage,o->handle);
     else if(o&&o->kind==VOLUME)rc=d9_bind_volume_texture(g.device,stage,o->handle);
     else rc=d9_bind_texture(g.device,stage,o?o->handle:0);
@@ -2349,14 +2367,18 @@ static void texture(CPU *c){
     if(addr){o=obj(addr,TEX);if(!o)o=obj(addr,CUBE);if(!o)o=obj(addr,VOLUME);}
     if(!obj(A(0),DEVICE)||(addr&&!o)||g.phase==2)RET(INVALID,3);
     int rc=bind_texture_obj(A(1),o);
-    if(rc==D9_UNSUPPORTED&&!(o&&(o->kind==CUBE||o->kind==VOLUME)))d3d_log("SetTexture","unsupported texture unit or non-2D sampling");
+    if(rc){
+        const char *why=d9_last_draw_diagnostic(g.device);
+        d3d_fail("SetTexture",why&&*why?why:"texture binding rejected by the core",hr(rc));
+    }
     RET(hr(rc),3);}
 static void get_texture(CPU *c){
-    uint32_t out=A(2);
-    if(!obj(A(0),DEVICE)||!ptr(out,4))RET(INVALID,3);
-    Obj *o=A(1)?g.tex1:g.tex;
-    if(!o)o=A(1)?g.cube1:g.cube;
-    if(!o)o=A(1)?g.volume1:g.volume;
+    uint32_t out=A(2);unsigned stage=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(out,4)||stage>=D9_SAMP_STAGES)RET(INVALID,3);
+    if(stage>=d9_stage_count(g.device)){retain(NULL);M32(out)=0;RET(OK,3);}
+    Obj *o=stage?g.tex1:g.tex;
+    if(!o)o=stage?g.cube1:g.cube;
+    if(!o)o=stage?g.volume1:g.volume;
     retain(o);M32(out)=o?o->guest:0;RET(OK,3);
 }
 /* ---- bounded state blocks --------------------------------------------------
@@ -2393,7 +2415,11 @@ static uint32_t state_block_capture(Obj *block){
             }
             tmp.rs_ids[tmp.rs_count]=ids[i];tmp.rs_values[tmp.rs_count++]=v;
         }
-        static const unsigned sampler_ids[]={1,2,5,6,7,9};
+        /* Every stored sampler state is captured, including the DWORD-encoded
+         * MIPMAPLODBIAS and the inert-for-POINT/LINEAR BORDERCOLOR/anisotropy. */
+        static const unsigned sampler_ids[]={D9_SAMP_ADDRESSU,D9_SAMP_ADDRESSV,D9_SAMP_ADDRESSW,
+            D9_SAMP_BORDERCOLOR,D9_SAMP_MAGFILTER,D9_SAMP_MINFILTER,D9_SAMP_MIPFILTER,
+            D9_SAMP_MIPMAPLODBIAS,D9_SAMP_MAXMIPLEVEL,D9_SAMP_MAXANISOTROPY,D9_SAMP_SRGBTEXTURE};
         static const unsigned tss_ids[]={D9_TSS_COLOROP,D9_TSS_COLORARG1,D9_TSS_COLORARG2,
             D9_TSS_ALPHAOP,D9_TSS_ALPHAARG1,D9_TSS_ALPHAARG2,D9_TSS_TEXCOORDINDEX};
         unsigned stages=d9_stage_count(g.device);

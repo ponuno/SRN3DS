@@ -552,7 +552,7 @@ static int write_binary(FILE *f, const D9CaptureSnapshot *s, const Plan *p,
         wu32(f, s->viewport.width) || wu32(f, s->viewport.height) ||
         wf32(f, s->viewport.minz) || wf32(f, s->viewport.maxz)) return D9_CAPTURE_IO;
 
-    if (write_section(f, SECTION_DRAWSTATE, 80u) ||
+    if (write_section(f, SECTION_DRAWSTATE, 100u) ||
         wu32(f, s->state.z_enable) || wu32(f, s->state.z_write) || wu32(f, s->state.z_func) ||
         wu32(f, s->state.cull) || wu32(f, s->state.alpha_test) ||
         wu32(f, s->state.alpha_func) || wu32(f, s->state.alpha_ref) ||
@@ -562,7 +562,10 @@ static int write_binary(FILE *f, const D9CaptureSnapshot *s, const Plan *p,
         wu32(f, s->state.address_v) || wu32(f, s->state.mag_filter) ||
         wu32(f, s->state.min_filter) || wu32(f, s->state.mip_filter) ||
         wu32(f, s->state.max_mip) || wu32(f, s->state.resident_mips) ||
-        wu32(f, s->state.pixel_shader ? 1u : 0u)) return D9_CAPTURE_IO;
+        wu32(f, s->state.pixel_shader ? 1u : 0u) ||
+        wu32(f, s->state.address_w) || wf32(f, d9_sampler_lod_bias(s->state.lod_bias)) ||
+        wu32(f, s->state.max_anisotropy) || wu32(f, s->state.srgb) ||
+        wu32(f, s->state.border_color)) return D9_CAPTURE_IO;
 
     if (write_section(f, SECTION_WORLD, 64u)) return D9_CAPTURE_IO;
     for (unsigned row = 0; row < 4; ++row) matrix_row(f, &s->world, row);
@@ -758,7 +761,12 @@ static int write_text(FILE *f, const D9CaptureSnapshot *s, const Plan *p) {
         "state.mip_filter=%u\n"
         "state.max_mip=%u\n"
         "state.resident_mips=%u\n"
-        "state.pixel_shader=%u\n",
+        "state.pixel_shader=%u\n"
+        "state.address_w=%u\n"
+        "state.lod_bias=%.9g\n"
+        "state.max_anisotropy=%u\n"
+        "state.srgb=%u\n"
+        "state.border_color=0x%08x\n",
         D9_CAPTURE_SCHEMA_VERSION,
         (unsigned long long)p->signature, p->truncation, trunc,
         s->frame_index, s->draw_index,
@@ -774,7 +782,9 @@ static int write_text(FILE *f, const D9CaptureSnapshot *s, const Plan *p) {
         s->state.blend_op, s->state.color_write, s->state.address_u,
         s->state.address_v, s->state.mag_filter, s->state.min_filter,
         s->state.mip_filter, s->state.max_mip, s->state.resident_mips,
-        s->state.pixel_shader ? 1u : 0u) < 0) return D9_CAPTURE_IO;
+        s->state.pixel_shader ? 1u : 0u,
+        s->state.address_w, (double)d9_sampler_lod_bias(s->state.lod_bias),
+        s->state.max_anisotropy, s->state.srgb, s->state.border_color) < 0) return D9_CAPTURE_IO;
 
     if (print_matrix(f, "world", &s->world) ||
         print_matrix(f, "view", &s->view) ||
