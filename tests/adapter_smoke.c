@@ -104,8 +104,13 @@ int main(void){
     args[5]=0x71u;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* float RT texture */
     args[5]=0x72u;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* HDR RT texture */
     args[4]=5;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* cube RT is also off by default */
-    args[3]=0;args[5]=0x71u;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* cube descriptor off */
-    args[5]=0x72u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
+    args[3]=0;
+    const unsigned default_desc_types[]={1,3,5};
+    for(unsigned i=0;i<sizeof default_desc_types/sizeof *default_desc_types;++i){
+        args[4]=default_desc_types[i];args[5]=0x71u;
+        assert(call(&s,s.factory,10,args,6)==0x8876086au); /* float descriptor off */
+        args[5]=0x72u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
+    }
     args[3]=1;args[4]=1;args[5]=D9_DXT1;assert(call(&s,s.factory,10,args,6)==0x8876086au);
     args[5]=D9_A8R8G8B8;args[3]=0x00020001u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
     args[3]=0x00020000u;assert(call(&s,s.factory,10,args,6)==0x8876086au); /* QUERY_FILTER is texture-only */
@@ -177,12 +182,15 @@ int main(void){
             args[4]=rt_types[i];args[5]=float_formats[j];
             assert(call(&s,s.factory,10,args,6)==0);
         }
-    args[3]=0;args[4]=5;
-    args[5]=0x71u;assert(call(&s,s.factory,10,args,6)==0); /* measured cube descriptor */
-    args[5]=0x72u;assert(call(&s,s.factory,10,args,6)==0);
-    args[4]=3;args[5]=0x71u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
+    args[3]=0;
+    const unsigned desc_types[]={1,3,5}; /* SURFACE, TEXTURE, CUBETEXTURE */
+    for(unsigned i=0;i<sizeof desc_types/sizeof *desc_types;++i)
+        for(unsigned j=0;j<sizeof float_formats/sizeof *float_formats;++j){
+            args[4]=desc_types[i];args[5]=float_formats[j];
+            assert(call(&s,s.factory,10,args,6)==0); /* measured descriptor */
+        }
     args[3]=1;args[4]=4;args[5]=0x71u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
-    args[4]=5;args[5]=0x73u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
+    args[3]=0;args[4]=5;args[5]=0x73u;assert(call(&s,s.factory,10,args,6)==0x8876086au);
     args[0]=0;args[1]=1;args[2]=CAPS9;assert(call(&s,s.factory,14,args,3)==0);
     assert(!memcmp(caps_before,guest_ptr(&s.memory,CAPS9,sizeof caps_before),sizeof caps_before));
     assert(rd(&s,CAPS9+196)==0xfffe0200u&&rd(&s,CAPS9+204)==0xffff0200u);

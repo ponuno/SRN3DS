@@ -758,6 +758,65 @@ before `0x00ced04b`; the index itself is already populated correctly. This is a
 guest stack-slot/path-precondition issue, not a D3D9 format capability or cube
 create HRESULT. The probe is measurement-only; no cube or frame is claimed.
 
+### Final 0x71-cube descriptor diagnostic (2026-11-26)
+
+Base: branch head `ae3e3dc`. Under the same measurement env,
+`CheckDeviceFormat` now also accepts `usage=0` for SURFACE, TEXTURE and
+CUBETEXTURE formats `0x71`/`0x72`. Default-off refusals and byte-identical
+`D9Caps9` remain covered by `adapter_smoke`; caps/SM/T&L are unchanged. Targeted
+`tesv_cube_desc_probe,adapter` reported **12 passed, 0 failed** with
+`-TestTimeoutSec 300`.
+
+A fresh instrumented probe-slice build took **158.0464922 s** and reported
+**10 passed, 1 expected diagnostic, 0 failed**. The final census took
+**86.4307506 s**, exit `1`, with the usual fallback+budget64 environment plus
+`TESV_CUBE_DESC_PROBE=1`. Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_final_diagnostic_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_final_diagnostic_census.out`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_final_diagnostic_census.run.txt`
+
+All measured usage-0 SURFACE/TEXTURE/CUBETEXTURE queries for `0x71`/`0x72` now
+return `S_OK` at `caller=0x00cd5542`. The descriptor-array dump is unchanged:
+
+```text
+[cube-desc] arg=408486b0 index=2 base=40848c04 slot=00000000
+slot_null=yes base_null=no index_eq_0x16=no index_ge_0x16=no
+source_obj=548b6a50 source_index=00000002 source_ok=yes
+[cube-desc] base8=00000000 00000000 00000000 00000000
+                 00000000 00000000 00000000 00000000
+```
+
+The short fault frame is:
+
+```text
+esp=1007fab0
+[esp+0x00]=541154d8 [esp+0x04]=408486b0 [esp+0x08]=541153e8
+[esp+0x0c]=408486cc [esp+0x10]=54115280 [esp+0x14]=00000000
+[esp+0x18]=40848c04  (base array; first eight dwords all zero)
+[esp+0x54]=408486b0  (argument/renderer object)
+ebp=54515a00
+backtrace: f_CECDC0 -> f_CD4E40 -> f_AE7CD0 -> f_C739B0 -> f_C74710
+```
+
+The probe fires in `L_CED041`, which is reached only when `[ebp+0x70]` is
+nonzero (the error/fallback branch sets it to `1`). That branch indexes the
+uninitialized local array at `[esp+0x18]`. The other branch, `[ebp+0x70]==0` at
+`L_CED067`, instead copies the same 68-byte descriptor from `ebx+0x14`. No call
+in `f_CECDC0` populates `[esp+0x18]` before `0x00ced04b`; its first write is at
+`0x00ced42e`, after the copy. `f_CD4E40` calls `f_CECDC0` with two pushed
+arguments and does not pass a descriptor-array pointer.
+
+Therefore expanding `CheckDeviceFormat` does not build this engine-local array.
+The `0x71`-cube measurement path leads to an engine path whose descriptor array
+is never built; this is a **dead end for the measurement hack**, not a concrete
+missing bridge D3D9 call. No guest code was patched and no fake descriptor data
+was supplied. The supported measurement route is the existing cube-skip probe.
+
+The final fault remains `0x00ced19d rep movsd`, count `0x11`, `ESI=0`, address
+`0`; `CreateCubeTexture`, depth, scene, shaders, `SetTexture`, draw and `Present`
+remain unreached. No cube or frame is claimed.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
