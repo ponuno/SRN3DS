@@ -32,7 +32,7 @@ PLAIN = [
 ]
 
 
-def trace(plain_addr=0xFD000000, hot_override=None):
+def trace(plain_addr=None, hot_override=None):
     lines = []
     for i, (name, addr) in enumerate(HOTPATCH.items()):
         if hot_override and name == hot_override[0]:
@@ -40,7 +40,8 @@ def trace(plain_addr=0xFD000000, hot_override=None):
         lines.append(f"[import] d3dx9_42.dll!{name} -> {addr:08x} "
                      f"(export {addr - 11:08x} hotpatch body)")
     for i, name in enumerate(PLAIN):
-        lines.append(f"[import] d3dx9_42.dll!{name} -> {plain_addr + 4 * i:08x}")
+        addr = cb.PLAIN_EXPECT[name] if plain_addr is None else plain_addr + 4 * i
+        lines.append(f"[import] d3dx9_42.dll!{name} -> {addr:08x} (host shim)")
     return lines
 
 
@@ -54,6 +55,12 @@ def main():
 
     assert cb.check(cb.parse(trace(plain_addr=0x080BA5D3)), require_shims=True) == 1
     print("  ok: a guest plain body fails --require-shims")
+
+    # A host thunk at the wrong slot (texture/surface swap) must also fail.
+    swapped = cb.parse(trace())
+    swapped["D3DXCompileShader"] = (0xFD000000, False)
+    assert cb.check(swapped, require_shims=True) == 1
+    print("  ok: a swapped host thunk fails")
 
     assert cb.check(cb.parse(trace(hot_override=("D3DXMatrixMultiply", 0x0802FA5D))),
                     require_shims=False) == 1

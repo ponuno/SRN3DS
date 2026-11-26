@@ -41,6 +41,19 @@ PLAIN = [
     "D3DXLoadSurfaceFromSurface",
     "D3DXLoadSurfaceFromMemory",
 ]
+# Measured on trace13.  Exact addresses catch a swapped texture/surface thunk,
+# which an "any host window" check would miss.
+PLAIN_EXPECT = {
+    "D3DXGetImageInfoFromFileInMemory": 0xFD000000,
+    "D3DXCreateTextureFromFileInMemory": 0xFD000004,
+    "D3DXGetImageInfoFromFileA": 0xFD000008,
+    "D3DXCreateTextureFromFileExA": 0xFD00000C,
+    "D3DXCreateCubeTextureFromFileInMemory": 0xFD000010,
+    "D3DXCreateVolumeTextureFromFileInMemory": 0xFD000014,
+    "D3DXLoadSurfaceFromMemory": 0xFD010000,
+    "D3DXLoadSurfaceFromSurface": 0xFD010004,
+    "D3DXCompileShader": 0xFD010008,
+}
 # Host thunks live below the Win32 window (0xff000000) and above the staged DLL.
 HOST_SHIM_LO = 0xFC000000
 HOST_SHIM_HI = 0xFF000000
@@ -85,7 +98,9 @@ def check(seen, require_shims):
             continue
         addr, hotpatch = got
         if HOST_SHIM_LO <= addr < HOST_SHIM_HI:
-            state, ok = "host shim", True
+            want = PLAIN_EXPECT[name]
+            ok = addr == want
+            state = "host shim" if ok else f"host shim, expected {want:08x}"
         elif hotpatch:
             state, ok = "hotpatch body", not require_shims
         else:
