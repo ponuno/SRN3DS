@@ -26,6 +26,8 @@ typedef struct {
     unsigned draws, draw_twos, colored_draws;
     uint32_t last0, last1;
     int active, refuse_large;
+    unsigned native_w, native_h, scaled_calls;
+    unsigned logical_w, logical_h;
 } Ctx;
 
 static int tex_create(void *opaque, unsigned w, unsigned h, unsigned levels,
@@ -99,7 +101,8 @@ static int target_create(void *opaque, unsigned w, unsigned h,
                          unsigned format, void **native) {
     (void)format;
     Ctx *c = opaque;
-    if (c->refuse_large && w >= 1024 && h >= 1024) return -1;
+    c->native_w = w; c->native_h = h;
+    if (c->refuse_large && w >= 512 && h >= 512) return -1;
     MockTarget *t = calloc(1, sizeof *t);
     if (!t) return -1;
     t->magic = TARGET_MAGIC;
@@ -136,6 +139,17 @@ static void *target_texture(void *opaque, void *native) {
     assert(t && t->magic == TARGET_MAGIC);
     return &t->sample;
 }
+static int target_viewport_scaled(void *opaque, unsigned logical_w,
+                                  unsigned logical_h, unsigned native_w,
+                                  unsigned native_h) {
+    Ctx *c = opaque;
+    assert(c->active);
+    assert(native_w <= logical_w && native_h <= logical_h);
+    c->scaled_calls++;
+    c->logical_w = logical_w; c->logical_h = logical_h;
+    c->native_w = native_w; c->native_h = native_h;
+    return 0;
+}
 
 static const D9Backend ops = {
     .texture_create = tex_create,
@@ -151,6 +165,7 @@ static const D9Backend ops = {
     .target_bind = target_bind,
     .target_clear = target_clear,
     .target_texture = target_texture,
+    .target_viewport_scaled = target_viewport_scaled,
 };
 
 static void stage1(D9Device *d) {
@@ -209,8 +224,9 @@ int main(void) {
     assert(c.target_deletes == 2 && c.tex_deletes == 0 && c.target_creates == 2);
     assert(d9_destroy_device_ex(d) == 0);
 
-    /* 1024x1024 RGBA8 is 4 MiB of colour storage.  Core budget admits it under
-     * a 5 MiB device budget; a 3 MiB device refuses before the backend. */
+    /* A 1024x1024 LDR target keeps its logical size but uses 512x512 native
+     * storage (1 MiB).  Core admits it under a 5 MiB device budget; a 512 KiB
+     * device refuses before the backend. */
     Ctx big;
     memset(&big, 0, sizeof big);
     D9Device *d5 = d9_create_device(&ops, &big, 5u << 20);
@@ -219,12 +235,13 @@ int main(void) {
     assert(d9_create_render_texture(d5, 1024, 1024, D9_A8R8G8B8,
                                     D9_POOL_DEFAULT, D9_USAGE_RENDERTARGET, &r) == D9_OK);
     assert(r && big.target_creates == 1);
+    assert(big.native_w == 512 && big.native_h == 512);
     assert(d9_release_texture(d5, r) == D9_OK && big.target_deletes == 1);
     assert(d9_destroy_device_ex(d5) == 0);
 
     Ctx small;
     memset(&small, 0, sizeof small);
-    D9Device *d3 = d9_create_device(&ops, &small, 3u << 20);
+    D9Device *d3 = d9_create_device(&ops, &small, 512u << 10);
     assert(d3);
     r = 0;
     assert(d9_create_render_texture(d3, 1024, 1024, D9_A8R8G8B8,
@@ -241,6 +258,7 @@ int main(void) {
     assert(d9_create_render_texture(dback, 1024, 1024, D9_A8R8G8B8,
                                     D9_POOL_DEFAULT, D9_USAGE_RENDERTARGET, &r) == D9_BACKEND);
     assert(r == 0 && backend.target_creates == 0);
+    assert(strstr(d9_last_draw_diagnostic(dback), "native target") != NULL);
     assert(d9_destroy_device_ex(dback) == 0);
 
     printf("render-target texture sampling: distinct target/sample handles, draw_two, budget PASS\n");

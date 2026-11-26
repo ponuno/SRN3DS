@@ -381,6 +381,20 @@ static int target_viewport(void *ctx,unsigned w,unsigned h){
     C3D_SetViewport(0,0,w,h);
     return 0;
 }
+/* Bounded native target: the D3D surface stays 1024x1024, but the colour
+ * storage and depth attachment are 512x512.  Mapping NDC through the native
+ * viewport scales the whole image into that storage instead of clipping it at
+ * 512.  The retained back buffer never takes this path. */
+static int target_viewport_scaled(void *ctx,unsigned logical_w,unsigned logical_h,
+                                  unsigned native_w,unsigned native_h){
+    D9Citro *c=ctx;
+    if(!c||!c->scene||!logical_w||!logical_h||!native_w||!native_h||
+       native_w>logical_w||native_h>logical_h)return -1;
+    NativeTarget *t=c->active_target;
+    if(!t||native_w>t->w||native_h>t->h)return -1;
+    C3D_SetViewport(0,0,native_w,native_h);
+    return 0;
+}
 /* StretchRect-class blit.  Only explicit render-target textures can be
  * sampled: the implicit 240x400 screen framebuffer is not a PICA texture, so a
  * back-buffer source is rejected explicitly (D9_BLIT_BACK_BUFFER_SRC) instead
@@ -464,4 +478,4 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
 }
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
-    target_write,depth_clear,target_viewport,draw_menu,target_texture};return &ops;}
+    target_write,depth_clear,target_viewport,draw_menu,target_texture,target_viewport_scaled};return &ops;}

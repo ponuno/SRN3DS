@@ -222,6 +222,7 @@ Add-Test "d3dx_texture_shims" $liftCommon ($legacySources + @("source/d3d9_core.
 # D3DX cube-map loader + IDirect3DCubeTexture9 COM path; null backend face pixels.
 Add-Test "d3dx_cube_texture_shims" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3dx_texture_shims.c") + $picaSources + @("tests/d3dx_cube_texture_smoke.c")) @()
 Add-Test "render_target" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/render_target_smoke.c") @()
+Add-Test "render_target_bounded" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_null.c", "tests/render_target_bounded_smoke.c") @()
 Add-Test "render_texture_sample" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/render_texture_sample_smoke.c") @()
 Add-Test "stretchrect" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/stretchrect_smoke.c") @()
 Add-Test "up_draw" $common ($d3dSources + @("tests/up_draw_smoke.c")) @()

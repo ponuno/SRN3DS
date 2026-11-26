@@ -110,9 +110,9 @@ texture units and materialises each stage constant from the c0..c8 float bank.
 Host coverage: `pica_tev` **152 checks, 0 failures** (including the exact
 menu-light plan, fog/tint plans, third-texture/duplicate-sampler/c9/color1
 negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
-menu plan through `draw_menu`, and the full suite is **80 passed, 1 diagnostic,
+menu plan through `draw_menu`, and the full suite is **83 passed, 1 diagnostic,
 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
-(`.3dsx` 802,176 B, `.elf` 5,463,344 B).  No Azahar pixel run is claimed.
+(`.3dsx` 805,924 B, `.elf` 5,484,136 B).  No Azahar pixel run is claimed.
 
 ### Render-target texture handles
 
@@ -130,17 +130,43 @@ only delete.  The null backend returns the target handle; its draw ignores it.
 also covers bind-before/after-target-render, `draw_two` with a second RT
 texture, exactly-once deletion, and the colour-budget/backend split.
 
+### Bounded native render targets
+
+Explicit render targets and render-target textures keep their D3D logical size
+but cap native colour storage at **512 per axis** (`D9_TARGET_NATIVE_MAX`).  A
+1024x1024 target therefore allocates 512x512 RGBA8 (1 MiB) and keeps 1024x1024
+in `GetDesc`/`GetLevelDesc` and `d9_render_target_info()`.  The
+`d9_render_target_storage_info()` accessor exposes the native size; `bytes`
+from `d9_render_target_info()` is the native allocation.
+
+The append-only `D9Backend.target_viewport_scaled(ctx, logical_w, logical_h,
+native_w, native_h)` maps the full logical surface into native storage.  citro3d
+sets the PICA viewport to native_w x native_h, so NDC covers the whole image
+instead of clipping at the native edge; the logical D3D viewport and clip
+matrices are unchanged.  A backend without this callback refuses a target whose
+native size is smaller than its logical size with a named `D9_UNSUPPORTED`
+(`target_viewport_scaled` in the diagnosis).  Equal sizes (512x512, 256x256) and
+the retained back buffer keep the existing `target_viewport` path; the
+retained back buffer is created unbounded because its 400x240 logical surface
+already uses a 512x256 native corner.
+
+Scaled `LockRect`/`UnlockRect` and `StretchRect` are named refusals rather than
+silently reading or copying 1024 logical pixels from 512 native storage.  A
+lockable explicit target larger than 512 is refused at creation with a named
+`D9_UNSUPPORTED` for the same reason.  Equal-size targets and the retained back
+buffer keep read/write/blit support.
+
 ### Render-target budget
 
-The core budget counts **colour bytes only** (`w*h*4`).  A 1024x1024 RGBA8
-target is 4 MiB; the citro3d target also allocates a DEPTH24_STENCIL8
-attachment, so the pair needs about 8 MiB.  That exceeds the 6 MiB N3DS VRAM
-budget and is expected to fail in `target_create()`; the failure is surfaced as
-`D9_BACKEND`, never as a fake success.  Practical sizes are 256x256 (512 KiB
-colour+depth) and 512x512 (2 MiB colour+depth).  By colour accounting alone the
-core's 16 MiB device budget admits four 1024x1024 colour buffers, but actual
-VRAM residency (plus depth) is lower.  No hardware memory proof is claimed
-here.
+The core budget counts **native colour bytes only**.  A 1024x1024 logical
+target is 512x512 native = 1 MiB, not 4 MiB.  The citro3d target also allocates
+a DEPTH24_STENCIL8 attachment at the same 512x512 size, so a single target needs
+about 2 MiB: that fits the 6 MiB N3DS VRAM budget.  Five simultaneous 1024
+logical targets need five 1 MiB colour buffers plus five 1 MiB depth
+attachments = 10 MiB, so at most three fit by raw accounting and the fourth is
+surfaced as `D9_BACKEND` by `target_create()`, never as a fake success.  A
+future shared/depth-lazy scheme is still required to hold all five measured TESV
+targets.  No hardware memory proof is claimed here.
 
 The translator packs literals as RGBA8 with red in bits 0..7.  PICA TEV constants
 are ABGR8888, so the descriptor stores `constant_abgr`, produced by

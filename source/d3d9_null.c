@@ -224,6 +224,12 @@ static int null_target_viewport(void *ctx,unsigned w,unsigned h){
     if(!s->scene||!w||!h||w>4096||h>4096){null_log("SetViewport","target viewport requires an active scene and plausible dimensions");return -1;}
     s->viewport_w=w;s->viewport_h=h;++s->viewport_calls;return 0;
 }
+static int null_target_viewport_scaled(void *ctx,unsigned logical_w,unsigned logical_h,
+                                       unsigned native_w,unsigned native_h){
+    if(!logical_w||!logical_h||!native_w||!native_h||native_w>logical_w||native_h>logical_h)
+        return -1;
+    return null_target_viewport(ctx,native_w,native_h);
+}
 static int null_draw_two(void *ctx,const D9ColorVertex *vertices,size_t count,
                          const D9Matrix *clip,void *tex0,const D9DrawState *stage0,
                          void *tex1,const D9DrawState *stage1){
@@ -261,7 +267,7 @@ static int null_draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
     null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
-    null_cube_create,null_cube_upload};
+    null_cube_create,null_cube_upload,null_target_viewport_scaled};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

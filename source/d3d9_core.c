@@ -8,12 +8,17 @@
 #include <math.h>
 
 enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+/* Native storage cap for explicit LDR render targets.  A 1024x1024 D3D target
+ * keeps 1024x1024 logical dimensions but is rasterised into at most 512x512,
+ * which matches the retained-back-buffer model and avoids a 4 MiB colour +
+ * 4 MiB depth allocation. */
+enum {D9_TARGET_NATIVE_MAX=512};
 typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
 typedef struct {
     D9Handle id;size_t offset,stride;
 } Stream;
 typedef struct {
-    D9Handle id;unsigned w,h,format,lockable;size_t bytes;void *native;
+    D9Handle id;unsigned w,h,native_w,native_h,format,lockable;size_t bytes;void *native;
 } Target;
 typedef struct {D9Handle id;unsigned w,h,format;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
@@ -489,21 +494,49 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
 }
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
 static Depth *depth_slot(D9Device *d,D9Handle h);
-int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
+static unsigned bounded_native_dim(unsigned v){
+    return v>D9_TARGET_NATIVE_MAX?D9_TARGET_NATIVE_MAX:v;
+}
+/* bounded=0 is the retained back buffer: it is already created at its native
+ * power-of-two size and keeps the existing corner-viewport/present path.
+ * bounded=1 is an explicit render target or render-target texture; its logical
+ * size is preserved while native storage is capped per axis. */
+static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,
+                         int bounded,D9Handle *out){
     if(out)*out=0;
     if(!d||d->scene||d->teardown||!out||!d->next||w<8||h<8||w>1024||h>1024||
        (w&(w-1))||(h&(h-1))||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
        !d->ops.target_create||!d->ops.target_delete||!d->ops.target_bind||!d->ops.target_clear||
        (lockable&&!d->ops.target_read))return D9_INVALID;
-    size_t bytes=(size_t)w*h*4;if(budget_has_room(d,bytes))return D9_MEMORY;
+    unsigned nw=bounded?bounded_native_dim(w):w;
+    unsigned nh=bounded?bounded_native_dim(h):h;
+    if((nw<w||nh<h)&&!d->ops.target_viewport_scaled){
+        char why[160];
+        snprintf(why,sizeof why,"CreateRenderTarget: backend cannot scale %ux%u logical to %ux%u native; no target_viewport_scaled",w,h,nw,nh);
+        set_diagnosis(d,why);
+        return D9_UNSUPPORTED;
+    }
+    if(lockable&&(nw<w||nh<h)){
+        char why[160];
+        snprintf(why,sizeof why,"CreateRenderTarget: lockable %ux%u would need %ux%u native scaled readback",w,h,nw,nh);
+        set_diagnosis(d,why);
+        return D9_UNSUPPORTED;
+    }
+    size_t bytes=(size_t)nw*nh*4;if(budget_has_room(d,bytes))return D9_MEMORY;
     Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
     if(!slot)return D9_MEMORY;void *native=NULL;
-    if(d->ops.target_create(d->ctx,w,h,format,&native)||!native){
+    if(d->ops.target_create(d->ctx,nw,nh,format,&native)||!native){
         if(native)d->ops.target_delete(d->ctx,native);
+        char why[160];
+        snprintf(why,sizeof why,"CreateRenderTarget: backend could not allocate a %ux%u native target",nw,nh);
+        set_diagnosis(d,why);
         return D9_BACKEND;
     }
-    D9Handle id=d->next++;*slot=(Target){id,w,h,format,lockable?1:0,bytes,native};
+    D9Handle id=d->next++;*slot=(Target){id,w,h,nw,nh,format,lockable?1:0,bytes,native};
     d->target_used+=bytes;*out=id;return D9_OK;
+}
+int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
+    return create_target(d,w,h,format,lockable,1,out);
 }
 int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
                              unsigned pool,unsigned usage,D9Handle *out){
@@ -534,6 +567,23 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
     t.level[0]=(Level){w,h,(size_t)w*4u,(size_t)w*h*4u,0,1};
     t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
+/* Program the backend viewport for a target.  The retained back buffer keeps
+ * its logical 400x240 corner (Present samples that rect).  Explicit bounded
+ * targets map the full logical surface through a native 512x512 viewpoint, so
+ * NDC still covers the whole image instead of clipping at native_w/h. */
+static int apply_target_viewport(D9Device *d,Target *t){
+    if(!t)return D9_OK;
+    if(t->id==d->back_target)
+        return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,d->back_w,d->back_h)?D9_BACKEND:D9_OK;
+    if(t->native_w!=t->w||t->native_h!=t->h){
+        if(!d->ops.target_viewport_scaled){
+            set_diagnosis(d,"SetRenderTarget: backend cannot scale this bounded native target");
+            return D9_UNSUPPORTED;
+        }
+        return d->ops.target_viewport_scaled(d->ctx,t->w,t->h,t->native_w,t->native_h)?D9_BACKEND:D9_OK;
+    }
+    return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,t->w,t->h)?D9_BACKEND:D9_OK;
+}
 int d9_set_render_target(D9Device *d,D9Handle h){
     if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
     /* Handle zero means the default back buffer: the retained target when
@@ -557,11 +607,8 @@ int d9_set_render_target(D9Device *d,D9Handle h){
     void *native=t?t->native:NULL;
     if(d->scene){
         if(d->ops.target_bind(d->ctx,native))return D9_BACKEND;
-        if(t&&d->ops.target_viewport){
-            unsigned w=t->id==d->back_target?d->back_w:t->w;
-            unsigned height=t->id==d->back_target?d->back_h:t->h;
-            if(d->ops.target_viewport(d->ctx,w,height))return D9_BACKEND;
-        }
+        int vrc=apply_target_viewport(d,t);
+        if(vrc)return vrc;
     }
     d->target=h;return D9_OK;
 }
@@ -572,9 +619,17 @@ int d9_render_target_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height,
     if(w)*w=t->w;if(height)*height=t->h;if(format)*format=t->format;
     if(lockable)*lockable=t->lockable;if(bytes)*bytes=t->bytes;return D9_OK;
 }
+int d9_render_target_storage_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height){
+    Target *t=target(d,h);if(!t)return D9_INVALID;
+    if(w)*w=t->native_w;if(height)*height=t->native_h;return D9_OK;
+}
 int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);if(!t||!d||!dst||!dst_pitch||d->scene)return D9_INVALID;
+    if(t->native_w!=t->w||t->native_h!=t->h){
+        set_diagnosis(d,"LockRect: a bounded native render target cannot be read back without scaling");
+        return D9_UNSUPPORTED;
+    }
     if(!d->ops.target_read)return D9_BACKEND;
     if(x>t->w||y>t->h||w>t->w-x||height>t->h-y)return D9_INVALID;
     return d->ops.target_read(d->ctx,t->native,dst,dst_pitch,x,y,w,height)?D9_BACKEND:D9_OK;
@@ -583,6 +638,10 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
                            unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);
     if(!t||!d||!src||!src_pitch||d->scene||d->teardown)return D9_INVALID;
+    if(t->native_w!=t->w||t->native_h!=t->h){
+        set_diagnosis(d,"UnlockRect: a bounded native render target cannot be written back without scaling");
+        return D9_UNSUPPORTED;
+    }
     if(!d->ops.target_read||!d->ops.target_write)return D9_BACKEND;
     if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||src_pitch<(size_t)w*4)return D9_INVALID;
     size_t pitch=(size_t)t->w*4,bytes=pitch*t->h;
@@ -621,8 +680,9 @@ int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format
         tw=pow2_up(w);th=pow2_up(h);
         if(!tw||!th)return D9_UNSUPPORTED;
         /* Create the replacement first so a failed allocation leaves the old
-         * back buffer intact. */
-        int rc=d9_create_render_target(d,tw,th,format,1,&fresh);
+         * back buffer intact.  The retained target is already at its native
+         * power-of-two size, so it uses the unbounded path. */
+        int rc=create_target(d,tw,th,format,1,0,&fresh);
         if(rc)return rc;
     }
     if(d->back_target){
@@ -631,7 +691,7 @@ int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format
     }
     d->back_w=w;d->back_h=h;d->back_format=format;d->back_valid=1;
     d->back_lockable=lockable?1:0;
-    if(lockable){d->back_target=fresh;d->back_tex_w=tw;d->back_tex_h=th;}
+    if(lockable){d->back_target=fresh;(void)d9_render_target_storage_info(d,fresh,&d->back_tex_w,&d->back_tex_h);}
     return D9_OK;
 }
 int d9_set_back_buffer_info(D9Device *d,unsigned w,unsigned h,unsigned format){
@@ -672,6 +732,12 @@ int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
     Target *dt=dst?target(d,dst):(d->back_target?target(d,d->back_target):NULL);
     if((src&&!st)||(dst&&!dt))return D9_INVALID;
     if(src==dst||(st&&st==dt)){d->blit_error=D9_BLIT_SAME_SURFACE;return D9_INVALID;}
+    if((st&&st->id!=d->back_target&&(st->native_w!=st->w||st->native_h!=st->h))||
+       (dt&&dt->id!=d->back_target&&(dt->native_w!=dt->w||dt->native_h!=dt->h))){
+        d->blit_error=D9_BLIT_UNSUPPORTED;
+        set_diagnosis(d,"StretchRect: a bounded native target requires scaled blit support");
+        return D9_BACKEND;
+    }
     D9BlitRegion sreg={{0}},dreg={{0}};
     if(st){
         int retained=st->id==d->back_target;
@@ -705,11 +771,8 @@ int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
         Target *cur=d->target?target(d,d->target):
             (d->back_target?target(d,d->back_target):NULL);
         if(d->ops.target_bind(d->ctx,cur?cur->native:NULL)){d->blit_error=D9_BLIT_BACKEND;return D9_BACKEND;}
-        if(cur&&d->ops.target_viewport){
-            unsigned w=cur->id==d->back_target?d->back_w:cur->w;
-            unsigned height=cur->id==d->back_target?d->back_h:cur->h;
-            if(d->ops.target_viewport(d->ctx,w,height)){d->blit_error=D9_BLIT_BACKEND;return D9_BACKEND;}
-        }
+        int vrc=apply_target_viewport(d,cur);
+        if(vrc){d->blit_error=D9_BLIT_BACKEND;return vrc;}
     }
     return rc==D9_BLIT_OK?D9_OK:D9_BACKEND;
 }
@@ -1031,12 +1094,9 @@ int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
     if(d->ops.target_bind&&d->ops.target_bind(d->ctx,t?t->native:NULL)){
         d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
     }
-    if(t&&d->ops.target_viewport){
-        unsigned w=t->id==d->back_target?d->back_w:t->w;
-        unsigned height=t->id==d->back_target?d->back_h:t->h;
-        if(d->ops.target_viewport(d->ctx,w,height)){
-            d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
-        }
+    if(t){
+        int vrc=apply_target_viewport(d,t);
+        if(vrc){d->ops.end(d->ctx);d->scene=0;return vrc;}
     }
     if(t&&want_clear&&d->ops.target_clear(d->ctx,t->native,color)){
         d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;

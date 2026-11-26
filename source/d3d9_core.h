@@ -195,6 +195,14 @@ typedef struct {
     int (*texture_create_cube)(void *ctx,unsigned edge_length,unsigned levels,void **native);
     int (*texture_upload_cube)(void *ctx,void *native,unsigned face,unsigned level,
                                const void *data,size_t bytes);
+    /* Logical-to-native viewport for a bounded render target.  Core caps a
+     * target's native storage at 512 per axis and keeps the D3D width/height
+     * logical.  This callback must map the full logical surface into the
+     * native storage (citro3d sets the PICA viewport to native_w x native_h).
+     * Required only when native_w < logical_w or native_h < logical_h; a
+     * backend without it refuses such targets by name. */
+    int (*target_viewport_scaled)(void *ctx,unsigned logical_w,unsigned logical_h,
+                                  unsigned native_w,unsigned native_h);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -277,6 +285,11 @@ int d9_set_render_target(D9Device *d,D9Handle h);
 D9Handle d9_get_render_target(const D9Device *d);
 int d9_render_target_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height,
                           unsigned *format,unsigned *lockable,size_t *bytes);
+/* Native colour-storage dimensions for a render target.  These are equal to
+ * the logical width/height for 512x512 and smaller targets, and capped at 512
+ * per axis for larger logical targets.  `bytes` from d9_render_target_info is
+ * the native allocation size, not logical_w*logical_h*4. */
+int d9_render_target_storage_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height);
 int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height);
 int d9_release_render_target(D9Device *d,D9Handle h);

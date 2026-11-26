@@ -599,7 +599,12 @@ static void create_render_target(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     if(!SURFACE_FORMAT(A(3))){d3d_log("CreateRenderTarget","only 32-bit X8R8G8B8/A8R8G8B8 targets are implemented");RET(UNAVAILABLE,9);}
     if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);
     D9Handle h=0;int rc=d9_create_render_target(g.device,A(1),A(2),A(3),A(6)!=0,&h);
-    if(rc){d3d_log("CreateRenderTarget",rc==D9_MEMORY?"render-target memory budget exceeded":rc==D9_BACKEND?"backend render-target allocation failed":"backend cannot create the requested target (including lockable without readback)");RET(rc==D9_INVALID?UNAVAILABLE:hr(rc),9);}
+    if(rc){
+        const char *why=d9_last_draw_diagnostic(g.device);
+        if((rc==D9_UNSUPPORTED||rc==D9_BACKEND)&&why&&*why)d3d_fail("CreateRenderTarget",why,hr(rc));
+        else d3d_log("CreateRenderTarget",rc==D9_MEMORY?"render-target memory budget exceeded":rc==D9_BACKEND?"backend render-target allocation failed":"backend cannot create the requested target (including lockable without readback)");
+        RET(rc==D9_INVALID?UNAVAILABLE:hr(rc),9);
+    }
     Obj *o=new_obj(SURFACE);if(!o){d9_release_render_target(g.device,h);RET(OUTMEM,9);}
     o->handle=h;o->width=A(1);o->height=A(2);o->format=A(3);o->usage=1;o->pool=0;o->pitch=A(1)*4;o->bytes=A(1)*A(2)*4;o->lockable=A(6)!=0;
     retain(g.dev);M32(out)=o->guest;
@@ -876,9 +881,15 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||
         if(hdr&&g.hdr_ldr_fallback)
             trace_detail("MEASUREMENT ONLY: HDR target %ux%u format 0x%x stored as A8R8G8B8",w,height,format);
         if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_render_texture(g.device,w,height,storage,pool,1u,&h);
-        if(rc){trace_detail("CreateTexture: render-target creation rc=%d",rc);d3d_log("CreateTexture",rc==D9_MEMORY?
+        if(rc){
+            trace_detail("CreateTexture: render-target creation rc=%d",rc);
+            const char *why=d9_last_draw_diagnostic(g.device);
+            if((rc==D9_UNSUPPORTED||rc==D9_BACKEND)&&why&&*why)d3d_fail("CreateTexture",why,UNAVAILABLE);
+            else d3d_log("CreateTexture",rc==D9_MEMORY?
                 "render-target texture memory budget exceeded":
-                "render-target texture creation failed");RET(rc==D9_MEMORY?OUTMEM:UNAVAILABLE,9);}
+                "render-target texture creation failed");
+            RET(rc==D9_MEMORY?OUTMEM:UNAVAILABLE,9);
+        }
         Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
         o->handle=h;o->width=w;o->height=height;o->bytes=w*height*4u;o->pitch=w*4u;
         o->format=format;o->usage=1u;o->pool=pool;retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,9);

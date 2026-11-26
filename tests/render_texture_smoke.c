@@ -210,6 +210,13 @@ static void *target_texture(void *ctx, void *native) {
     assert(t && t->magic == TARGET_MAGIC);
     return &t->sample;
 }
+static int target_viewport_scaled(void *ctx, unsigned logical_w, unsigned logical_h,
+                                  unsigned native_w, unsigned native_h) {
+    Mock *m = ctx;
+    (void)logical_w; (void)logical_h; (void)native_w; (void)native_h;
+    ++m->targets_bound;
+    return 0;
+}
 static const D9Backend ops = {
     .texture_create = tex_create,
     .texture_upload = tex_upload,
@@ -222,6 +229,7 @@ static const D9Backend ops = {
     .target_bind = target_bind,
     .target_clear = target_clear,
     .target_texture = target_texture,
+    .target_viewport_scaled = target_viewport_scaled,
 };
 
 static uint32_t call(D9ComDemo *s, uint32_t object, unsigned slot,
