@@ -256,15 +256,24 @@ renderer), `0x00fb5cc1`/`0x00fb5cd1` (face index, new buffer), `0x00ced404`
 
 ## 8. Minimal honest PICA200 policy
 
-PICA200 has no cube render-target format and no cube-map sampling in this
-bridge (a draw with a cube bound is `D3DERR_NOTAVAILABLE`).
+PICA200 does support cube-map textures, and the devkitPro headers expose the
+whole path: `C3D_TexInitCube(tex, cube, w, h, fmt)` with `GPU_TEX_CUBE_MAP`,
+`C3D_TexCubeGetImagePtr`, `C3D_TexLoadImage(tex, data, face, level)` and
+`C3D_RenderTargetCreateFromTex(tex, face, level, depthFmt)`. What is missing is
+in this bridge, not in the hardware: `texture_create_cube` /
+`texture_upload_cube` and cube-face render targets are not implemented yet, so a
+cube-bound draw is still `D3DERR_NOTAVAILABLE`. PICA render targets are integer
+formats only, so `A16B16G16R16F` must be downgraded under the LDR
+render-target policy and never reported as a native cube RT format.
 
 - **Measurement only:** a host/null six-face target set can be created to reach
   the next layer. It must be env-gated (the existing HDR/budget probes or a new
   `TESV_D3D9_CUBE_RT_PROBE=1`), never a shipping default.
-- **Shipping:** `CreateCubeTexture` with `D3DUSAGE_RENDERTARGET`, and
-  `GetCubeMapSurface` used as a render target, are named refusals. Disable water
-  reflections / the kind-11 group for the menu; keep the 2D targets.
+- **Shipping today:** `CreateCubeTexture` with `D3DUSAGE_RENDERTARGET`, and
+  `GetCubeMapSurface` used as a render target, are named refusals until the cube
+  backend and face targets land. A CPU-only cube must not be sampled or passed
+  off as a device cube. Disable water reflections / the kind-11 group for the
+  menu; keep the 2D targets.
 - **VRAM:** a 512 cube at `A16B16G16R16F` is `6 * 512^2 * 8 = 12 MiB`; even an
   RGBA8 cube is `6 MiB`, equal to the whole original-3DS VRAM, before colour
   targets, depth or textures. The 2D set already needs 24.5 MiB in the 64 MiB
