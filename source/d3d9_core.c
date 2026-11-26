@@ -2396,13 +2396,22 @@ static void core_text_plan(D9TevProgram *p){
     for(unsigned i=0;i<3;++i){s->op_rgb[i]=D9TEV_RGB_COLOR;s->op_a[i]=D9TEV_A_ALPHA;}
     s->const_reg=0xFFu;
 }
+/* A mip-filtered cube may only draw when every face of every level is present;
+ * the PICA cube view exposes one native for the whole mip chain. */
+static int cube_levels_ready(const CubeTexture *c){
+    if(!c)return 0;
+    for(unsigned level=0;level<c->levels;++level)
+        if(!c->level[level].uploaded||
+           c->level[level].face_mask!=((1u<<D9_CUBE_FACES)-1u))return 0;
+    return 1;
+}
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
     if(d->clip_plane_enable){
         set_diagnosis(d,"user clip planes are enabled; PICA has no user clip-plane stage");
         return D9_UNSUPPORTED;
     }
-    CubeTexture *ct=NULL;int cube_mode=0;
+    CubeTexture *ct=NULL;int cube_mode=0,cube_mips=0;
     if(d->cube_texture1){
         set_diagnosis(d,"cube-map sampling on texture stage 1 is not implemented; bind the cube to stage 0");
         return D9_UNSUPPORTED;
@@ -2440,8 +2449,11 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
             return D9_UNSUPPORTED;
         }
         if(ct->levels>1&&d->state.mip_filter!=0){
-            set_diagnosis(d,"cube-map sampling supports level 0 only; mip filtering is not implemented");
-            return D9_UNSUPPORTED;
+            cube_mips=1;
+            if(!cube_levels_ready(ct)){
+                set_diagnosis(d,"cube mip sampling requires all mip levels resident");
+                return D9_UNSUPPORTED;
+            }
         }
         if(d->tnl_proto&&d->tnl.lighting&&!(d->decl_active&&d->declaration.position_t)){
             set_diagnosis(d,"cube-map sampling with CPU T&L lighting is not implemented");
@@ -2539,7 +2551,7 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
     if(cube_mode){
         D9CubeView view;fill_cube_view(&view,ct);
-        state.resident_mips=1;
+        state.resident_mips=cube_mips?ct->levels:1;
         if(d->ops.draw_cube(d->ctx,d->color_scratch,n,d->cube_faces,&clip,&view,&state)){
             set_diagnosis(d,"cube-map draw rejected by the backend");
             return D9_BACKEND;

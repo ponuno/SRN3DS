@@ -338,12 +338,19 @@ static int draw_colored(void *ctx,const D9ColorVertex *vertices,size_t count,
  * third component travels in texcoord0w.  The adapter therefore converts each
  * vertex into {pos3, direction3, rgba4}; d9_cube_direction() builds the
  * standard face direction with the same vertical flip the 2D colour shader
- * uses.  Only level 0 is sampled (the core refuses a mip-filtered multi-level
- * cube by name) and sampler state is point/clamp. */
-static void configure_native_cube(NativeCube *t){
-    t->tex.minLevel=0;t->tex.maxLevel=0;
-    C3D_TexSetFilter(&t->tex,GPU_NEAREST,GPU_NEAREST);
-    C3D_TexSetFilterMipmap(&t->tex,GPU_NEAREST);
+ * uses.  Level 0 is always the base level; when the sampler's MIP filter is
+ * not NONE the core has already required every mip level to be resident and
+ * the same C3D_Tex mip chain is configured here.  Sampler state is
+ * point/clamp only for the wrap mode; filters follow the D3D state.
+ */
+static void configure_native_cube(NativeCube *t,const D9DrawState *state){
+    /* PICA LOD clamp: base level 0, top level = last resident mip. */
+    unsigned max=state&&state->resident_mips?state->resident_mips-1u:0u;
+    if(max>=t->levels)max=t->levels-1u;
+    t->tex.minLevel=0;t->tex.maxLevel=(u8)max;
+    C3D_TexSetFilter(&t->tex,state&&state->mag_filter==2?GPU_LINEAR:GPU_NEAREST,
+                     state&&state->min_filter==2?GPU_LINEAR:GPU_NEAREST);
+    C3D_TexSetFilterMipmap(&t->tex,state&&state->mip_filter==2?GPU_LINEAR:GPU_NEAREST);
     C3D_TexSetWrap(&t->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
 }
 static void prepare_draw_cube(D9Citro *c){
@@ -375,6 +382,10 @@ static int draw_cube(void *ctx,const D9ColorVertex *vertices,size_t count,
         fprintf(stderr,"[d3d9-citro] draw_cube: a pixel shader owns the TEV stages; fixed-function cube sampling only\n");
         return -1;
     }
+    if(state->mip_filter&&state->resident_mips<cube->levels){
+        fprintf(stderr,"[d3d9-citro] draw_cube: cube mip sampling requires all mip levels resident\n");
+        return -1;
+    }
     D9ColorTevStage plan;const char *why=NULL;
     if(d9_color_tev_stage0(state,1,&plan,&why)){
         fprintf(stderr,"[d3d9-citro] draw_cube: %s\n",why?why:"stage-0 state is not expressible");
@@ -398,7 +409,7 @@ static int draw_cube(void *ctx,const D9ColorVertex *vertices,size_t count,
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_cube,&m);
     apply_state(state,1);
-    configure_native_cube(native);
+    configure_native_cube(native,state);
     d9_pica_citro3d_restore_tev();
     C3D_TexBind(0,&native->tex);
     apply_color_tev(0,&plan);

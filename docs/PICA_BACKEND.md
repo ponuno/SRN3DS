@@ -1082,25 +1082,34 @@ bound to stage 0 reaches PICA instead of the previous named refusal.
 - Stage 0 uses the certified fixed-function single-stage translator
   (`d9_color_tev_stage0`): the documented case is
   `MODULATE(TEXTURE0, PRIMARY)` for RGB and alpha; the same subset's
-  `SELECTARG1/2` forms use `REPLACE`. Sampler state is forced to level 0,
-  POINT and CLAMP for the draw, matching the bridge's point-sampled level-0
-  contract and D3D's per-face clamp.
+  `SELECTARG1/2` forms use `REPLACE`. Level 0 is the base level. Sampler wrap
+  is forced to CLAMP for the draw (D3D clamps cube faces). With
+  `MIPFILTER_NONE` the top level is 0, so min/mag may still be POINT or
+  LINEAR but only level 0 is selected. With `MIPFILTER_POINT/LINEAR` the core
+  requires every mip level to be resident and the whole `C3D_Tex` chain is
+  configured (`minLevel=0`, `maxLevel=levels-1`, min/mag/mip filters from the
+  D3D sampler).
 - Named refusals, before any GPU call: an incomplete cube, a cube on stage 1,
   a second texture/stage, a pixel shader, a non-`texcoord0` stage-0 index, a
-  multi-level cube with mip filtering (level > 0 is not sampled), a backend
+  mip-filtered cube whose levels 1..N are not all resident
+  (`"cube mip sampling requires all mip levels resident"`), a backend
   without `draw_cube`, invalid face/edge/format and a stage-0 tuple the
   single-TEV translator cannot express. Face 0 is never substituted.
 - `cube_draw_plan` records six D3D faces through a CPU backend, checks the cube
   native and level-0 view, the `MODULATE(TEXTURE,DIFFUSE)` plan, the direction
   table round-trip, and the named level/second-texture/pixel-shader/
-  no-callback refusals. `cube_sampling` and `cube_rt_sampling` still prove the
-  real null-backend texels and the PICA-shaped missing-callback refusal; both
-  keep DevCaps at `0x00082000`.
+  no-callback refusals. `cube_mip_sampling` builds a 16x16 three-level cube,
+  draws with LINEAR/LINEAR/LINEAR and verifies the backend sees
+  `mip_filter=LINEAR` with `resident_mips=3`; a cube with only level 0
+  uploaded is refused by name, and MIPFILTER_NONE/POINT still select level 0.
+  `cube_sampling` and `cube_rt_sampling` still prove the real null-backend
+  texels and the PICA-shaped missing-callback refusal; both keep DevCaps at
+  `0x00082000`.
 
 This is compile-time and host-contract evidence only. No Azahar or hardware
 cube sample, no image comparison and no frame is claimed.
 
-## 5.6 Cube/volume texcache rehydration (2026-11-26)
+## 5.7 Cube/volume texcache rehydration (2026-11-26)
 
 Cube and volume natives now participate in LRU eviction and can be rebuilt:
 

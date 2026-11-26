@@ -560,8 +560,8 @@ upload:
   `d9_render_target_write` call `cube_face_mark_ready()`. It sets that level's
   `face_mask` bit and `uploaded` marker. Once all six level-0 faces are marked,
   the same texcache native is committed `gpu_ready` that a CPU upload would
-  have committed. Higher levels are not required for binding; level 0 is the
-  sampling level.
+  have committed. Higher levels are not required for binding; a mip-filtered
+  draw requires every level to be resident.
 - `d9_bind_cube_texture()` accepts the complete RT cube without requiring
   `texture_upload_cube`. A partial RT cube is a named
   `"render-target cube is incomplete; render all six faces before binding"`
@@ -626,8 +626,11 @@ needed.
   fixed-function stage-0 plan through `d9_color_tev_stage0`. The documented
   tuple is `MODULATE(TEXTURE0, PRIMARY)` for both RGB and alpha.
 - A new `d9shader_cube.v.pica` writes `texcoord0.xy` + `texcoord0w` from the
-  direction and COLOR0 from the vertex colour. Sampler state is forced to
-  level 0, POINT and CLAMP.
+  direction and COLOR0 from the vertex colour. Level 0 is the base level;
+  wrap is CLAMP. With MIPFILTER_NONE only level 0 is selected (min/mag may be
+  POINT or LINEAR). With MIPFILTER_POINT/LINEAR the core requires every mip
+  level to be resident and the full chain is configured
+  (`minLevel=0`, `maxLevel=levels-1`, min/mag/mip filters from D3D).
 - `d9_cube_direction` is a small citro3d-free table implementing the standard
   cube-face inverse. It uses the same `t = 1 - v` vertical flip as the 2D
   shaders because PICA's face t axis starts at the last stored row. The
@@ -637,8 +640,9 @@ needed.
 ### Named refusals
 
 Incomplete cube, stage-1 cube, second texture/stage, pixel shader, a stage-0
-texture-coordinate index other than 0, a multi-level cube with mip filtering
-(level > 0 is not sampled), a backend without `draw_cube`, invalid
+texture-coordinate index other than 0, a mip-filtered cube whose levels 1..N
+are not all resident (`"cube mip sampling requires all mip levels resident"`),
+a backend without `draw_cube`, invalid
 face/edge/format and a stage-0 tuple the single-TEV translator cannot express
 are all named before the GPU call. Face 0 is never substituted. The previous
 `"cube-map sampling requires a backend draw_cube callback"` diagnosis remains
@@ -649,10 +653,13 @@ for backends that do not implement the callback.
 `cube_draw_plan` drives the core with a recording backend: six triangles with
 `+X..-Z` normals reach `draw_cube` with the expected native, cube view and
 `MODULATE(TEXTURE,DIFFUSE)` state; the direction table round-trips through an
-independent inverse; a 2-level cube with mip filtering is refused as
-`"cube-map sampling supports level 0 only; mip filtering is not implemented"`
-while the same cube with mip filter NONE draws; a second texture, a pixel
-shader and a missing `draw_cube` are named. `cube_sampling` and
+independent inverse; a 3-level cube with only level 0 uploaded is refused as
+`"cube mip sampling requires all mip levels resident"` while the same cube
+with mip filter NONE draws. `cube_mip_sampling` builds a 16x16 three-level
+cube, uploads every face/level, and verifies a LINEAR/LINEAR/LINEAR draw
+reaches the backend with `mip_filter=LINEAR` and `resident_mips=3`; level-0
+POINT and MIPFILTER_NONE draws report `resident_mips=1`. A second texture, a
+pixel shader and a missing `draw_cube` are named. `cube_sampling` and
 `cube_rt_sampling` retain the real null-backend texel checks and the unchanged
 DevCaps (`0x00082000`).
 

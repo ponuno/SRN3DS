@@ -4,10 +4,10 @@
  * native, the face array and a level-0 D9CubeView.  This test checks that
  * contract for all six faces, the single-stage MODULATE plan, the direction
  * table used by the PICA shader, and the named refusals for mip filtering
- * (level > 0), a second texture, a pixel shader and a backend without
- * draw_cube.  The PICA-shaped refusal is checked on a second device whose ops
- * have draw_cube == NULL.  DevCaps are covered by cube_rt_sampling; this test
- * changes no cap state. */
+ * with incomplete levels, a second texture, a pixel shader and a backend
+ * without draw_cube.  The PICA-shaped refusal is checked on a second device
+ * whose ops have draw_cube == NULL.  DevCaps are covered by cube_rt_sampling;
+ * this test changes no cap state. */
 #include "d3d9_core.h"
 #include "d3d9_null.h"
 #include "d3d9_cube_coords.h"
@@ -41,6 +41,7 @@ static int record_cube(void *ctx, const D9ColorVertex *v, size_t n,
     assert(state->stage_alphaop == D9_TOP_MODULATE);
     assert(state->stage_alphaarg1 == D9_TA_TEXTURE);
     assert(state->stage_alphaarg2 == D9_TA_DIFFUSE);
+    assert(state->mip_filter == 0 && state->resident_mips == 1);
     assert(draws < 7);
     for (unsigned i = 0; i < 3; ++i) if (draws < 6) assert(faces[i] == draws);
     if (draws < 6) seen_faces[draws] = faces[0];
@@ -170,8 +171,8 @@ int main(void) {
     for (unsigned f = 0; f < 6; ++f) assert(seen_faces[f] == f);
     assert(!d9_end_scene(d));
 
-    /* level > 0: a multi-level cube with mip filtering is named, while the
-     * same cube with mip filter NONE still samples level 0. */
+    /* A multi-level cube whose mips are not uploaded is named; the same cube
+     * with mip filter NONE still samples level 0. */
     make_cube(d, EDGE, 2);
     D9Handle tex = make_2d(d);
     assert(!d9_begin_scene(d, 0));
@@ -179,7 +180,7 @@ int main(void) {
     unsigned before = draws;
     int rc = draw_face(d);
     assert(rc == D9_UNSUPPORTED);
-    assert(strstr(d9_last_draw_diagnostic(d), "level 0 only") != NULL);
+    assert(strstr(d9_last_draw_diagnostic(d), "all mip levels resident") != NULL);
     assert(draws == before);
     assert(!d9_set_unit_sampler(d, 0, 7, 0));
     assert(!draw_face(d));
