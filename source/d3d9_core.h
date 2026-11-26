@@ -476,8 +476,29 @@ int d9_set_texture(D9Device *d,D9Handle h);
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program);
 /* Material constants for menu TEV plans: c0..c7 are the D3D registers, c8 is
  * the internal ambient+emissive fold.  Values are copied; non-finite entries
- * are rejected.  This is evidence for the menu path, not a D3D9 cap. */
+ * are rejected.  This is evidence for the menu path, not a D3D9 cap.
+ * Rows written through d9_set_ps_constants_f() take priority over this bank
+ * and are re-applied after every upload. */
 int d9_set_tev_constants(D9Device *d,const float values[9][4]);
+/* Read back the nine-row bank actually passed to the menu draw. */
+int d9_get_tev_constants(const D9Device *d,float out[9][4]);
+/* Pixel-shader constants.  The float window is c0..c7: that is the PICA TEV
+ * external-constant limit (D9TEV_MAX_CONSTANTS); a wider D3D9 range is not
+ * advertised or accepted.  Integer and bool registers are stored for honest
+ * Set/Get round-trip but the accepted ps_3_0 subset has no integer, predicate
+ * or flow-control opcode, so no accepted program consumes them.  Counts are
+ * vectors for F/I and individual BOOLs for B; n==0 is a valid no-op. */
+#define D9_PS_CONST_F_REGS 8u
+#define D9_PS_CONST_I_REGS 8u
+#define D9_PS_CONST_B_REGS 8u
+int d9_set_ps_constants_f(D9Device *d,unsigned start,const float *values,unsigned count);
+int d9_get_ps_constants_f(const D9Device *d,unsigned start,float *values,unsigned count);
+int d9_set_ps_constants_i(D9Device *d,unsigned start,const int32_t *values,unsigned count);
+int d9_get_ps_constants_i(const D9Device *d,unsigned start,int32_t *values,unsigned count);
+int d9_set_ps_constants_b(D9Device *d,unsigned start,const int32_t *values,unsigned count);
+int d9_get_ps_constants_b(const D9Device *d,unsigned start,int32_t *values,unsigned count);
+/* Bits 0..7 of the float registers that have been written. */
+unsigned d9_ps_constants_f_mask(const D9Device *d);
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m);
 /* Test-only CPU T&L prototype.  d9_set_tnl_proto resets the fixed-function
  * lighting state to the D3D defaults when enabling; disabling leaves the

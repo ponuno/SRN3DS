@@ -82,6 +82,10 @@ struct D9Device {
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
     float tev_constants[9][4];
+    float ps_constants[D9_PS_CONST_F_REGS][4];
+    int32_t ps_constants_i[D9_PS_CONST_I_REGS][4];
+    uint8_t ps_constants_b[D9_PS_CONST_B_REGS];
+    uint32_t ps_constants_f_mask;
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
     D9TnlState tnl;int tnl_proto;
     D9Handle texture1,cube_texture,cube_texture1,volume_texture,volume_texture1;
@@ -1291,8 +1295,94 @@ int d9_set_tev_constants(D9Device *d,const float values[9][4]){
     for(unsigned i=0;i<9;++i)for(unsigned j=0;j<4;++j)
         if(!isfinite(values[i][j]))return D9_INVALID;
     memcpy(d->tev_constants,values,sizeof d->tev_constants);
+    /* SetPixelShaderConstantF is the authoritative pixel-shader bank.  The
+     * legacy VS/ambient upload must not silently undo those writes. */
+    for(unsigned i=0;i<D9_PS_CONST_F_REGS;++i)
+        if(d->ps_constants_f_mask&(1u<<i))
+            memcpy(d->tev_constants[i],d->ps_constants[i],sizeof d->ps_constants[i]);
     return D9_OK;
 }
+int d9_get_tev_constants(const D9Device *d,float out[9][4]){
+    if(!d||!out)return D9_INVALID;
+    memcpy(out,d->tev_constants,sizeof d->tev_constants);
+    return D9_OK;
+}
+static int ps_range(const D9Device *d,const char *method,unsigned start,
+                    unsigned count,unsigned limit){
+    if(start>limit||count>limit-start){
+        char why[160];
+        snprintf(why,sizeof why,"%s: c%u + %u is outside the %u-register PS window",
+                 method,start,count,limit);
+        set_diagnosis((D9Device *)d,why);
+        return D9_INVALID;
+    }
+    return D9_OK;
+}
+int d9_set_ps_constants_f(D9Device *d,unsigned start,const float *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=ps_range(d,"SetPixelShaderConstantF",start,count,D9_PS_CONST_F_REGS);
+    if(rc)return rc;
+    if(!count)return D9_OK;
+    if(!values){set_diagnosis(d,"SetPixelShaderConstantF: constant data is not readable");return D9_INVALID;}
+    for(unsigned i=0;i<count*4u;++i)
+        if(!isfinite(values[i])){
+            set_diagnosis(d,"SetPixelShaderConstantF: non-finite constant value");
+            return D9_INVALID;
+        }
+    memcpy(&d->ps_constants[start][0],values,(size_t)count*16);
+    d->ps_constants_f_mask|=((1u<<count)-1u)<<start;
+    for(unsigned i=0;i<count;++i)
+        memcpy(d->tev_constants[start+i],d->ps_constants[start+i],16);
+    set_diagnosis(d,"");
+    return D9_OK;
+}
+int d9_get_ps_constants_f(const D9Device *d,unsigned start,float *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=ps_range(d,"GetPixelShaderConstantF",start,count,D9_PS_CONST_F_REGS);
+    if(rc)return rc;
+    if(count&&!values)return D9_INVALID;
+    if(count)memcpy(values,&d->ps_constants[start][0],(size_t)count*16);
+    return D9_OK;
+}
+int d9_set_ps_constants_i(D9Device *d,unsigned start,const int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=ps_range(d,"SetPixelShaderConstantI",start,count,D9_PS_CONST_I_REGS);
+    if(rc)return rc;
+    if(!count)return D9_OK;
+    if(!values){set_diagnosis(d,"SetPixelShaderConstantI: constant data is not readable");return D9_INVALID;}
+    memcpy(&d->ps_constants_i[start][0],values,(size_t)count*16);
+    set_diagnosis(d,"");
+    return D9_OK;
+}
+int d9_get_ps_constants_i(const D9Device *d,unsigned start,int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=ps_range(d,"GetPixelShaderConstantI",start,count,D9_PS_CONST_I_REGS);
+    if(rc)return rc;
+    if(count&&!values)return D9_INVALID;
+    if(count)memcpy(values,&d->ps_constants_i[start][0],(size_t)count*16);
+    return D9_OK;
+}
+int d9_set_ps_constants_b(D9Device *d,unsigned start,const int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=ps_range(d,"SetPixelShaderConstantB",start,count,D9_PS_CONST_B_REGS);
+    if(rc)return rc;
+    if(!count)return D9_OK;
+    if(!values){set_diagnosis(d,"SetPixelShaderConstantB: constant data is not readable");return D9_INVALID;}
+    /* D3D9 BOOL constants are normalised on write; Get returns 0/1, never the
+     * original nonzero bits. */
+    for(unsigned i=0;i<count;++i)d->ps_constants_b[start+i]=values[i]?1u:0u;
+    set_diagnosis(d,"");
+    return D9_OK;
+}
+int d9_get_ps_constants_b(const D9Device *d,unsigned start,int32_t *values,unsigned count){
+    if(!d)return D9_INVALID;
+    int rc=ps_range(d,"GetPixelShaderConstantB",start,count,D9_PS_CONST_B_REGS);
+    if(rc)return rc;
+    if(count&&!values)return D9_INVALID;
+    for(unsigned i=0;i<count;++i)values[i]=d->ps_constants_b[start+i];
+    return D9_OK;
+}
+unsigned d9_ps_constants_f_mask(const D9Device *d){return d?d->ps_constants_f_mask&0xFFu:0u;}
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;d->transforms[which]=*m;return D9_OK;}
 int d9_set_shader_clip(D9Device *d,const D9Matrix *m){if(!d)return D9_INVALID;if(!m){d->shader_active=0;return D9_OK;}

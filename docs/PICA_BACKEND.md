@@ -113,8 +113,8 @@ negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
 menu plan through `draw_menu`, `scaled_target_blit` pixel-checks scaled
 1024/512 logical StretchRect chains, `scaled_readback` checks the env-gated
 nearest readback/writeback and default lossy refusal, and the full
-suite is **95 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
-(`.3dsx` 840,708 B, `.elf` 5,721,244 B).  No Azahar pixel run is claimed.
+suite is **98 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
+(`.3dsx` 851,524 B, `.elf` 5,799,632 B).  No Azahar pixel run is claimed.
 
 ### Render-target texture handles
 

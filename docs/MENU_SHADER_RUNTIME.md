@@ -95,8 +95,20 @@ They remain explicit-only and must be reported by the material/preprocessing
 loader via `d9_menu_shader_note_preconditions()`. Until then the logo draw
 stays refused by name even with textures, colour and constants present.
 
-`SetVertexShaderConstantF` now accepts c0..c7 so this evidence can exist. The
-advertised `MaxVertexShaderConst` stays **4**; c4..c7 are stored only as
+`SetPixelShaderConstantF` now writes the real c0..c7 TEV bank (`slots
+109`/`110`, with honest `GetPixelShaderConstantF`).  The window is eight
+registers because PICA exposes eight external TEV constants; wider D3D9
+ranges return named `D3DERR_INVALIDCALL` without a partial write.  The
+nine-row bank passed to `draw_menu()` is authoritative: PS rows override the
+legacy VS/ambient upload, so a later `SetVertexShaderConstantF` cannot clobber
+a material c3/c4/c7.  The observed mask admits c0..c7 evidence from either
+bank, and alpha evidence from PS c4 when present.  `SetPixelShaderConstantI/B`
+also round-trip through Get but are not claimed as draw inputs: the accepted
+ps_3_0 subset has no integer, predicate or flow-control opcode that could
+consume them.  Bool values are normalised to 0/1 on write.
+
+`SetVertexShaderConstantF` still accepts c0..c7 so this evidence can exist.
+The advertised `MaxVertexShaderConst` stays **4**; c4..c7 are stored only as
 menu-material evidence and the fixed clip path still consumes c0..c3. This is
 not an SM3 or shader-capability claim.
 
@@ -254,7 +266,7 @@ powershell -File tools\run_host_tests.ps1 `
   -OutDir C:\Users\vasya\Documents\Skyrim_N3DS_wt\menu-shader-vs\build_host_full_menu_abs
 ```
 
-Result: **95 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
+Result: **98 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
 hitting the documented guest memory gate (`Not enough memory to run
 application.`), not a rendering PASS.
 

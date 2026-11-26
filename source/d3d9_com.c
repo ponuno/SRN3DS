@@ -1741,13 +1741,17 @@ static uint32_t menu_observed_preconditions(void){
     }
     if(menu_texture_ldr(g.tex1))mask|=D9_MENU_SHADER_PRE_TEXTURE1_2D;
     if(menu_decl_has(decl,D9_USAGE_COLOR,0))mask|=D9_MENU_SHADER_PRE_VERTEX_COLOR;
-    if((g.constants_mask&0xFFu)==0xFFu)
+    uint32_t ps_mask=g.device?d9_ps_constants_f_mask(g.device):0u;
+    if(((g.constants_mask|ps_mask)&0xFFu)==0xFFu)
         mask|=D9_MENU_SHADER_PRE_MATERIAL_CONSTANTS_C0_C7;
-    if(g.constants_mask&(1u<<4)){
-        float alpha=g.constants_hi.m[0][3];
-        if(isfinite(alpha)&&alpha>=0.0f&&alpha<=1.0f)
-            mask|=D9_MENU_SHADER_PRE_MATERIAL_ALPHA_C4;
+    float alpha=0.0f;int have_alpha=0;
+    if(ps_mask&(1u<<4)){
+        if(!d9_get_ps_constants_f(g.device,4,&alpha,1))have_alpha=1;
+    }else if(g.constants_mask&(1u<<4)){
+        alpha=g.constants_hi.m[0][3];have_alpha=1;
     }
+    if(have_alpha&&isfinite(alpha)&&alpha>=0.0f&&alpha<=1.0f)
+        mask|=D9_MENU_SHADER_PRE_MATERIAL_ALPHA_C4;
     if(g.constants_mask&(1u<<8))
         mask|=D9_MENU_SHADER_PRE_AMBIENT_EMISSIVE_VARYING;
     return mask;
@@ -1952,6 +1956,72 @@ static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!
     for(unsigned i=0;i<n;++i){memcpy(vs_const_row(start+i),values[i],16);g.constants_mask|=1u<<(start+i);}upload_tev_constants();RET(OK,4);}
 static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=9||n>9-start||(n&&!ptr(A(2),n*16)))RET(INVALID,4);
     for(unsigned i=0;i<n;++i)memcpy(ptr(A(2)+i*16,16),vs_const_row(start+i),16);RET(OK,4);}
+/* ---- pixel-shader constants --------------------------------------------- */
+/* The float bank is exactly the PICA TEV external-constant window c0..c7.
+ * I/B registers are API state with no accepted-opcode consumer; they still
+ * round-trip honestly and use the same bounded register window. */
+static int ps_const_range(const char *method,unsigned start,unsigned n,unsigned limit){
+    if(start>limit||n>limit-start){
+        char why[160];
+        snprintf(why,sizeof why,"c%u + %u is outside the %u-register PS window",
+                 start,n,limit);
+        d3d_fail(method,why,INVALID);
+        return INVALID;
+    }
+    return OK;
+}
+static uint32_t ps_const_setup(CPU *c,const char *method,unsigned limit,size_t unit,void **data){
+    unsigned start=A(1),n=A(3);uint32_t p=A(2);
+    if(!obj(A(0),DEVICE))return INVALID;
+    uint32_t range=ps_const_range(method,start,n,limit);if(range!=OK)return range;
+    if(g.phase==2){d3d_fail(method,"cannot set pixel-shader constants after EndScene",INVALID);return INVALID;}
+    *data=n?ptr(p,(size_t)n*unit):NULL;
+    if(n&&!*data){d3d_fail(method,"constant data is not readable guest memory",INVALID);return INVALID;}
+    return OK;
+}
+static void ps_const_finish(CPU *c,const char *method,int rc){
+    if(rc){d3d_fail(method,d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void set_ps_const_f(CPU *c){
+    void *data=NULL;uint32_t setup=ps_const_setup(c,"SetPixelShaderConstantF",D9_PS_CONST_F_REGS,16,&data);
+    if(setup!=OK)RET(setup,4);
+    ps_const_finish(c,"SetPixelShaderConstantF",d9_set_ps_constants_f(g.device,A(1),(const float *)data,A(3)));
+}
+static void get_ps_const_f(CPU *c){
+    unsigned start=A(1),n=A(3);uint32_t range=ps_const_range("GetPixelShaderConstantF",start,n,D9_PS_CONST_F_REGS);
+    if(!obj(A(0),DEVICE)||range!=OK)RET(INVALID,4);
+    if(n&&!ptr(A(2),(size_t)n*16))RET(INVALID,4);
+    int rc=d9_get_ps_constants_f(g.device,start,n?(float *)ptr(A(2),(size_t)n*16):NULL,n);
+    if(rc){d3d_fail("GetPixelShaderConstantF",d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void set_ps_const_i(CPU *c){
+    void *data=NULL;uint32_t setup=ps_const_setup(c,"SetPixelShaderConstantI",D9_PS_CONST_I_REGS,16,&data);
+    if(setup!=OK)RET(setup,4);
+    ps_const_finish(c,"SetPixelShaderConstantI",d9_set_ps_constants_i(g.device,A(1),(const int32_t *)data,A(3)));
+}
+static void get_ps_const_i(CPU *c){
+    unsigned start=A(1),n=A(3);uint32_t range=ps_const_range("GetPixelShaderConstantI",start,n,D9_PS_CONST_I_REGS);
+    if(!obj(A(0),DEVICE)||range!=OK)RET(INVALID,4);
+    if(n&&!ptr(A(2),(size_t)n*16))RET(INVALID,4);
+    int rc=d9_get_ps_constants_i(g.device,start,n?(int32_t *)ptr(A(2),(size_t)n*16):NULL,n);
+    if(rc){d3d_fail("GetPixelShaderConstantI",d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void set_ps_const_b(CPU *c){
+    void *data=NULL;uint32_t setup=ps_const_setup(c,"SetPixelShaderConstantB",D9_PS_CONST_B_REGS,4,&data);
+    if(setup!=OK)RET(setup,4);
+    ps_const_finish(c,"SetPixelShaderConstantB",d9_set_ps_constants_b(g.device,A(1),(const int32_t *)data,A(3)));
+}
+static void get_ps_const_b(CPU *c){
+    unsigned start=A(1),n=A(3);uint32_t range=ps_const_range("GetPixelShaderConstantB",start,n,D9_PS_CONST_B_REGS);
+    if(!obj(A(0),DEVICE)||range!=OK)RET(INVALID,4);
+    if(n&&!ptr(A(2),(size_t)n*4))RET(INVALID,4);
+    int rc=d9_get_ps_constants_b(g.device,start,n?(int32_t *)ptr(A(2),(size_t)n*4):NULL,n);
+    if(rc){d3d_fail("GetPixelShaderConstantB",d9_last_draw_diagnostic(g.device),INVALID);RET(INVALID,4);}
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
 static void shader_function(CPU *c){Obj *o=obj(A(0),0);uint32_t size_ptr=A(2);if(!o||(o->kind!=VS&&o->kind!=PS)||!ptr(size_ptr,4))RET(INVALID,3);
     uint32_t need=o->words*4,provided=M32(size_ptr);M32(size_ptr)=need;if(!A(1))RET(OK,3);
     if(provided<need||!ptr(A(1),need))RET(INVALID,3);memcpy(ptr(A(1),need),o->code,need);RET(OK,3);}
@@ -2213,7 +2283,8 @@ static void draw_indexed_up(CPU *c){
  X(cooperative) X(available_texture_mem) X(evict_managed) X(raster_status) X(dialog_box_mode) X(validate_device) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(create_cube_tex) X(create_volume_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
  X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
  X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
- X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
+ X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) \
+ X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
  X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
@@ -2363,6 +2434,9 @@ static void init_tables(void){
     SLOT(DEVICE,86,create_decl);SLOT(DEVICE,87,set_decl);SLOT(DEVICE,88,get_decl);SLOT(DEVICE,101,get_stream);SLOT(DEVICE,102,stream_freq);SLOT(DEVICE,103,get_stream_freq);SLOT(DEVICE,105,get_indices);
     SLOT(DEVICE,91,create_vs);SLOT(DEVICE,92,set_vs);SLOT(DEVICE,93,get_vs);SLOT(DEVICE,94,set_vs_const);SLOT(DEVICE,95,get_vs_const);
     SLOT(DEVICE,106,create_ps);SLOT(DEVICE,107,set_ps);SLOT(DEVICE,108,get_ps);
+    SLOT(DEVICE,109,set_ps_const_f);SLOT(DEVICE,110,get_ps_const_f);
+    SLOT(DEVICE,111,set_ps_const_i);SLOT(DEVICE,112,get_ps_const_i);
+    SLOT(DEVICE,113,set_ps_const_b);SLOT(DEVICE,114,get_ps_const_b);
     for(unsigned k=VB;k<=TEX;++k){SLOT(k,3,resource_device);SLOT(k,10,resource_type);}
     for(unsigned k=VB;k<=IB;++k){SLOT(k,11,buffer_lock);SLOT(k,12,buffer_unlock);SLOT(k,13,buffer_desc);}
     SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,18,texture_get_surface_level);
