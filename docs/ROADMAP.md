@@ -186,6 +186,11 @@ read stage without fake successes. *Not met.*
       code/advance/bounds/kerning tables; malformed/AVM2/DefineFont4 paths refuse
       by name. Still no renderable display list, AVM execution or draw.
       See `docs/MENU_SWF.md`.
+- [x] Bounded SWF shape/glyph geometry: DefineShape/2/3/4 fill/line styles,
+      StyleChange/StraightEdge/CurvedEdge records, 27 shapes / 151 paths /
+      1,712 segments / 2,362 points, selected-sprite shape bounds, and 243
+      DefineFont3 glyph outlines (241 non-empty, 5,292 segments). No
+      tessellation, rasterisation or atlas. See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer
