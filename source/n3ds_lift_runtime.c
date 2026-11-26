@@ -1,5 +1,8 @@
 #include "n3ds_lift_runtime.h"
 #include "win32_shims.h"
+/* Optional measurement hook; absent from ordinary host/ARM test binaries. */
+extern void *tesv_sm3_probe_level_ptr(uint32_t address, size_t bytes)
+    __attribute__((weak));
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -259,6 +262,10 @@ void n3ds_lift_init_cpu(CPU *c,uint32_t stack_top,uint32_t teb) {
     memset(c,0,sizeof *c);c->r[4]=stack_top;c->fs_base=teb;c->fpu_cw=0x37f;c->mxcsr=0x1f80;
 }
 void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
+    if (tesv_sm3_probe_level_ptr) {
+        void *probe = tesv_sm3_probe_level_ptr(addr, bytes);
+        if (probe) return probe;
+    }
     void *p=memory?guest_ptr(memory,addr,bytes):NULL;
     if(!p){
         static unsigned logged;

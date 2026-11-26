@@ -10,6 +10,7 @@
 #include "d3d9_null.h"
 #include "d3dx_texture_shims.h"
 #include "d3dx_surface_shims.h"
+#include "tesv_sm3_probe.h"
 #include "ir_core.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
@@ -62,6 +63,7 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
     BootSession b;
     n3ds_boot_init(&b, budget);
     int rc = -1;
+    IrCacheStats ir_stats = {0};
     if (n3ds_boot_add_file(&b, "TESV.exe", exe, 0)) {
         printf("load: %s\n", b.message);
         goto out;
@@ -122,6 +124,10 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
         printf("prepare: %s\n", b.message);
         goto out;
     }
+    if (tesv_sm3_gate_probe(&b.memory)) {
+        printf("sm3 probe: refused; guest run not started\n");
+        goto out;
+    }
     if (n3ds_ir_cache_init(4u << 20) != 0) printf("IR cache: 4 MiB allocation failed; using default\n");
     n3ds_pilot_set_steps(steps);
     uint32_t status = 0;
@@ -129,7 +135,6 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
     rt_prof_enable(1);
     int r = n3ds_boot_run(&b, &status);
     rt_prof_enable(0);
-    IrCacheStats ir_stats;
     n3ds_ir_cache_stats(&ir_stats);
     printf("IR cache: blocks=%llu bytes=%llu hits=%llu misses=%llu evicted=%llu\n",
            (unsigned long long)ir_stats.blocks, (unsigned long long)ir_stats.bytes,
