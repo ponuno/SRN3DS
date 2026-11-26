@@ -232,6 +232,9 @@ int main(void) {
     gfxInitDefault();
     D9Citro *gpu=d9_citro_open();
     consoleInit(GFX_TOP, NULL); osSetSpeedupEnable(true);
+    /* Keep the complete stderr trace on SD so emulator runs can be read
+     * from the host after the console scrolls or the engine exits. */
+    (void)freopen("sdmc:/Skyrim_N3DS_stderr.log", "w", stderr);
     printf("Skyrim N3DS - TESV startup slice\nNot a playable build.\n\n");
     printf("D3D9 backend: %s\n",gpu?"PICA200":"null fallback (PICA init failed)");
     printf("Hold X at start: memory probe (measurement only)\n\n");
