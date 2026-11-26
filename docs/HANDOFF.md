@@ -49,12 +49,14 @@ Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
   it blindly; cap memory or pack a smaller corpus.
 - `TESV_HANG_WATCHDOG_MS=<ms>` (host slice only, default off) arms after the
   first real Present and dumps every thread, wait set, stack, IR block, sync
-  objects, CS owners and the Interlocked ring before exiting 70. The current
-  census hangs with the main thread in slice IR at `0xa3ce84` (leader inside
-  `0xa3ce81+6`), while threads 8/12 wait on `0x504`/`0x537`; the last lock is
-  `0x541e118c`. A runtime mid-instruction guard is unsafe until the
-  decoder/discovery boundary disagreement (e.g. `00f5ea78` in a .data
-  "function") is fixed.
+  objects, CS owners and the Interlocked ring before exiting 70. The menu hang
+  is a real guest retry loop, not a bad leader: the actual guest image has
+  `0xa3ce84: cmp [esp+0x10],0`, and the main loops over `0xa3cdd0..0xa3d01a`
+  with the Interlocked word `0x541e118c`. Thread 8 waits on semaphore `0x504`;
+  thread 12 waits on `0x537`, which is no longer a live sync object. Closing a
+  sync object now wakes waiters and the wait loop returns
+  `ERROR_INVALID_HANDLE` instead of blocking forever, but thread 12 still never
+  reaches that path, so its producer is the next lead.
 
 ## Commands (Windows)
 
