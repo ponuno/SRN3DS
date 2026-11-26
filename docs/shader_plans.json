@@ -1,0 +1,414 @@
+{
+  "archive": "Skyrim - Shaders.bsa",
+  "entries": [
+    {
+      "constants": [
+        3,
+        4,
+        7
+      ],
+      "draw_enabled": 0,
+      "family": "menu_light",
+      "id": "menu.logo.ps",
+      "inputs": [
+        {
+          "reg_index": 1,
+          "tev_source": 0,
+          "usage": 10,
+          "usage_index": 0
+        },
+        {
+          "reg_index": 2,
+          "tev_source": 1,
+          "usage": 10,
+          "usage_index": 1
+        }
+      ],
+      "instructions": 25,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "note": "five-stage menu-light plan reproduced offline; draw needs normal/tangent prebake and c8 ambient",
+      "preconditions": [
+        "normal_prebaked",
+        "tangent_basis_prebaked",
+        "ambient_emissive_varying",
+        "material_alpha_c4",
+        "material_constants_c0_c7",
+        "ldr_quality",
+        "texture0_2d",
+        "texture1_2d",
+        "vertex_color"
+      ],
+      "requires_alpha_fixup": 0,
+      "sha1": "fc143f74d6aa2b4b55ff39f0b4221c5495751850",
+      "sha256": "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9",
+      "source_key": "0x01200005",
+      "source_package": "shadersfx\\lighting\\059\\p1200005.fxp",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 3,
+          "const_rgba8": 0,
+          "func_a": 7,
+          "func_rgb": 7,
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            4,
+            14,
+            14
+          ],
+          "src_rgb": [
+            4,
+            14,
+            14
+          ]
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 4,
+          "const_rgba8": 0,
+          "func_a": 8,
+          "func_rgb": 8,
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            1
+          ],
+          "src_rgb": [
+            15,
+            14,
+            1
+          ]
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 1,
+          "func_rgb": 1,
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            3,
+            0,
+            15
+          ],
+          "src_rgb": [
+            3,
+            15,
+            15
+          ]
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 4,
+          "const_rgba8": 0,
+          "func_a": 1,
+          "func_rgb": 1,
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            15,
+            0,
+            15
+          ]
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 7,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 1,
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            2,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            15,
+            15
+          ],
+          "src_rgb": [
+            15,
+            14,
+            15
+          ]
+        }
+      ],
+      "stages": 5,
+      "textures": [
+        {
+          "sampler_reg": 0,
+          "sampler_type": 2,
+          "texcoord_reg": 0
+        },
+        {
+          "sampler_reg": 1,
+          "sampler_type": 2,
+          "texcoord_reg": 0
+        }
+      ],
+      "uses_vertex_color": 1,
+      "version": "0xffff0300"
+    },
+    {
+      "constants": [],
+      "draw_enabled": 1,
+      "family": "generic",
+      "id": "menu.composite.ps",
+      "inputs": [],
+      "instructions": 1,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "note": "certified one-stage copy; same plan as the runtime selector",
+      "requires_alpha_fixup": 0,
+      "sha1": "c99c2cafbbfb2bec25745071be4c7657ea584aea",
+      "sha256": "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de",
+      "source_key": "0x00000000",
+      "source_package": "shadersfx\\imagespace002.fxp",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "texld",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            3,
+            3,
+            3
+          ],
+          "src_rgb": [
+            3,
+            3,
+            3
+          ],
+          "word": 164
+        }
+      ],
+      "stages": 1,
+      "textures": [
+        {
+          "sampler_reg": 0,
+          "sampler_type": 2,
+          "texcoord_reg": 0
+        }
+      ],
+      "uses_vertex_color": 0,
+      "version": "0xffff0300"
+    },
+    {
+      "constants": [
+        0
+      ],
+      "draw_enabled": 0,
+      "family": "generic",
+      "id": "game.ps.f5239354",
+      "inputs": [],
+      "instructions": 3,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "note": "offline-compiled generic TEV plan; not certified for draw",
+      "requires_alpha_fixup": 0,
+      "sha1": "be2eece3bd00c0ae8917a65db4636939aaa5f777",
+      "sha256": "f5239354171a6bc8166e1bfc59a0f46b90a3f0bc37b936f0b33ff6b91e9cc9ce",
+      "source_key": "0x00040002",
+      "source_package": "shadersfx\\shaders001.fxp",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 1,
+          "const_reg": 255,
+          "const_rgba8": 255,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "mov",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            15,
+            15
+          ],
+          "src_rgb": [
+            14,
+            15,
+            15
+          ],
+          "word": 168
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 0,
+          "const_rgba8": 0,
+          "func_a": 8,
+          "func_rgb": 8,
+          "instruction": "mad",
+          "op_a": [
+            2,
+            4,
+            2
+          ],
+          "op_rgb": [
+            0,
+            4,
+            8
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            14,
+            15,
+            15
+          ],
+          "src_rgb": [
+            14,
+            15,
+            15
+          ],
+          "word": 180
+        }
+      ],
+      "stages": 2,
+      "textures": [],
+      "uses_vertex_color": 0,
+      "version": "0xffff0300"
+    },
+    {
+      "codegen": "pending",
+      "constants": [
+        0,
+        1,
+        2
+      ],
+      "draw_enabled": 0,
+      "expandable": [],
+      "id": "game.vs.0ccc7542",
+      "inputs": [
+        {
+          "reg_index": 0,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        },
+        {
+          "reg_index": 1,
+          "usage": 5,
+          "usage_index": 0,
+          "usage_name": "texcoord"
+        }
+      ],
+      "instructions": 4,
+      "kind": "pica_vs",
+      "note": "PICA VS descriptor; native codegen pending, draw disabled",
+      "outputs": [
+        {
+          "reg_index": 0,
+          "type": 6,
+          "usage": 0,
+          "usage_index": 0,
+          "usage_name": "position"
+        },
+        {
+          "reg_index": 1,
+          "type": 6,
+          "usage": 5,
+          "usage_index": 0,
+          "usage_name": "texcoord"
+        }
+      ],
+      "sha1": "3b26d602f1af2403644bdb830d11e95aa47dd45f",
+      "sha256": "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7",
+      "skinning": false,
+      "source_key": "0x00000000",
+      "source_package": "shadersfx\\imagespace002.fxp",
+      "stage": "vs_3_0",
+      "uniform_registers": 3,
+      "version": "0xfffe0300"
+    }
+  ],
+  "generated_for": "F:\\Skyrim\\Data",
+  "note": "Native pipeline descriptors only. Hash -> plan; no shader bytes are stored. draw_enabled is 1 only for a plan whose runtime equivalence is separately certified.",
+  "schema": "d9-shader-plan-v1"
+}
