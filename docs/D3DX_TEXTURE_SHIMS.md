@@ -15,6 +15,7 @@ these six slots point at host thunks in the `0xfd000000` window.
 | `D3DXGetImageInfoFromFileA` | Maps the guest path below the `win32_init()` sandbox root, reads **only the 128-byte DDS header**, and fills the same seven fields. A valid header is reported even when the payload is larger than 64 MiB. |
 | `D3DXCreateTextureFromFileExA` | Reads the whole file (64 MiB cap), parses the same DDS, accepts the real TESV tuple (Width/Height from the file, `MipLevels=D3DX_FROM_FILE`, `D3DUSAGE_DYNAMIC`, `A8R8G8B8`, `D3DPOOL_SYSTEMMEM`), and creates/uploads a real texture. BC1/3/5 files requested as `A8R8G8B8` are decoded through `d3d9_bc.c`. |
 | `D3DXCreateCubeTextureFromFileInMemory` | Parses a six-face cube DDS (`CUBEMAP` plus all six face bits), validates square/pow2/<=1024 and the face-major mip chain, then creates a real `IDirect3DCubeTexture9` through the new core cube path and uploads every face/level. A8R8G8B8, X8R8G8B8, DXT1, DXT3 and DXT5 are accepted. |
+| `D3DXCreateVolumeTextureFromFileInMemory` | Parses a legacy volume DDS (`DDSCAPS2_VOLUME`, `DDSD_DEPTH`, depth > 1), validates pow2 width/height/depth up to 1024 and the level-major slice chain, then creates a real `IDirect3DVolumeTexture9` and uploads every depth slice/mip level. A8R8G8B8, X8R8G8B8, DXT1, DXT3 and DXT5 are accepted. |
 
 Supported DDS payloads: `A8R8G8B8`, `X8R8G8B8`, `DXT1`, `DXT3`, `DXT5`;
 power-of-two dimensions up to 1024. Legacy DDS headers only; a `DX10` header is
@@ -98,27 +99,51 @@ payload. Missing bits, non-square edges, truncation and non-cube DDS return
 `D3DXERR_INVALIDDATA`. A cube DDS passed to the 2D loaders still returns
 `E_NOTIMPL`.
 
-Remaining in this layer: volume textures (`IDirect3DVolumeTexture9`) are still
-`E_NOTIMPL`; cube objects are not registered in the 2D texture cache
-(`D9TexCache`) and cube-map sampling/PICA cube faces are not implemented.
+Remaining in the cube layer: cube objects are not registered in the 2D texture
+cache (`D9TexCache`) and cube-map sampling/PICA cube faces are not implemented.
+
+## Volume textures
+
+`d3d9_core` also owns a `VolumeTexture` with width x height x depth slice
+storage for every mip level. `d3d9_com` exposes object kind `VOLUME` /
+`IDirect3DVolumeTexture9`: `CreateVolumeTexture` (device slot 24),
+`GetLevelCount`, `GetLevelDesc`, `LockBox`/`UnlockBox` and `AddDirtyBox`.
+`LockBox` maps a sliced box into guest memory and `UnlockBox` re-uploads the
+level; compressed volumes use block-aligned row geometry. `SetTexture` accepts
+a volume and `GetTexture` returns it. A draw with a volume bound fails with
+`D3DERR_NOTAVAILABLE` and `"volume sampling is not implemented"`.
+
+Volume creation requires the append-only backend
+`texture_create_volume/upload_volume` callbacks. The null backend advertises
+them and stores/counts every slice level; the PICA backend does not, so
+`CreateVolumeTexture` returns `D3DERR_NOTAVAILABLE` with
+`"this backend has no volume-texture API"`.
+
+`IDirect3DVolume9` / `GetVolumeLevel` is deliberately not implemented: it
+returns `D3DERR_NOTAVAILABLE` and directs callers to `LockBox`/`UnlockBox`.
+The D3DX loader requires `DDSCAPS2_VOLUME` + `DDSD_DEPTH`, depth > 1, pow2
+dimensions <=1024 and a complete level-major slice chain. Missing depth,
+truncation, non-volume DDS and unsupported formats are named failures.
+
+Remaining in this layer: volume sampling, PICA volume faces and volume texcache
+integration. Volume textures keep a CPU slice store per mip level and are not
+sampled by the draw path.
 
 ## Named unsupported
 
-`D3DXCreateVolumeTextureFromFileInMemory` still resolves to a host thunk that
-returns `E_NOTIMPL` and records the missing layer:
+* `IDirect3DVolume9` / `IDirect3DVolumeTexture9::GetVolumeLevel` - no volume
+  surface interface; use `LockBox`/`UnlockBox`.
+* `D3DXCreateTextureFromFile(InMemory|ExA)` on a cube or volume DDS - the 2D
+  loader returns `E_NOTIMPL` and never creates a 2D texture.
+* `D3DXCreateCubeTextureFromFileInMemory` on a volume DDS - `E_NOTIMPL`; the
+  dedicated volume loader is named in the diagnostic.
+* Cube/volume sampling in a draw - `D3DERR_NOTAVAILABLE` with the exact
+  `"cube-map sampling"` / `"volume sampling"` reason.
 
-* `D3DXCreateVolumeTextureFromFileInMemory` - no `IDirect3DVolumeTexture9`
-  object type, depth slices or volume upload.
-
-Cube/volume DDS passed to `D3DXCreateTextureFromFile(InMemory|ExA)` is also
-rejected, never silently created as 2D.
-
-### Missing core layer for volume
-
-`d3d9_core` now has a six-face `CubeTexture`, but no depth-slice object or
-volume backend API. Volume support needs a new core volume type, depth slices,
-COM interfaces, backend entry points and `SetTexture`/sampler acceptance - a
-separate change.
+`cube` DDS passed to `D3DXCreateVolumeTextureFromFileInMemory` is rejected as
+`D3DXERR_INVALIDDATA`; a volume DDS passed to the cube loader returns
+`E_NOTIMPL`, and a volume DDS passed to a 2D loader also returns `E_NOTIMPL`
+(the 2D/cube loaders never create the wrong resource type).
 
 ## Integration
 

@@ -81,3 +81,11 @@ uint32_t d9_com_host_create_cube_texture(uint32_t device,unsigned edge,unsigned 
 uint32_t d9_com_host_upload_cube_face_level(uint32_t cube,unsigned face,unsigned level,
                                             const void *src,size_t src_pitch,
                                             size_t src_bytes);
+/* Host-ABI volume creation/upload.  The core stores every depth slice for every
+ * mip level; the backend must provide texture_create_volume/upload_volume. */
+uint32_t d9_com_host_create_volume_texture(uint32_t device,unsigned w,unsigned h,
+                                           unsigned depth,unsigned levels,unsigned usage,
+                                           unsigned format,unsigned pool,uint32_t *out);
+uint32_t d9_com_host_upload_volume_level(uint32_t volume,unsigned level,
+                                         const void *src,size_t src_pitch,
+                                         size_t src_slice_pitch,size_t src_bytes);

@@ -203,6 +203,15 @@ typedef struct {
      * backend without it refuses such targets by name. */
     int (*target_viewport_scaled)(void *ctx,unsigned logical_w,unsigned logical_h,
                                   unsigned native_w,unsigned native_h);
+    /* Optional volume-texture creation/upload.  Appended after the cube and
+     * bounded-target callbacks so existing positional D9Backend initializers
+     * keep their meaning.  The core owns width x height x depth slices for
+     * every mip level as CPU pixels; NULL means volume textures are refused
+     * by name. */
+    int (*texture_create_volume)(void *ctx,unsigned w,unsigned h,unsigned depth,
+                                 unsigned levels,void **native);
+    int (*texture_upload_volume)(void *ctx,void *native,unsigned level,
+                                 const void *data,size_t bytes);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -278,6 +287,31 @@ int d9_release_cube_texture(D9Device *d,D9Handle h);
  * not implemented by the draw path, so a later draw with a cube bound fails
  * with D9_UNSUPPORTED rather than silently dropping the cube. */
 int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h);
+/* ---- volume textures -----------------------------------------------------
+ * Width x height x depth CPU slices with a shared mip chain.  Creation requires
+ * the append-only backend texture_create_volume/upload_volume callbacks; the
+ * null backend advertises them, the PICA backend does not.  LockBox/UnlockBox
+ * are exposed through a level view; IDirect3DVolume9 is not implemented. */
+int d9_create_volume_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned depth,
+                                unsigned levels,unsigned format,unsigned pool,
+                                unsigned usage,D9Handle *out);
+unsigned d9_volume_levels(D9Device *d,D9Handle h);
+int d9_volume_level_info(D9Device *d,D9Handle h,unsigned level,
+                         unsigned *w,unsigned *height,unsigned *depth,
+                         size_t *pitch,size_t *plane_bytes,size_t *bytes);
+int d9_volume_level_view(D9Device *d,D9Handle h,unsigned level,void **pixels,
+                         unsigned *w,unsigned *height,unsigned *depth,
+                         size_t *pitch,size_t *plane_bytes,size_t *bytes);
+int d9_volume_upload_level(D9Device *d,D9Handle h,unsigned level,
+                           const void *src,size_t src_pitch,size_t src_slice_pitch,
+                           size_t src_bytes);
+/* Re-upload a whole level after a LockBox view was written. */
+int d9_volume_level_unlocked(D9Device *d,D9Handle h,unsigned level);
+int d9_release_volume_texture(D9Device *d,D9Handle h);
+/* Bind a ready volume to stage 0/1.  h==0 clears that stage.  Volume sampling
+ * is not implemented by the draw path, so a later draw with a volume bound
+ * fails with D9_UNSUPPORTED rather than silently dropping it. */
+int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h);
 /* One LDR render target at a time.  Handle zero is the implicit back buffer. */
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,
                             int lockable,D9Handle *out);

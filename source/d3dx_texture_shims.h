@@ -17,10 +17,12 @@
  *                                        A(12)) and `ret 0x38`.
  *   D3DXCreateCubeTextureFromFileInMemory  six-face DDS -> IDirect3DCubeTexture9
  *                                        (A8/X8/DXT1/3/5, face-major mips)
+ *   D3DXCreateVolumeTextureFromFileInMemory  depth-slice DDS -> IDirect3DVolumeTexture9
+ *                                        (A8/X8/DXT1/3/5, LockBox/UnlockBox)
  *
  * Named unsupported (never a fake success):
- *   D3DXCreateVolumeTextureFromFileInMemory
- *   D3DXCreateTextureFromFile(InMemory|ExA) on a cube DDS (E_NOTIMPL)
+ *   IDirect3DVolume9 / GetVolumeLevel (LockBox is the supported volume path)
+ *   D3DXCreateTextureFromFile(InMemory|ExA) on a cube/volume DDS (E_NOTIMPL)
  */
 #include "guest.h"
 #include "pe_imports.h"

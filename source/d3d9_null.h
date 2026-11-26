@@ -41,6 +41,7 @@ typedef struct {
     /* Cube-map creation/upload accounting.  The core owns the six face stores;
      * these counters prove the null backend accepted every face/level. */
     unsigned cube_creates,cube_uploads;
+    unsigned volume_creates,volume_uploads;
 } D9NullStats;
 
 const D9Backend *d9_null_backend(void);

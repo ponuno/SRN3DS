@@ -633,8 +633,8 @@ int main(void){
     assert(!guest_write(&h.memory,DATA,ddsbuf,vol_bytes));
     uint32_t vol[4]={h.device,DATA,(uint32_t)vol_bytes,OUT};
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-    assert(shim_call(&h,"D3DXCreateVolumeTextureFromFileInMemory",vol,4)==HR_E_NOTIMPL);
-    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"IDirect3DVolumeTexture9"));
+    assert(shim_call(&h,"D3DXCreateVolumeTextureFromFileInMemory",vol,4)==HR_INVALIDDATA);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"truncated"));
 
     /* 8. Device validation: a non-device pointer must not create a texture. */
     dds_a8=make_dxt1_dds(ddsbuf,16,16,0x40);

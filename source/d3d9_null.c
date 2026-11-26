@@ -62,6 +62,28 @@ static int null_cube_upload(void *ctx,void *native,unsigned face,unsigned level,
     }
     ++c->face_uploads;++s->cube_uploads;return 0;
 }
+typedef struct {unsigned w,h,depth,levels,uploads;} NullVolume;
+static int null_volume_create(void *ctx,unsigned w,unsigned h,unsigned depth,
+                              unsigned levels,void **native){
+    D9NullStats *s=stats(ctx);
+    if(!native||!pow2(w)||!pow2(h)||!pow2(depth)||depth<2||
+       w>1024||h>1024||depth>1024||!levels||levels>11){
+        null_log("CreateVolumeTexture","only power-of-two 1..1024 dimensions, depth > 1 "
+                 "and 1..11 levels are implemented");
+        return -1;
+    }
+    NullVolume *v=calloc(1,sizeof *v);if(!v)return -1;
+    v->w=w;v->h=h;v->depth=depth;v->levels=levels;*native=v;++s->volume_creates;return 0;
+}
+static int null_volume_upload(void *ctx,void *native,unsigned level,
+                              const void *data,size_t bytes){
+    D9NullStats *s=stats(ctx);NullVolume *v=native;
+    if(!v||level>=v->levels||!data||!bytes){
+        null_log("UnlockBox","invalid volume, mip level or slice data");
+        return -1;
+    }
+    ++v->uploads;++s->volume_uploads;return 0;
+}
 static int null_begin(void *ctx,uint32_t argb){
     D9NullStats *s=stats(ctx);
     if(s->scene){null_log("BeginScene","a scene is already active");return -1;}
@@ -267,7 +289,8 @@ static int null_draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
     null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
-    null_cube_create,null_cube_upload,null_target_viewport_scaled};
+    null_cube_create,null_cube_upload,null_target_viewport_scaled,
+    null_volume_create,null_volume_upload};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

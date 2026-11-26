@@ -478,4 +478,4 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
 }
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
-    target_write,depth_clear,target_viewport,draw_menu,target_texture,NULL,NULL,target_viewport_scaled};return &ops;}
+    target_write,depth_clear,target_viewport,draw_menu,target_texture,NULL,NULL,target_viewport_scaled,NULL,NULL};return &ops;}

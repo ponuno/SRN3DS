@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <math.h>
 
-enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_VOLUMES=8,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
 /* Bounded native storage for explicit LDR render targets.  The default is 256
  * so the measured TESV set fits the N3DS 6 MiB VRAM budget:
  *   5x1024 + 4x512 logical targets -> nine 256x256 targets
@@ -51,10 +51,19 @@ typedef struct {
     void *native;
     CubeLevel level[MAX_LEVELS];
 } CubeTexture;
+typedef struct {unsigned w,h,depth;size_t pitch,plane_bytes,bytes,offset;int uploaded;} VolumeLevel;
+typedef struct {
+    D9Handle id;unsigned w,h,depth,levels,format,pool,usage;
+    int cpu_only;
+    size_t cost,cpu_bytes;
+    uint8_t *pixels; /* level-major: level[i].offset, each level has depth slices */
+    void *native;
+    VolumeLevel level[MAX_LEVELS];
+} VolumeTexture;
 struct D9Device {
     D9Backend ops;void *ctx;size_t used,limit;D9Handle next;int teardown;
-    Buffer buffers[MAX_BUFFERS];Texture textures[MAX_TEXTURES];CubeTexture cubes[MAX_CUBES];
-    size_t cube_used;
+    Buffer buffers[MAX_BUFFERS];Texture textures[MAX_TEXTURES];CubeTexture cubes[MAX_CUBES];VolumeTexture volumes[MAX_VOLUMES];
+    size_t cube_used,volume_used;
     Target targets[MAX_TARGETS];D9Handle target;size_t target_used;
     /* D3DPRESENTFLAG_LOCKABLE_BACKBUFFER: a retained offscreen colour target
      * that lives as a normal Target slot.  back_tex_w/h are its native
@@ -69,7 +78,7 @@ struct D9Device {
     float tev_constants[9][4];
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
     D9TnlState tnl;int tnl_proto;
-    D9Handle texture1,cube_texture,cube_texture1;
+    D9Handle texture1,cube_texture,cube_texture1,volume_texture,volume_texture1;
     D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
     D9ColorVertex color_scratch[MAX_DRAW_VERTICES];unsigned color_scratch_count;
     unsigned view_w,view_h;
@@ -160,6 +169,7 @@ D9Handle d9_texture_render_target(const D9Device *d,D9Handle h){
     return 0;
 }
 static CubeTexture *cube_texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id==id)return &d->cubes[i];return NULL;}
+static VolumeTexture *volume_texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_VOLUMES;++i)if(d->volumes[i].id==id)return &d->volumes[i];return NULL;}
 int d9_destroy_device_ex(D9Device *d){
     if(!d)return D9_INVALID;d->teardown=1;
     if(d->scene){d->ops.end(d->ctx);d->scene=0;}
@@ -171,6 +181,11 @@ int d9_destroy_device_ex(D9Device *d){
         free(d->cubes[i].pixels);
     }
     d->cube_used=0;
+    for(unsigned i=0;i<MAX_VOLUMES;++i)if(d->volumes[i].id){
+        if(d->volumes[i].native)d->ops.texture_delete(d->ctx,d->volumes[i].native);
+        free(d->volumes[i].pixels);
+    }
+    d->volume_used=0;
     for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id){
         if(d->ops.target_delete)d->ops.target_delete(d->ctx,d->targets[i].native);
     }
@@ -502,8 +517,142 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
         if(!c||c->cpu_only||!c->native||c->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u))
             return D9_INVALID;
     }
-    if(stage){d->cube_texture1=h;d->texture1=0;}
-    else{d->cube_texture=h;d->texture=0;}
+    if(stage){d->cube_texture1=h;d->texture1=0;d->volume_texture1=0;}
+    else{d->cube_texture=h;d->texture=0;d->volume_texture=0;}
+    return D9_OK;
+}
+/* ---- volume textures ------------------------------------------------------ */
+static void volume_dims(unsigned w,unsigned h,unsigned depth,unsigned level,
+                        unsigned *lw,unsigned *lh,unsigned *ld){
+    *lw=level<32&&(w>>level)?(w>>level):1;
+    *lh=level<32&&(h>>level)?(h>>level):1;
+    *ld=level<32&&(depth>>level)?(depth>>level):1;
+}
+int d9_create_volume_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned depth,
+                                unsigned levels,unsigned format,unsigned pool,
+                                unsigned usage,D9Handle *out){
+    if(out)*out=0;
+    if(!d||d->scene||d->teardown||!out||!d->next||!pow2(w)||!pow2(h)||
+       !pow2(depth)||depth<2||pool>D9_POOL_SYSTEMMEM)return D9_INVALID;
+    if(!d->ops.texture_create_volume||!d->ops.texture_upload_volume){
+        set_diagnosis(d,"volume textures require backend texture_create_volume/upload_volume; "
+                        "this backend has no volume-texture API");
+        return D9_UNSUPPORTED;
+    }
+    unsigned max=1,a=w>h?w:h;if(depth>a)a=depth;
+    while(a>1){a>>=1;++max;}
+    if(!levels)levels=max;
+    if(levels>max||levels>MAX_LEVELS)return D9_INVALID;
+    VolumeTexture t={.w=w,.h=h,.depth=depth,.levels=levels,.format=format,.pool=pool,
+                     .usage=usage,.cpu_only=pool==D9_POOL_SYSTEMMEM};
+    size_t offset=0;
+    for(unsigned i=0;i<levels;++i){
+        VolumeLevel *l=&t.level[i];
+        volume_dims(w,h,depth,i,&l->w,&l->h,&l->depth);
+        l->offset=offset;
+        if(d9_texture_layout(l->w,l->h,format,&l->pitch,&l->plane_bytes))return D9_INVALID;
+        if(l->plane_bytes>0&&l->depth>SIZE_MAX/l->plane_bytes)return D9_MEMORY;
+        l->bytes=l->plane_bytes*l->depth;
+        offset+=l->bytes;
+    }
+    t.cpu_bytes=offset;t.cost=t.cpu_bytes;
+    if(budget_has_room(d,t.cost))return D9_MEMORY;
+    VolumeTexture *slot=NULL;
+    for(unsigned i=0;i<MAX_VOLUMES;++i)if(!d->volumes[i].id){slot=&d->volumes[i];break;}
+    if(!slot)return D9_MEMORY;
+    t.pixels=calloc(1,t.cpu_bytes);
+    if(!t.pixels)return D9_MEMORY;
+    if(!t.cpu_only){
+        if(d->ops.texture_create_volume(d->ctx,w,h,depth,levels,&t.native)||!t.native){
+            free(t.pixels);return D9_BACKEND;
+        }
+    }
+    t.id=d->next++;*slot=t;d->volume_used+=t.cpu_bytes;*out=t.id;return D9_OK;
+}
+unsigned d9_volume_levels(D9Device *d,D9Handle h){VolumeTexture *v=volume_texture(d,h);return v?v->levels:0;}
+int d9_volume_level_info(D9Device *d,D9Handle h,unsigned level,
+                         unsigned *w,unsigned *height,unsigned *depth,
+                         size_t *pitch,size_t *plane_bytes,size_t *bytes){
+    VolumeTexture *v=volume_texture(d,h);
+    if(!v||level>=v->levels)return D9_INVALID;
+    const VolumeLevel *l=&v->level[level];
+    if(w)*w=l->w;if(height)*height=l->h;if(depth)*depth=l->depth;
+    if(pitch)*pitch=l->pitch;if(plane_bytes)*plane_bytes=l->plane_bytes;if(bytes)*bytes=l->bytes;
+    return D9_OK;
+}
+int d9_volume_level_view(D9Device *d,D9Handle h,unsigned level,void **pixels,
+                         unsigned *w,unsigned *height,unsigned *depth,
+                         size_t *pitch,size_t *plane_bytes,size_t *bytes){
+    VolumeTexture *v=volume_texture(d,h);
+    if(!v||level>=v->levels||!v->pixels)return D9_INVALID;
+    const VolumeLevel *l=&v->level[level];
+    if(pixels)*pixels=v->pixels+l->offset;
+    if(w)*w=l->w;if(height)*height=l->h;if(depth)*depth=l->depth;
+    if(pitch)*pitch=l->pitch;if(plane_bytes)*plane_bytes=l->plane_bytes;if(bytes)*bytes=l->bytes;
+    return D9_OK;
+}
+int d9_volume_upload_level(D9Device *d,D9Handle h,unsigned level,
+                           const void *src,size_t src_pitch,size_t src_slice_pitch,
+                           size_t src_bytes){
+    VolumeTexture *v=volume_texture(d,h);
+    if(!v||level>=v->levels||!src||!src_pitch||!src_slice_pitch||d->scene||d->teardown)
+        return D9_INVALID;
+    VolumeLevel *l=&v->level[level];
+    unsigned bb=d9_bc_block_bytes(v->format);
+    size_t rows=bb?(size_t)((l->h+3u)/4u):(size_t)l->h;
+    size_t row_bytes=bb?(size_t)((l->w+3u)/4u)*bb:(size_t)l->w*4u;
+    if(src_pitch<row_bytes||src_slice_pitch<l->plane_bytes)return D9_INVALID;
+    if((rows-1u)>(SIZE_MAX-row_bytes)/src_pitch||
+       (rows-1u)*src_pitch+row_bytes>src_slice_pitch)return D9_INVALID;
+    if((l->depth-1u)>(SIZE_MAX-src_slice_pitch)/src_slice_pitch||
+       (l->depth-1u)*src_slice_pitch+src_slice_pitch>src_bytes)return D9_INVALID;
+    uint8_t *dst=v->pixels+l->offset;
+    for(unsigned z=0;z<l->depth;++z){
+        const uint8_t *sp=(const uint8_t *)src+(size_t)z*src_slice_pitch;
+        uint8_t *dp=dst+(size_t)z*l->plane_bytes;
+        for(size_t y=0;y<rows;++y)
+            memcpy(dp+y*l->pitch,sp+y*src_pitch,row_bytes);
+    }
+    if(!v->cpu_only){
+        if(d->ops.texture_upload_volume(d->ctx,v->native,level,dst,l->bytes))
+            return D9_BACKEND;
+    }
+    l->uploaded=1;
+    return D9_OK;
+}
+int d9_volume_level_unlocked(D9Device *d,D9Handle h,unsigned level){
+    VolumeTexture *v=volume_texture(d,h);
+    if(!v||level>=v->levels)return D9_INVALID;
+    VolumeLevel *l=&v->level[level];
+    if(!v->cpu_only){
+        if(d->ops.texture_upload_volume(d->ctx,v->native,level,v->pixels+l->offset,l->bytes))
+            return D9_BACKEND;
+    }
+    l->uploaded=1;
+    return D9_OK;
+}
+int d9_release_volume_texture(D9Device *d,D9Handle h){
+    VolumeTexture *v=volume_texture(d,h);
+    if(!v||d->scene||d->teardown)return D9_INVALID;
+    if(d->volume_texture==h)d->volume_texture=0;
+    if(d->volume_texture1==h)d->volume_texture1=0;
+    if(v->native)d->ops.texture_delete(d->ctx,v->native);
+    free(v->pixels);
+    if(d->volume_used>=v->cpu_bytes)d->volume_used-=v->cpu_bytes;
+    memset(v,0,sizeof *v);
+    return D9_OK;
+}
+int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
+    if(!d||stage>=d9_stage_count(d)){
+        if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");
+        return D9_UNSUPPORTED;
+    }
+    if(h){
+        VolumeTexture *v=volume_texture(d,h);
+        if(!v||v->cpu_only||!v->native||!v->level[0].uploaded)return D9_INVALID;
+    }
+    if(stage){d->volume_texture1=h;d->texture1=0;d->cube_texture1=0;}
+    else{d->volume_texture=h;d->texture=0;d->cube_texture=0;}
     return D9_OK;
 }
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
@@ -854,6 +1003,7 @@ int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
     if(stage>=d9_stage_count(d)){if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");return D9_UNSUPPORTED;}
     Texture *t=d?texture(d,h):NULL;if(!d||d->teardown||(h&&(!t||t->locked||!t->native||!t->level[0].uploaded)))return D9_INVALID;
     if(stage)d->cube_texture1=0;else d->cube_texture=0;
+    if(stage)d->volume_texture1=0;else d->volume_texture=0;
     if(h&&!t->rt_target){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
     if(stage)d->texture1=h;else d->texture=h;return D9_OK;}
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
@@ -1205,6 +1355,10 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         set_diagnosis(d,"cube-map sampling is not implemented; bind a 2D texture for this draw");
         return D9_UNSUPPORTED;
     }
+    if(d->volume_texture||d->volume_texture1){
+        set_diagnosis(d,"volume sampling is not implemented; bind a 2D texture for this draw");
+        return D9_UNSUPPORTED;
+    }
     if(up&&(!up->vertices||!up->stride||(up->indices&&up->index_size!=2&&up->index_size!=4)))return D9_INVALID;
     const uint8_t *ixdata=NULL;size_t ixbytes=0;unsigned step=2;
     if(indexed){
@@ -1469,7 +1623,7 @@ int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
     return d->ops.depth_clear(d->ctx,flags,packed)?D9_BACKEND:D9_OK;
 }
 size_t d9_memory_used(const D9Device *d){if(!d)return 0;D9TexCacheStats st;d9_texcache_stats(&d->tex_cache,&st);
-    return memory_sum(d->used,memory_sum(d->cube_used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used))));}
+    return memory_sum(d->used,memory_sum(d->cube_used,memory_sum(d->volume_used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used)))));}
 int d9_get_draw_state(const D9Device *d,D9DrawState *out){
     if(!d||!out)return D9_INVALID;
     *out=d->state;

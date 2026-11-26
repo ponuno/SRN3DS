@@ -674,6 +674,11 @@ static void shim_create_tex_ex_a(CPU *c){
 
 static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8_t *p,
                                      size_t size,const DdsImage *d,uint32_t *out){
+    if(d->resource==D3DRTYPE_VOLUMETEXTURE){
+        reject("%s: volume DDS is not a cube map; use "
+               "D3DXCreateVolumeTextureFromFileInMemory (E_NOTIMPL)",who);
+        return D3DX_E_NOTIMPL;
+    }
     if(d->resource!=D3DRTYPE_CUBETEXTURE){
         reject("%s: DDS is not a cube map (resource type %u)",who,d->resource);
         return D3DXERR_INVALIDDATA;
@@ -773,14 +778,105 @@ static void shim_create_cube_mem(CPU *c){
     g.last_error[0]=0;
     RET(D3DX_OK,4);
 }
+static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uint8_t *p,
+                                       size_t size,const DdsImage *d,uint32_t *out){
+    if(d->resource!=D3DRTYPE_VOLUMETEXTURE||!(d->caps2&DDSCAPS2_VOLUME)){
+        reject("%s: DDS is not a volume texture (resource type %u)",who,d->resource);
+        return D3DXERR_INVALIDDATA;
+    }
+    if(d->depth<2u){
+        reject("%s: volume DDS depth is %u; a volume needs at least two slices",
+               who,d->depth);
+        return D3DXERR_INVALIDDATA;
+    }
+    if(!texture_format_supported(d->format)){
+        reject("%s: volume DDS format %s is not implemented",who,format_name(d->format));
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(d->width>1024u||d->height>1024u||d->depth>1024u||
+       (d->width&(d->width-1u))||(d->height&(d->height-1u))||(d->depth&(d->depth-1u))){
+        reject("%s: volume dimensions %ux%ux%u are not power-of-two up to 1024",
+               who,d->width,d->height,d->depth);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    unsigned max=1,a=d->width>d->height?d->width:d->height;if(d->depth>a)a=d->depth;
+    while(a>1){a>>=1;++max;}
+    if(d->mips<1u||d->mips>max){
+        reject("%s: %u volume mip levels do not fit %ux%ux%u",
+               who,d->mips,d->width,d->height,d->depth);
+        return D3DXERR_INVALIDDATA;
+    }
+    size_t total=0,w=d->width,h=d->height,depth=d->depth;
+    for(unsigned i=0;i<d->mips;++i){
+        size_t pitch,plane;
+        if(d9_texture_layout(w,h,d->format,&pitch,&plane)){
+            reject("%s: volume level %u format/dimensions are unsupported",who,i);
+            return D3DX_D3DERR_NOTAVAILABLE;
+        }
+        size_t bytes=plane*depth;
+        if(total>SIZE_MAX-bytes)return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+        total+=bytes;
+        if(w>1)w>>=1;if(h>1)h>>=1;if(depth>1)depth>>=1;
+    }
+    if(d->data_offset>size||total>size-d->data_offset){
+        reject("%s: truncated volume payload: need %llu bytes, have %llu",
+               who,(unsigned long long)total,
+               (unsigned long long)(d->data_offset<=size?size-d->data_offset:0));
+        return D3DXERR_INVALIDDATA;
+    }
+    uint32_t volume=0;
+    uint32_t hr=d9_com_host_create_volume_texture(device,d->width,d->height,d->depth,
+                                                  d->mips,0,d->format,D9_POOL_MANAGED,&volume);
+    if(hr){
+        reject("%s: %s",who,d9_com_last_diagnostic());
+        return hr;
+    }
+    size_t offset=d->data_offset;w=d->width;h=d->height;depth=d->depth;
+    for(unsigned i=0;i<d->mips;++i){
+        size_t pitch=0,plane=0;
+        if(d9_texture_layout(w,h,d->format,&pitch,&plane)){
+            d9_com_host_release(volume);return D3DX_D3DERR_NOTAVAILABLE;
+        }
+        size_t bytes=plane*depth;
+        hr=d9_com_host_upload_volume_level(volume,i,p+offset,pitch,plane,bytes);
+        if(hr){
+            reject("%s: level %u upload failed (%s)",who,i,d9_com_last_diagnostic());
+            d9_com_host_release(volume);
+            return hr;
+        }
+        offset+=bytes;
+        if(w>1)w>>=1;if(h>1)h>>=1;if(depth>1)depth>>=1;
+    }
+    *out=volume;
+    fprintf(stderr,"[d3dx] %s: %ux%ux%u volume %s, %u level(s)\n",
+            who,d->width,d->height,d->depth,format_name(d->format),d->mips);
+    return D3DX_OK;
+}
+
 static void shim_create_volume_mem(CPU *c){
-    uint32_t out=A(3);
+    uint32_t device=A(0),src=A(1),size=A(2),out=A(3);
     uint32_t *out_guest=out&&g.memory?guest_ptr(g.memory,out,4):NULL;
-    if(out_guest)*out_guest=0;
-    reject("D3DXCreateVolumeTextureFromFileInMemory: the D3D9 bridge has no "
-           "IDirect3DVolumeTexture9 object type, depth slices, or volume upload "
-           "(d3d9_core/d3d9_com are 2D-only); E_NOTIMPL");
-    RET(D3DX_E_NOTIMPL,4);
+    if(!out_guest){
+        reject("D3DXCreateVolumeTextureFromFileInMemory: invalid output pointer");
+        RET(D3DX_D3DERR_INVALIDCALL,4);
+    }
+    *out_guest=0;
+    const uint8_t *p=src&&size&&g.memory?guest_ptr(g.memory,src,size):NULL;
+    if(!p){
+        reject("D3DXCreateVolumeTextureFromFileInMemory: source buffer is null or "
+               "outside guest memory");
+        RET(D3DX_D3DERR_INVALIDCALL,4);
+    }
+    DdsImage d;
+    if(parse_checked("D3DXCreateVolumeTextureFromFileInMemory",p,size,&d))
+        RET(D3DXERR_INVALIDDATA,4);
+    uint32_t volume=0;
+    uint32_t hr=create_volume_from_dds("D3DXCreateVolumeTextureFromFileInMemory",
+                                       device,p,size,&d,&volume);
+    if(hr)RET(hr,4);
+    *out_guest=volume;
+    g.last_error[0]=0;
+    RET(D3DX_OK,4);
 }
 
 #define D3DX_FUNCTIONS(X) X(get_image_info_mem) X(create_tex_mem) X(get_image_info_file_a) \
