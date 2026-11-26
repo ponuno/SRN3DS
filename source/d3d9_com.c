@@ -872,6 +872,42 @@ static void color_fill(CPU *c){
                  (long)r[2],(long)r[3]);
     RET(OK,4);
 }
+static void get_render_target_data(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    Obj *s=obj(A(1),SURFACE),*d=obj(A(2),SURFACE);
+    if(!s||!d){d3d_fail("GetRenderTargetData","source and destination must be valid surfaces",INVALID);RET(INVALID,3);}
+    const char *why=NULL;uint32_t fail=INVALID;
+    if(g.phase)why="GetRenderTargetData cannot read back inside BeginScene/EndScene";
+    else if(s->is_depth||d->is_depth){why="depth-stencil surfaces cannot be read back";fail=UNAVAILABLE;}
+    else if(s->view_cube||d->view_cube){why="cube-face surfaces are not supported";fail=UNAVAILABLE;}
+    else if(!s->handle)why="source surface is not a render target";
+    else if(d->handle){why="destination must be a CPU offscreen/system surface, not a GPU-only target";fail=UNAVAILABLE;}
+    else if(!d->pixels||d->is_view)why="destination needs its own CPU pixel store";
+    else if(s->lock_guest||d->lock_guest)why="a locked surface cannot participate in GetRenderTargetData";
+    else if(s->format!=d->format||s->width!=d->width||s->height!=d->height)
+        why="source and destination must share size and format";
+    else if(d->pool!=2&&d->pool!=3)why="destination must be D3DPOOL_SYSTEMMEM or D3DPOOL_SCRATCH";
+    if(why){d3d_fail("GetRenderTargetData",why,fail);RET(fail,3);}
+    int rc=d9_render_target_read(g.device,s->handle,d->pixels,d->pitch,0,0,s->width,s->height);
+    if(rc){
+        const char *detail=d9_last_draw_diagnostic(g.device);
+        if(rc==D9_BACKEND&&(!detail||!*detail))
+            detail="backend cannot read this render target (target_read unavailable)";
+        d3d_fail("GetRenderTargetData",detail,hr(rc));
+        RET(hr(rc),3);
+    }
+    g.last_diagnostic[0]=0;
+    trace_detail("GetRenderTargetData src=0x%08lx dst=0x%08lx %lux%lu",
+                 (unsigned long)s->guest,(unsigned long)d->guest,
+                 (unsigned long)s->width,(unsigned long)s->height);
+    RET(OK,3);
+}
+static void get_front_buffer_data(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    d3d_fail("GetFrontBufferData","front buffer readback is not provided by this bridge; "
+             "no real front-buffer source exists and the back buffer is not substituted",UNAVAILABLE);
+    RET(UNAVAILABLE,3);
+}
 static void set_depth_stencil(CPU *c){
     if(!obj(A(0),DEVICE))RET(INVALID,2);
     if(!A(1)){
@@ -2450,7 +2486,7 @@ static void draw_indexed_up(CPU *c){
  X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
- X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(update_surface) X(update_texture) X(color_fill) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
+ X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(update_surface) X(update_texture) X(color_fill) X(get_render_target_data) X(get_front_buffer_data) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
  X(set_scissor_rect) X(get_scissor_rect) X(set_gamma_ramp) X(get_gamma_ramp) X(set_npatch_mode) X(get_npatch_mode) \
  X(surface_desc) X(surface_container) X(surface_lock) X(surface_unlock) X(surface_dc) X(surface_release_dc) \
  X(cube_level_count) X(cube_desc) X(cube_get_surface) X(cube_lock) X(cube_unlock) X(cube_add_dirty_rect) \
@@ -2584,6 +2620,7 @@ static void init_tables(void){
     SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
     SLOT(DEVICE,23,create_tex);SLOT(DEVICE,24,create_volume_tex);SLOT(DEVICE,25,create_cube_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
     SLOT(DEVICE,30,update_surface);SLOT(DEVICE,31,update_texture);SLOT(DEVICE,35,color_fill);
+    SLOT(DEVICE,32,get_render_target_data);SLOT(DEVICE,33,get_front_buffer_data);
     SLOT(DEVICE,36,create_offscreen);SLOT(DEVICE,37,set_render_target);SLOT(DEVICE,38,get_render_target);SLOT(DEVICE,34,stretch_rect);SLOT(DEVICE,39,set_depth_stencil);
     SLOT(DEVICE,40,get_depth_stencil);SLOT(DEVICE,41,begin_scene);SLOT(DEVICE,42,end_scene);SLOT(DEVICE,43,clear);SLOT(DEVICE,44,transform);
     SLOT(DEVICE,45,get_transform);SLOT(DEVICE,46,multiply_transform);

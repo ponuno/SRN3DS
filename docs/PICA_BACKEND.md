@@ -189,9 +189,14 @@ path (slow, measurement-only).  `tests/scaled_readback_smoke.c` checks the
 default-off refusal, lockable >512 creation refusal, 4x4 nearest upscale,
 write-back round-trip and the unaffected retained back buffer.  Equal-size
 targets and the retained back buffer keep their unscaled read/write path.
-`GetRenderTargetData`/`UpdateSurface` are not implemented by this bridge (the
-COM slots use the generic unsupported handler), so no silent scaled copy path
-exists there.
+`GetRenderTargetData` is implemented for a readable render target and a
+CPU-owned offscreen/system surface with the same size and format: it calls
+`d9_render_target_read` (the LockRect path), so a capped target still reports
+the named scaled-readback refusal unless `TESV_D3D9_SCALED_READBACK=1`.
+`UpdateSurface` copies CPU-backed surface rectangles only; GPU-only sources or
+destinations are named refusals. `GetFrontBufferData` is an explicit
+`D3DERR_NOTAVAILABLE` with `"front buffer readback is not provided by this
+bridge"`; it never substitutes the back buffer.
 
 ### Render-target budget
 
@@ -781,8 +786,11 @@ A lockable target requires both a readback and a
 write-back callback; the null backend keeps real BGRA pixels (including a
 private 400x240 presented image) and implements both, so the host tests verify
 the pixels instead of only the call stream. Texture render targets, MRT,
-resolve, `ColorFill` and sampling a non-lockable implicit back buffer remain
-unsupported. `StretchRect` is implemented for explicit-target and retained-back
+resolve and sampling a non-lockable implicit back buffer remain unsupported.
+`ColorFill` is implemented for CPU surfaces/views and render-target surfaces
+(through the backend read/modify/write path); `GetRenderTargetData` reads a
+render target into a CPU offscreen surface; `GetFrontBufferData` remains a
+named refusal. `StretchRect` is implemented for explicit-target and retained-back
 buffer source/destination copies through the optional backend `target_blit`;
 format conversion is rejected. The existing screen-oriented clip transform is
 reused, so arbitrary offscreen orientation/scale is not claimed. The pixel proof

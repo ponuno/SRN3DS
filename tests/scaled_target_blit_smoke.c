@@ -6,10 +6,10 @@
  * backend owns real BGRA pixels, so the full 1024->1024, 1024->512 and
  * 512->1024 paths are checked pixel by pixel, including both filters.
  *
- * GetRenderTargetData remains unimplemented, and UpdateSurface still refuses
- * GPU-only/bounded target surfaces; there is no silent scaled copy path to
- * test there.  Scaled LockRect/UnlockRect remain named refusals with the lossy
- * reason.
+ * GetRenderTargetData and UpdateSurface only operate on CPU-backed sources or
+ * destinations; GPU-only/bounded targets are refused, so there is no silent
+ * scaled copy path to test here.  Scaled LockRect/UnlockRect remain named
+ * refusals with the lossy reason.
  */
 #include "d3d9_core.h"
 #include "d3d9_null.h"
