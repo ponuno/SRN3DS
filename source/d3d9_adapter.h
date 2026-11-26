@@ -68,6 +68,16 @@ int d9_adapter_caps(unsigned adapter,unsigned device_type,D9Caps9 *out);
  * "claimed:" describe an implemented capability, "not claimed:" describe why a
  * bit stays clear.  This does not alter d9_adapter_caps(). */
 const char *d9_adapter_devcaps_reason(uint32_t bit);
+/* One adapter capability answer plus a static explanation.  `reason` is never
+ * NULL; it names the implemented contract or the exact missing capability.
+ * result is D9_ADAPTER_OK, D9_ADAPTER_INVALID or D9_ADAPTER_UNAVAILABLE. */
+typedef struct {int result;const char *reason;} D9AdapterAnswer;
+
+D9AdapterAnswer d9_adapter_answer_device_type(unsigned adapter,unsigned device_type,unsigned display_format,unsigned backbuffer_format,int windowed);
+D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device_type,unsigned adapter_format,unsigned usage,unsigned resource_type,unsigned format);
+D9AdapterAnswer d9_adapter_answer_depth_stencil(unsigned adapter,unsigned device_type,unsigned display_format,unsigned backbuffer_format,unsigned depth_stencil_format);
+D9AdapterAnswer d9_adapter_answer_format_conversion(unsigned adapter,unsigned device_type,unsigned source_format,unsigned target_format);
+
 int d9_adapter_check_device_type(unsigned adapter,unsigned device_type,unsigned display_format,unsigned backbuffer_format,int windowed);
 int d9_adapter_check_device_format(unsigned adapter,unsigned device_type,unsigned adapter_format,unsigned usage,unsigned resource_type,unsigned format);
 int d9_adapter_check_multisample(unsigned adapter,unsigned device_type,unsigned surface_format,int windowed,unsigned multisample_type);

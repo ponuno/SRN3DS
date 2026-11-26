@@ -486,29 +486,13 @@ static void enum_modes(CPU *c){
     memcpy(ptr(out,sizeof mode),&mode,sizeof mode);RET(OK,5);
 }
 static void check_device_type(CPU *c){
-    int rc=d9_adapter_check_device_type(A(1),A(2),A(3),A(4),A(5)!=0);
-    if(rc){
-        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
-            !A(5)?"exclusive fullscreen/display-mode ownership is not implemented":
-            A(3)!=D9_X8R8G8B8?"display format is not the single 400x240 X8R8G8B8 mode":
-            "back-buffer format is not X8R8G8B8, A8R8G8B8 or UNKNOWN";
-        d3d_log("CheckDeviceType",why);RET(adapter_result(rc),6);
-    }
+    D9AdapterAnswer a=d9_adapter_answer_device_type(A(1),A(2),A(3),A(4),A(5)!=0);
+    if(a.result){d3d_log("CheckDeviceType",a.reason);RET(adapter_result(a.result),6);}
     RET(OK,6);
 }
 static void check_format(CPU *c){
-    int rc=d9_adapter_check_device_format(A(1),A(2),A(3),A(4),A(5),A(6));
-    if(rc){
-        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
-            A(3)!=D9_X8R8G8B8?"adapter format is not X8R8G8B8":
-            A(4)&~0x00220001u?"usage flags other than RENDERTARGET or QUERY_FILTER/QUERY_WRAPANDMIP are not implemented":
-            (A(5)!=3&&A(5)!=1)?"only D3DRTYPE_TEXTURE and plain D3DRTYPE_SURFACE are implemented":
-            A(5)==1&&A(4)&&A(4)!=1?"only usage zero or D3DUSAGE_RENDERTARGET is implemented for surfaces":
-            A(5)==1?"plain/render-target surfaces require a 32-bit X8R8G8B8/A8R8G8B8 format":
-            A(4)==1?"render-target textures are available only as X8R8G8B8/A8R8G8B8":
-            "format is not A8R8G8B8, X8R8G8B8, DXT1, DXT3 or DXT5";
-        d3d_log("CheckDeviceFormat",why);RET(adapter_result(rc),7);
-    }
+    D9AdapterAnswer a=d9_adapter_answer_device_format(A(1),A(2),A(3),A(4),A(5),A(6));
+    if(a.result){d3d_log("CheckDeviceFormat",a.reason);RET(adapter_result(a.result),7);}
     RET(OK,7);
 }
 static void check_multisample(CPU *c){
@@ -526,21 +510,13 @@ static void check_multisample(CPU *c){
     RET(OK,7);
 }
 static void check_depth_stencil(CPU *c){
-    int rc=d9_adapter_check_depth_stencil(A(1),A(2),A(3),A(4),A(5));
-    if(rc){
-        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
-            "D3D9 depth-stencil surfaces are not implemented";
-        d3d_log("CheckDepthStencilMatch",why);RET(adapter_result(rc),6);
-    }
+    D9AdapterAnswer a=d9_adapter_answer_depth_stencil(A(1),A(2),A(3),A(4),A(5));
+    if(a.result){d3d_log("CheckDepthStencilMatch",a.reason);RET(adapter_result(a.result),6);}
     RET(OK,6);
 }
 static void check_format_conversion(CPU *c){
-    int rc=d9_adapter_check_format_conversion(A(1),A(2),A(3),A(4));
-    if(rc){
-        const char *why=(A(1)>=D9_ADAPTER_COUNT||A(2)!=1)?"invalid adapter or device type":
-            "surface format conversion is not implemented";
-        d3d_log("CheckDeviceFormatConversion",why);RET(adapter_result(rc),5);
-    }
+    D9AdapterAnswer a=d9_adapter_answer_format_conversion(A(1),A(2),A(3),A(4));
+    if(a.result){d3d_log("CheckDeviceFormatConversion",a.reason);RET(adapter_result(a.result),5);}
     RET(OK,5);
 }
 static void register_software(CPU *c){

@@ -1204,6 +1204,59 @@ the create succeeds.
 Remaining: PICA `draw_cube` (hardware cube sampling) and a visible frame.  The
 automatic trim is budget-driven; no engine census has yet exercised it.
 
+## 5.8 Adapter capability matrix audit (2026-11-26)
+
+`source/d3d9_adapter.c` now owns one explicit, shippable answer matrix for
+`CheckDeviceType`, `CheckDeviceFormat`, `CheckDepthStencilMatch` and
+`CheckDeviceFormatConversion`.  Every answer carries a static reason; an
+unsupported query is `D3DERR_NOTAVAILABLE` with the reason in the trace, never
+an unconditional `S_OK`.  DevCaps stays byte-identical at `0x00082000`; caps,
+SM3 words and T&L are unchanged.
+
+`CheckDeviceType`: windowed HAL, the single 400x240 `X8R8G8B8` display mode and
+an `X8R8G8B8`/`A8R8G8B8`/UNKNOWN back buffer.  Exclusive fullscreen and every
+other display/back-buffer pair are named refusals.
+
+`CheckDeviceFormat` (adapter format must be `X8R8G8B8`/0x16):
+
+- `SURFACE`: usage 0 or `RENDERTARGET` for `X8R8G8B8`/`A8R8G8B8`; usage 0 or
+  `DEPTHSTENCIL` for `D24S8`/`D24X8`; the 0x71/0x72 render-target descriptor
+  when `TESV_D3D9_HDR_LDR_FALLBACK=1`, otherwise a named refusal.  Depth
+  surfaces have no `RENDERTARGET` usage.
+- `TEXTURE`: usage 0/`DYNAMIC`/`QUERY_FILTER`/`QUERY_WRAPANDMIP` for
+  `X8R8G8B8`/`A8R8G8B8`/`A8`/`DXT1`/`DXT3`/`DXT5`; a single-level
+  `X8R8G8B8`/`A8R8G8B8` render target, plus the 0x71/0x72 LDR fallback under
+  the env.  A8, DXT and sampled float render targets are refused; 0x71/0x72
+  capability descriptors are accepted only with the env.
+- `CUBETEXTURE`: usage 0/`DYNAMIC`/`QUERY_FILTER`/`QUERY_WRAPANDMIP` for
+  `X8R8G8B8`/`A8R8G8B8`/`DXT1`/`DXT3`/`DXT5`; render targets for
+  `X8R8G8B8`/`A8R8G8B8` and the 0x71/0x72 LDR fallback under the env.  A8 cube
+  storage is refused because the cube upload path is 4-byte rows.
+- `VOLUMETEXTURE`: usage 0/`DYNAMIC`/`QUERY_FILTER`/`QUERY_WRAPANDMIP` for
+  `X8R8G8B8`/`A8R8G8B8`/`DXT1`/`DXT3`/`DXT5`; A8 and render-target volumes are
+  refused.
+
+`CheckDepthStencilMatch`: `D24S8`/`D24X8` with the 400x240 `X8R8G8B8` display
+and an `X8R8G8B8`/`A8R8G8B8` back buffer.  The old table also refused the
+engine's `CheckDeviceFormat(SURFACE, usage=D3DUSAGE_DEPTHSTENCIL, D24S8/D24X8)`
+query; that usage is now accepted and all other depth formats are named
+refusals.
+
+`CheckDeviceFormatConversion`: only same-format `X8R8G8B8`/`A8R8G8B8` copies;
+cross-format conversion is refused.  `check_format_matrix` covers 86
+cases, including cube RT 0x71/0x72 with and without the LDR env, depth match,
+device type, conversion and a byte-identical DevCaps check.
+
+Evidence: targeted
+`check_format_matrix,adapter,render_texture,render_texture_hdr,cube_rt,com`
+all PASS (harness summary 12 passed, 0 diagnostic, 4 known Python environment
+failures); full suite **125 passed, 0 diagnostic**, with the same 4 unrelated
+Python environment failures.  ARM `-Mode com`: `.elf` 6,239,344 B SHA256
+`513b010a2f17c0ffd52fedb119ab4d7cbee8752f6673975ceca9d285b193030a`; `.3dsx`
+926,744 B SHA256
+`aa90a4d081728375094a1838cd08f4048ef63294a4f686585fbaab71c90f45fe`;
+`.text` 908,156 B.  No frame is claimed.
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.
