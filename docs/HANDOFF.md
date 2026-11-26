@@ -58,9 +58,10 @@ content, flags, clang build)` compiles once; every test, worktree and agent
 links from it.
 
 - Full suite (145 tests + Python): **145 s** warm, previously ~25 min.
-- Targeted 3 tests: **19 s** warm / 27 s cold (Python tests dominate).
-- Do not run the full suite per iteration. Use `-Only a,b,c`; run the full
-  suite once before the final commit of a layer.
+- Targeted 3 tests: **19 s** warm / 27 s cold; add `-SkipPython` for an 8 s
+  loop (most of the rest is the one-time vcvars import).
+- Do not run the full suite per iteration. Use `-Only a,b,c` (optionally
+  `-SkipPython`); run the full suite once before the final commit of a layer.
 - ARM: `-NoClean -Jobs 8` is safe (shader/bin2s dependencies are explicit in
   the Makefile). Measured full `-Mode com -Jobs 8` build: **12 s** (was ~2 min).
   Full clean only when flags or generated inputs change.
