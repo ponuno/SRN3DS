@@ -38,7 +38,6 @@
  * NULL.  Measurement only. */
 #define GETBUFFER_VTABLE_ADDR 0x011b0224u
 #define GETBUFFER_VTABLE2_ADDR 0x011b0220u
-#define GETBUFFER_STUB_ADDR   0x00fb60a7u
 #define GETBUFFER_ENTRY       0x00fb6090u
 #define GETBUFFER_ENTRY2      0x00fb6070u
 
@@ -54,10 +53,8 @@ static const uint8_t store_expected[4]    = {0x89, 0x44, 0xb4, 0x40};
 static const uint8_t inc_expected[1]      = {0x46};
 static const uint8_t vtable_expected[4]   = {0x90, 0x60, 0xfb, 0x00};
 static const uint8_t vtable2_expected[4]  = {0x70, 0x60, 0xfb, 0x00};
-static const uint8_t stub_site_expected[5] = {0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
-static const uint8_t stub_patch[5]        = {0x31, 0xc0, 0xc2, 0x04, 0x00};
 static const uint8_t vtable_patch[4]      = {0x00, 0x00, 0x00, 0x30};
-static const uint8_t vtable2_patch[4]     = {0x00, 0x00, 0x00, 0x30};
+static const uint8_t vtable2_patch[4]     = {0x10, 0x00, 0x00, 0x30};
 
 static const uint8_t patch[10] = {
     0x83, 0xc4, 0x0c,        /* add esp,0x0c */
@@ -123,6 +120,46 @@ void *tesv_cube_probe_ptr(uint32_t address, size_t bytes) {
     return NULL;
 }
 
+/* Buffer-slot classifier shared by the conditional vtable stubs and the
+ * dispatch guard.  The skipped cube group leaves -1/0 in its buffer array; a
+ * legitimate group has a readable Ni2DBuffer pointer there.  Only the latter
+ * may reach the real container getter, because 0x00fb6090 dereferences the
+ * slot without a NULL check. */
+int tesv_cube_probe_slot_state(GuestMemory *m, uint32_t this_, uint32_t arg,
+                               uint32_t *slot_out) {
+    if (!m || !this_) return 0;
+
+    uint32_t vtable = 0;
+    if (guest_read32(m, this_, &vtable)) return 0;
+    if (vtable != 0x011b019cu && vtable != 0x011539d8u) return 0;
+
+    uint32_t count = 0;
+    int have_count = guest_read32(m, this_ + 0x1cu, &count) == 0;
+    if (have_count && count >= 1u && count <= 6u) {
+        if (arg >= count) return 0;
+    } else if (arg > 5u) {
+        return 0;
+    }
+
+    uint32_t slot = 0;
+    if (guest_read32(m, this_ + 0x0cu + arg * 4u, &slot)) return 0;
+    if (slot_out) *slot_out = slot;
+
+    if (slot == 0u || slot == 0xffffffffu || slot < 0x10000u) return -1;
+
+    uint32_t probe = 0;
+    if (guest_read32(m, slot, &probe)) return 0;
+    return 1;
+}
+
+uint32_t tesv_cube_probe_slot_field(GuestMemory *m, uint32_t slot,
+                                    uint32_t field, int *ok) {
+    uint32_t value = 0;
+    int rc = !m || guest_read32(m, slot + field, &value);
+    if (ok) *ok = !rc;
+    return rc ? 0u : value;
+}
+
 static void dump_bytes(const char *label, uint32_t address,
                        const uint8_t *expected, const uint8_t *got,
                        size_t count, int readable) {
@@ -157,7 +194,7 @@ int tesv_cube_skip_probe(GuestMemory *m) {
     int vtable_on = vtable_env && !strcmp(vtable_env, "1");
 
     uint8_t flag[3], push[3], call[5], epilogue[5], store[4], inc[1];
-    uint8_t vtable[4], vtable2[4], stub_site[5];
+    uint8_t vtable[4], vtable2[4];
     int flag_ok = guest_read(m, CUBE_FLAG_ADDR, flag, sizeof flag) == 0;
     int push_ok = guest_read(m, CUBE_PUSH_ADDR, push, sizeof push) == 0;
     int call_ok = guest_read(m, CUBE_CALL_ADDR, call, sizeof call) == 0;
@@ -169,8 +206,6 @@ int tesv_cube_skip_probe(GuestMemory *m) {
         guest_read(m, GETBUFFER_VTABLE_ADDR, vtable, sizeof vtable) == 0;
     int vtable2_ok = !vtable_on ||
         guest_read(m, GETBUFFER_VTABLE2_ADDR, vtable2, sizeof vtable2) == 0;
-    int stub_ok = !vtable_on ||
-        guest_read(m, GETBUFFER_STUB_ADDR, stub_site, sizeof stub_site) == 0;
 
     int target_ok = 0;
     uint32_t target = 0;
@@ -189,10 +224,9 @@ int tesv_cube_skip_probe(GuestMemory *m) {
         memcmp(epilogue, epilogue_expected, sizeof epilogue) ||
         memcmp(store, store_expected, sizeof store) ||
         memcmp(inc, inc_expected, sizeof inc) ||
-        (vtable_on && (!vtable_ok || !vtable2_ok || !stub_ok ||
+        (vtable_on && (!vtable_ok || !vtable2_ok ||
          memcmp(vtable, vtable_expected, sizeof vtable) ||
-         memcmp(vtable2, vtable2_expected, sizeof vtable2) ||
-         memcmp(stub_site, stub_site_expected, sizeof stub_site)))) {
+         memcmp(vtable2, vtable2_expected, sizeof vtable2)))) {
         fprintf(stderr, "[cube-probe] REFUSED: byte verification failed; "
                         "no patch\n");
         dump_bytes("flag", CUBE_FLAG_ADDR, flag_expected, flag, sizeof flag,
@@ -211,8 +245,6 @@ int tesv_cube_skip_probe(GuestMemory *m) {
                        sizeof vtable, vtable_ok);
             dump_bytes("vtable2", GETBUFFER_VTABLE2_ADDR, vtable2_expected,
                        vtable2, sizeof vtable2, vtable2_ok);
-            dump_bytes("stub", GETBUFFER_STUB_ADDR, stub_site_expected, stub_site,
-                       sizeof stub_site, stub_ok);
         }
         if (call_ok) {
             fprintf(stderr, "[cube-probe] call target 0x%08lx expected "
@@ -229,8 +261,7 @@ int tesv_cube_skip_probe(GuestMemory *m) {
         guest_write(m, CUBE_STORE_ADDR, store_patch, sizeof store_patch) ||
         guest_write(m, CUBE_INC_ADDR, inc_patch, sizeof inc_patch) ||
         (vtable_on &&
-         (guest_write(m, GETBUFFER_STUB_ADDR, stub_patch, sizeof stub_patch) ||
-          guest_write(m, GETBUFFER_VTABLE_ADDR, vtable_patch,
+         (guest_write(m, GETBUFFER_VTABLE_ADDR, vtable_patch,
                       sizeof vtable_patch) ||
           guest_write(m, GETBUFFER_VTABLE2_ADDR, vtable2_patch,
                       sizeof vtable2_patch)))) {
@@ -249,7 +280,9 @@ int tesv_cube_skip_probe(GuestMemory *m) {
                     "shippable\n");
     if (vtable_on)
         fprintf(stderr, "[cube-probe] MEASUREMENT ONLY: GetBufferData vtable "
-                        "0x011b0220/0x011b0224 -> 0x30000000 host stub "
-                        "(eax=0; ret 4); not shippable\n");
+                        "0x011b0220/0x011b0224 -> conditional host stubs "
+                        "0x30000000/0x30000010 (valid slot -> real container "
+                        "getter; sentinel/unreadable -> checked NULL + ret 4); "
+                        "not shippable\n");
     return 0;
 }

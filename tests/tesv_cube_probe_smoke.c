@@ -8,12 +8,11 @@
 #define PAGE_BASE 0x00c91000u
 #define CODE_SIZE 0x2000u
 #define GROUP_BASE 0x55100000u
+#define BUFFER_BASE 0x55101000u
 #define VTABLE_BASE 0x011b0000u
-#define STUB_BASE 0x00fb6000u
 #define PAGE_SIZE 0x1000u
 #define VTABLE_ADDR 0x011b0224u
 #define VTABLE2_ADDR 0x011b0220u
-#define STUB_ADDR 0x00fb60a7u
 #define FLAG_ADDR 0x00c9163eu
 #define PUSH_ADDR 0x00c9164du
 #define CALL_ADDR 0x00c91650u
@@ -34,10 +33,8 @@ static const uint8_t store_patch[4] = {0x90, 0x90, 0x90, 0x90};
 static const uint8_t inc_patch[1]   = {0x90};
 static const uint8_t vtable_expected[4] = {0x90, 0x60, 0xfb, 0x00};
 static const uint8_t vtable2_expected[4] = {0x70, 0x60, 0xfb, 0x00};
-static const uint8_t stub_expected[5]   = {0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
 static const uint8_t vtable_patch[4]    = {0x00, 0x00, 0x00, 0x30};
-static const uint8_t vtable2_patch[4]   = {0x00, 0x00, 0x00, 0x30};
-static const uint8_t stub_patch[5]      = {0x31, 0xc0, 0xc2, 0x04, 0x00};
+static const uint8_t vtable2_patch[4]   = {0x10, 0x00, 0x00, 0x30};
 
 #define CHECK(cond) do { if (!(cond)) { \
     fprintf(stderr, "tesv_cube_probe: FAIL line %d: %s\n", __LINE__, #cond); \
@@ -62,7 +59,6 @@ static int seed_extra(GuestMemory *m) {
     CHECK(!guest_write(m, VTABLE_ADDR, vtable_expected, sizeof vtable_expected));
     CHECK(!guest_write(m, VTABLE2_ADDR, vtable2_expected,
                        sizeof vtable2_expected));
-    CHECK(!guest_write(m, STUB_ADDR, stub_expected, sizeof stub_expected));
     return 0;
 }
 
@@ -75,11 +71,11 @@ static int expect_unchanged(GuestMemory *m, const uint8_t *before) {
 
 int main(void) {
     GuestMemory m;
-    guest_init(&m, CODE_SIZE + PAGE_SIZE * 3u);
+    guest_init(&m, CODE_SIZE + PAGE_SIZE * 4u);
     CHECK(!guest_map(&m, PAGE_BASE, CODE_SIZE));
     CHECK(!guest_map(&m, GROUP_BASE, PAGE_SIZE));
+    CHECK(!guest_map(&m, BUFFER_BASE, PAGE_SIZE));
     CHECK(!guest_map(&m, VTABLE_BASE, PAGE_SIZE));
-    CHECK(!guest_map(&m, STUB_BASE, PAGE_SIZE));
     CHECK(!seed_page(&m));
     CHECK(!seed_extra(&m));
 
@@ -123,13 +119,11 @@ int main(void) {
         }
     CHECK(changed == sizeof patch_expected + sizeof store_patch +
                       sizeof inc_patch);
-    uint8_t vtable[4], vtable2[4], stub[5];
+    uint8_t vtable[4], vtable2[4];
     CHECK(!guest_read(&m, VTABLE_ADDR, vtable, sizeof vtable));
     CHECK(!memcmp(vtable, vtable_patch, sizeof vtable));
     CHECK(!guest_read(&m, VTABLE2_ADDR, vtable2, sizeof vtable2));
     CHECK(!memcmp(vtable2, vtable2_patch, sizeof vtable2));
-    CHECK(!guest_read(&m, STUB_ADDR, stub, sizeof stub));
-    CHECK(!memcmp(stub, stub_patch, sizeof stub));
 
     /* Group sentinel shadow: GROUP_BASE carries the NiRenderTargetGroup
      * vtable, and group+0xc is -1.  The probe walks back to the vtable,
@@ -149,6 +143,44 @@ int main(void) {
     CHECK(slot == 0);
     CHECK(!tesv_cube_probe_ptr(GROUP_BASE + 0x08u, 4));
     CHECK(!tesv_cube_probe_ptr(GROUP_BASE + 0x0cu, 8));
+
+    /* Conditional getter classification: a real group + readable buffer slot
+     * must be allowed to reach the real container getter and yields the real
+     * field; sentinel/small/unreadable slots return the checked NULL. */
+    CHECK(!guest_write32(&m, GROUP_BASE, 0x011b019cu));
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x1cu, 6u));
+    CHECK(!guest_write32(&m, BUFFER_BASE + 0x08u, 0x11112222u));
+    CHECK(!guest_write32(&m, BUFFER_BASE + 0x0cu, 0x33334444u));
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x0cu, BUFFER_BASE));
+    uint32_t cslot = 0;
+    CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 0, &cslot) == 1);
+    CHECK(cslot == BUFFER_BASE);
+    int field_ok = 0;
+    CHECK(tesv_cube_probe_slot_field(&m, cslot, 0x0cu, &field_ok) ==
+          0x33334444u);
+    CHECK(field_ok);
+    CHECK(tesv_cube_probe_slot_field(&m, cslot, 0x08u, &field_ok) ==
+          0x11112222u);
+    CHECK(field_ok);
+
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x0cu, 0xffffffffu));
+    CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 0, &cslot) == -1);
+    CHECK(cslot == 0xffffffffu);
+
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x0cu, 0x20u));
+    CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 0, &cslot) == -1);
+
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x0cu, 0x70000000u));
+    CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 0, &cslot) == 0);
+
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x0cu, BUFFER_BASE));
+    CHECK(!guest_write32(&m, GROUP_BASE + 0x20u, BUFFER_BASE));
+    CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 6, &cslot) == 0);
+    CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 5, &cslot) == 1);
+    CHECK(tesv_cube_probe_slot_state(&m, 0x70000000u, 0, &cslot) == 0);
+    CHECK(!guest_write32(&m, GROUP_BASE, 0x011b0198u));
+    CHECK(tesv_cube_probe_slot_state(&m, GROUP_BASE, 0, &cslot) == 0);
+    CHECK(!guest_write32(&m, GROUP_BASE, 0x011b019cu));
 
     /* A second call sees the patch and must refuse without another write. */
     uint8_t patched[CODE_SIZE];
@@ -220,7 +252,7 @@ int main(void) {
     CHECK(tesv_cube_skip_probe(&m) == -1);
     CHECK(!expect_unchanged(&m, patched));
 
-    /* Wrong vtable/stub bytes: refuse without writing. */
+    /* Wrong vtable bytes: refuse without writing. */
     CHECK(!seed_page(&m));
     CHECK(!seed_extra(&m));
     CHECK(!guest_read(&m, PAGE_BASE, before, sizeof before));
@@ -233,22 +265,22 @@ int main(void) {
     CHECK(!seed_page(&m));
     CHECK(!seed_extra(&m));
     CHECK(!guest_read(&m, PAGE_BASE, before, sizeof before));
-    uint8_t bad_stub = 0xcd;
-    CHECK(!guest_write(&m, STUB_ADDR, &bad_stub, 1));
+    uint8_t bad_vtable2 = 0x71;
+    CHECK(!guest_write(&m, VTABLE2_ADDR, &bad_vtable2, 1));
     memcpy(patched, before, sizeof patched);
     CHECK(tesv_cube_skip_probe(&m) == -1);
     CHECK(!expect_unchanged(&m, patched));
 
-    /* Vtable stub is opt-in: without TESV_CUBE_PROBE_VTABLE the code patches
-     * apply but the vtable/stub bytes remain expected. */
+    /* Vtable patch is opt-in: without TESV_CUBE_PROBE_VTABLE the code patches
+     * apply but the vtable entries remain the retail values. */
     CHECK(!seed_page(&m));
     CHECK(!seed_extra(&m));
     CHECK(!_putenv_s("TESV_CUBE_PROBE_VTABLE", "0"));
     CHECK(!tesv_cube_skip_probe(&m));
     CHECK(!guest_read(&m, VTABLE_ADDR, vtable, sizeof vtable));
     CHECK(!memcmp(vtable, vtable_expected, sizeof vtable));
-    CHECK(!guest_read(&m, STUB_ADDR, stub, sizeof stub));
-    CHECK(!memcmp(stub, stub_expected, sizeof stub));
+    CHECK(!guest_read(&m, VTABLE2_ADDR, vtable2, sizeof vtable2));
+    CHECK(!memcmp(vtable2, vtable2_expected, sizeof vtable2));
 
     guest_destroy(&m);
 

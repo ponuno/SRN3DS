@@ -59,15 +59,28 @@ static int add_dll(BootSession *b, const char *name, uint32_t base, const char *
     return 0;
 }
 
-/* Measurement-only host target for the GetBufferData stub address that
- * TESV_D3D9_CUBE_SKIP_PROBE writes into the NiRenderTargetGroup vtable.  The
- * stub is not lifted, so bind it as a one-entry host module: eax=0 and the
- * callee's `ret 4` (return address + one argument). */
-static void cube_probe_getbuffer_stub(CPU *c) {
-    if (c) c->r[0] = 0; /* caller reloads esp around the indirect call */
+/* Measurement-only host targets for the two NiRenderTargetGroup buffer
+ * getters that TESV_D3D9_CUBE_SKIP_PROBE redirects while
+ * TESV_CUBE_PROBE_VTABLE=1.  The synthetic entries are not lifted, so bind
+ * them as a two-entry host module.  The probe slice supplies the conditional
+ * implementation through a weak hook; an ordinary slice keeps the checked
+ * NULL fallback. */
+extern int tesv_cube_probe_getbuffer(CPU *c, uint32_t real_addr)
+    __attribute__((weak));
+
+static void cube_probe_stub33(CPU *c) {
+    if (tesv_cube_probe_getbuffer &&
+        tesv_cube_probe_getbuffer(c, 0x00fb6070u)) return;
+    if (c) { c->r[0] = 0; c->r[4] += 8u; }
+}
+static void cube_probe_stub34(CPU *c) {
+    if (tesv_cube_probe_getbuffer &&
+        tesv_cube_probe_getbuffer(c, 0x00fb6090u)) return;
+    if (c) { c->r[0] = 0; c->r[4] += 8u; }
 }
 static const FnEntry cube_probe_table[] = {
-    {0x30000000u, cube_probe_getbuffer_stub}
+    {0x30000000u, cube_probe_stub34},
+    {0x30000010u, cube_probe_stub33}
 };
 
 static int run(const char *exe, const char *root, unsigned steps, size_t budget, const char *log,
@@ -132,7 +145,8 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
         printf("d3dx: %u lifted function(s) registered\n", g_fn_count_pilot);
     }
     if (table_count < sizeof tables / sizeof tables[0])
-        tables[table_count++] = (FnModule){"cube-probe", cube_probe_table, 1};
+        tables[table_count++] = (FnModule){"cube-probe", cube_probe_table,
+            (unsigned)(sizeof cube_probe_table / sizeof cube_probe_table[0])};
     n3ds_boot_set_unresolved_traps(&b, 1);
     if (n3ds_boot_prepare(&b, tables, table_count, 0x80000, 0x200000, root)) {
         printf("prepare: %s\n", b.message);

@@ -387,35 +387,43 @@ measurement build renames the three generated `f_FB5C20(c)` call sites in
 build. The probe prints `MEASUREMENT ONLY ... not shippable`; caps, SM3 words
 and T&L are unchanged.
 
-The probe was extended with byte-verified measurement-only pieces: NOPs at
+The probe was extended with measurement-only pieces: byte-verified NOPs at
 `0xc92698` (`89 44 B4 40`, store the cube group) and `0xc926a6` (`46`, inc
 `esi`); a group-sentinel guest-memory shadow (`tesv_cube_probe_ptr`, group
-vtables `0x011b019c`/`0x011539d8`); a runtime dispatch shadow for `0xfb6090`;
-and vtable slots 33/34 (`0x011b0220`/`0x011b0224`) pointed at a synthetic host
-stub `0x30000000` (the vtable part is opt-in via `TESV_CUBE_PROBE_VTABLE=1`).
-Host test `tesv_cube_probe` PASS (exact 15 code bytes plus
-the two vtable entries and the five-byte stub site, repeat refusal, wrong
-bytes, group shadow, unmapped memory). Registered in
-`tools/run_host_tests.ps1`.
+vtables `0x011b019c`/`0x011539d8`); a conditional `0xfb6090`/`0xfb6070`
+dispatch shadow; and, opt-in via `TESV_CUBE_PROBE_VTABLE=1`, vtable slots
+33/34 (`0x011b0220`/`0x011b0224`) pointed at the synthetic host entries
+`0x30000000`/`0x30000010` (no guest stub bytes are written).
 
-Two fresh-slice censuses from `main` `bc6ae69` (`growth_probe/gen01`) with the
-SM3, HDR-fallback and 64 MiB budget probes:
+The conditional stub uses `tesv_cube_probe_slot_state`: a real group with an
+in-range readable `Ni2DBuffer` pointer in `[group+0xc+arg*4]` runs the real
+container getter and returns its width/height; `0`/`-1`/small-integer sentinel
+slots and unreadable receivers return `eax=0` with `ret 4`. Host test
+`tesv_cube_probe` PASS (exact 15 code bytes, two vtable entries, repeat
+refusal, wrong bytes, valid slot -> real field 0x08/0x0c, sentinel -> -1,
+unreadable -> 0, group shadow, unmapped memory).
 
-1. **Dispatch-guard variant (default, no vtable stub): 210.657 s, exit 1.** Nine 2D
-   RTs created; `0xfb5bd0` gone; first blocker still
-   `last_call=0x00fb6090`, address `0xb` (`GetBufferData`, vtable slot 34,
-   buffer slot `-1`/`3`). The store/inc slot skip and the sentinel shadow did
-   not remove it: the getter is reached through the IR container, not the
-   skipped cube group's outer slot.
-2. **Vtable-stub variant (`TESV_CUBE_PROBE_VTABLE=1`): 231.052 s, exit 1.** Fault moves to
-   `last_call=0x30000000`, address `0`; `CreateTexture` is only 3, so the
-   renderer aborts before the nine-RT set. The stub returns NULL for legitimate
-   early `GetBufferData` calls too, so it is too broad.
+Final census on fresh `main` `0e0b460`/`growth_probe/gen01`, SM3 + HDR
+fallback + budget64 + shader skip + `TESV_CUBE_PROBE_VTABLE=1`, 2e9 steps:
+**216.513 s, exit 1**. `0xfb6090`/`0xfb6070`/`0x30000000` no longer appear in
+the fault log; `CreateTexture` rises from 3 to **32**. First tuple
+`Direct3DCreate9 -> 0x50002010`; last tuple before the fault
+`IDirect3DSurface9::Release slot=2 this=0x50002190 caller=0x00ce715b ->
+S_OK`. New first blocker: the pre-existing `NiDX9TextureBufferData` descriptor
+copy at `0x00ced19d rep movsd` (count `ecx=0x11` dwords = 68 bytes, `esi=0`,
+destination `[ebp+0x14]`, fault address 0; backtrace `f_CECDC0 -> f_CD4E40 ->
+f_AE7CD0 -> f_C739B0 -> f_C74710`). This is the known `[esp+0x18]`/NULL
+descriptor-slot precondition from section 12, not a getter or cube-create
+HRESULT. `CreateCubeTexture`, `GetCubeMapSurface`,
+`CreateDepthStencilSurface`, `SetRenderTarget`, `SetDepthStencilSurface`,
+`CreateVertexShader`, `CreatePixelShader`, `SetTexture`, both draw entry
+points and `Present` remain 0; no frame is claimed. The dummy `Ni2DBuffer`
+alternative was not added because the conditional stub already reached the
+next real layer.
 
-Next minimal step: zero the skipped group's buffer array (or skip the
-`0xc92676` group build and its slot bookkeeping) so `GetBufferData` at
-`0xfb6090` sees NULL and returns 0; then re-run for depth/shaders/draw. Do not
-fabricate a cube.
+Next minimal step: initialize/validate the `f_CECDC0` `[esp+0x18]` base array
+before `0x00ced04b` and the `0xced170` source slot before the 68-byte copy. Do
+not fabricate a cube.
 
 ## 12. Where the cube format descriptor comes from (2026-11-26, static)
 
