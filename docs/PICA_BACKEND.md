@@ -1057,7 +1057,48 @@ SHA256 `d2dc52ad7ac526190c465103f67c40fca1ddd58bc4ca088a9dd50ff04d204c68`;
 `.3dsx` 881,952 B SHA256
 `f8c612c0a339e5b0dd4a74f5eae7e5b1e4fe3c4cbbf05a9b0bfa2f9815dfb1ba`;
 `.text` 864,020 B. No Azahar or hardware run was performed; cube sampling/draw
-and a visible frame remain open.
+is covered by section 5.6, and a visible frame remains open.
+
+## 5.6 Cube-map sampling and draw (2026-11-26)
+
+`D9Backend.draw_cube` is now implemented, so a draw with a complete cube texture
+bound to stage 0 reaches PICA instead of the previous named refusal.
+
+- PICA samples a cube map from a 3-component direction: `texcoord0.xy` carries
+  the first two components and the separate `texcoord0w` output the third
+  (picasso `Manual.md`; `RESULT_TEXCOORD0W`). citro3d exposes the whole path:
+  `C3D_TexInitWithParams(..., GPU_TEX_CUBE_MAP)`,
+  `C3D_TexLoadImage(tex, data, face, level)` and `C3D_TexBind`. No CPU sampling
+  substitute is used.
+- The core already selects one D3D face per vertex (`+X,-X,+Y,-Y,+Z,-Z`, the
+  same order as `GPU_TEXFACE`) and keeps face-local `(u,v)`. The adapter
+  converts each `D9ColorVertex` into `D9CubeVertex {pos3, direction3, rgba4}`
+  (stride 40) and a new `d9shader_cube` vertex program writes the direction to
+  `texcoord0`/`texcoord0w` and COLOR0 to primary. `d9_cube_direction()` is a
+  citro3d-free table (host-tested by `cube_draw_plan`) implementing the standard
+  face inverse with the same PICA bottom-up `t = 1 - v` flip as the 2D shaders.
+  The in-face orientation is an explicit assumption pending an image test on
+  hardware; the face order is D3D's.
+- Stage 0 uses the certified fixed-function single-stage translator
+  (`d9_color_tev_stage0`): the documented case is
+  `MODULATE(TEXTURE0, PRIMARY)` for RGB and alpha; the same subset's
+  `SELECTARG1/2` forms use `REPLACE`. Sampler state is forced to level 0,
+  POINT and CLAMP for the draw, matching the bridge's point-sampled level-0
+  contract and D3D's per-face clamp.
+- Named refusals, before any GPU call: an incomplete cube, a cube on stage 1,
+  a second texture/stage, a pixel shader, a non-`texcoord0` stage-0 index, a
+  multi-level cube with mip filtering (level > 0 is not sampled), a backend
+  without `draw_cube`, invalid face/edge/format and a stage-0 tuple the
+  single-TEV translator cannot express. Face 0 is never substituted.
+- `cube_draw_plan` records six D3D faces through a CPU backend, checks the cube
+  native and level-0 view, the `MODULATE(TEXTURE,DIFFUSE)` plan, the direction
+  table round-trip, and the named level/second-texture/pixel-shader/
+  no-callback refusals. `cube_sampling` and `cube_rt_sampling` still prove the
+  real null-backend texels and the PICA-shaped missing-callback refusal; both
+  keep DevCaps at `0x00082000`.
+
+This is compile-time and host-contract evidence only. No Azahar or hardware
+cube sample, no image comparison and no frame is claimed.
 
 ## 5.6 Cube/volume texcache rehydration (2026-11-26)
 
@@ -1112,6 +1153,6 @@ full TESV engine census that actually evicts/reloads these resources.
 - No second/third texture unit or sampler.
 - No vertex-colour or fragment-varying routing.
 - No VPOS/VFACE support.
-- No MRT, depth-output, cube/volume sampler, or non-TEV fragment operation.
+- No MRT, depth-output, volume sampler, or non-TEV fragment operation.
 - No claim that the wider translator subset is renderable by this backend.
 - No claim of a real Skyrim frame or pixel-equivalent PICA rendering.

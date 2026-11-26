@@ -2346,6 +2346,14 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
             set_diagnosis(d,"cube-map sampling requires an active stage-0 colour operation");
             return D9_UNSUPPORTED;
         }
+        if(d->state.stage_texcoordindex!=0){
+            set_diagnosis(d,"cube-map sampling requires texcoord0 on stage 0");
+            return D9_UNSUPPORTED;
+        }
+        if(ct->levels>1&&d->state.mip_filter!=0){
+            set_diagnosis(d,"cube-map sampling supports level 0 only; mip filtering is not implemented");
+            return D9_UNSUPPORTED;
+        }
         if(d->tnl_proto&&d->tnl.lighting&&!(d->decl_active&&d->declaration.position_t)){
             set_diagnosis(d,"cube-map sampling with CPU T&L lighting is not implemented");
             return D9_UNSUPPORTED;

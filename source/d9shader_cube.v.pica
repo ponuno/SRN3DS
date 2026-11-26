@@ -1,0 +1,29 @@
+; PICA cube-map vertex shader for the D3D9 backend.
+; Attribute plan (stride 40 bytes, D9CubeVertex):
+;   v0 position  GPU_FLOAT x3  offset  0
+;   v1 direction GPU_FLOAT x3  offset 12  (already selected by the core face)
+;   v2 color     GPU_FLOAT x4  offset 24  (normalized RGBA, direct copy)
+; texcoord0.xy carries the first two direction components and texcoord0w the
+; third; PICA samples a GPU_TEX_CUBE_MAP from that 3-component vector.
+.fvec clip[4]
+.constf k(0.0, 1.0, 0.0, 0.0)
+.alias ones k.yyyy
+.alias inpos v0
+.alias indir v1
+.alias incolor v2
+.out outpos position
+.out outtc texcoord0.xy
+.out - texcoord0w outtc.z
+.out outclr color
+
+.proc main
+    mov r0.xyz, inpos
+    mov r0.w, ones
+    dp4 outpos.x, clip[0], r0
+    dp4 outpos.y, clip[1], r0
+    dp4 outpos.z, clip[2], r0
+    dp4 outpos.w, clip[3], r0
+    mov outtc.xyz, indir
+    mov outclr, incolor
+    end
+.end

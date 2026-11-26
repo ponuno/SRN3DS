@@ -3,7 +3,7 @@
  * The null backend really samples the six CPU face stores, so this test proves
  * face order (+X,-X,+Y,-Y,+Z,-Z), normal-major-axis selection, the documented
  * UV fallback and the exact texel returned for a solid-colour A8 cube.  A
- * backend without draw_cube (the PICA shape) must refuse the draw by name and
+ * backend without draw_cube (a backend without draw_cube) must refuse the draw by name and
  * never substitute face 0.  DevCaps stay 0x00082000. */
 #include "d3d9_com.h"
 #include "d3d9_null.h"
@@ -213,7 +213,7 @@ int main(void){
     assert(call(&h,h.device,2,NULL,0)==0);
     assert(call(&h,h.factory,2,NULL,0)==0);
 
-    /* PICA shape: no draw_cube -> named refusal, no face-0 substitution. */
+    /* Backend without draw_cube: no callback -> named refusal, no face-0 substitution. */
     D9NullStats direct;memset(&direct,0,sizeof direct);
     D9Backend ops=*d9_null_backend();ops.draw_cube=NULL;
     D9Device *dev=d9_create_device(&ops,&direct,1u<<20);assert(dev);

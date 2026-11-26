@@ -331,8 +331,8 @@ D9Handle d9_texture_render_target(const D9Device *d,D9Handle h);
 /* ---- cube textures -------------------------------------------------------
  * Six CPU face stores (+X,-X,+Y,-Y,+Z,-Z) with a shared mip chain.  Cube
  * creation requires the backend texture_create_cube/upload_cube callbacks;
- * the null backend advertises them, the PICA backend does not.  Locking is
- * exposed per face/level for host loaders and GetCubeMapSurface views. */
+ * the null and PICA backends advertise them.  Locking is exposed per
+ * face/level for host loaders and GetCubeMapSurface views. */
 enum {D9_CUBE_FACES=6};
 int d9_create_cube_texture_ex(D9Device *d,unsigned edge_length,unsigned levels,
                               unsigned format,unsigned pool,unsigned usage,
@@ -365,9 +365,9 @@ int d9_cube_resource_info(D9Device *d,D9Handle h,unsigned *levels,
                           unsigned *edge_length,unsigned *format,
                           size_t *guest_bytes,size_t *gpu_bytes,int *cpu_only);
 int d9_release_cube_texture(D9Device *d,D9Handle h);
-/* Bind a ready cube to stage 0/1.  h==0 clears that stage.  Cube sampling is
- * not implemented by the draw path, so a later draw with a cube bound fails
- * with D9_UNSUPPORTED rather than silently dropping the cube. */
+/* Bind a ready cube to stage 0/1.  h==0 clears that stage.  A draw with a
+ * cube bound uses the optional draw_cube callback; a backend without it
+ * refuses by name rather than silently dropping the cube. */
 int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h);
 /* ---- volume textures -----------------------------------------------------
  * Width x height x depth CPU slices with a shared mip chain.  Creation requires

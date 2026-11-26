@@ -6,10 +6,15 @@
 #include <string.h>
 #include "d9shader_shbin.h"
 #include "d9shader_color_shbin.h"
+#include "d9shader_cube_shbin.h"
 #include "d3d9_pica_citro3d.h"
 #include "d3d9_color_tev.h"
+#include "d3d9_cube_coords.h"
 
 #define FRAME_VERTICES 16384u
+/* Cube draw vertex: the PICA cube shader reads a 3-component direction and
+ * writes texcoord0.xy + texcoord0w, so the attribute stride is 40 bytes. */
+typedef struct {float x,y,z,dx,dy,dz,r,g,b,a;} D9CubeVertex;
 #define TRANSFER (GX_TRANSFER_FLIP_VERT(0)|GX_TRANSFER_OUT_TILED(0)|GX_TRANSFER_RAW_COPY(0)| \
  GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8)|GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8)|GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
 struct D9Citro {
@@ -28,6 +33,13 @@ struct D9Citro {
     int program_color_ready,uniform_color;
     D9ColorVertex *arena_color;
     size_t cursor_color;
+    /* Cube-map path: the core hands a per-vertex face, so the adapter converts
+     * {pos3, uv2, rgba4} into {pos3, direction3, rgba4} on the CPU. */
+    DVLB_s *shader_cube;
+    shaderProgram_s program_cube;
+    int program_cube_ready,uniform_cube;
+    D9CubeVertex *arena_cube;
+    size_t cursor_cube;
 };
 D9Citro *d9_citro_open(void){
     D9Citro *c=calloc(1,sizeof *c);if(!c)return NULL;
@@ -45,6 +57,11 @@ D9Citro *d9_citro_open(void){
     if(R_FAILED(shaderProgramSetVsh(&c->program_color,&c->shader_color->DVLE[0])))goto fail;
     c->uniform_color=shaderInstanceGetUniformLocation(c->program_color.vertexShader,"clip");if(c->uniform_color<0)goto fail;
     c->arena_color=linearAlloc(FRAME_VERTICES*sizeof(D9ColorVertex));if(!c->arena_color)goto fail;
+    c->shader_cube=DVLB_ParseFile((u32 *)d9shader_cube_shbin,d9shader_cube_shbin_size);if(!c->shader_cube)goto fail;
+    if(R_FAILED(shaderProgramInit(&c->program_cube)))goto fail;c->program_cube_ready=1;
+    if(R_FAILED(shaderProgramSetVsh(&c->program_cube,&c->shader_cube->DVLE[0])))goto fail;
+    c->uniform_cube=shaderInstanceGetUniformLocation(c->program_cube.vertexShader,"clip");if(c->uniform_cube<0)goto fail;
+    c->arena_cube=linearAlloc(FRAME_VERTICES*sizeof(D9CubeVertex));if(!c->arena_cube)goto fail;
     return c;
 fail:d9_citro_close(c);return NULL;
 }
@@ -52,6 +69,8 @@ void d9_citro_close(D9Citro *c){
     if(!c)return;if(c->scene)C3D_FrameEnd(0);C3D_FrameSync();
     if(c->arena)linearFree(c->arena);
     if(c->arena_color)linearFree(c->arena_color);
+    if(c->arena_cube)linearFree(c->arena_cube);
+    if(c->program_cube_ready)shaderProgramFree(&c->program_cube);if(c->shader_cube)DVLB_Free(c->shader_cube);
     if(c->program_color_ready)shaderProgramFree(&c->program_color);if(c->shader_color)DVLB_Free(c->shader_color);
     if(c->program_ready)shaderProgramFree(&c->program);if(c->shader)DVLB_Free(c->shader);
     if(c->target)C3D_RenderTargetDelete(c->target);C3D_Fini();free(c);
@@ -160,7 +179,7 @@ static void prepare_draw(D9Citro *c){
 }
 static int begin(void *ctx,uint32_t argb){
     D9Citro *c=ctx;if(c->scene||!C3D_FrameBegin(C3D_FRAME_SYNCDRAW))return -1;
-    c->scene=1;c->cursor=0;c->cursor_color=0;c->active_target=NULL;
+    c->scene=1;c->cursor=0;c->cursor_color=0;c->cursor_cube=0;c->active_target=NULL;
     uint32_t rgba=(argb<<8)|(argb>>24);
     C3D_RenderTargetClear(c->target,C3D_CLEAR_ALL,rgba,0);
     if(!C3D_FrameDrawOn(c->target)){C3D_FrameEnd(0);c->scene=0;return -1;}
@@ -311,6 +330,83 @@ static int draw_color_stages(void *ctx,const D9ColorVertex *v,size_t n,const D9M
 static int draw_colored(void *ctx,const D9ColorVertex *vertices,size_t count,
                         const D9Matrix *clip,void *texture,const D9DrawState *state){
     return draw_color_stages(ctx,vertices,count,clip,texture,state,NULL,NULL);
+}
+/* --- cube-map path -------------------------------------------------------
+ * The core selects a D3D face per vertex from the major normal axis (or the
+ * u-0.5/v-0.5 fallback) and keeps face-local (u,v).  PICA has no per-vertex
+ * face attribute: a cube map is sampled from a 3-component direction, whose
+ * third component travels in texcoord0w.  The adapter therefore converts each
+ * vertex into {pos3, direction3, rgba4}; d9_cube_direction() builds the
+ * standard face direction with the same vertical flip the 2D colour shader
+ * uses.  Only level 0 is sampled (the core refuses a mip-filtered multi-level
+ * cube by name) and sampler state is point/clamp. */
+static void configure_native_cube(NativeCube *t){
+    t->tex.minLevel=0;t->tex.maxLevel=0;
+    C3D_TexSetFilter(&t->tex,GPU_NEAREST,GPU_NEAREST);
+    C3D_TexSetFilterMipmap(&t->tex,GPU_NEAREST);
+    C3D_TexSetWrap(&t->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
+}
+static void prepare_draw_cube(D9Citro *c){
+    C3D_BindProgram(&c->program_cube);
+    C3D_AttrInfo *attr=C3D_GetAttrInfo();AttrInfo_Init(attr);
+    /* D9CubeVertex is {pos3, direction3, rgba4}. */
+    AttrInfo_AddLoader(attr,0,GPU_FLOAT,3);
+    AttrInfo_AddLoader(attr,1,GPU_FLOAT,3);
+    AttrInfo_AddLoader(attr,2,GPU_FLOAT,4);
+    C3D_BufInfo *buf=C3D_GetBufInfo();BufInfo_Init(buf);
+    BufInfo_Add(buf,c->arena_cube,sizeof(D9CubeVertex),3,0x210);
+}
+static int draw_cube(void *ctx,const D9ColorVertex *vertices,size_t count,
+                     const unsigned *faces,const D9Matrix *clip,
+                     const D9CubeView *cube,const D9DrawState *state){
+    D9Citro *c=ctx;
+    if(!c||!c->scene||!c->program_cube_ready||!vertices||!faces||!clip||
+       !cube||!state||!count||count%3)return -1;
+    NativeCube *native=cube->native;
+    if(!native||cube->levels<1||cube->edge<8||cube->edge>1024){
+        fprintf(stderr,"[d3d9-citro] draw_cube: cube view has no native or an invalid edge/level\n");
+        return -1;
+    }
+    if(cube->format!=D9_A8R8G8B8&&cube->format!=D9_X8R8G8B8){
+        fprintf(stderr,"[d3d9-citro] draw_cube: only A8R8G8B8/X8R8G8B8 cube sampling is implemented\n");
+        return -1;
+    }
+    if(state->pixel_shader){
+        fprintf(stderr,"[d3d9-citro] draw_cube: a pixel shader owns the TEV stages; fixed-function cube sampling only\n");
+        return -1;
+    }
+    D9ColorTevStage plan;const char *why=NULL;
+    if(d9_color_tev_stage0(state,1,&plan,&why)){
+        fprintf(stderr,"[d3d9-citro] draw_cube: %s\n",why?why:"stage-0 state is not expressible");
+        return -1;
+    }
+    if(count>FRAME_VERTICES-c->cursor_cube)return -1;
+    for(size_t i=0;i<count;++i){
+        if(faces[i]>=D9_CUBE_FACES){
+            fprintf(stderr,"[d3d9-citro] draw_cube: face index %u is outside 0..5\n",faces[i]);
+            return -1;
+        }
+        float dir[3];d9_cube_direction(faces[i],vertices[i].u,vertices[i].v,dir);
+        D9CubeVertex *o=&c->arena_cube[c->cursor_cube+i];
+        o->x=vertices[i].x;o->y=vertices[i].y;o->z=vertices[i].z;
+        o->dx=dir[0];o->dy=dir[1];o->dz=dir[2];
+        o->r=vertices[i].r;o->g=vertices[i].g;o->b=vertices[i].b;o->a=vertices[i].a;
+    }
+    GSPGPU_FlushDataCache(c->arena_cube+c->cursor_cube,count*sizeof(D9CubeVertex));
+    prepare_draw_cube(c);
+    D9Matrix mtx=*clip;orient_clip(c,&mtx);
+    C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_cube,&m);
+    apply_state(state,1);
+    configure_native_cube(native);
+    d9_pica_citro3d_restore_tev();
+    C3D_TexBind(0,&native->tex);
+    apply_color_tev(0,&plan);
+    C3D_DrawArrays(GPU_TRIANGLES,(int)c->cursor_cube,(int)count);
+    d9_pica_citro3d_restore_tev();
+    c->cursor_cube+=count;
+    prepare_draw(c);
+    return 0;
 }
 /* Menu TEV plans: the colour vertex program carries color0, the plan can bind
  * two texture units, and external stage constants come from the c0..c8 bank.
@@ -616,5 +712,5 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
     target_write,depth_clear,target_viewport,draw_menu,target_texture,
-    cube_create,cube_upload,target_viewport_scaled,NULL,NULL,NULL,cube_delete,
+    cube_create,cube_upload,target_viewport_scaled,NULL,NULL,draw_cube,cube_delete,
     cube_face_create,cube_face_delete,tex_create_format,tex_upload_format};return &ops;}

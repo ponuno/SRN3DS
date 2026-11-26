@@ -574,10 +574,11 @@ upload:
   present, falling back to the core CPU face store for uploaded non-RT cubes.
   Face order remains +X,-X,+Y,-Y,+Z,-Z and the sampled ARGB is the value written
   by `Clear`.
-- PICA still has no `draw_cube`. `SetTexture` accepts the complete RT cube, and
-  the draw is refused by name with the existing
+- Before section 15, PICA had no `draw_cube`. `SetTexture` accepted the
+  complete RT cube and the draw was refused by name with the existing
   `"cube-map sampling requires a backend draw_cube callback"` diagnosis. No
-  face 0 is substituted.
+  face 0 is substituted. Section 15 adds the real PICA callback; the named
+  refusal remains the behavior of any backend that lacks it.
 
 New `tests/cube_rt_sampling_smoke.c` (registered as `cube_rt_sampling`) creates
 a 16x16 A8 RT cube, selects and clears each face to +X red, -X green, +Y blue,
@@ -596,6 +597,63 @@ backend (`draw_cube=NULL`): the complete RT cube binds, the draw is
   `5b63742d2a3620b5a9e7d6377f24370461bb33eefa70cc2f3de3365a1167d4ce`;
   `.text` 892,692 B.
 
-Remaining: PICA `draw_cube` (hardware cube sampling), texcache rehydration for
-evicted cube natives, the full TESV engine path/census, and Azahar/hardware
-proof. No frame is claimed.
+Remaining: texcache rehydration for evicted cube natives, the full TESV
+engine path/census, and Azahar/hardware proof. No frame is claimed.
+
+## 15. PICA cube-map draw (2026-11-26)
+
+The PICA backend now implements `draw_cube` for level-0 cube sampling.
+
+### How PICA samples a cube map
+
+devkitPro's PICA interface exposes cube maps as
+`C3D_TexInitWithParams(..., GPU_TEX_CUBE_MAP)` and `C3D_TexBind`. The face enum
+`GPU_POSITIVE_X..GPU_NEGATIVE_Z` is the same `+X,-X,+Y,-Y,+Z,-Z` order as
+`D3DCUBEMAP_FACES`, and `C3D_TexLoadImage(tex, data, face, level)` writes the
+six uploaded faces unchanged. The texture coordinate is a direction vector:
+picasso emits `texcoord0` for the first two components and `texcoord0w` for
+the third (`RESULT_TEXCOORD0W`; "used for 3D/cube textures"). citro3d therefore
+does have the required attribute/texcoord path; no CPU sampling substitute is
+needed.
+
+### Adapter path
+
+- The core keeps its face selection (`+X..-Z`, normal major axis or the
+  `(u-0.5,v-0.5,0)` fallback) and passes the per-vertex `faces[]`.
+- `draw_cube` validates the native cube, edge, format and face indices, builds
+  a local `D9CubeVertex {pos3, direction3, rgba4}` (stride 40) with
+  `d9_cube_direction(face,u,v)`, binds `&cube->tex` to unit 0 and applies the
+  fixed-function stage-0 plan through `d9_color_tev_stage0`. The documented
+  tuple is `MODULATE(TEXTURE0, PRIMARY)` for both RGB and alpha.
+- A new `d9shader_cube.v.pica` writes `texcoord0.xy` + `texcoord0w` from the
+  direction and COLOR0 from the vertex colour. Sampler state is forced to
+  level 0, POINT and CLAMP.
+- `d9_cube_direction` is a small citro3d-free table implementing the standard
+  cube-face inverse. It uses the same `t = 1 - v` vertical flip as the 2D
+  shaders because PICA's face t axis starts at the last stored row. The
+  in-face orientation is an explicit assumption until an image test on
+  hardware; the face order is D3D's.
+
+### Named refusals
+
+Incomplete cube, stage-1 cube, second texture/stage, pixel shader, a stage-0
+texture-coordinate index other than 0, a multi-level cube with mip filtering
+(level > 0 is not sampled), a backend without `draw_cube`, invalid
+face/edge/format and a stage-0 tuple the single-TEV translator cannot express
+are all named before the GPU call. Face 0 is never substituted. The previous
+`"cube-map sampling requires a backend draw_cube callback"` diagnosis remains
+for backends that do not implement the callback.
+
+### Host evidence
+
+`cube_draw_plan` drives the core with a recording backend: six triangles with
+`+X..-Z` normals reach `draw_cube` with the expected native, cube view and
+`MODULATE(TEXTURE,DIFFUSE)` state; the direction table round-trips through an
+independent inverse; a 2-level cube with mip filtering is refused as
+`"cube-map sampling supports level 0 only; mip filtering is not implemented"`
+while the same cube with mip filter NONE draws; a second texture, a pixel
+shader and a missing `draw_cube` are named. `cube_sampling` and
+`cube_rt_sampling` retain the real null-backend texel checks and the unchanged
+DevCaps (`0x00082000`).
+
+No Azahar/hardware cube sample, image comparison or frame is claimed.

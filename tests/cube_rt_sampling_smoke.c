@@ -4,7 +4,7 @@
  * cleared to a distinct colour, then bound with SetTexture and sampled by a
  * draw with +X..-Z normals.  The null backend uses the face-target pixel
  * buffers, not the zeroed CPU upload store.  A partial cube is a named
- * refusal; a backend without draw_cube (the PICA shape) binds the complete RT
+ * refusal; a backend without draw_cube (a backend without draw_cube) binds the complete RT
  * cube but refuses the draw by name and never substitutes face 0.
  */
 #include "d3d9_com.h"
@@ -198,7 +198,7 @@ int main(void) {
     assert(call(&h, h.factory, 2, NULL, 0) == 0);
     d9_com_shutdown();
 
-    /* PICA shape: RT cube binds after all six faces are rendered, but the
+    /* Backend without draw_cube: RT cube binds after all six faces are rendered, but the
      * missing draw_cube callback refuses the draw by name. */
     D9NullStats direct; memset(&direct, 0, sizeof direct);
     D9Backend ops = *d9_null_backend(); ops.draw_cube = NULL;
