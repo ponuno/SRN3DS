@@ -217,6 +217,12 @@ read stage without fake successes. *Not met.*
       with proportional UVs, deterministic pen order and count-before-write
       overflow. Real codes 33..36: 4 quads / 16 vertices / 24 indices, bounds
       1,104,1,63. No upload, draw or GPU. See `docs/MENU_SWF.md`.
+- [x] Flattened first-frame SWF display list: PlaceObject2/3, RemoveObject/2,
+      depth-sorted live state, recursive sprite expansion with parent*child
+      16.16 matrices and 8.8 colour composition, clip depth/name/ratio, cycle
+      and depth/record limits. Real StartMenu: 216 records, 71 sprites, 106
+      sprite records, top=1, max sprite depth 7. CPU metadata only; masks,
+      AVM and real GFx draw remain open. See `docs/MENU_SWF.md`.
 - [x] Host COM A8 text draw: real D3DFMT_A8 texture creation/upload, 8x8 pitch
       8 byte-exact coverage, POINT/CLAMP + MODULATE(TEXTURE,DIFFUSE), FVF
       0x142 and one DrawPrimitiveUP for 12 expanded vertices. Named A8 refusal

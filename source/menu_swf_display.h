@@ -149,6 +149,16 @@ typedef struct {
     int truncated;
 } MenuSwfDisplaySummary;
 
+/* Parse one PlaceObject2 (26) or PlaceObject3 (70) payload into the bounded
+ * display-object fields.  Filters followed by undecodable fields are
+ * E_NOTIMPL; malformed tags are E_FORMAT.  Used by the flattened display-list
+ * builder. */
+MenuSwfStatus menu_swf_display_parse_place(const uint8_t *p, size_t len,
+                                           uint8_t tag_code,
+                                           MenuSwfDisplayObject *out,
+                                           char *reason,
+                                           size_t reason_cap);
+
 /* Parse the container, build the top-level display list, summarize every
  * DefineSprite (bounded), re-walk the first sprite with placements for its
  * frames, and report DefineFont2/3 metrics.  ZWS, DefineFont4, DoABC/AVM2 and

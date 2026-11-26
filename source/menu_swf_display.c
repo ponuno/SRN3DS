@@ -287,6 +287,30 @@ static int parse_remove(const uint8_t *p, size_t len, uint16_t *depth) {
     return 0;
 }
 
+MenuSwfStatus menu_swf_display_parse_place(const uint8_t *p, size_t len,
+                                           uint8_t tag_code,
+                                           MenuSwfDisplayObject *out,
+                                           char *reason,
+                                           size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!p || !out) return MENU_SWF_ERR_ARGUMENT;
+    int rc = tag_code == 26 ? parse_place2(p, len, out)
+                            : tag_code == 70 ? parse_place3(p, len, out)
+                                             : -1;
+    if (rc == -2) {
+        set_reason(reason, reason_cap,
+                   "swf: PlaceObject3 filters hide later fields");
+        return MENU_SWF_ERR_NOTIMPL;
+    }
+    if (rc) {
+        set_reason(reason, reason_cap,
+                   "swf: malformed PlaceObject%d tag",
+                   tag_code == 70 ? 3 : 2);
+        return MENU_SWF_ERR_FORMAT;
+    }
+    return MENU_SWF_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* Display builder                                                     */
 /* ------------------------------------------------------------------ */

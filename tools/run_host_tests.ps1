@@ -316,6 +316,7 @@ Add-Test "renderer_requirements" $common @("source/d3d9_renderer_requirements.c"
 Add-Test "menu_bsa" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/guest.c", "source/guest_heap.c", "tests/menu_bsa_smoke.c") @()
 Add-Test "menu_swf" $common @("source/bsa_reader.c", "source/menu_swf.c", "tests/menu_swf_smoke.c") @()
 Add-Test "menu_swf_display" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "tests/menu_swf_display_smoke.c") @()
+Add-Test "menu_swf_display_list" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "tests/menu_swf_display_list_smoke.c") @()
 Add-Test "menu_swf_shape" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "tests/menu_swf_shape_smoke.c") @()
 Add-Test "menu_swf_tess" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "tests/menu_swf_tess_smoke.c") @()
 Add-Test "menu_swf_text" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "tests/menu_swf_text_smoke.c") @()

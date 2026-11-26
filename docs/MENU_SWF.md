@@ -14,6 +14,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 |---|---|
 | `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, tag walk (including DefineSprite nesting), bounded summary |
 | `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, DefineFont2/3 metrics and kerning pairs |
+| `source/menu_swf_display_list.h` / `.c` | First-frame flattened display list with recursive sprite expansion, accumulated 16.16 matrices/colour transforms, clip depth and cycle/depth limits |
 | `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, streaming geometry sink, and DefineFont2/3 glyph SHAPE contours/bounds |
 | `source/menu_swf_tess.h` / `.c` | Bounded even-odd/non-zero tessellation of one shape or DefineFont2/3 glyph into caller-owned vertex/index/triangle-style pools plus separate stroked line segments |
 | `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement, glyph tessellation through `menu_swf_tess`, 16.16 transform, ARGB vertices and per-glyph triangle ranges |
@@ -23,6 +24,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/d3d9_menu_text.h` / `.c` | Host/menu COM demo: A8 texture creation/upload and one DrawPrimitiveUP from the atlas+batch |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_display_smoke.c` | Synthetic PlaceObject2/3, RemoveObject2, sprite, ShowFrame and DefineFont3 fixtures; optional real display/font summary |
+| `tests/menu_swf_display_list_smoke.c` | Synthetic 2-sprite nesting/matrices/colour/RemoveObject2/clip-depth plus cycle, overflow and broken-tag refusals; optional real StartMenu flatten |
 | `tests/menu_swf_shape_smoke.c` | Synthetic rectangle/curve/two-style/glyph shapes plus truncation, bitmap-id, segment-limit and AVM2/DefineFont4 refusals; optional real shape/glyph summary |
 | `tests/menu_swf_tess_smoke.c` | Synthetic square in both orientations, even-odd hole, non-zero star/nested contours, curve, multiple styles, stroked square, empty contour, overflow and missing-shape refusals; optional real tessellation summary |
 | `tests/menu_swf_text_smoke.c` | Synthetic 3-glyph font with kerning, direct glyph tessellation, placement/transform/colour, empty/unknown glyph and overflow; optional real StartMenu text |
@@ -30,7 +32,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_atlas_smoke.c` | Synthetic varied-size pack/determinism/UV/composition/overflow/empty cases; optional real codes 33..36 coverage-sum comparison |
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch` and `menu_text_draw`; `menu_bsa` now links `menu_swf.c` |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch` and `menu_text_draw`; `menu_bsa` now links `menu_swf.c` |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -464,38 +466,74 @@ The test also verifies a texture-create refusal is `ERR_A8`, an empty batch is
 `ERR_EMPTY`, and an oversized index count is `ERR_OVERFLOW`.  There is no
 sampling result, frame, or GPU pixel claim.
 
-## 13. Tests
+## 13. Flattened display list
+
+`menu_swf_display_list_build()` processes the first ShowFrame of the top-level
+timeline and recursively expands sprite placements:
+
+* `PlaceObject2` (26) flags cover HasCharacter, HasMatrix, HasColorTransform,
+  HasRatio, HasName and HasClipDepth; `PlaceObject3` (70) is accepted through
+  the same validated display parser.  `RemoveObject2` (28) and `RemoveObject`
+  (5) delete a depth.
+* Live objects are kept sorted by depth.  Each sprite placement is emitted as a
+  record and its first timeline frame is walked immediately, so the result is a
+  depth-first, depth-sorted flat array.  Sprite cycles are `ERR_TAG`; more than
+  32 sprite levels, 128 live objects, 128 sprite definitions or 8,192 records
+  are named `ERR_BUDGET`/refusals.
+* Matrices are 16.16 and compose `parent * child`; translations are in twips.
+  Colour transforms use 8.8 multipliers and additive channels and compose
+  `parent.mult * child` with the parent addend.  Every record carries the final
+  matrix/colour, local depth, clip depth, ratio, name, parent sprite id and
+  sprite depth.
+* The caller owns the record array; overflow reports the number written and
+  sets `truncated`.  A broken PlaceObject/RemoveObject tag is `ERR_FORMAT`.
+
+Measured real `Update.bsa` StartMenu first frame:
+
+```text
+real: records=216 sprites=71 sprite_records=106 top=1
+      placements=216 removals=0 max_depth=7
+```
+
+The top frame has one object; 71 sprite definitions produce 106 sprite records
+and 216 total flattened records, with a maximum sprite nesting depth of 7.
+This is CPU metadata only: masks/clip rendering, AVM and font layout are still
+outside the module, and no frame is produced.
+
+## 14. Tests
 
 Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
 Result: `menu_swf_batch` **21 checks, 0 failures**; `menu_swf_atlas` **27
 checks, 0 failures**; `menu_swf_raster` **44 checks, 0 failures**;
 `menu_swf_text` **33 checks, 0 failures**; `menu_swf_tess` **47 checks, 0
-failures**; `menu_swf_shape` **28 checks, 0 failures**; `menu_swf_display`
-**38 checks, 0 failures**; `menu_swf` **86 checks, 0 failures**; `menu_bsa`
-**277 checks, 0 failures**.
+failures**; `menu_swf_shape` **28 checks, 0 failures**;
+`menu_swf_display_list` **15 checks, 0 failures**; `menu_swf_display` **38
+checks, 0 failures**; `menu_swf` **86 checks, 0 failures**; `menu_bsa` **277
+checks, 0 failures**.
 
 Real read-only:
 
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_batch,menu_swf_atlas,menu_swf_raster,menu_swf_text,menu_swf_tess,menu_swf_shape,menu_swf_display_list,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
 Result: `menu_swf_batch` **34 checks, 0 failures**; `menu_swf_atlas` **37
 checks, 0 failures**; `menu_swf_raster` **60 checks, 0 failures**;
 `menu_swf_text` **46 checks, 0 failures**; `menu_swf_tess` **55 checks, 0
-failures**; `menu_swf_shape` **40 checks, 0 failures**; `menu_swf_display`
-**57 checks, 0 failures**; `menu_swf` **102 checks, 0 failures**; `menu_bsa`
-**286 checks, 0 failures**.
+failures**; `menu_swf_shape` **40 checks, 0 failures**;
+`menu_swf_display_list` **23 checks, 0 failures**; `menu_swf_display` **57
+checks, 0 failures**; `menu_swf` **102 checks, 0 failures**; `menu_bsa` **286
+checks, 0 failures**.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
 long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
@@ -508,7 +546,10 @@ clip-action presence, sprite frames, DefineFont3 codes/advances/bounds and the
 named DefineFont4/AVM2/filter-then-field refusals.  The shape test adds a
 two-style closed rectangle, a quadratic curve, Shape4 edge bounds, a glyph
 outline, truncation, bitmap fill without id, unsupported fill type, segment
-limit and AVM2/DefineFont4 refusals.  The tessellation test adds a 4-vertex /
+limit and AVM2/DefineFont4 refusals.  The flattened display-list test adds two
+nested sprites, accumulated matrices/colour, RemoveObject2, clip depth, depth
+order, cycle/overflow and broken-PlaceObject refusals.  The tessellation test
+adds a 4-vertex /
 2-triangle square in both contour orientations, an even-odd hole, a non-zero
 star and same-direction nested contours, an adaptive curve, two fill styles, a
 stroked square, an empty contour, vertex/index/edge overflow and a missing
@@ -530,19 +571,19 @@ full viewport clipping, overflow without buffer mutation, NaN/negative-scale/
 rotated-clip refusals, and real 33..36 atlas quads.
 
 Full host suite with the main-tree generated slice and IR container:
-**113 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
+**119 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
 contributes 21 synthetic checks, `menu_swf_atlas` 27, `menu_swf_raster` 44,
 `menu_swf_text` 33, `menu_swf_tess` 47, `menu_swf_shape` 28,
-`menu_swf_display` 38 and `menu_swf` 86; `menu_text_draw` is an assertion-based
-COM test outside that real-data matrix.  No real-data checks are run in that
-suite.
+`menu_swf_display_list` 15, `menu_swf_display` 38 and `menu_swf` 86;
+`menu_text_draw` is an assertion-based COM test outside that real-data matrix.
+No real-data checks are run in that suite.
 
-## 14. What remains
+## 15. What remains
 
-1. **Renderable display list** — bounded state, shape geometry and triangle
-   tessellation exist, but this is not a GFx display list: sprite/movie-clip
-   materialisation, nested transforms, masks, clipping layers, button states and
-   frame scripts remain.
+1. **Renderable display list** — bounded state, flattened CPU transform records,
+   shape geometry and triangle tessellation exist, but this is not a GFx
+   display list: mask/clip rendering, clipping layers, button states, frame
+   scripts and draw submission remain.
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
    the menu's script behaviour.  `DoAction`/clip-action payloads are not
    executed.
@@ -557,7 +598,7 @@ suite.
    TEV/PICA submission and the first real frame.  The host COM DrawPrimitiveUP
    is not a frame claim.
 
-## 15. Integration
+## 16. Integration
 
 ```c
 /* r came from menu_bsa_resolve_startmenu(&heap, ...). */
@@ -575,6 +616,8 @@ MenuSwfAtlasResult atlas_result;
 MenuSwfBatchVertex batch_vertices[glyph_count * 4];
 uint32_t batch_indices[glyph_count * 6];
 MenuSwfBatchResult batch_result;
+MenuSwfDisplayListRecord list_records[216]; /* caller-sized */
+MenuSwfDisplayListResult flat;
 char reason[BSA_REASON_MAX];
 const uint8_t *bytes = guest_ptr(heap.memory, r.guest_address, r.size);
 MenuSwfStatus st = menu_swf_summary(bytes, r.size, &summary, reason,
@@ -582,6 +625,9 @@ MenuSwfStatus st = menu_swf_summary(bytes, r.size, &summary, reason,
 if (st == MENU_SWF_OK)
     st = menu_swf_display_summary(bytes, r.size, &display, reason,
                                   sizeof reason);
+if (st == MENU_SWF_OK)
+    st = menu_swf_display_list_build(bytes, r.size, list_records, 216,
+                                     &flat, reason, sizeof reason);
 if (st == MENU_SWF_OK)
     st = menu_swf_shape_summary(bytes, r.size, &shapes, reason,
                                 sizeof reason);
@@ -618,11 +664,12 @@ if (st == MENU_SWF_OK) {
 heap_free(&heap, r.guest_address);
 ```
 
-The summary/display/shape/tess/text/raster/atlas/batch structures are metadata,
-CPU geometry, A8 coverage/atlas memory and CPU vertex/index data only.  They
-must not be reported as a parsed movie, renderable display list or frame.
+The summary/display/display-list/shape/tess/text/raster/atlas/batch structures
+are metadata, CPU geometry, A8 coverage/atlas memory and CPU vertex/index data
+only.  They must not be reported as a parsed movie, renderable display list or
+frame.
 
-## 16. Honest claim
+## 17. Honest claim
 
 * StartMenu.swf is validated as one CWS/zlib stream with the declared size,
   frame header and complete top-level tag stream through End.
@@ -631,6 +678,8 @@ must not be reported as a parsed movie, renderable display list or frame.
 * The bounded display model reports one top-level `MenuHolder`, 71 sprites, a
   selected sprite timeline, and the local 243-glyph DefineFont3 code/advance/
   bounds/kerning data.
+* The flattened display list reports **216 records**, 71 sprite definitions,
+  106 sprite records, one top-level object and a maximum sprite depth of **7**.
 * The bounded shape model reports 27 shapes, 151 paths, 1,712 shape segments,
   2,362 shape points, 243 glyphs (241 non-empty) and 5,292 glyph segments.
 * The bounded tessellator turns all 27 shapes into 71,605 vertices / 35,759
