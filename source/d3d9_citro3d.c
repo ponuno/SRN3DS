@@ -57,6 +57,7 @@ void d9_citro_close(D9Citro *c){
     if(c->target)C3D_RenderTargetDelete(c->target);C3D_Fini();free(c);
 }
 typedef struct {C3D_Tex tex;unsigned levels;} NativeTex;
+typedef struct {C3D_Tex tex;C3D_TexCube cube;unsigned edge,levels,format;} NativeCube;
 typedef struct {C3D_Tex tex;C3D_RenderTarget *target;NativeTex sample;unsigned w,h,format;} NativeTarget;
 static int tex_create(void *ctx,unsigned w,unsigned h,unsigned levels,void **handle){
     (void)ctx;NativeTex *n=calloc(1,sizeof *n);if(!n||!levels){free(n);return -1;}
@@ -69,6 +70,56 @@ static int tex_upload(void *ctx,void *handle,unsigned level,const void *data,siz
     C3D_FrameSync();t->maxLevel=(u8)(n->levels-1);t->minLevel=0;C3D_TexLoadImage(t,data,GPU_TEXFACE_2D,(int)level);C3D_TexFlush(t);return 0;
 }
 static void tex_delete(void *ctx,void *handle){(void)ctx;NativeTex *n=handle;C3D_FrameSync();C3D_TexDelete(&n->tex);free(n);}
+/* PICA cube textures.  C3D_TexInitWithParams allocates the six face images;
+ * C3D_TexDelete frees them (the embedded C3D_TexCube struct is ours to free).
+ * Formats are limited to the two the core can upload without conversion on the
+ * GPU: RGBA8 and RGB8 (X8 uploads are expanded from the core's 4-byte store). */
+static int cube_create(void *ctx,unsigned edge,unsigned levels,unsigned format,void **handle){
+    (void)ctx;if(!handle||!levels||edge<8||edge>1024||(edge&(edge-1)))return -2;
+    GPU_TEXCOLOR pfmt;
+    if(format==D9_A8R8G8B8)pfmt=GPU_RGBA8;
+    else if(format==D9_X8R8G8B8)pfmt=GPU_RGB8;
+    else return -2;
+    NativeCube *n=calloc(1,sizeof *n);if(!n)return -3;
+    C3D_TexInitParams params={(u16)edge,(u16)edge,(u8)(levels-1),pfmt,
+                              GPU_TEX_CUBE_MAP,false};
+    if(!C3D_TexInitWithParams(&n->tex,&n->cube,params)){
+        if(n->tex.cube)C3D_TexDelete(&n->tex);
+        free(n);return -3;
+    }
+    n->edge=edge;n->levels=levels;n->format=format;
+    C3D_TexSetFilter(&n->tex,GPU_LINEAR,GPU_LINEAR);
+    C3D_TexSetWrap(&n->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
+    *handle=n;return 0;
+}
+static int cube_upload(void *ctx,void *handle,unsigned face,unsigned level,
+                       const void *data,size_t bytes){
+    D9Citro *c=ctx;NativeCube *n=handle;
+    if(!c||!n||c->scene||face>=6u||level>=n->levels||!data)return -1;
+    unsigned dim=n->edge>>level;if(!dim)dim=1;
+    C3D_Tex *t=&n->tex;
+    u32 want=C3D_TexCalcLevelSize(t->size,(int)level);
+    size_t src=(size_t)dim*dim*4u;
+    C3D_FrameSync();t->maxLevel=(u8)(n->levels-1);t->minLevel=0;
+    if(n->format==D9_X8R8G8B8){
+        if(want!=(u32)((size_t)dim*dim*3u)||bytes!=src)return -1;
+        uint8_t *rgb=malloc(want);if(!rgb)return -1;
+        const uint8_t *in=data;
+        for(size_t i=0;i<(size_t)dim*dim;++i){
+            rgb[i*3]=in[i*4];rgb[i*3+1]=in[i*4+1];rgb[i*3+2]=in[i*4+2];
+        }
+        C3D_TexLoadImage(t,rgb,(GPU_TEXFACE)face,(int)level);
+        free(rgb);
+    }else{
+        if(bytes!=want)return -1;
+        C3D_TexLoadImage(t,data,(GPU_TEXFACE)face,(int)level);
+    }
+    C3D_TexFlush(t);return 0;
+}
+static int cube_delete(void *ctx,void *handle){
+    (void)ctx;NativeCube *n=handle;if(!n)return 0;
+    C3D_FrameSync();C3D_TexDelete(&n->tex);free(n);return 0;
+}
 static int tex_create_encoded(void *ctx,unsigned w,unsigned h,unsigned levels,unsigned format,void **handle){
     (void)ctx;if(!handle||(format!=D9_TEX_ETC1&&format!=D9_TEX_ETC1A4)||!levels)return -1;
     NativeTex *n=calloc(1,sizeof *n);if(!n)return -1;
@@ -497,4 +548,5 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
 }
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
-    target_write,depth_clear,target_viewport,draw_menu,target_texture,NULL,NULL,target_viewport_scaled,NULL,NULL};return &ops;}
+    target_write,depth_clear,target_viewport,draw_menu,target_texture,
+    cube_create,cube_upload,target_viewport_scaled,NULL,NULL,NULL,cube_delete};return &ops;}

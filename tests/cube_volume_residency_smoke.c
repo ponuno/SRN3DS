@@ -29,6 +29,14 @@ static int flaky_release(void *ctx, void *native) {
     d9_null_backend()->texture_delete(ctx, native);
     return 0;
 }
+static int flaky_cube_delete(void *ctx, void *native) {
+    FlakyCtx *f = ctx;
+    if (f->fail_deletes) {
+        --f->fail_deletes;
+        return -1;
+    }
+    return d9_null_backend()->texture_delete_cube(ctx, native);
+}
 
 static unsigned guest_releases, gpu_releases;
 static int test_guest_release(void *ctx, void *guest, size_t bytes) {
@@ -177,6 +185,7 @@ int main(void) {
     memset(&flaky, 0, sizeof flaky);
     D9Backend flaky_ops = ops;
     flaky_ops.texture_release = flaky_release;
+    flaky_ops.texture_delete_cube = flaky_cube_delete;
     dev = d9_create_device(&flaky_ops, &flaky, 1u << 20);
     assert(dev);
     make_cube_volume(dev, &cube, &volume);

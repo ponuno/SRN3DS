@@ -117,10 +117,14 @@ accepts a cube and `GetTexture` returns it. The cube's CPU faces are real. A
 cube-bound draw uses the optional backend `draw_cube` callback (see below); a
 backend without it refuses by name and never substitutes face 0.
 
-Cube creation requires the backend `texture_create_cube/upload_cube` callbacks.
-The null backend advertises them and counts every face/level upload; the PICA
-backend does not, so `CreateCubeTexture` returns `D3DERR_NOTAVAILABLE` with
-`"this backend has no cube-map texture API"`. This keeps the PICA claim honest.
+Cube creation requires the backend `texture_create_cube/upload_cube`
+callbacks. The null backend advertises them and counts every face/level upload;
+the PICA backend also implements them with real `C3D_TexInitCube` /
+`C3D_TexLoadImage` faces and a `texture_delete_cube` release. PICA maps
+A8R8G8B8 to `GPU_RGBA8` and X8R8G8B8 to `GPU_RGB8` (X8 is expanded from the
+core's 4-byte store at upload); DXT/ETC cube formats, edges outside 8..1024 and
+VRAM failures are named refusals (`"cube backend does not support format ..."` /
+`"... could not allocate ... (VRAM)"`) rather than a silent substitution.
 
 The D3DX loader requires all six `DDSCAPS2_CUBEMAP_*` face bits, a square
 power-of-two edge (compressed faces at least 8x8), and a complete face-major
@@ -128,8 +132,8 @@ payload. Missing bits, non-square edges, truncation and non-cube DDS return
 `D3DXERR_INVALIDDATA`. A cube DDS passed to the 2D loaders still returns
 `E_NOTIMPL`.
 
-Remaining in the cube layer: PICA cube faces/native sampling are not
-implemented.
+Remaining in the cube layer: PICA cube-map sampling and cube render targets
+are not implemented.
 
 ### Cube sampling in a draw
 
@@ -240,8 +244,9 @@ are detached from the core slot to avoid a double free.
   `D9TexCache` accounting) and only creates one when the backend advertises
   `texture_create_cube/upload_cube`; a cube draw additionally needs `draw_cube`.
 * `source/d3d9_null.c` provides those callbacks, counts face uploads and
-  point-samples the six CPU faces (`draw_cube`); `source/d3d9_citro3d.c` leaves
-  them NULL, which is the PICA refusal path.
+  point-samples the six CPU faces (`draw_cube`); `source/d3d9_citro3d.c`
+  allocates real `C3D_Tex` cube faces (A8/X8) and leaves `draw_cube` NULL, so
+  PICA cube sampling remains the named refusal path.
 * `source/d3d9_bc.c` already provides `d9_bc_decode_block`; the shim uses it and
   converts RGBA to `A8R8G8B8` byte order (B,G,R,A) per level.
 * Thunk windows stay disjoint: texture `0xfd000000..0xfd000024`, surface

@@ -259,11 +259,15 @@ renderer), `0x00fb5cc1`/`0x00fb5cd1` (face index, new buffer), `0x00ced404`
 PICA200 does support cube-map textures, and the devkitPro headers expose the
 whole path: `C3D_TexInitCube(tex, cube, w, h, fmt)` with `GPU_TEX_CUBE_MAP`,
 `C3D_TexCubeGetImagePtr`, `C3D_TexLoadImage(tex, data, face, level)` and
-`C3D_RenderTargetCreateFromTex(tex, face, level, depthFmt)`. What is missing is
-in this bridge, not in the hardware: `texture_create_cube` /
-`texture_upload_cube` and cube-face render targets are not implemented yet, so a
-cube-bound draw is still `D3DERR_NOTAVAILABLE`. PICA render targets are integer
-formats only, so `A16B16G16R16F` must be downgraded under the LDR
+`C3D_RenderTargetCreateFromTex(tex, face, level, depthFmt)`. The bridge now
+owns real cube source textures: `texture_create_cube`, `texture_upload_cube`
+and `texture_delete_cube` allocate six `C3D_Tex` faces with
+`C3D_TexInitCube` and upload each face/mip with `C3D_TexLoadImage`
+(A8R8G8B8 -> `GPU_RGBA8`, X8R8G8B8 -> `GPU_RGB8`; DXT/ETC, invalid edges and
+VRAM failures are named refusals). What is still missing is the render side:
+`GetCubeMapSurface` is not bindable as a target and PICA `draw_cube` is NULL,
+so a cube-bound draw is still `D3DERR_NOTAVAILABLE`. PICA render targets are
+integer formats only, so `A16B16G16R16F` must be downgraded under the LDR
 render-target policy and never reported as a native cube RT format.
 
 - **Measurement only:** a host/null six-face target set can be created to reach

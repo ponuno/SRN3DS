@@ -97,6 +97,12 @@ static int cache_release_gpu(void *ctx,void *gpu,size_t bytes){
     if(d->ops.texture_release)return d->ops.texture_release(d->ctx,gpu);
     d->ops.texture_delete(d->ctx,gpu);return 0;
 }
+static int cache_release_cube_gpu(void *ctx,void *gpu,size_t bytes){
+    D9Device *d=ctx;(void)bytes;
+    if(d->ops.texture_delete_cube)return d->ops.texture_delete_cube(d->ctx,gpu);
+    if(d->ops.texture_release)return d->ops.texture_release(d->ctx,gpu);
+    d->ops.texture_delete(d->ctx,gpu);return 0;
+}
 static size_t memory_sum(size_t a,size_t b){return b>SIZE_MAX-a?SIZE_MAX:a+b;}
 static int budget_has_room(const D9Device *d,size_t bytes){
     size_t used=d9_memory_used(d);return used>d->limit||bytes>d->limit-used?D9_MEMORY:D9_OK;
@@ -240,12 +246,13 @@ static size_t volume_gpu_bytes(unsigned w,unsigned h,unsigned depth,unsigned lev
 /* Takes ownership of pixels and native on every path.  On success both are
  * owned by the cache and the entry is non-evictable. */
 static int register_subtexture(D9Device *d,D9Handle key,uint8_t *pixels,size_t cpu,
-                               void *native,size_t gpu,int cpu_only){
+                               void *native,size_t gpu,int cpu_only,
+                               D9TexGpuRelease release){
     if(d9_texcache_add_guest(&d->tex_cache,key,pixels,cpu,1)!=D9TEXCACHE_OK){
         delete_unowned_native(d,native);free(pixels);return D9_BACKEND;
     }
     if(!cpu_only){
-        D9TexGpuRegistration reg={native,gpu,1,cache_release_gpu,d,D9TEXCACHE_NO_REHYDRATE_TOKEN};
+        D9TexGpuRegistration reg={native,gpu,1,release,d,D9TEXCACHE_NO_REHYDRATE_TOKEN};
         if(d9_texcache_attach_gpu(&d->tex_cache,key,&reg)!=D9TEXCACHE_OK){
             (void)d9_texcache_remove(&d->tex_cache,key);
             delete_unowned_native(d,native);
@@ -482,12 +489,29 @@ int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
     t.pixels=calloc(1,t.cpu_bytes);
     if(!t.pixels)return D9_MEMORY;
     if(!t.cpu_only){
-        if(d->ops.texture_create_cube(d->ctx,edge,levels,&t.native)||!t.native){
+        int rc=d->ops.texture_create_cube(d->ctx,edge,levels,format,&t.native);
+        if(rc||!t.native){
+            if(rc==-2){
+                snprintf(d->diagnosis,sizeof d->diagnosis,
+                         "cube backend does not support format 0x%lx at edge %u",
+                         (unsigned long)format,edge);
+                free(t.pixels);return D9_UNSUPPORTED;
+            }
+            if(rc==-3){
+                snprintf(d->diagnosis,sizeof d->diagnosis,
+                         "cube backend could not allocate edge %u levels %u (VRAM)",
+                         edge,levels);
+                free(t.pixels);return D9_MEMORY;
+            }
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube backend rejected creation of format 0x%lx edge %u levels %u",
+                     (unsigned long)format,edge,levels);
             free(t.pixels);return D9_BACKEND;
         }
     }
     D9Handle key=d->next;
-    if(register_subtexture(d,key,t.pixels,t.cpu_bytes,t.native,t.gpu_bytes,t.cpu_only))
+    if(register_subtexture(d,key,t.pixels,t.cpu_bytes,t.native,t.gpu_bytes,t.cpu_only,
+                           cache_release_cube_gpu))
         return D9_BACKEND;
     t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
@@ -541,8 +565,11 @@ int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned leve
                             "retained but cube rehydration is not implemented");
             return D9_UNSUPPORTED;
         }
-        if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,dst,l->bytes))
+        if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,dst,l->bytes)){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube backend upload failed at face %u level %u",face,level);
             return D9_BACKEND;
+        }
     }
     l->uploaded=1;l->face_mask|=1u<<face;
     if(!c->cpu_only&&level==0&&
@@ -561,8 +588,11 @@ int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level){
             return D9_UNSUPPORTED;
         }
         uint8_t *src=c->pixels+(size_t)face*c->face_bytes+l->offset;
-        if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,src,l->bytes))
+        if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,src,l->bytes)){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube backend upload failed at face %u level %u",face,level);
             return D9_BACKEND;
+        }
     }
     l->uploaded=1;l->face_mask|=1u<<face;
     if(!c->cpu_only&&level==0&&
@@ -672,7 +702,8 @@ int d9_create_volume_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned depth
         }
     }
     D9Handle key=d->next;
-    if(register_subtexture(d,key,t.pixels,t.cpu_bytes,t.native,t.gpu_bytes,t.cpu_only))
+    if(register_subtexture(d,key,t.pixels,t.cpu_bytes,t.native,t.gpu_bytes,t.cpu_only,
+                           cache_release_gpu))
         return D9_BACKEND;
     t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }

@@ -206,12 +206,14 @@ typedef struct {
      * is refused by name. */
     void *(*target_texture)(void *ctx,void *native);
     /* Optional cube-map texture creation/upload.  The core owns all six faces
-     * and their mip chain as CPU pixels; these callbacks only create/update a
-     * backend-native cube handle.  NULL means the backend cannot represent
+     * and their mip chain as CPU pixels; these callbacks create/update a
+     * backend-native cube handle and receive the D3D format because PICA needs
+     * it for its C3D_TexInitParams.  NULL means the backend cannot represent
      * cube maps, so d9_create_cube_texture_ex() returns D9_UNSUPPORTED instead
      * of pretending a CPU-only cube can be sampled.  Deletion uses
-     * texture_delete(). */
-    int (*texture_create_cube)(void *ctx,unsigned edge_length,unsigned levels,void **native);
+     * texture_delete_cube when present, otherwise texture_release/delete. */
+    int (*texture_create_cube)(void *ctx,unsigned edge_length,unsigned levels,
+                               unsigned format,void **native);
     int (*texture_upload_cube)(void *ctx,void *native,unsigned face,unsigned level,
                                const void *data,size_t bytes);
     /* Logical-to-native viewport for a bounded render target.  Core caps a
@@ -241,6 +243,11 @@ typedef struct {
     int (*draw_cube)(void *ctx,const D9ColorVertex *vertices,size_t count,
                      const unsigned *faces,const D9Matrix *clip,
                      const D9CubeView *cube,const D9DrawState *state);
+    /* Optional cube-native release.  Appended after draw_cube.  Called instead
+     * of texture_release/texture_delete for cube handles; non-zero means the
+     * native is still live and release stays retryable.  NULL falls back to the
+     * generic release path. */
+    int (*texture_delete_cube)(void *ctx,void *native);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
