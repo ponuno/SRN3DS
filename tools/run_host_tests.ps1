@@ -307,6 +307,7 @@ Add-Test "menu_swf_tess" $common @("source/bsa_reader.c", "source/menu_swf.c", "
 Add-Test "menu_swf_text" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "tests/menu_swf_text_smoke.c") @()
 Add-Test "menu_swf_raster" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_raster.c", "tests/menu_swf_raster_smoke.c") @()
 Add-Test "menu_swf_atlas" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_raster.c", "source/menu_swf_atlas.c", "tests/menu_swf_atlas_smoke.c") @()
+Add-Test "menu_swf_batch" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "source/menu_swf_raster.c", "source/menu_swf_atlas.c", "source/menu_swf_batch.c", "tests/menu_swf_batch_smoke.c") @()
 Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "tests/d3d9_capture_smoke.c") @()
 $irPilotGen = Join-Path $root "pilot_out_mult\D3DXMatrixMultiply\gen"
 if ((Test-Path (Join-Path $irPilotGen "pilot_00.c")) -and (Test-Path (Join-Path $irPilotGen "pilot_table.c"))) {

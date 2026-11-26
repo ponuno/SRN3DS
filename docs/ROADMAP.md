@@ -212,6 +212,11 @@ read stage without fake successes. *Not met.*
       too-large/overflow/too-many refusals. Real codes 33..36: used height 62,
       8,618 occupied pixels, occupancy 35,584/65,536, rect sums identical to
       raster. No upload, cache, GPU or frame. See `docs/MENU_SWF.md`.
+- [x] Bounded text quad batch: one quad/2 triangles per non-empty atlas glyph,
+      16.16 style, exact UVs, ARGB vertices, axis-aligned viewport clipping
+      with proportional UVs, deterministic pen order and count-before-write
+      overflow. Real codes 33..36: 4 quads / 16 vertices / 24 indices, bounds
+      1,104,1,63. No upload, draw or GPU. See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer

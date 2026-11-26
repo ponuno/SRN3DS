@@ -1,0 +1,291 @@
+#include "menu_swf_batch.h"
+
+#include <limits.h>
+#include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef struct {
+    int32_t q00, q01, q10, q11, qtx, qty;
+    const MenuSwfBatchViewport *viewport;
+} BatchCtx;
+
+typedef struct {
+    int32_t x[4], y[4];
+    uint32_t u[4], v[4];
+} BatchQuad;
+
+static void batch_reason(char *reason, size_t cap, const char *fmt, ...) {
+    if (!reason || !cap) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(reason, cap, fmt, ap);
+    va_end(ap);
+    reason[cap - 1] = 0;
+}
+
+const char *menu_swf_batch_status_name(MenuSwfBatchStatus status) {
+    switch (status) {
+    case MENU_SWF_BATCH_OK: return "ok";
+    case MENU_SWF_BATCH_ERR_ARGUMENT: return "bad batch argument";
+    case MENU_SWF_BATCH_ERR_OVERFLOW: return "batch overflow";
+    case MENU_SWF_BATCH_ERR_NAN: return "non-finite batch transform";
+    case MENU_SWF_BATCH_ERR_SCALE: return "degenerate/negative batch scale";
+    case MENU_SWF_BATCH_ERR_CLIP: return "unsupported viewport clip";
+    default: return "unknown batch status";
+    }
+}
+
+static MenuSwfBatchStatus quantize(double value, int32_t *out) {
+    if (!isfinite(value)) return MENU_SWF_BATCH_ERR_NAN;
+    double scaled = value * 65536.0;
+    if (scaled < (double)INT32_MIN || scaled > (double)INT32_MAX)
+        return MENU_SWF_BATCH_ERR_OVERFLOW;
+    *out = (int32_t)llround(scaled);
+    return MENU_SWF_BATCH_OK;
+}
+
+static void tx_point(const BatchCtx *c, double x, double y, double *ox,
+                     double *oy) {
+    *ox = ((double)c->q00 * x + (double)c->q01 * y + (double)c->qtx) /
+          65536.0;
+    *oy = ((double)c->q10 * x + (double)c->q11 * y + (double)c->qty) /
+          65536.0;
+}
+
+static int32_t pixel(double value) {
+    if (!isfinite(value)) return INT32_MIN;
+    if (value > (double)INT32_MAX) return INT32_MAX;
+    if (value < (double)INT32_MIN) return INT32_MIN;
+    return (int32_t)llround(value);
+}
+
+static void uv_lerp(uint32_t base, uint32_t span, double fraction,
+                    uint32_t *out) {
+    double v = (double)base + (double)span * fraction;
+    if (v < 0.0) v = 0.0;
+    if (v > 131072.0) v = 131072.0;
+    *out = (uint32_t)llround(v);
+}
+
+static int64_t area2(const BatchQuad *q) {
+    return ((int64_t)q->x[1] - q->x[0]) * ((int64_t)q->y[2] - q->y[0]) -
+           ((int64_t)q->y[1] - q->y[0]) * ((int64_t)q->x[2] - q->x[0]);
+}
+
+static int make_quad(const BatchCtx *c, const MenuSwfShapeRect *bounds,
+                     const MenuSwfAtlasEntry *e, BatchQuad *q) {
+    if (bounds->xmax <= bounds->xmin || bounds->ymax <= bounds->ymin)
+        return 0;
+    if (!e->has_rect || !e->w || !e->h) return 0;
+
+    uint32_t u0 = e->u;
+    uint32_t u1 = e->u + e->uw;
+    uint32_t v0 = e->v;
+    uint32_t v1 = e->v + e->vh;
+
+    if (c->q01 == 0 && c->q10 == 0) {
+        double xa, xb, ya, yb, dummy;
+        tx_point(c, bounds->xmin, bounds->ymin, &xa, &dummy);
+        tx_point(c, bounds->xmax, bounds->ymin, &xb, &dummy);
+        tx_point(c, bounds->xmin, bounds->ymin, &dummy, &ya);
+        tx_point(c, bounds->xmin, bounds->ymax, &dummy, &yb);
+        int flip_u = xb < xa;
+        int flip_v = yb < ya;
+        double xlo = flip_u ? xb : xa;
+        double xhi = flip_u ? xa : xb;
+        double ylo = flip_v ? yb : ya;
+        double yhi = flip_v ? ya : yb;
+        double xc0 = xlo, xc1 = xhi, yc0 = ylo, yc1 = yhi;
+        if (c->viewport) {
+            if (xlo < c->viewport->x0) xc0 = c->viewport->x0;
+            if (xhi > c->viewport->x1) xc1 = c->viewport->x1;
+            if (ylo < c->viewport->y0) yc0 = c->viewport->y0;
+            if (yhi > c->viewport->y1) yc1 = c->viewport->y1;
+        }
+        if (xc1 <= xc0 || yc1 <= yc0) return 0;
+        int32_t px0 = pixel(xc0), px1 = pixel(xc1);
+        int32_t py0 = pixel(yc0), py1 = pixel(yc1);
+        if (px1 <= px0 || py1 <= py0) return 0;
+
+        double fx0 = (xc0 - xlo) / (xhi - xlo);
+        double fx1 = (xc1 - xlo) / (xhi - xlo);
+        double fy0 = (yc0 - ylo) / (yhi - ylo);
+        double fy1 = (yc1 - ylo) / (yhi - ylo);
+        uint32_t ua, ub, va, vb;
+        if (!flip_u) {
+            uv_lerp(u0, e->uw, fx0, &ua);
+            uv_lerp(u0, e->uw, fx1, &ub);
+        } else {
+            uv_lerp(u0, e->uw, 1.0 - fx0, &ua);
+            uv_lerp(u0, e->uw, 1.0 - fx1, &ub);
+        }
+        if (!flip_v) {
+            uv_lerp(v0, e->vh, fy0, &va);
+            uv_lerp(v0, e->vh, fy1, &vb);
+        } else {
+            uv_lerp(v0, e->vh, 1.0 - fy0, &va);
+            uv_lerp(v0, e->vh, 1.0 - fy1, &vb);
+        }
+        q->x[0] = px0; q->y[0] = py0; q->u[0] = ua; q->v[0] = va;
+        q->x[1] = px1; q->y[1] = py0; q->u[1] = ub; q->v[1] = va;
+        q->x[2] = px1; q->y[2] = py1; q->u[2] = ub; q->v[2] = vb;
+        q->x[3] = px0; q->y[3] = py1; q->u[3] = ua; q->v[3] = vb;
+        return area2(q) > 0;
+    }
+
+    if (c->viewport) return -1; /* rotated clipping is not implemented */
+
+    double xs[4], ys[4];
+    const int32_t bx[4] = {bounds->xmin, bounds->xmax, bounds->xmax,
+                           bounds->xmin};
+    const int32_t by[4] = {bounds->ymin, bounds->ymin, bounds->ymax,
+                           bounds->ymax};
+    for (unsigned i = 0; i < 4; ++i) {
+        tx_point(c, bx[i], by[i], &xs[i], &ys[i]);
+        if (!isfinite(xs[i]) || !isfinite(ys[i])) return -1;
+        q->x[i] = pixel(xs[i]);
+        q->y[i] = pixel(ys[i]);
+    }
+    q->u[0] = u0; q->v[0] = v0;
+    q->u[1] = u1; q->v[1] = v0;
+    q->u[2] = u1; q->v[2] = v1;
+    q->u[3] = u0; q->v[3] = v1;
+    return area2(q) > 0;
+}
+
+MenuSwfBatchStatus menu_swf_batch_text(
+    const MenuSwfTextMesh *text, const MenuSwfAtlasEntry *atlas_entries,
+    uint32_t atlas_count, const MenuSwfBatchStyle *style,
+    const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,
+    uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
+    MenuSwfBatchResult *out, char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!out) return MENU_SWF_BATCH_ERR_ARGUMENT;
+    memset(out, 0, sizeof *out);
+    if (!text || !style) {
+        batch_reason(reason, reason_cap, "swf batch: needs text and style");
+        return MENU_SWF_BATCH_ERR_ARGUMENT;
+    }
+    if (text->glyph_count > MENU_SWF_TEXT_MAX_GLYPHS ||
+        text->glyph_count > MENU_SWF_BATCH_MAX_QUADS) {
+        batch_reason(reason, reason_cap,
+                     "swf batch: %u glyphs exceed the quad limit",
+                     text->glyph_count);
+        return MENU_SWF_BATCH_ERR_OVERFLOW;
+    }
+    if (text->glyph_count && (!text->glyphs || !atlas_entries ||
+                              atlas_count < text->glyph_count)) {
+        batch_reason(reason, reason_cap,
+                     "swf batch: atlas entries do not cover %u glyphs",
+                     text->glyph_count);
+        return MENU_SWF_BATCH_ERR_ARGUMENT;
+    }
+    if (viewport && viewport->enabled &&
+        (viewport->x1 <= viewport->x0 || viewport->y1 <= viewport->y0)) {
+        batch_reason(reason, reason_cap,
+                     "swf batch: viewport is empty or inverted");
+        return MENU_SWF_BATCH_ERR_ARGUMENT;
+    }
+
+    BatchCtx c;
+    memset(&c, 0, sizeof c);
+    MenuSwfBatchStatus st;
+    if ((st = quantize(style->m00, &c.q00)) != MENU_SWF_BATCH_OK ||
+        (st = quantize(style->m01, &c.q01)) != MENU_SWF_BATCH_OK ||
+        (st = quantize(style->m10, &c.q10)) != MENU_SWF_BATCH_OK ||
+        (st = quantize(style->m11, &c.q11)) != MENU_SWF_BATCH_OK ||
+        (st = quantize(style->tx, &c.qtx)) != MENU_SWF_BATCH_OK ||
+        (st = quantize(style->ty, &c.qty)) != MENU_SWF_BATCH_OK) {
+        batch_reason(reason, reason_cap,
+                     "swf batch: transform is not finite 16.16");
+        return st;
+    }
+    int64_t det = (int64_t)c.q00 * c.q11 - (int64_t)c.q01 * c.q10;
+    if (det <= 0) {
+        batch_reason(reason, reason_cap,
+                     "swf batch: scale determinant is zero or negative");
+        return MENU_SWF_BATCH_ERR_SCALE;
+    }
+    c.viewport = (viewport && viewport->enabled) ? viewport : NULL;
+    if (c.viewport && (c.q01 != 0 || c.q10 != 0)) {
+        batch_reason(reason, reason_cap,
+                     "swf batch: viewport clipping needs an axis-aligned "
+                     "transform");
+        return MENU_SWF_BATCH_ERR_CLIP;
+    }
+
+    uint32_t quads = 0;
+    for (uint32_t i = 0; i < text->glyph_count; ++i) {
+        const MenuSwfTextGlyph *g = &text->glyphs[i];
+        if (!g->has_geometry || g->missing) continue;
+        BatchQuad q;
+        int rc = make_quad(&c, &g->bounds, &atlas_entries[i], &q);
+        if (rc < 0) {
+            batch_reason(reason, reason_cap,
+                         "swf batch: glyph %u cannot be transformed",
+                         g->code);
+            return MENU_SWF_BATCH_ERR_CLIP;
+        }
+        if (rc) ++quads;
+    }
+    uint32_t need_vertices = quads * 4u;
+    uint32_t need_indices = quads * 6u;
+    if (need_vertices > MENU_SWF_BATCH_MAX_VERTICES ||
+        need_indices > MENU_SWF_BATCH_MAX_INDICES ||
+        need_vertices > vertex_capacity || need_indices > index_capacity ||
+        (need_vertices && !vertices) || (need_indices && !indices)) {
+        batch_reason(reason, reason_cap,
+                     "swf batch: %u quads need %u vertices/%u indices "
+                     "(capacity %u/%u)",
+                     quads, need_vertices, need_indices, vertex_capacity,
+                     index_capacity);
+        return MENU_SWF_BATCH_ERR_OVERFLOW;
+    }
+    if (!quads) return MENU_SWF_BATCH_OK;
+
+    uint32_t vcount = 0, icount = 0;
+    int have_bounds = 0;
+    int32_t bxmin = 0, bxmax = 0, bymin = 0, bymax = 0;
+    for (uint32_t i = 0; i < text->glyph_count; ++i) {
+        const MenuSwfTextGlyph *g = &text->glyphs[i];
+        if (!g->has_geometry || g->missing) continue;
+        BatchQuad q;
+        if (!make_quad(&c, &g->bounds, &atlas_entries[i], &q)) continue;
+        uint32_t base = vcount;
+        for (unsigned k = 0; k < 4; ++k) {
+            vertices[vcount].x = q.x[k];
+            vertices[vcount].y = q.y[k];
+            vertices[vcount].u = q.u[k];
+            vertices[vcount].v = q.v[k];
+            vertices[vcount].color = style->color;
+            ++vcount;
+            if (!have_bounds) {
+                bxmin = bxmax = q.x[k];
+                bymin = bymax = q.y[k];
+                have_bounds = 1;
+            } else {
+                if (q.x[k] < bxmin) bxmin = q.x[k];
+                if (q.x[k] > bxmax) bxmax = q.x[k];
+                if (q.y[k] < bymin) bymin = q.y[k];
+                if (q.y[k] > bymax) bymax = q.y[k];
+            }
+        }
+        indices[icount++] = base + 0;
+        indices[icount++] = base + 1;
+        indices[icount++] = base + 2;
+        indices[icount++] = base + 0;
+        indices[icount++] = base + 2;
+        indices[icount++] = base + 3;
+    }
+    out->vertex_count = vcount;
+    out->index_count = icount;
+    out->quad_count = vcount / 4u;
+    out->bounds.xmin = bxmin;
+    out->bounds.xmax = bxmax;
+    out->bounds.ymin = bymin;
+    out->bounds.ymax = bymax;
+    out->has_bounds = (uint8_t)have_bounds;
+    return MENU_SWF_BATCH_OK;
+}
