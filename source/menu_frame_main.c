@@ -618,7 +618,34 @@ int main(void) {
                                     &index_count, &stats, reason, sizeof reason);
     stage(cpu_ok ? "build_menu_done" : "build_menu_failed");
     fprintf(stderr, "MENU_BUILD vertices=%u indices=%u\n", vertex_count, index_count);
+    if (cpu_ok) {
+        int32_t xmin = 0, xmax = 0, ymin = 0, ymax = 0;
+        for (uint32_t i = 0; i < vertex_count; ++i) {
+            int32_t x = g_batch_vertices[i].x, y = g_batch_vertices[i].y;
+            if (!i) { xmin = xmax = x; ymin = ymax = y; }
+            if (x < xmin) xmin = x;
+            if (x > xmax) xmax = x;
+            if (y < ymin) ymin = y;
+            if (y > ymax) ymax = y;
+        }
+        fprintf(stderr, "BATCH_BOUNDS x=%ld..%ld y=%ld..%ld\n",
+                (long)xmin, (long)xmax, (long)ymin, (long)ymax);
+        for (uint32_t i = 0; i < 3 && i < vertex_count; ++i)
+            fprintf(stderr, "VB %u x=%ld y=%ld u=%lu v=%lu color=%08lx\n", i,
+                    (long)g_batch_vertices[i].x, (long)g_batch_vertices[i].y,
+                    (unsigned long)g_batch_vertices[i].u,
+                    (unsigned long)g_batch_vertices[i].v,
+                    (unsigned long)g_batch_vertices[i].color);
+    }
     free(swf);
+
+    FILE *red_flag = fopen("sdmc:/menu_debug_red.flag", "r");
+    if (red_flag) {
+        fclose(red_flag);
+        for (uint32_t i = 0; i < vertex_count; ++i)
+            g_batch_vertices[i].color = 0xffff0000u;
+        fprintf(stderr, "MENU_DEBUG_RED: all batch vertex colours forced to opaque red\n");
+    }
 
     D9Citro *gpu = NULL;
     D9Device *device = NULL;
