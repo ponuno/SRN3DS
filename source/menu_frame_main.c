@@ -478,7 +478,10 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
         free(shapes); free(display); return -1;
     }
 
-    static const uint8_t white_pixel = 255;
+    /* A 4x4 marker: a single texel is too easy to lose to point-sampling
+     * rounding and the 1px shelf padding. */
+    static uint8_t white_block[16];
+    memset(white_block, 0xFF, sizeof white_block);
     MenuSwfAtlasGlyph atlas_glyphs[2];
     memset(atlas_glyphs, 0, sizeof atlas_glyphs);
     atlas_glyphs[0].pixels = g_raster + raster_result.y0 * RASTER_SIZE + raster_result.x0;
@@ -486,9 +489,9 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
     atlas_glyphs[0].width = raster_result.x1 - raster_result.x0;
     atlas_glyphs[0].height = raster_result.y1 - raster_result.y0;
     atlas_glyphs[0].glyph_index = CONTROL_CODE;
-    atlas_glyphs[1].pixels = &white_pixel;
-    atlas_glyphs[1].stride = 1;
-    atlas_glyphs[1].width = atlas_glyphs[1].height = 1;
+    atlas_glyphs[1].pixels = white_block;
+    atlas_glyphs[1].stride = 4;
+    atlas_glyphs[1].width = atlas_glyphs[1].height = 4;
     atlas_glyphs[1].glyph_index = WHITE_GLYPH;
     *atlas = (MenuSwfAtlasTarget){ATLAS_SIZE, ATLAS_SIZE, ATLAS_SIZE, g_atlas_pixels};
     MenuSwfAtlasEntry entries[2];
@@ -503,11 +506,9 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
     for (unsigned i = 0; i < 2; ++i)
         if (entries[i].glyph_index == WHITE_GLYPH) white = &entries[i];
     if (!white || !white->has_rect) { free(shapes); free(display); return -1; }
-    /* The white marker is 1x1.  Its exact centre lands on the texel boundary;
-     * PICA point sampling can round up into the zero padding.  Bias the UV a
-     * quarter texel inside so the sample is unambiguously white. */
-    uint32_t white_u = white->u + white->uw / 4u;
-    uint32_t white_v = white->v + white->vh / 4u;
+    /* 4x4 marker: sample its centre, well away from the shelf padding. */
+    uint32_t white_u = white->u + white->uw / 2u;
+    uint32_t white_v = white->v + white->vh / 2u;
     for (uint32_t i = 0; i < stats->shape_vertices; ++i) {
         g_batch_vertices[i].u = white_u;
         g_batch_vertices[i].v = white_v;
