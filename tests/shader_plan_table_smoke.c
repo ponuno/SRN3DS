@@ -1,0 +1,157 @@
+/* Host test: exact-hash native plan table, named refusals, unchanged caps.
+ *
+ * The table is generated offline by tools/fxp_compile.py from
+ * docs/shader_plans.json.  This test does not need retail bytecode: it checks
+ * the descriptors and the draw gate only.
+ */
+
+#include "d3d9_shader_plan.h"
+#include "d3d9_adapter.h"
+
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+
+#define LOGO_SHA "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"
+#define COPY_SHA "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de"
+#define FOREIGN_SHA "0000000000000000000000000000000000000000000000000000000000000000"
+
+static int checks, failures;
+#define CHECK(condition, text) do { ++checks; if (!(condition)) { \
+    ++failures; printf("FAIL: %s (%s:%d)\n", text, __FILE__, __LINE__); \
+} } while (0)
+
+static const D9ShaderPlan *lookup(unsigned stage, const char *sha, int expect) {
+    const D9ShaderPlan *plan = NULL;
+    char why[256] = "";
+    int rc = d9_shader_plan_lookup(stage, sha, &plan, why, sizeof why);
+    if (rc != expect) {
+        ++failures;
+        printf("FAIL: lookup(%u, %.12s) rc=%d expected %d why=%s\n",
+               stage, sha, rc, expect, why);
+    }
+    ++checks;
+    return plan;
+}
+
+int main(void) {
+    CHECK(d9_shader_plan_count() >= 4, "table has at least four entries");
+    CHECK(d9_shader_plan_at(d9_shader_plan_count()) == NULL,
+          "out-of-range index returns NULL");
+
+    /* Copy: the certified one-stage TEV plan. */
+    const D9ShaderPlan *copy = lookup(D9_SHADER_PLAN_STAGE_PS, COPY_SHA, 1);
+    CHECK(copy != NULL && strcmp(copy->id, "menu.composite.ps") == 0,
+          "copy entry id");
+    CHECK(copy && copy->kind == D9_SHADER_PLAN_TEV, "copy is TEV");
+    CHECK(copy && copy->draw_enabled == 1, "copy is draw-enabled");
+    CHECK(copy && copy->tev.stages == 1, "copy has one stage");
+    CHECK(copy && copy->tev.stage[0].func_rgb == D9TEV_FUNC_REPLACE,
+          "copy stage 0 replaces");
+    CHECK(copy && copy->tev.stage[0].src_rgb[0] == D9TEV_SRC_TEX0,
+          "copy stage 0 reads TEXTURE0");
+    CHECK(copy && copy->tev.textures == 1 && copy->tev.texture[0].sampler_reg == 0,
+          "copy uses sampler s0");
+    char why[256] = "";
+    CHECK(d9_shader_plan_draw_allowed(copy, why, sizeof why) == 0,
+          "copy draw gate allows");
+
+    /* Upper-case hash must resolve to the same entry. */
+    const char *upper =
+        "6022044EF19E4B1C241482207ACCA5A6BE484081E629B6D72CDEFDD9568A45DE";
+    const D9ShaderPlan *copy2 = lookup(D9_SHADER_PLAN_STAGE_PS, upper, 1);
+    CHECK(copy2 == copy, "upper-case SHA maps to the same entry");
+
+    /* Logo: five-stage plan, draw refused by material preconditions. */
+    const D9ShaderPlan *logo = lookup(D9_SHADER_PLAN_STAGE_PS, LOGO_SHA, 1);
+    CHECK(logo != NULL && strcmp(logo->id, "menu.logo.ps") == 0, "logo entry id");
+    CHECK(logo && logo->tev.stages == 5, "logo has five stages");
+    CHECK(logo && logo->tev.stage[0].func_rgb == D9TEV_FUNC_DOT3_RGBA,
+          "logo stage 0 is dot3");
+    CHECK(logo && logo->tev.stage[0].src_rgb[0] == D9TEV_SRC_TEX1,
+          "logo stage 0 reads TEXTURE1");
+    CHECK(logo && logo->tev.stage[0].const_reg == 3, "logo stage 0 uses c3");
+    CHECK(logo && logo->tev.textures == 2, "logo uses two textures");
+    CHECK(logo && logo->tev.constants == 3 && logo->tev.constant_reg[2] == 7,
+          "logo constant list c3/c4/c7");
+    CHECK(logo && logo->draw_enabled == 0, "logo draw is disabled");
+    why[0] = 0;
+    CHECK(logo && d9_shader_plan_draw_allowed(logo, why, sizeof why) == -1,
+          "logo draw gate refuses");
+    CHECK(strstr(why, "not draw-enabled") != NULL, "logo refusal is named");
+    CHECK(strstr(why, "normal/tangent") != NULL,
+          "logo refusal names the material precondition");
+
+    /* A PS hash looked up as a VS is a miss, not a silent success. */
+    const D9ShaderPlan *wrong = NULL;
+    why[0] = 0;
+    CHECK(d9_shader_plan_lookup(D9_SHADER_PLAN_STAGE_VS, LOGO_SHA, &wrong,
+                                why, sizeof why) == 0, "logo is not a VS plan");
+    CHECK(wrong == NULL, "wrong-stage lookup leaves the output NULL");
+    CHECK(strstr(why, "no compiled vertex plan") != NULL,
+          "wrong-stage refusal is named");
+
+    /* Foreign hash. */
+    why[0] = 0;
+    CHECK(d9_shader_plan_lookup(D9_SHADER_PLAN_STAGE_PS, FOREIGN_SHA, &wrong,
+                                why, sizeof why) == 0, "foreign hash is refused");
+    CHECK(wrong == NULL, "foreign hash leaves the output NULL");
+    CHECK(strstr(why, "no compiled pixel plan") != NULL,
+          "foreign refusal is named");
+
+    /* Malformed argument. */
+    why[0] = 0;
+    CHECK(d9_shader_plan_lookup(D9_SHADER_PLAN_STAGE_PS, "abc", &wrong,
+                                why, sizeof why) == -1, "short hash is invalid");
+    CHECK(d9_shader_plan_lookup(D9_SHADER_PLAN_STAGE_PS, NULL, &wrong,
+                                why, sizeof why) == -1, "NULL hash is invalid");
+
+    /* The pilot game PS is compiled but not certified: named refusal. */
+    const D9ShaderPlan *game_ps = NULL;
+    for (unsigned i = 0; i < d9_shader_plan_count(); ++i) {
+        const D9ShaderPlan *plan = d9_shader_plan_at(i);
+        if (plan->stage == D9_SHADER_PLAN_STAGE_PS &&
+            strncmp(plan->id, "game.ps.", 8) == 0)
+            game_ps = plan;
+    }
+    CHECK(game_ps != NULL, "pilot game PS is present");
+    CHECK(game_ps && game_ps->tev.stages >= 2, "pilot game PS has >= 2 stages");
+    why[0] = 0;
+    CHECK(game_ps && d9_shader_plan_draw_allowed(game_ps, why, sizeof why) == -1,
+          "pilot game PS draw is refused");
+    CHECK(strstr(why, "not draw-enabled") != NULL,
+          "pilot game PS refusal is named");
+
+    /* The pilot game VS is a descriptor, not an executable plan. */
+    const D9ShaderPlan *game_vs = NULL;
+    for (unsigned i = 0; i < d9_shader_plan_count(); ++i) {
+        const D9ShaderPlan *plan = d9_shader_plan_at(i);
+        if (plan->stage == D9_SHADER_PLAN_STAGE_VS)
+            game_vs = plan;
+    }
+    CHECK(game_vs != NULL && game_vs->kind == D9_SHADER_PLAN_PICA_VS,
+          "pilot game VS is a PICA VS descriptor");
+    why[0] = 0;
+    CHECK(game_vs && d9_shader_plan_draw_allowed(game_vs, why, sizeof why) == -1,
+          "PICA VS descriptor draw is refused");
+    CHECK(strstr(why, "code emitter") != NULL || strstr(why, "not draw-enabled") != NULL,
+          "PICA VS refusal is named");
+
+    /* Caps are untouched by plan lookup/selection. */
+    D9Caps9 caps;
+    memset(&caps, 0xAA, sizeof caps);
+    CHECK(d9_adapter_caps(0, 1 /* DEVTYPE_HAL */, &caps) == 0, "caps query");
+    CHECK(caps.dev_caps == 0x00082000u, "DevCaps stays 0x00082000");
+    CHECK(caps.vertex_shader_version == 0xFFFE0200u, "VS stays 2.0");
+    CHECK(caps.pixel_shader_version == 0xFFFF0200u, "PS stays 2.0");
+    CHECK(caps.max_vertex_shader_30_instruction_slots == 0, "no SM3 VS slots");
+    CHECK(caps.max_pixel_shader_30_instruction_slots == 0, "no SM3 PS slots");
+    CHECK(caps.max_vertex_shader_const == 4, "MaxVertexShaderConst stays 4");
+
+    if (failures) {
+        printf("shader_plan_table: %d checks, %d failures\n", checks, failures);
+        return 1;
+    }
+    printf("shader_plan_table: %d checks, 0 failures\n", checks);
+    return 0;
+}
