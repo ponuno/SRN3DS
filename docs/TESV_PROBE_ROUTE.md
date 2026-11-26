@@ -79,6 +79,14 @@ This is an architectural gap, not a regression: the bridge reports VS/PS 2.0
 and does not claim SM3 (`docs/MENU_SHADER_CLOSURE.md`). No draw or `Present`
 occurs before this gate.
 
+The bounded first-menu PS runtime is now wired
+(`docs/MENU_SHADER_RUNTIME.md`): it selects only the exact certified
+`p1200005` logo and menu-copy plans (plus fixed fog/tint contracts) and refuses
+everything else by name, but it deliberately does not change the two version
+words. This gate therefore still fails in the honest path; passing it requires
+the real bounded SM3 execution path (VS family, material preconditions, PICA
+texture units/vertex colour/constants), not a caps edit.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
