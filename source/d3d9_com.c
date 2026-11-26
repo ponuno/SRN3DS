@@ -60,7 +60,7 @@ typedef struct Obj {
     D9TevProgram tev;int has_tev;
     /* Exact first-menu selection (d3d9_menu_shader_runtime.h).  A menu plan is
      * still subject to draw-time preconditions and a named backend gate. */
-    D9MenuShaderMatch menu;int has_menu,menu_backend_ok;
+    D9MenuShaderMatch menu;int has_menu,has_menu_vs,menu_backend_ok;
     char menu_backend_why[D9_MENU_SHADER_REASON_MAX];
     D9Decl *declaration;
     /* Level surface view: pixels point into the parent texture's CPU store. */
@@ -70,7 +70,7 @@ static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
     Obj o[MAX_OBJECTS];unsigned next;
     Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*vs,*ps,*declaration;
-    unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants;
+    unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
     uint16_t gamma[3][256];size_t surface_bytes;
     unsigned frame_index,draw_index,capture_present;uint32_t capture_present_flags;
@@ -551,7 +551,7 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
     g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.back->handle?1:0;
-    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);
+    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);
     g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
     /* Reset also discards every closure observation and material evidence. */
     d9_menu_closure_reset();
@@ -1132,6 +1132,82 @@ static void texture(CPU *c){Obj *o=obj(A(2),TEX);if(!obj(A(0),DEVICE)||(A(2)&&!o
     if(rc==D9_UNSUPPORTED)d3d_log("SetTexture","unsupported texture unit");
     if(!rc)bind(A(1)?&g.tex1:&g.tex,o);
     RET(hr(rc),3);}
+/* ---- menu VS / material evidence ---------------------------------------- */
+/* The menu path does not guess normal/tangent availability.  It derives only
+ * the bits the device can actually observe: bound LDR textures, the current
+ * declaration/FVF, and the constants the guest has really uploaded.  Normal,
+ * tangent and ambient+emissive evidence remains explicit-only. */
+static const D9Decl *menu_current_decl(D9Decl *tmp){
+    if(g.declaration&&g.declaration->declaration)return g.declaration->declaration;
+    if(g.fvf){const char *why=NULL;if(!d9_decl_from_fvf(g.fvf,tmp,&why))return tmp;}
+    return NULL;
+}
+static int menu_decl_has(const D9Decl *decl,unsigned usage,unsigned index){
+    if(!decl)return 0;
+    for(unsigned i=0;i<decl->count;++i)
+        if(decl->elements[i].usage==usage&&decl->elements[i].usage_index==index)return 1;
+    return 0;
+}
+static int menu_texture_ldr(const Obj *t){
+    if(!t||!t->width||!t->height)return 0;
+    return t->format==D9_A8R8G8B8||t->format==D9_X8R8G8B8||
+           t->format==D9_DXT1||t->format==D9_DXT3||t->format==D9_DXT5;
+}
+static uint32_t menu_observed_preconditions(void){
+    uint32_t mask=0;D9Decl tmp;const D9Decl *decl=menu_current_decl(&tmp);
+    if(menu_texture_ldr(g.tex)){
+        mask|=D9_MENU_SHADER_PRE_TEXTURE0_2D;
+        if(!g.tex1||menu_texture_ldr(g.tex1))mask|=D9_MENU_SHADER_PRE_LDR_QUALITY;
+    }
+    if(menu_texture_ldr(g.tex1))mask|=D9_MENU_SHADER_PRE_TEXTURE1_2D;
+    if(menu_decl_has(decl,D9_USAGE_COLOR,0))mask|=D9_MENU_SHADER_PRE_VERTEX_COLOR;
+    if((g.constants_mask&0xFFu)==0xFFu)
+        mask|=D9_MENU_SHADER_PRE_MATERIAL_CONSTANTS_C0_C7;
+    if(g.constants_mask&(1u<<4)){
+        float alpha=g.constants_hi.m[0][3];
+        if(isfinite(alpha)&&alpha>=0.0f&&alpha<=1.0f)
+            mask|=D9_MENU_SHADER_PRE_MATERIAL_ALPHA_C4;
+    }
+    return mask;
+}
+uint32_t d9_com_menu_observed_preconditions(void){return menu_observed_preconditions();}
+static int menu_vs_state(void){
+    char why[D9_MENU_SHADER_REASON_MAX];
+    if(!g.vs||!g.vs->has_menu_vs)return 0;
+    D9Decl tmp;const D9Decl *decl=menu_current_decl(&tmp);
+    if(!decl){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "%s: no vertex declaration or FVF is bound",g.vs->menu.id);
+        return D9_UNSUPPORTED;
+    }
+    if(d9_menu_shader_vs_check_decl(&g.vs->menu,decl,why,sizeof why)){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: %s",
+                 g.vs->menu.id,why);
+        return D9_UNSUPPORTED;
+    }
+    if(!g.vs->menu_backend_ok){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: %s",
+                 g.vs->menu.id,g.vs->menu_backend_why);
+        return D9_UNSUPPORTED;
+    }
+    return 0;
+}
+static int menu_ps_state(void){
+    char why[D9_MENU_SHADER_REASON_MAX];
+    if(!g.ps||!g.ps->has_menu)return 0;
+    uint32_t have=d9_menu_shader_preconditions()|menu_observed_preconditions();
+    if(d9_menu_shader_missing_preconditions(&g.ps->menu,have,why,sizeof why)){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "%s: missing preconditions: %s",g.ps->menu.id,why);
+        return D9_UNSUPPORTED;
+    }
+    if(!g.ps->menu_backend_ok){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: %s",
+                 g.ps->menu.id,g.ps->menu_backend_why);
+        return D9_UNSUPPORTED;
+    }
+    return 0;
+}
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     if(!address||(address&3)||!ptr(out,4)||g.next>=MAX_OBJECTS)return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
@@ -1151,11 +1227,12 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         free(code);
         return closure.match==D9_MENU_BAD_ARGUMENT?INVALID:UNAVAILABLE;
     }
-    /* Exact menu subset: select a specialised TEV plan from the certified
-     * bytecode hash.  Anything outside the two PS entries stays on the legacy
-     * path; a certified entry whose plan cannot be built is a named failure
-     * before any object or partial plan exists. */
-    D9MenuShaderMatch menu;int has_menu=0;char menu_why[D9_MENU_SHADER_REASON_MAX];
+    /* Exact menu subset.  PS entries are selected by certified hash, the VS
+     * family by its structural/declaration contract.  Anything outside stays
+     * on the legacy path; a selected entry whose plan cannot be built is a
+     * named failure before any object or partial plan exists. */
+    D9MenuShaderMatch menu;int has_menu=0,has_menu_vs=0;
+    char menu_why[D9_MENU_SHADER_REASON_MAX];
     if(kind==PS){
         int menu_result=d9_menu_shader_match_ps(code,count,&menu,
                                                 menu_why,sizeof menu_why);
@@ -1167,8 +1244,19 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             free(code);return UNAVAILABLE;
         }
         has_menu=menu_result>0;
+    }else{
+        int menu_result=d9_menu_shader_match_vs(code,count,&menu,
+                                                menu_why,sizeof menu_why);
+        if(menu_result<0){
+            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                      "menu shader: %s",menu_why);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+            d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+            free(code);return UNAVAILABLE;
+        }
+        has_menu_vs=menu_result>0;
     }
-    if(!has_menu&&kind==PS&&count&&code[0]==0xFFFF0300u){
+    if(!has_menu&&!has_menu_vs&&kind==PS&&count&&code[0]==0xFFFF0300u){
         D9PicaTevReject reason;char backend_why[256];
         if(d9_pica_tev_preflight_pixel(code,count,&reason,backend_why,sizeof backend_why)){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
@@ -1177,13 +1265,18 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             free(code);return (reason==D9_PICA_TEV_MALFORMED||reason==D9_PICA_TEV_PROGRAM_VERSION)?INVALID:UNAVAILABLE;}
     }
     D9ShaderInfo info;D9TevProgram tev;int result;
-    if(has_menu){
+    if(has_menu||has_menu_vs){
         memset(&info,0,sizeof info);
         info.version=code[0];info.major=3;info.minor=0;
         info.stream=D9_SHADER_STREAM_VALID;info.saw_end=1;
-        info.kind=D9_SHADER_TEV;info.words=(unsigned)closure.used_words;
+        info.words=(unsigned)closure.used_words;
         info.instructions=closure.instructions;
-        tev=menu.plan;result=D9_SHADER_TEV;
+        if(has_menu){
+            info.kind=D9_SHADER_TEV;tev=menu.plan;result=D9_SHADER_TEV;
+        }else{
+            info.kind=D9_SHADER_VS_MENU;memset(&tev,0,sizeof tev);
+            result=D9_SHADER_VS_MENU;
+        }
     }else{
         result=d9_shader_analyze_tev(code,count,&info,&tev);
         int wanted=kind==VS?D9_SHADER_VS_MATRIX_UV:D9_SHADER_PS_TEXTURE;
@@ -1195,6 +1288,14 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             free(code);return result==D9_SHADER_INVALID?INVALID:UNAVAILABLE;}
     }
     char menu_backend_why[D9_MENU_SHADER_REASON_MAX];menu_backend_why[0]=0;int menu_backend_ok=1;
+    if(has_menu_vs){
+        /* The fixed PICA VS carries position+texcoord0 only.  The certified
+         * menu VS family also declares color0/color1 varyings, so the plan is
+         * selected but the draw gate must refuse by name. */
+        menu_backend_ok=0;
+        snprintf(menu_backend_why,sizeof menu_backend_why,
+                  "fixed PICA vertex shader provides position and texcoord0 only; color0/color1 varyings are not produced");
+    }
     if(kind==PS&&result==D9_SHADER_TEV){
         D9PicaTevReject reason;char backend_why[256];
         if(d9_pica_tev_validate(&tev,NULL,&reason,backend_why,sizeof backend_why)){
@@ -1222,6 +1323,9 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             o->menu=menu;o->has_menu=1;o->menu_backend_ok=menu_backend_ok;
             snprintf(o->menu_backend_why,sizeof o->menu_backend_why,"%s",menu_backend_why);
         }
+    }else if(kind==VS&&result==D9_SHADER_VS_MENU){
+        o->menu=menu;o->has_menu_vs=1;o->menu_backend_ok=menu_backend_ok;
+        snprintf(o->menu_backend_why,sizeof o->menu_backend_why,"%s",menu_backend_why);
     }
     retain(g.dev);M32(out)=o->guest;
     /* Observation, not a D3D9 capability: the closure becomes READY only when
@@ -1231,18 +1335,27 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
 }
 static void create_vs(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(shader_new(VS,A(1),A(2)),3);}
 static void create_ps(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(shader_new(PS,A(1),A(2)),3);}
-static void set_vs(CPU *c){Obj *o=obj(A(1),VS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);bind(&g.vs,o);if(!o)d9_set_shader_clip(g.device,NULL);RET(OK,2);}
+static void set_vs(CPU *c){Obj *o=obj(A(1),VS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
+    if(o&&o->has_menu_vs){
+        D9Decl tmp;const D9Decl *decl=menu_current_decl(&tmp);char why[D9_MENU_SHADER_REASON_MAX];
+        if(decl&&d9_menu_shader_vs_check_decl(&o->menu,decl,why,sizeof why)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: %s",o->menu.id,why);
+            RET(UNAVAILABLE,2);
+        }
+    }
+    bind(&g.vs,o);if(!o)d9_set_shader_clip(g.device,NULL);RET(OK,2);}
 static void set_ps(CPU *c){Obj *o=obj(A(1),PS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     const D9TevProgram *program=o&&o->has_tev?&o->tev:NULL;
     if(d9_set_pixel_shader(g.device,program))RET(INVALID,2);
     bind(&g.ps,o);RET(OK,2);}
 static void get_vs(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.vs);M32(A(1))=g.vs?g.vs->guest:0;RET(OK,2);}
 static void get_ps(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ps);M32(A(1))=g.ps?g.ps->guest:0;RET(OK,2);}
-static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!obj(A(0),DEVICE)||start>=4||n>4-start||g.phase==2||(n&&!ptr(p,n*16)))RET(INVALID,4);
-    float values[4][4];if(n)memcpy(values,ptr(p,n*16),n*16);for(unsigned i=0;i<n;++i)for(unsigned j=0;j<4;++j)if(!isfinite(values[i][j]))RET(INVALID,4);
-    for(unsigned i=0;i<n;++i){memcpy(g.constants.m[start+i],values[i],16);g.constants_mask|=1u<<(start+i);}RET(OK,4);}
-static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=4||n>4-start||(n&&!ptr(A(2),n*16)))RET(INVALID,4);
-    if(n)memcpy(ptr(A(2),n*16),g.constants.m[start],n*16);RET(OK,4);}
+static float *vs_const_row(unsigned i){return i<4?g.constants.m[i]:g.constants_hi.m[i-4];}
+static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!obj(A(0),DEVICE)||start>=8||n>8-start||g.phase==2||(n&&!ptr(p,n*16)))RET(INVALID,4);
+    float values[8][4];if(n)memcpy(values,ptr(p,n*16),n*16);for(unsigned i=0;i<n;++i)for(unsigned j=0;j<4;++j)if(!isfinite(values[i][j]))RET(INVALID,4);
+    for(unsigned i=0;i<n;++i){memcpy(vs_const_row(start+i),values[i],16);g.constants_mask|=1u<<(start+i);}RET(OK,4);}
+static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=8||n>8-start||(n&&!ptr(A(2),n*16)))RET(INVALID,4);
+    for(unsigned i=0;i<n;++i)memcpy(ptr(A(2)+i*16,16),vs_const_row(start+i),16);RET(OK,4);}
 static void shader_function(CPU *c){Obj *o=obj(A(0),0);uint32_t size_ptr=A(2);if(!o||(o->kind!=VS&&o->kind!=PS)||!ptr(size_ptr,4))RET(INVALID,3);
     uint32_t need=o->words*4,provided=M32(size_ptr);M32(size_ptr)=need;if(!A(1))RET(OK,3);
     if(provided<need||!ptr(A(1),need))RET(INVALID,3);memcpy(ptr(A(1),need),o->code,need);RET(OK,3);}
@@ -1261,25 +1374,15 @@ static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2
     if(provided<need||!ptr(p,(size_t)need*8))RET(INVALID,3);memcpy(ptr(p,(size_t)need*8),o->declaration->elements,(need-1)*8);
     D9VertexElement end={0xff,0,D9_DECL_UNUSED,0,0,0};memcpy(ptr(p+(need-1)*8,8),&end,8);RET(OK,3);}
 static int shader_state(void){
-    /* A selected menu plan still needs its material preconditions and a backend
-     * that can execute it.  Both are named refusals here, before the draw, so
-     * the batch is never partially submitted. */
-    if(g.ps&&g.ps->has_menu){
-        char why[D9_MENU_SHADER_REASON_MAX];
-        if(d9_menu_shader_missing_preconditions(&g.ps->menu,d9_menu_shader_preconditions(),
-                                                why,sizeof why)){
-            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
-                     "%s: missing preconditions: %s",g.ps->menu.id,why);
-            return D9_UNSUPPORTED;
-        }
-        if(!g.ps->menu_backend_ok){
-            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: %s",
-                     g.ps->menu.id,g.ps->menu_backend_why);
-            return D9_UNSUPPORTED;
-        }
-    }
+    /* A selected menu plan still needs its declaration/material preconditions
+     * and a backend that can execute it.  Both are named refusals here, before
+     * the draw, so the batch is never partially submitted. */
+    int menu_vs=menu_vs_state();
+    if(menu_vs)return menu_vs;
+    int menu_ps=menu_ps_state();
+    if(menu_ps)return menu_ps;
     int needs_texture=g.ps&&(!g.ps->has_tev||g.ps->tev.textures!=0);if(needs_texture&&!g.tex)return D9_INVALID;if(!g.vs)return d9_set_shader_clip(g.device,NULL);
-    if(g.constants_mask!=15)return D9_INVALID;return d9_set_shader_clip(g.device,&g.constants);}
+    if((g.constants_mask&0xFu)!=0xFu)return D9_INVALID;return d9_set_shader_clip(g.device,&g.constants);}
 #if D9_CAPTURE_HOOK
 /* ---- first-draw capture -------------------------------------------------- */
 /* Enabled only when TESV_D3D9_CAPTURE_DRAWS is a positive integer.  The
@@ -1445,12 +1548,23 @@ static void capture_draw(unsigned type,unsigned start,unsigned primitives,int in
     (void)min_vertex;(void)vertex_count;(void)start_index;
 }
 #endif
-static void draw_primitive(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||shader_state())RET(INVALID,4);
+static uint32_t shader_gate(const char *method){
+    int rc=shader_state();
+    if(!rc)return OK;
+    if(!g.last_diagnostic[0])
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: shader state rejected",method);
+    return hr(rc);
+}
+static void draw_primitive(CPU *c){
+    if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf))RET(INVALID,4);
+    uint32_t gate=shader_gate("DrawPrimitive");if(gate!=OK)RET(gate,4);
     int rc=d9_draw_primitive(g.device,A(1),A(2),A(3));
     if(rc==D9_OK)capture_draw(A(1),A(2),A(3),0,0,0,0,0);
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitive: %s",d9_last_draw_diagnostic(g.device));
     RET(hr(rc),4);}
-static void draw_indexed(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!A(4)||shader_state())RET(INVALID,7);
+static void draw_indexed(CPU *c){
+    if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!A(4))RET(INVALID,7);
+    uint32_t gate=shader_gate("DrawIndexedPrimitive");if(gate!=OK)RET(gate,7);
     int rc=d9_draw_indexed_range(g.device,A(1),(int32_t)A(2),A(3),A(4),A(5),A(6));
     if(rc==D9_OK)capture_draw(A(1),A(5),A(6),1,(int32_t)A(2),A(3),A(4),A(5));
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitive: %s",d9_last_draw_diagnostic(g.device));
@@ -1466,9 +1580,10 @@ static int up_geometry(unsigned type,unsigned primitives,unsigned *vertices){
 static void draw_primitive_up(CPU *c){
     unsigned type=A(1),primitives=A(2),stride=A(4),vertices=0;
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
-       up_geometry(type,primitives,&vertices)||!stride||stride>4096u||shader_state()){
+       up_geometry(type,primitives,&vertices)||!stride||stride>4096u){
         d3d_log("DrawPrimitiveUP","invalid scene, vertex format, primitive type/count or vertex stride");RET(INVALID,5);
     }
+    uint32_t gate=shader_gate("DrawPrimitiveUP");if(gate!=OK)RET(gate,5);
     void *data=ptr(A(3),(size_t)vertices*stride);
     if(!data){d3d_log("DrawPrimitiveUP","vertex stream zero data is null or outside guest memory");RET(INVALID,5);}
     int rc=d9_draw_primitive_up(g.device,type,primitives,data,stride);
@@ -1481,9 +1596,10 @@ static void draw_indexed_up(CPU *c){
     unsigned type=A(1),min=A(2),count=A(3),primitives=A(4),fmt=A(6),stride=A(8),indices=0,used,isize;
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
        up_geometry(type,primitives,&indices)||!count||min>UINT32_MAX-count||
-       (fmt!=D9_INDEX16&&fmt!=D9_INDEX32)||!stride||stride>4096u||shader_state()){
+       (fmt!=D9_INDEX16&&fmt!=D9_INDEX32)||!stride||stride>4096u){
         d3d_log("DrawIndexedPrimitiveUP","invalid scene, vertex format, index format/range, primitive count or vertex stride");RET(INVALID,9);
     }
+    uint32_t gate=shader_gate("DrawIndexedPrimitiveUP");if(gate!=OK)RET(gate,9);
     size_t need=(size_t)min+count;
     if(need>SIZE_MAX/stride){d3d_log("DrawIndexedPrimitiveUP","vertex range overflows the stream-zero byte size");RET(INVALID,9);}
     isize=fmt==D9_INDEX32?4u:2u;used=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;

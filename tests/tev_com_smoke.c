@@ -6,6 +6,7 @@
 #include "d3d9_com.h"
 #include "d3d9_shader.h"
 #include "d3d9_tev.h"
+#include "d3d9_menu_shader_runtime.h"
 #include "n3ds_lift_runtime.h"
 
 #include <assert.h>
@@ -83,6 +84,41 @@ static uint32_t rd(Harness *h,uint32_t address){uint32_t v=0;assert(!guest_read3
 static uint32_t create_pixel_shader(Harness *h,uint32_t address,uint32_t out){
     uint32_t args[2]={address,out};return call(h,h->device,106,args,2);
 }
+static uint32_t create_vertex_shader(Harness *h,uint32_t address,uint32_t out){
+    uint32_t args[2]={address,out};return call(h,h->device,91,args,2);
+}
+static uint32_t set_vertex_shader(Harness *h,uint32_t shader){
+    uint32_t args[1]={shader};return call(h,h->device,92,args,1);
+}
+static uint32_t vs_dst(unsigned type,unsigned reg,unsigned mask){
+    return 0x80000000u|((type&7u)<<28)|((type&0x18u)<<8)|(reg&0x7FFu)|((mask&0xFu)<<16);
+}
+static uint32_t vs_src(unsigned type,unsigned reg,unsigned sw){
+    return 0x80000000u|((type&7u)<<28)|((type&0x18u)<<8)|(reg&0x7FFu)|((sw&0xFFu)<<16);
+}
+static size_t build_menu_vs(uint32_t *code,int input_color,int output_color1){
+    size_t n=0;
+    code[n++]=0xFFFE0300u;
+    code[n++]=DI(0x1F,2);code[n++]=0x80000000u;code[n++]=vs_dst(1,0,0xF); /* position v0 */
+    code[n++]=DI(0x1F,2);code[n++]=0x80000005u;code[n++]=vs_dst(1,1,0xF); /* texcoord0 v1 */
+    if(input_color){
+        code[n++]=DI(0x1F,2);code[n++]=0x8000000Au;code[n++]=vs_dst(1,2,0xF); /* color0 v2 */
+    }
+    code[n++]=DI(0x1F,2);code[n++]=0x80000000u;code[n++]=vs_dst(6,0,0xF); /* position o0 */
+    code[n++]=DI(0x1F,2);code[n++]=0x80000005u;code[n++]=vs_dst(6,1,0xF); /* texcoord0 o1 */
+    code[n++]=DI(0x1F,2);code[n++]=0x8000000Au;code[n++]=vs_dst(6,2,0xF); /* color0 o2 */
+    if(output_color1){
+        code[n++]=DI(0x1F,2);code[n++]=0x8001000Au;code[n++]=vs_dst(6,3,0xF); /* color1 o3 */
+    }
+    code[n++]=DI(0x01,2);code[n++]=vs_dst(6,0,0xF);code[n++]=vs_src(1,0,0xE4);
+    code[n++]=DI(0x01,2);code[n++]=vs_dst(6,1,0xF);code[n++]=vs_src(1,1,0xE4);
+    code[n++]=DI(0x01,2);code[n++]=vs_dst(6,2,0xF);code[n++]=vs_src(1,input_color?2:1,0xE4);
+    if(output_color1){
+        code[n++]=DI(0x01,2);code[n++]=vs_dst(6,3,0xF);code[n++]=vs_src(1,1,0xE4);
+    }
+    code[n++]=END;
+    return n;
+}
 static void prefix(uint32_t *code,size_t *n){
     code[(*n)++]=VER;
     code[(*n)++]=DI(0x1F,2);code[(*n)++]=0x80000005u;code[(*n)++]=TEXD0;
@@ -140,6 +176,25 @@ int main(void){
     uint32_t create[]={0,1,0,0x20,PP,OUT};assert(call(&h,h.factory,16,create,6)==0);
     assert((h.device=rd(&h,OUT))!=0);
     make_vertices(&h);uint32_t texture=make_texture(&h);set_texture(&h,texture);
+
+    /* Observable material evidence: bound LDR texture, declaration colour and
+     * constants c0..c7.  Normal/tangent/ambient stay absent by design. */
+    uint32_t observed=d9_com_menu_observed_preconditions();
+    assert((observed&(D9_MENU_SHADER_PRE_LDR_QUALITY|
+                      D9_MENU_SHADER_PRE_TEXTURE0_2D))==
+           (D9_MENU_SHADER_PRE_LDR_QUALITY|D9_MENU_SHADER_PRE_TEXTURE0_2D));
+    assert(!(observed&D9_MENU_SHADER_PRE_VERTEX_COLOR));
+    float rows[8][4]={
+        {1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1},
+        {0.5f,0.25f,0.75f,0.5f},{0,0,0,0},{0,0,0,0},{0.25f,0,0,1}
+    };
+    assert(!guest_write(&h.memory,DATA,rows,sizeof rows));
+    uint32_t const_args[]={0,DATA,8};assert(call(&h,h.device,94,const_args,3)==0);
+    observed=d9_com_menu_observed_preconditions();
+    assert((observed&D9_MENU_SHADER_PRE_MATERIAL_CONSTANTS_C0_C7)!=0);
+    assert((observed&D9_MENU_SHADER_PRE_MATERIAL_ALPHA_C4)!=0);
+    assert(!(observed&D9_MENU_SHADER_PRE_NORMAL_PREBAKED));
+    assert(!(observed&D9_MENU_SHADER_PRE_TANGENT_BASIS_PREBAKED));
 
     uint32_t code[128],shader=0;size_t n=0;prefix(code,&n);
     code[n++]=DI(0x42,3);code[n++]=DST_C0;code[n++]=SRC_T0;code[n++]=SAMP0;code[n++]=END;
@@ -205,6 +260,43 @@ int main(void){
     }
     code[n++]=DI(0x01,2);code[n++]=DST_C0;code[n++]=SRC_R(0);code[n++]=END;
     expect_shader_rejection(&h,code,n,UNAVAILABLE,"TEV stages");
+
+    /* Menu VS family: the declaration/FVF gate is part of selection. */
+    uint32_t vscode[64],vshader=0,fvf=0x102;
+    size_t vn=build_menu_vs(vscode,1,1);
+    assert(!guest_write(&h.memory,CODE,vscode,vn*4));
+    assert(!guest_write32(&h.memory,OUT,0xDEADBEEFu));
+    assert(create_vertex_shader(&h,CODE,OUT)==0&&(vshader=rd(&h,OUT))!=0);
+    assert(d9_com_last_shader_rejection()[0]==0);
+
+    /* FVF 0x102 has position+texcoord only: SetVertexShader must refuse. */
+    assert(call(&h,h.device,89,&fvf,1)==0);
+    assert(set_vertex_shader(&h,vshader)==UNAVAILABLE);
+    assert(strstr(d9_com_last_diagnostic(),"color0")!=NULL);
+
+    /* FVF 0x142 supplies position+diffuse+tex1: bind succeeds, draw does not. */
+    fvf=0x142;assert(call(&h,h.device,89,&fvf,1)==0);
+    observed=d9_com_menu_observed_preconditions();
+    assert((observed&D9_MENU_SHADER_PRE_VERTEX_COLOR)!=0);
+    assert(set_vertex_shader(&h,vshader)==0);
+    unsigned before=mock.draws;
+    uint32_t draw[]={D9_TRIANGLELIST,0,1},present[]={0,0,0,0};
+    assert(call(&h,h.device,41,NULL,0)==0);
+    assert(call(&h,h.device,81,draw,3)==UNAVAILABLE);
+    assert(mock.draws==before);
+    assert(strstr(d9_com_last_diagnostic(),"PICA")!=NULL||
+           strstr(d9_com_last_diagnostic(),"vertex shader")!=NULL);
+    assert(call(&h,h.device,42,NULL,0)==0);
+    assert(call(&h,h.device,17,present,4)==0);
+    assert(set_vertex_shader(&h,0)==0);
+    fvf=0x102;assert(call(&h,h.device,89,&fvf,1)==0);
+
+    /* Missing color1 output is a named refusal with no partial object. */
+    vn=build_menu_vs(vscode,1,0);
+    assert(!guest_write(&h.memory,CODE,vscode,vn*4));
+    assert(!guest_write32(&h.memory,OUT,0xDEADBEEFu));
+    assert(create_vertex_shader(&h,CODE,OUT)==UNAVAILABLE);
+    assert(rd(&h,OUT)==0&&strstr(d9_com_last_shader_rejection(),"color1")!=NULL);
 
     /* Leave a TEV shader bound across COM shutdown of an adopted device. */
     n=0;code[n++]=VER;

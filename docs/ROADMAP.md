@@ -209,9 +209,10 @@ read stage without fake successes. *Not met.*
       `vs_3_0`, the material-precondition source and two PICA texture units are
       the next layers. The bounded
       first-menu runtime selector is now connected: exact-hash
-      `menu.logo.ps`/`menu.composite.ps` plans plus fixed fog/tint contract
-      plans, with named precondition/backend draw refusals
-      (`docs/MENU_SHADER_RUNTIME.md`).
+      `menu.logo.ps`/`menu.composite.ps` plans, a bounded structural
+      `menu.generic.vs` family gated by declaration/FVF, fixed fog/tint
+      contract plans, and observable material bits, with named
+      precondition/backend draw refusals (`docs/MENU_SHADER_RUNTIME.md`).
 - [x] Offline menu preprocessing tools validate both normal-decode signatures,
       tangent/material constants and Scaleform glyph quads; real `Logo02_n.dds`
       normalization passes. Runtime loader integration remains pending.

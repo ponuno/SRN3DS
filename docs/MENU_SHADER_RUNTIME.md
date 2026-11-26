@@ -18,6 +18,7 @@ TEV path:
 | `menu.composite.ps` | exact certified SHA-256 `6022044e...45de` (184-byte copy) | one `REPLACE(TEXTURE0)` stage, 1 texture | structural + PICA descriptor only (LDR, 2D sampler s0); no material mask |
 | `menu.fog.fixed` | explicit fixed-material request; no `.fxp` | two-stage contract: `TEX0*PRIMARY`, then `TEX1*PREV` | LDR, two 2D textures, vertex colour |
 | `menu.tint.fixed` | explicit fixed-material request; no `.fxp` | one `TEX0*PRIMARY` stage | LDR, one 2D texture, vertex colour |
+| `menu.generic.vs` | bounded structural VS family + current declaration/FVF | fixed PICA vertex transform (position+UV); no arbitrary VS execution | VS inputs present in the declaration; fixed backend currently lacks color0/color1 varyings |
 
 The two bytecode-backed entries are accepted only by their **exact certified
 hash**, then re-checked structurally:
@@ -33,31 +34,90 @@ selected by this runtime path. A `nop` added to the copy, a changed literal, a
 wrong swizzle, a wrong opcode or a wrong stage is refused by name; the output
 match is zeroed and no shader object is created from a partial plan.
 
-### 1.1 Draw-time refusal
+### 1.1 Vertex-shader family
 
-A selected plan can still be undrawable. `shader_state()` checks, before any
-core draw call:
+`CreateVertexShader` now asks `d9_menu_shader_match_vs()`. A single VS hash is
+not the contract because the engine selects a declaration-compatible program
+from a shipped family. The runtime contract is:
 
-1. the process-wide material evidence mask
-   (`d9_menu_shader_note_preconditions()`), and
-2. the PICA descriptor validation of the plan.
+- `vs_3_0`, no texture sample, no branch/loop;
+- opcodes restricted to the measured static menu set
+  (`mov/add/mad/mul/rcp/rsq/dp3/dp4/min/max/slt/sge/frc/dcl/pow/sincos/mova/def`);
+- input semantics only `position0`, `texcoord0..4`, `color0`;
+- output declarations for `position0`, `texcoord0`, `color0`, `color1`;
+- 1..96 instructions.
 
-If either fails, the draw returns `D3DERR_UNSUPPORTED` and
-`d3d9_com_last_diagnostic()` names the entry and the missing preconditions or
-backend gap. Nothing is submitted: no partial batch, no fallback texture and no
-fake success. The mask starts empty and is reset on device creation and
-`Reset`.
+The manifest's older "390 candidates" count used output declarations to satisfy
+its input requirement. The runtime tightens it to the static menu subset: **83
+base members** in `shaders001.fxp` (83 more in the Update `shaders002.fxp`),
+26 distinct base hashes (28 including the Update override). This is a bounded
+family, not arbitrary vs_3_0 acceptance.
+
+`SetVertexShader` checks the selected VS against the current explicit
+declaration or FVF. A missing `color0`/texcoord input is a named refusal and
+the old VS stays bound. At draw time the same check runs again, so changing the
+declaration after binding cannot bypass it. The fixed PICA VS still produces
+only position+texcoord0, so every member of this family is selected but draw
+refused by name until the backend carries color0/color1 varyings.
+
+### 1.2 FXP key mapping
+
+`d9_menu_shader_lookup_fxp(stage, package, key)` maps the measured
+package+technique keys deterministically:
+
+| Package | Key | Entry |
+|---|---|---|
+| `shadersfx\lighting\059\p1200005.fxp` | `0x01200005` | `menu.logo.ps` |
+| `shadersfx\imagespace002.fxp` | `0x00000000` | `menu.composite.ps` |
+| `shadersfx\shaders001.fxp` | any measured VS key | `menu.generic.vs` |
+| `shadersfx\shaders002.fxp` | any measured VS key | `menu.generic.vs` |
+
+The VS family has many technique keys; the package rule identifies the family
+and the bytecode still has to pass `d9_menu_shader_match_vs()`. Lookup is
+independent of creation order; tests resolve the same package/key in different
+orders and get the same entry.
+
+### 1.3 Material evidence and draw refusal
+
+`shader_state()` now derives the observable part of the menu material mask from
+the current device state:
+
+- `texture0_2d` / `texture1_2d` when the bound texture units hold 2D LDR
+  textures (A8R8G8B8, X8R8G8B8 or DXT1/3/5);
+- `ldr_quality` when texture 0 is LDR and texture 1 (if bound) is LDR;
+- `vertex_color` when the explicit declaration or FVF provides `COLOR0`;
+- `material_constants_c0_c7` when the guest has uploaded c0..c7;
+- `material_alpha_c4` when c4 was uploaded with a finite alpha in `[0,1]`.
+
+`normal_prebaked`, `tangent_basis_prebaked` and
+`ambient_emissive_varying` are **not** derived from textures or declarations.
+They remain explicit-only and must be reported by the material/preprocessing
+loader via `d9_menu_shader_note_preconditions()`. Until then the logo draw
+stays refused by name even with textures, colour and constants present.
+
+`SetVertexShaderConstantF` now accepts c0..c7 so this evidence can exist. The
+advertised `MaxVertexShaderConst` stays **4**; c4..c7 are stored only as
+menu-material evidence and the fixed clip path still consumes c0..c3. This is
+not an SM3 or shader-capability claim.
+
+A selected plan can still be undrawable. `shader_state()` checks the VS
+declaration contract, the combined explicit+observed mask, and the PICA
+descriptor validation before any core draw. If any fails, the draw returns
+`D3DERR_NOTAVAILABLE` and `d3d9_com_last_diagnostic()` names the entry and the
+missing input/precondition/backend gap. Nothing is submitted: no partial batch,
+no fallback texture and no fake success. The explicit mask starts empty and is
+reset on device creation and `Reset`.
 
 Current backend gap (honest): the PICA descriptor path still accepts only one
-texture unit, no vertex colour and no external constants. Therefore the copy
-plan is the only one of the four that is currently PICA-valid; logo, fog and
-tint are selected, precondition-gated and then refused by name. This is not a
-rendered-menu claim.
+texture unit, no vertex colour and no external constants; the fixed PICA VS
+produces position+texcoord0 only. Therefore the copy plan is the only one of
+the five that is currently drawable; the logo, fog, tint and VS family are
+selected and then refused by name. This is not a rendered-menu claim.
 
-### 1.2 Caps and closure separation
+### 1.4 Caps and closure separation
 
 - `d9_menu_closure_caps_claim()` and `d9_adapter_caps()` remain
-  `0xFFFE0200` / `0xFFFF0200`, SM3 slots `0`.
+  `0xFFFE0200` / `0xFFFF0200`, SM3 slots `0`, `MaxVertexShaderConst = 4`.
 - The closure predicate is still the only thing the TESV level-7 branch may
   consult. This runtime selector never touches a caps field.
 - An armed closure still invalidates on any shader outside the certified set.
@@ -88,19 +148,20 @@ diagnostic only; no compiler, no bytecode cache and no fake success were added.
 
 ## 3. What is not connected
 
-- **`vs_3_0` path.** The closure still describes a bounded family of 390
-  shipped VS programs, but the exact runtime key comes from the engine's
-  vertex-declaration path. No specialised VS selection is wired here.
-- **Automatic material selection.** Nothing in the runtime currently sets the
-  precondition mask. A future NIF/material loader must validate the normal,
-  tangent basis, c0..c7, alpha and texture formats and then call
-  `d9_menu_shader_note_preconditions()`. Until then the logo/fog/tint draws are
-  refused by name.
+- **VS execution.** Selection and declaration/FVF gating are connected, but the
+  fixed PICA VS only transforms position+UV. It does not produce color0/color1
+  or the extra texcoords the family declares, so family draws are refused by
+  name until the backend grows those varyings.
+- **Automatic material selection.** Observable texture/declaration/constant
+  evidence is derived automatically. A NIF/material loader still has to
+  validate and report the normal map, tangent basis and ambient+emissive
+  varying; without those bits the logo draw is refused by name.
 - **Other measured blobs.** The closure covers two PS entries and one fixed fog
   contract. The remaining ~6.6k distinct bytecode blobs are rejected while the
   closure is armed; there is no generic SM3 translation and no fallback.
 - **PICA backend features needed by the selected plans:** two texture units,
-  vertex colour, external constants, and the fixed fog/tint blend/depth state.
+  vertex colour, external constants, color0/color1 VS varyings, and the fixed
+  fog/tint blend/depth state.
 - **Exact retail fog/tint stage semantics.** No `.fxp` ships for
   `BSEffectShaderProperty`; the fog/tint plans above are explicit contract
   plans, not bytecode matches. The logo's own c7.a tint stage is part of the
@@ -120,8 +181,8 @@ powershell -File tools\run_host_tests.ps1 `
   -OutDir build_host_targeted
 ```
 
-Result: **13 passed, 0 diagnostic, 0 failed** (the run also executes the Python
-lane). New `menu_closure` coverage: 200 checks, 0 failures, including
+Result: **14 passed, 0 diagnostic, 0 failed** (the run also executes the Python
+lane). New `menu_closure` coverage: 255 checks, 0 failures, including
 
 - exact logo selection, five-stage plan and c7.a tint stage;
 - exact copy selection and one-stage `REPLACE(TEXTURE0)`;
@@ -129,7 +190,19 @@ lane). New `menu_closure` coverage: 200 checks, 0 failures, including
   without the certified bytes, a vertex program, a wrong sampler swizzle, a
   wrong opcode or a missing stage;
 - fixed fog/tint plans and named missing-precondition refusals;
-- caps unchanged and zero SM3 slots after selection.
+- VS family selection, required output semantics and named refusals for a
+  missing color1 output, normal input or texture sample;
+- declaration/FVF compatibility (0x142 accepted, 0x102 refused by name);
+- FXP key lookup for both PS entries and the VS package family, including
+  stage-mismatch, wrong-key and order-independence cases;
+- observable-only material bits cannot satisfy the logo's explicit
+  normal/tangent/ambient requirements;
+- caps unchanged, `MaxVertexShaderConst = 4`, zero SM3 slots after selection.
+
+`tev_com` additionally drives the COM path: synthetic VS create, named
+SetVertexShader refusal on an incompatible FVF, compatible bind, named
+draw-time fixed-VS refusal with no backend draw, missing color1 create refusal
+with a zero output slot, and the observable c0..c7/texture/colour mask.
 
 Real-chunk measurement (`tev_real`, read-only data under
 `E:\Skyrim_N3DS_build`): 9,621 chunks, 19 accepted by the generic translator,
@@ -147,10 +220,10 @@ powershell -File tools\run_host_tests.ps1 `
   -TesvIrc F:\Skyrim\ir\tesv.irc `
   -TesvExe E:\skyr\TESV.exe -AllowDiagnosticFault `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe `
-  -OutDir C:\Users\vasya\Documents\Skyrim_N3DS_wt\menu-shaders\build_host_full_menu_abs
+  -OutDir C:\Users\vasya\Documents\Skyrim_N3DS_wt\menu-shader-vs\build_host_full_menu_abs
 ```
 
-Result: **71 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
+Result: **72 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
 hitting the documented guest memory gate (`Not enough memory to run
 application.`), not a rendering PASS.
 

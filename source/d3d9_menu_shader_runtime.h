@@ -31,17 +31,30 @@
 #include <stdint.h>
 
 #include "d3d9_tev.h"
+#include "d3d9_vertex.h"
 
 #define D9_MENU_SHADER_ID_MAX 32u
 #define D9_MENU_SHADER_REASON_MAX 224u
+#define D9_MENU_SHADER_MAX_INPUTS 8u
+#define D9_MENU_FXP_KEY_ANY UINT32_C(0xffffffff)
 
 typedef enum {
     D9_MENU_SHADER_NONE = 0,
     D9_MENU_SHADER_LOGO_PS = 1,      /* p1200005 exact closure hash */
     D9_MENU_SHADER_COMPOSITE_PS = 2, /* menu copy exact closure hash */
     D9_MENU_SHADER_FOG_FIXED = 3,    /* menu.fog.fixed, no bytecode */
-    D9_MENU_SHADER_TINT_FIXED = 4    /* fixed texture*vertex-colour tint */
+    D9_MENU_SHADER_TINT_FIXED = 4,   /* fixed texture*vertex-colour tint */
+    D9_MENU_SHADER_GENERIC_VS = 5    /* bounded static menu VS family */
 } D9MenuShaderKind;
+
+/* Output semantics a certified menu VS must declare.  These are D3DDECLUSAGE
+ * bits in a compact mask so a test or diagnostics line can name the gap. */
+enum {
+    D9_MENU_VS_OUT_POSITION0 = 1u << 0,
+    D9_MENU_VS_OUT_TEXCOORD0 = 1u << 1,
+    D9_MENU_VS_OUT_COLOR0 = 1u << 2,
+    D9_MENU_VS_OUT_COLOR1 = 1u << 3
+};
 
 /* Material/backend contracts.  These are not D3D9 caps. */
 enum {
@@ -62,6 +75,12 @@ typedef struct {
     uint32_t required_preconditions;      /* D9_MENU_SHADER_PRE_* */
     D9TevProgram plan;                    /* complete or zeroed */
     char id[D9_MENU_SHADER_ID_MAX];
+    /* VS-only structural contract: exact input semantics read by the program
+     * and the output semantics it declares.  Zero for PS/fixed entries. */
+    uint32_t input_count;
+    uint8_t input_usage[D9_MENU_SHADER_MAX_INPUTS];
+    uint8_t input_index[D9_MENU_SHADER_MAX_INPUTS];
+    uint32_t output_semantic_mask;        /* D9_MENU_VS_OUT_* */
 } D9MenuShaderMatch;
 
 /* Match a ps_3_0 stream against the two certified bytecode menu entries.
@@ -80,6 +99,41 @@ int d9_menu_shader_match_ps(const uint32_t *code, size_t words,
 int d9_menu_shader_match_fixed(int kind, uint32_t preconditions,
                                D9MenuShaderMatch *out,
                                char *why, size_t why_size);
+
+/* Match a vs_3_0 stream against the bounded static menu family.
+ *
+ * Certification is structural, not a single hash: the shipped family has
+ * several declaration-compatible programs selected by the engine's vertex
+ * declaration.  The runtime contract is:
+ *   - vs_3_0, no texture sample and no branch/loop opcode;
+ *   - opcodes restricted to the measured static menu set;
+ *   - input semantics only position0, texcoord0..4 and color0;
+ *   - output declarations for position0, texcoord0, color0 and color1;
+ *   - 1..96 instructions.
+ * The old manifest's "390" count used output declarations to satisfy its
+ * input requirement.  This matcher tightens that to the static menu subset.
+ *
+ * Returns 1 for a member, 0 for a non-vs_3_0 stream (the legacy SM2 template
+ * may decide) and -1 with a named reason for any vs_3_0 stream outside the
+ * static family.  No partial plan is left in `out`. */
+int d9_menu_shader_match_vs(const uint32_t *code, size_t words,
+                            D9MenuShaderMatch *out,
+                            char *why, size_t why_size);
+
+/* Check that a vertex declaration (explicit declaration or FVF-derived) pro-
+ * vides every input the selected VS reads.  Returns 0 when compatible, -1 and
+ * a named missing semantic otherwise. */
+int d9_menu_shader_vs_check_decl(const D9MenuShaderMatch *match,
+                                 const D9Decl *decl,
+                                 char *why, size_t why_size);
+
+/* Measured FXP package+technique key -> closure entry.  For the two PS entries
+ * the package and key are exact.  The VS family has one package rule and many
+ * keys, so an exact VS key is not a single entry; `key` may be
+ * D9_MENU_FXP_KEY_ANY and the bytecode still has to pass match_vs().
+ * Returns 1 and writes *entry when known, 0 otherwise (with a named reason). */
+int d9_menu_shader_lookup_fxp(int stage, const char *package_path, uint32_t key,
+                              int *entry, char *why, size_t why_size);
 
 /* Number of required bits absent from `have`.  Writes a comma-separated list
  * of names into `why` (may be NULL/0). */

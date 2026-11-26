@@ -693,6 +693,192 @@ static void test_menu_runtime_fixed(void) {
                                         &m, why, sizeof why), -1);
 }
 
+static int find_dcl(const uint32_t *code, size_t words, unsigned usage,
+                    unsigned index, unsigned reg_type) {
+    size_t i = 1;
+    while (i + 2 < words) {
+        uint32_t token = code[i], op = token & 0xFFFFu;
+        if (op == 0xFFFFu) break;
+        if (op == 0xFFFEu) { i += 1 + (size_t)((token >> 16) & 0x7FFFu); continue; }
+        size_t total = 1u + ((token >> 24) & 0xFu);
+        if (op == 0x1Fu && total == 3u) {
+            uint32_t decl = code[i + 1], dst = code[i + 2];
+            if ((decl & 0x1Fu) == usage && ((decl >> 16) & 0xFu) == index &&
+                ((dst >> 28) & 0x7u) == reg_type)
+                return (int)i;
+        }
+        i += total;
+    }
+    return -1;
+}
+
+static void test_menu_runtime_vs_family(void) {
+    D9MenuShaderMatch vs;
+    D9Decl decl;
+    const char *decl_why = NULL;
+    char why[256];
+
+    CHECK_EQ(d9_menu_shader_match_vs(menu_generic_vs, MENU_GENERIC_VS_WORDS,
+                                     &vs, why, sizeof why), 1);
+    CHECK_EQ(vs.kind, D9_MENU_SHADER_GENERIC_VS);
+    CHECK_EQ(vs.entry, D9_MENU_ENTRY_MENU_GENERIC_VS);
+    CHECK_STR(vs.id, "menu.generic.vs");
+    CHECK(vs.input_count >= 2);
+    CHECK_EQ(vs.output_semantic_mask,
+             D9_MENU_VS_OUT_POSITION0 | D9_MENU_VS_OUT_TEXCOORD0 |
+             D9_MENU_VS_OUT_COLOR0 | D9_MENU_VS_OUT_COLOR1);
+
+    /* The certified member needs the declaration inputs it really reads. */
+    CHECK_EQ(d9_decl_from_fvf(0x142u, &decl, &decl_why), D9_OK);
+    CHECK_EQ(d9_menu_shader_vs_check_decl(&vs, &decl, why, sizeof why), 0);
+    CHECK_EQ(d9_decl_from_fvf(0x102u, &decl, &decl_why), D9_OK);
+    CHECK_EQ(d9_menu_shader_vs_check_decl(&vs, &decl, why, sizeof why), -1);
+    CHECK(strstr(why, "color0") != 0);
+    CHECK_EQ(d9_menu_shader_vs_check_decl(&vs, NULL, why, sizeof why), -1);
+
+    /* PS bytes are not a VS family member; legacy may decide. */
+    CHECK_EQ(d9_menu_shader_match_vs(menu_logo_ps, MENU_LOGO_PS_WORDS,
+                                     &vs, why, sizeof why), 0);
+    CHECK_EQ(vs.kind, D9_MENU_SHADER_NONE);
+    CHECK_EQ(vs.plan.stages, 0);
+
+    /* Missing color1 output is a named vs_3_0 refusal, never a partial match. */
+    uint32_t *mutated = copy_words(menu_generic_vs, MENU_GENERIC_VS_WORDS);
+    CHECK(mutated != 0);
+    if (!mutated) return;
+    int at = find_dcl(mutated, MENU_GENERIC_VS_WORDS, 10, 1, 6);
+    CHECK(at > 0);
+    if (at > 0) {
+        mutated[at + 1] = (mutated[at + 1] & ~(0x1Fu | (0xFu << 16))) | 10u;
+        CHECK_EQ(d9_menu_shader_match_vs(mutated, MENU_GENERIC_VS_WORDS,
+                                         &vs, why, sizeof why), -1);
+        CHECK_EQ(vs.kind, D9_MENU_SHADER_NONE);
+        CHECK(strstr(why, "color1") != 0);
+    }
+    free(mutated);
+
+    /* Normal/tangent input is outside the static menu family. */
+    mutated = copy_words(menu_generic_vs, MENU_GENERIC_VS_WORDS);
+    CHECK(mutated != 0);
+    if (!mutated) return;
+    at = find_dcl(mutated, MENU_GENERIC_VS_WORDS, 0, 0, 1);
+    CHECK(at > 0);
+    if (at > 0) {
+        mutated[at + 1] = (mutated[at + 1] & ~0x1Fu) | 3u; /* normal0 */
+        CHECK_EQ(d9_menu_shader_match_vs(mutated, MENU_GENERIC_VS_WORDS,
+                                         &vs, why, sizeof why), -1);
+        CHECK(strstr(why, "normal0") != 0);
+    }
+    free(mutated);
+
+    /* A texture sample has the same token length as dp4 and is refused. */
+    mutated = copy_words(menu_generic_vs, MENU_GENERIC_VS_WORDS);
+    CHECK(mutated != 0);
+    if (!mutated) return;
+    at = -1;
+    for (size_t i = 1; i + 4 < MENU_GENERIC_VS_WORDS; ++i) {
+        uint32_t token = mutated[i];
+        if ((token & 0xFFFFu) == 0x09u && ((token >> 24) & 0xFu) == 3u) {
+            at = (int)i;
+            break;
+        }
+    }
+    CHECK(at > 0);
+    if (at > 0) {
+        mutated[at] = (mutated[at] & 0xFFFF0000u) | 0x42u;
+        CHECK_EQ(d9_menu_shader_match_vs(mutated, MENU_GENERIC_VS_WORDS,
+                                         &vs, why, sizeof why), -1);
+        CHECK(strstr(why, "texture sample") != 0);
+    }
+    free(mutated);
+}
+
+static void test_menu_runtime_fxp_keys(void) {
+    int entry = -1;
+    char why[256];
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_PS,
+                                       "shadersfx\\lighting\\059\\p1200005.fxp",
+                                       0x01200005u, &entry, why, sizeof why), 1);
+    CHECK_EQ(entry, D9_MENU_ENTRY_MENU_LOGO_PS);
+
+    entry = -1;
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_PS,
+                                       "data/ShadersFX/Imagespace002.fxp",
+                                       0u, &entry, why, sizeof why), 1);
+    CHECK_EQ(entry, D9_MENU_ENTRY_MENU_COMPOSITE_PS);
+
+    entry = -1;
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_PS,
+                                       "shadersfx/lighting/059/p1200005.fxp",
+                                       0x01200006u, &entry, why, sizeof why), 0);
+    CHECK_EQ(entry, D9_MENU_ENTRY_NONE);
+    CHECK(strstr(why, "0x01200006") != 0);
+
+    entry = -1;
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_VS,
+                                       "shadersfx\\shaders002.fxp",
+                                       0xDEADBEEFu, &entry, why, sizeof why), 1);
+    CHECK_EQ(entry, D9_MENU_ENTRY_MENU_GENERIC_VS);
+
+    /* Stage is part of the key: a PS package is not a VS closure entry. */
+    entry = -1;
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_PS,
+                                       "shadersfx\\shaders001.fxp",
+                                       0u, &entry, why, sizeof why), 0);
+    CHECK_EQ(entry, D9_MENU_ENTRY_NONE);
+    entry = -1;
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_VS,
+                                       "shadersfx\\lighting\\059\\p1200005.fxp",
+                                       0x01200005u, &entry, why, sizeof why), 0);
+
+    /* Order independence: the same inputs resolve to the same entry. */
+    int first = -1, second = -1;
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_PS,
+                                       "shadersfx\\imagespace002.fxp", 0u,
+                                       &first, why, sizeof why), 1);
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_VS,
+                                       "shadersfx\\shaders001.fxp", 0x7u,
+                                       &second, why, sizeof why), 1);
+    CHECK_EQ(d9_menu_shader_lookup_fxp(D9_MENU_STAGE_PS,
+                                       "shadersfx\\imagespace002.fxp", 0u,
+                                       &first, why, sizeof why), 1);
+    CHECK_EQ(first, D9_MENU_ENTRY_MENU_COMPOSITE_PS);
+    CHECK_EQ(second, D9_MENU_ENTRY_MENU_GENERIC_VS);
+}
+
+static void test_menu_runtime_observable_mask(void) {
+    D9MenuShaderMatch logo;
+    char why[256];
+    uint32_t observed = D9_MENU_SHADER_PRE_LDR_QUALITY |
+                        D9_MENU_SHADER_PRE_TEXTURE0_2D |
+                        D9_MENU_SHADER_PRE_TEXTURE1_2D |
+                        D9_MENU_SHADER_PRE_VERTEX_COLOR |
+                        D9_MENU_SHADER_PRE_MATERIAL_CONSTANTS_C0_C7 |
+                        D9_MENU_SHADER_PRE_MATERIAL_ALPHA_C4;
+    CHECK_EQ(d9_menu_shader_match_ps(menu_logo_ps, MENU_LOGO_PS_WORDS,
+                                     &logo, why, sizeof why), 1);
+    /* Observable device state alone must not invent normal/tangent evidence. */
+    CHECK(d9_menu_shader_missing_preconditions(&logo, observed,
+                                               why, sizeof why) > 0);
+    CHECK(strstr(why, "normal_prebaked") != 0);
+    CHECK(strstr(why, "tangent_basis_prebaked") != 0);
+    CHECK(strstr(why, "ambient_emissive_varying") != 0);
+
+    D9MenuShaderMatch fixed;
+    CHECK_EQ(d9_menu_shader_match_fixed(D9_MENU_SHADER_FOG_FIXED,
+                                        observed, &fixed, why, sizeof why), 1);
+    CHECK_EQ(d9_menu_shader_match_fixed(D9_MENU_SHADER_FOG_FIXED,
+                                        observed &
+                                        ~D9_MENU_SHADER_PRE_TEXTURE1_2D,
+                                        &fixed, why, sizeof why), -1);
+    CHECK(strstr(why, "texture1_2d") != 0);
+    CHECK_EQ(d9_menu_shader_match_fixed(D9_MENU_SHADER_TINT_FIXED,
+                                        observed &
+                                        ~D9_MENU_SHADER_PRE_VERTEX_COLOR,
+                                        &fixed, why, sizeof why), -1);
+    CHECK(strstr(why, "vertex_color") != 0);
+}
+
 static void test_menu_runtime_caps_unchanged(void) {
     D9MenuShaderMatch m;
     D9MenuClosureCapsClaim claim;
@@ -735,6 +921,9 @@ int main(void) {
     test_menu_runtime_exact_hash_only();
     test_menu_runtime_structural_negatives();
     test_menu_runtime_fixed();
+    test_menu_runtime_vs_family();
+    test_menu_runtime_fxp_keys();
+    test_menu_runtime_observable_mask();
     test_menu_runtime_caps_unchanged();
 
     printf("menu_closure_contract_smoke: %u checks, %u failures\n",

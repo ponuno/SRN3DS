@@ -205,7 +205,7 @@ int d9_shader_diagnostic(const D9ShaderInfo *info,char *text,size_t size){
         return tx_done(&t);
     }
     tx_version(&t,info);
-    if(info->kind==D9_SHADER_VS_MATRIX_UV||info->kind==D9_SHADER_PS_TEXTURE||info->kind==D9_SHADER_TEV){
+    if(info->kind==D9_SHADER_VS_MATRIX_UV||info->kind==D9_SHADER_VS_MENU||info->kind==D9_SHADER_PS_TEXTURE||info->kind==D9_SHADER_TEV){
         tx_text(&t,": supported (stream valid, ");tx_uint(&t,info->instructions);tx_text(&t," instructions)");
     }else if(info->stream==D9_SHADER_STREAM_VALID){
         tx_text(&t,": unsupported (stream valid, ");tx_uint(&t,info->instructions);tx_text(&t," instructions)");

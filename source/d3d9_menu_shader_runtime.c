@@ -9,6 +9,7 @@
 
 #include "d3d9_menu_closure.h"
 #include "d3d9_menu_light.h"
+#include "d3d9_shader.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -199,6 +200,225 @@ static int build_tint(D9TevProgram *out, char *why, size_t why_size) {
 }
 
 /* --------------------------------------------------------------------- */
+/* Vertex family                                                         */
+/* --------------------------------------------------------------------- */
+
+enum {
+    D3DSIO_END = 0xFFFF,
+    D3DSIO_COMMENT = 0xFFFE,
+    D3DSIO_PHASE = 0xFFFD,
+    D3DSIO_DCL = 0x1F,
+    D3DSIO_TEXLD = 0x42
+};
+
+/* Measured static menu VS opcode set.  It excludes texture samples, branches,
+ * loops, comparisons that need flow control, and the wide mask/MSAA paths. */
+static int vs_opcode_allowed(unsigned op) {
+    switch (op) {
+    case 0x01: /* mov */
+    case 0x02: /* add */
+    case 0x04: /* mad */
+    case 0x05: /* mul */
+    case 0x06: /* rcp */
+    case 0x07: /* rsq */
+    case 0x08: /* dp3 */
+    case 0x09: /* dp4 */
+    case 0x0A: /* min */
+    case 0x0B: /* max */
+    case 0x0C: /* slt */
+    case 0x0D: /* sge */
+    case 0x13: /* frc */
+    case 0x1F: /* dcl */
+    case 0x20: /* pow */
+    case 0x25: /* sincos */
+    case 0x2E: /* mova */
+    case 0x51: /* def */
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int vs_input_allowed(unsigned usage, unsigned index) {
+    if (usage == 0u && index == 0u) return 1;       /* position0 */
+    if (usage == 5u && index <= 4u) return 1;       /* texcoord0..4 */
+    if (usage == 10u && index == 0u) return 1;      /* color0 */
+    return 0;
+}
+
+static const char *usage_name(unsigned usage) {
+    switch (usage) {
+    case 0: return "position";
+    case 1: return "blendweight";
+    case 2: return "blendindices";
+    case 3: return "normal";
+    case 5: return "texcoord";
+    case 6: return "tangent";
+    case 7: return "binormal";
+    case 10: return "color";
+    default: return "usage";
+    }
+}
+
+static int add_vs_input(D9MenuShaderMatch *out, unsigned usage, unsigned index) {
+    for (uint32_t i = 0; i < out->input_count; ++i)
+        if (out->input_usage[i] == usage && out->input_index[i] == index)
+            return 0;
+    if (out->input_count >= D9_MENU_SHADER_MAX_INPUTS) return -1;
+    out->input_usage[out->input_count] = (uint8_t)usage;
+    out->input_index[out->input_count] = (uint8_t)index;
+    ++out->input_count;
+    return 0;
+}
+
+/* Walk a validated vs_3_0 stream and collect its declarations.  Framing and
+ * instruction lengths are already checked by d9_shader_analyze(); this walk
+ * only applies the menu-specific structural contract. */
+static int walk_vs(const uint32_t *code, size_t words, D9MenuShaderMatch *out,
+                   char *why, size_t why_size) {
+    D9ShaderInfo info;
+    size_t i;
+    int end = 0;
+    if (d9_shader_analyze(code, words, &info) == D9_SHADER_INVALID ||
+        info.stream != D9_SHADER_STREAM_VALID || !info.saw_end) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: malformed vs token stream");
+        return -1;
+    }
+    if (info.version != 0xFFFE0300u) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: version 0x%08x is not vs_3_0",
+                     (unsigned)info.version);
+        return -1;
+    }
+    if (!info.instructions || info.instructions > 96u) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "menu.generic.vs: %u instructions is outside the static menu bound (1..96)",
+                     info.instructions);
+        return -1;
+    }
+
+    i = 1;
+    while (i < words) {
+        uint32_t token = code[i];
+        unsigned op = token & 0xFFFFu;
+        if (op == D3DSIO_END) { end = 1; break; }
+        if (op == D3DSIO_COMMENT) {
+            size_t skip = (size_t)((token >> 16) & 0x7FFFu);
+            if (skip > words - i - 1u) {
+                if (why && why_size)
+                    snprintf(why, why_size, "menu.generic.vs: comment past the stream");
+                return -1;
+            }
+            i += skip + 1u;
+            continue;
+        }
+        if (op == D3DSIO_PHASE) {
+            if (why && why_size)
+                snprintf(why, why_size, "menu.generic.vs: phase token is not a VS3 declaration");
+            return -1;
+        }
+        size_t total = 1u + ((token >> 24) & 0xFu);
+        if (total > words - i) {
+            if (why && why_size)
+                snprintf(why, why_size, "menu.generic.vs: instruction past the stream");
+            return -1;
+        }
+        if (op == D3DSIO_TEXLD) {
+            if (why && why_size)
+                snprintf(why, why_size, "menu.generic.vs: texture sample is outside the static VS family");
+            return -1;
+        }
+        if (!vs_opcode_allowed(op)) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "menu.generic.vs: opcode '0x%02x' is outside the measured static VS set",
+                         op);
+            return -1;
+        }
+        if (op == D3DSIO_DCL) {
+            uint32_t decl, dst;
+            unsigned usage, index, reg_type, reg_index;
+            if (total != 3u) {
+                if (why && why_size)
+                    snprintf(why, why_size, "menu.generic.vs: dcl must carry two operands");
+                return -1;
+            }
+            decl = code[i + 1];
+            dst = code[i + 2];
+            usage = decl & 0x1Fu;
+            index = (decl >> 16) & 0xFu;
+            reg_type = (dst >> 28) & 0x7u;
+            reg_index = dst & 0x7FFu;
+            if (reg_type == 1u) {
+                if (!vs_input_allowed(usage, index)) {
+                    if (why && why_size)
+                        snprintf(why, why_size,
+                                 "menu.generic.vs: input %s%u is outside the static menu family",
+                                 usage_name(usage), index);
+                    return -1;
+                }
+                if (reg_index > 15u && usage != 10u) {
+                    if (why && why_size)
+                        snprintf(why, why_size, "menu.generic.vs: input register v%u is too high",
+                                 reg_index);
+                    return -1;
+                }
+                if (add_vs_input(out, usage, index) < 0) {
+                    if (why && why_size)
+                        snprintf(why, why_size, "menu.generic.vs: too many input semantics");
+                    return -1;
+                }
+            } else if (reg_type == 6u) {
+                if (usage == 0u && index == 0u) out->output_semantic_mask |= D9_MENU_VS_OUT_POSITION0;
+                else if (usage == 5u && index == 0u) out->output_semantic_mask |= D9_MENU_VS_OUT_TEXCOORD0;
+                else if (usage == 10u && index == 0u) out->output_semantic_mask |= D9_MENU_VS_OUT_COLOR0;
+                else if (usage == 10u && index == 1u) out->output_semantic_mask |= D9_MENU_VS_OUT_COLOR1;
+            } else {
+                if (why && why_size)
+                    snprintf(why, why_size,
+                             "menu.generic.vs: dcl register type %u is not an input or output",
+                             reg_type);
+                return -1;
+            }
+        }
+        i += total;
+    }
+    if (!end) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: no END token");
+        return -1;
+    }
+    if (!out->input_count) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: no input declarations");
+        return -1;
+    }
+    if (!(out->output_semantic_mask & D9_MENU_VS_OUT_POSITION0)) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: missing position0 output declaration");
+        return -1;
+    }
+    if (!(out->output_semantic_mask & D9_MENU_VS_OUT_TEXCOORD0)) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: missing texcoord0 output declaration");
+        return -1;
+    }
+    if (!(out->output_semantic_mask & D9_MENU_VS_OUT_COLOR0)) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: missing color0 output declaration");
+        return -1;
+    }
+    if (!(out->output_semantic_mask & D9_MENU_VS_OUT_COLOR1)) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: missing color1 output declaration");
+        return -1;
+    }
+    return 0;
+}
+
+/* --------------------------------------------------------------------- */
 /* Public selection                                                      */
 /* --------------------------------------------------------------------- */
 
@@ -319,6 +539,151 @@ int d9_menu_shader_match_fixed(int kind, uint32_t preconditions,
     return 1;
 }
 
+int d9_menu_shader_match_vs(const uint32_t *code, size_t words,
+                            D9MenuShaderMatch *out,
+                            char *why, size_t why_size) {
+    zero_match(out);
+    if (why && why_size) why[0] = 0;
+    if (!out) return -1;
+    if (!code || words < 2)
+        return fail(out, why, why_size, "menu.generic.vs: no readable vs_3_0 token stream");
+    if ((code[0] >> 16) != 0xFFFEu || ((code[0] >> 8) & 0xFFu) != 3u ||
+        (code[0] & 0xFFu) != 0u) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "menu.generic.vs: version 0x%08x is not vs_3_0; legacy path may decide",
+                     (unsigned)code[0]);
+        return 0;
+    }
+
+    /* No single hash selects a VS; the engine picks a declaration-compatible
+     * member, so the family contract is structural.  d9_shader_analyze()
+     * supplies framing/END validation inside walk_vs().  A vs_3_0 stream that
+     * is outside the certified family is a named refusal, not a fallback. */
+    if (walk_vs(code, words, out, why, why_size) < 0) {
+        zero_match(out);
+        return -1;
+    }
+    fill_identity(out, D9_MENU_SHADER_GENERIC_VS, D9_MENU_ENTRY_MENU_GENERIC_VS, 0u);
+    return 1;
+}
+
+int d9_menu_shader_vs_check_decl(const D9MenuShaderMatch *match,
+                                 const D9Decl *decl,
+                                 char *why, size_t why_size) {
+    if (why && why_size) why[0] = 0;
+    if (!match || match->kind != D9_MENU_SHADER_GENERIC_VS) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: no selected vertex family");
+        return -1;
+    }
+    if (!decl) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu.generic.vs: no vertex declaration or FVF is bound");
+        return -1;
+    }
+    for (uint32_t need = 0; need < match->input_count; ++need) {
+        unsigned usage = match->input_usage[need];
+        unsigned index = match->input_index[need];
+        int found = 0;
+        for (unsigned i = 0; i < decl->count; ++i) {
+            if (decl->elements[i].usage == usage &&
+                decl->elements[i].usage_index == index) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "menu.generic.vs: vertex declaration lacks %s%u",
+                         usage_name(usage), index);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* --------------------------------------------------------------------- */
+/* Measured FXP key mapping                                              */
+/* --------------------------------------------------------------------- */
+
+typedef struct {
+    const char *package;
+    uint32_t key;
+    int stage;
+    int entry;
+} D9MenuFxpKey;
+
+/* Package paths are canonical lowercase with '/'.  The VS family has many
+ * technique keys; the package rule is the measured bound and the bytecode
+ * still has to pass d9_menu_shader_match_vs(). */
+static const D9MenuFxpKey d9_menu_fxp_keys[] = {
+    {"shadersfx/lighting/059/p1200005.fxp", 0x01200005u,
+     D9_MENU_STAGE_PS, D9_MENU_ENTRY_MENU_LOGO_PS},
+    {"shadersfx/imagespace002.fxp", 0x00000000u,
+     D9_MENU_STAGE_PS, D9_MENU_ENTRY_MENU_COMPOSITE_PS},
+    {"shadersfx/shaders001.fxp", D9_MENU_FXP_KEY_ANY,
+     D9_MENU_STAGE_VS, D9_MENU_ENTRY_MENU_GENERIC_VS},
+    {"shadersfx/shaders002.fxp", D9_MENU_FXP_KEY_ANY,
+     D9_MENU_STAGE_VS, D9_MENU_ENTRY_MENU_GENERIC_VS},
+};
+
+static const char *skip_data_prefix(const char *path) {
+    if (!path) return path;
+    if ((path[0] == 'd' || path[0] == 'D') &&
+        (path[1] == 'a' || path[1] == 'A') &&
+        (path[2] == 't' || path[2] == 'T') &&
+        (path[3] == 'a' || path[3] == 'A') &&
+        (path[4] == '/' || path[4] == '\\') && path[4])
+        return path + 5;
+    return path;
+}
+
+static int package_equal(const char *a, const char *b) {
+    a = skip_data_prefix(a);
+    b = skip_data_prefix(b);
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        unsigned x = (unsigned char)*a++;
+        unsigned y = (unsigned char)*b++;
+        if (x == '\\') x = '/';
+        if (y == '\\') y = '/';
+        if (x >= 'A' && x <= 'Z') x += 'a' - 'A';
+        if (y >= 'A' && y <= 'Z') y += 'a' - 'A';
+        if (x != y) return 0;
+    }
+    return *a == *b;
+}
+
+int d9_menu_shader_lookup_fxp(int stage, const char *package_path, uint32_t key,
+                              int *entry, char *why, size_t why_size) {
+    if (entry) *entry = D9_MENU_ENTRY_NONE;
+    if (why && why_size) why[0] = 0;
+    if (!package_path || (stage != D9_MENU_STAGE_PS && stage != D9_MENU_STAGE_VS)) {
+        if (why && why_size)
+            snprintf(why, why_size, "menu fxp: a ps/vs stage and package path are required");
+        return 0;
+    }
+    for (unsigned i = 0; i < sizeof d9_menu_fxp_keys / sizeof d9_menu_fxp_keys[0]; ++i) {
+        const D9MenuFxpKey *m = &d9_menu_fxp_keys[i];
+        if (m->stage != stage || !package_equal(package_path, m->package)) continue;
+        if (m->key != D9_MENU_FXP_KEY_ANY && m->key != key) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "menu fxp: %s key 0x%08x is not the certified entry",
+                         m->package, (unsigned)key);
+            return 0;
+        }
+        if (entry) *entry = m->entry;
+        return 1;
+    }
+    if (why && why_size)
+        snprintf(why, why_size, "menu fxp: package '%s' is not in the certified menu set",
+                 package_path);
+    return 0;
+}
+
 int d9_menu_shader_missing_preconditions(const D9MenuShaderMatch *match,
                                          uint32_t have,
                                          char *why, size_t why_size) {
@@ -363,6 +728,7 @@ const char *d9_menu_shader_kind_name(int kind) {
     case D9_MENU_SHADER_COMPOSITE_PS: return "menu.composite.ps";
     case D9_MENU_SHADER_FOG_FIXED: return "menu.fog.fixed";
     case D9_MENU_SHADER_TINT_FIXED: return "menu.tint.fixed";
+    case D9_MENU_SHADER_GENERIC_VS: return "menu.generic.vs";
     default: return "none";
     }
 }

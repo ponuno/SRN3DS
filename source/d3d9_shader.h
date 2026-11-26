@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "d3d9_tev.h"
-enum {D9_SHADER_UNKNOWN=0,D9_SHADER_VS_MATRIX_UV=1,D9_SHADER_PS_TEXTURE=2,D9_SHADER_TEV=3,D9_SHADER_INVALID=-1};
+enum {D9_SHADER_UNKNOWN=0,D9_SHADER_VS_MATRIX_UV=1,D9_SHADER_PS_TEXTURE=2,D9_SHADER_TEV=3,D9_SHADER_VS_MENU=4,D9_SHADER_INVALID=-1};
 #define D9_SHADER_MAX_WORDS 4096u
 /* D3DSIO_* opcodes 0..96 are the SM2/SM3 instruction set; comments (0xfffe),
  * phase (0xfffd) and END (0xffff) are handled separately. */

@@ -4,14 +4,18 @@ Status: **scratch investigation, now partially connected at runtime.**
 The investigation artifacts live in `C:\Skyrim_N3DS_build\agent_work\sm3`.
 `GetDeviceCaps` is not changed and no fake SM3 flag exists.
 
-> **Runtime update (2026-11-26, branch `menu-shaders`).** The bounded selector
-> is now wired into `CreatePixelShader` as
+> **Runtime update (2026-11-26, branch `menu-shader-vs`).** The bounded selector
+> is wired into `CreatePixelShader`/`CreateVertexShader` as
 > `source/d3d9_menu_shader_runtime.{c,h}`: exact SHA-256 selection of
 > `menu.logo.ps` (p1200005 five-stage plan) and `menu.composite.ps` (one-stage
-> copy), plus explicit fixed fog/tint contract plans. Material preconditions
-> and the PICA backend gap are named draw refusals; no partial draw. The
-> `vs_3_0` path, automatic material selection and the other ~6.6k blobs remain
-> outside. See `docs/MENU_SHADER_RUNTIME.md` for the exact boundary and tests.
+> copy), explicit fixed fog/tint contract plans, and a bounded structural
+> `menu.generic.vs` family gated by the current vertex declaration/FVF. The
+> manifest's loose 390 count is tightened to 83 base members (+83 Update), 28
+> distinct hashes; no arbitrary vs_3_0 acceptance. Observable material evidence
+> (LDR textures, declaration colour, c0..c7) is now derived automatically;
+> normal/tangent/ambient remain explicit-only. PICA backend gaps are named draw
+> refusals; no partial draw. The other ~6.6k blobs remain outside. See
+> `docs/MENU_SHADER_RUNTIME.md` for the exact boundary and tests.
 >
 > `D3DXCompileShader` is **not** the SM3 menu path and is unchanged: named
 > `E_NOTIMPL`, cleared outputs, no trap. Trace12 shows only two import
@@ -185,12 +189,14 @@ This is a compatibility contract, not a D3D9 capability claim.
 | Live file / point | Status |
 |---|---|
 | `source/d3d9_com.c`, `CreatePixelShader` | **Connected.** `d9_menu_shader_match_ps()` gates on the certified hash, then builds the plan. Anything else stays on the legacy path; an armed closure still invalidates by name. |
-| `source/d3d9_shader.c`, `d9_shader_analyze_tev` | Unchanged. The menu plan is selected before the generic analyzer and stored separately on the object. |
+| `source/d3d9_com.c`, `CreateVertexShader`/`SetVertexShader` | **Connected.** `d9_menu_shader_match_vs()` certifies the static VS family; `SetVertexShader` and the draw gate check the current declaration/FVF and refuse missing inputs by name. |
+| `source/d3d9_shader.c`, `d9_shader_analyze_tev` | Unchanged except a `D9_SHADER_VS_MENU` diagnostic kind. Menu plans are selected before the generic analyzer. |
 | `source/d3d9_renderer_requirements.c` | Unchanged. The closure predicate remains a non-D3D9 answer; it is not mapped to a caps success. |
 | `source/d3d9_menu_light.c` | **Used by the runtime.** `menu.logo.ps` must match `p1200005_ADD_NORMAL`; draw is refused until the normal/basis/alpha/constant preconditions are reported. |
 | TESV compatibility gate `0x00c6e22d` | Still not flipped. It may consult only `d9_menu_closure_predicate()`; `GetDeviceCaps` stays 2.0 and `D3DXCompileShader` stays `E_NOTIMPL`. |
 | `source/d3d9_capture.c` / first-draw capture | **Not connected.** The selector exposes the entry id but capture does not record it yet. |
 | Fixed fog/tint | **API only.** Explicit contract plans with named precondition refusals; no material loader calls them yet. |
+| Material precondition source | **Observable bits connected.** Bound LDR textures, declaration colour and c0..c7 are derived in `d3d9_com.c`; normal/tangent/ambient remain explicit-only. `MaxVertexShaderConst` stays 4. |
 
 ## 5. Artifacts
 
