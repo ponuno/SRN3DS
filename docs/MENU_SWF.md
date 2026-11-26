@@ -994,11 +994,13 @@ CPU layers and the real COM demo.  It reads the winning
 3. tessellates every unmasked shape record with its accumulated 16.16 matrix,
    appends solid-fill triangle-list vertices/indices with parsed RGBA * record
    CXFORM and counts skipped stroke segments;
-4. collects structured ImportAssets2 records, tries the declared font URL then
-   `Interface/fonts_en.swf`, collects candidate DefineFont2/3 definitions and
-   resolves imported ids exactly; missing ids are named refusals with no
-   local/name substitution, while an exact match lays out/tessellates nonempty
-   edit text into the combined geometry batch;
+4. collects structured ImportAssets2 records, loads the declared font URL then
+   `Interface/fonts_en.swf` and `Interface/fontconfig.txt`, collects candidate
+   DefineFont2/3 definitions, and resolves imported ids first by exact id and
+   then by fontconfig symbol -> face/style -> one DefineFont3 (logged
+   substitution); unprovable mappings are named refusals.  Nonempty edit text
+   is laid out/tessellated with its resolved primary and per-run faces into its
+   own real geometry;
 5. lays out one synthetic string (`"!"`) using the local 243-glyph DefineFont3,
    rasterises its 159 triangles, packs the used A8 rectangle beside one white
    texel and appends the resulting control text quad;
@@ -1019,9 +1021,10 @@ records=216 sprites=71 sprite_records=106 shape_definitions=27
 shape_records=53 text_records=57 mask_records=0 unsupported_records=0
 edit_text_definitions=22 edit_text_ids=22 nonempty_definitions=3
 source_records=57 nonempty_records=3 source_lines=3 source_glyph_slots=72
-refused_records=57 resolved_records=0 layout_records=0
-refused_font_mask=00000204 resolved_text_glyphs=0 missing_glyphs=0
-real_text_vertices=0 real_text_indices=0
+refused_records=0 resolved_records=57 exact_records=0 substituted_records=57
+layout_records=3 refused_font_mask=00000000
+resolved_text_glyphs=72 missing_glyphs=0
+real_text_vertices=3024 real_text_indices=4320 real_text_triangles=1440
 html_defs=22 payloads=4 nonempty=3 runs=3 tags=14 unknown=0
 html_colors=3 html_sizes=3 html_faces=3 html_entities=0
 empty_shapes=0 degenerate_shapes=0 strokes_skipped=182
@@ -1032,17 +1035,24 @@ glyph=33 tess_vertices=319 triangles=159
 raster=64x64 rect=24,1,40,63 sum=178003 atlas_used_height=62
 batch_vertices=57484 indices=86160 triangles=28720
 limits=262144 vertices / 786432 indices
-COM draw_calls=1 expanded_vertices=0 indexed_draws=1 indexed_vertices=57484 indexed_indices=86160
-FVF=0x142 A8=64x64 control_text_quads=1; 60 checks, 0 failures
+COM draw_calls=1 expanded_vertices=0 indexed_draws=1
+indexed_vertices=57484 indexed_indices=86160
+FVF=0x142 A8=64x64 control_text_quads=1; 74 checks, 0 failures
 ```
 
-The 57 real text records produce three nonempty plain sources (72 source glyph
-slots), but all reference imported fonts 34/41.  The declared `gfxfontlib.swf`
-URL is absent and the `fonts_en.swf` fallback has neither exact id, so all 57
-are named refusals and add zero real-text glyphs/vertices.  The four HTML
-payloads (three nonempty plus one empty `<p>`) are parsed into three runs and
-14 tags without glyph layout, honestly reporting the unresolved fonts.  The
-single local-font `!` control exercises the raster/atlas/batch/COM path.
+Imported ids 34/41 are absent from `fonts_en.swf`.  The shipped
+`fontconfig.txt` maps `$EverywhereMediumFont` to `Futura Condensed` Normal and
+`$EverywhereFont` to `Futura CondensedLight` Normal; those are DefineFont3 ids
+3 and 1 (187 glyphs each).  All 57 text records resolve and the three authored
+labels (`$Loading extra content.`, `$Loading downloadable content...`,
+`Start a New Game?`, 72 source slots) produce **72 real glyph placements, 0
+missing, 3,024 vertices / 4,320 indices / 1,440 triangles**.  The four HTML
+payloads (three nonempty plus one empty `<p>`) parse into three runs and 14
+tags; each run face resolves to the same real face.  Resolved text geometry is
+kept separate from the shape batch so the fixed census stays 57,484 / 86,160;
+combined shape + real text would be 60,508 vertices / 90,480 indices, still
+16-bit-safe.  The single local-font `!` control still exercises the
+raster/atlas/COM path.
 Shape fills use the atlas's white texel and the parsed solid-fill RGBA
 multiplied by the record CXFORM; linear/radial gradient fills are evaluated per
 vertex, focal/bitmap fills are named refusals, and the 182 stroke segments are
@@ -1083,6 +1093,25 @@ Verification:
   `.3dsx` 936,180 B, SHA256
   `ca08df4e5ca93a48c17b0ccf78b85f23284627117128357b443ebaad8b297bd1`;
   compile/link only, no hardware or frame claim;
+* ARM compile-only (`arm-none-eabi-gcc`, no link/run): all **5/5** changed C
+  `menu_swf_display_list.c.o` text 6,189 B.  No ARM binary/hardware/frame claim;
+  `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B;
+* targeted
+  `menu_font_resolve,menu_swf_text,menu_swf_atlas,menu_swf_glyph,menu_pipeline_e2e`
+  with real data: **15 passed, 0 diagnostic, 0 failed**; check counts 31, 93,
+  37, 8 and 74;
+* real font resolution: ids 34/41 -> fontconfig faces -> DefineFont3 3/1,
+  **72 glyphs / 3,024 vertices / 4,320 indices / 1,440 triangles**, 0 missing;
+  shape batch remains **57,484 vertices / 86,160 indices / 28,720 triangles**;
+  `menu_swf_font.o` 6,572 B, `menu_swf_display.o` 19,900 B,
+  `menu_swf_shape.o` 15,796 B, `menu_swf_tess.o` 10,192 B,
+  `menu_swf_text.o` 22,996 B;
+* ARM `-Mode com -Isolated menu_fonts -NoClean -Jobs 8`: `.elf` 6,293,872 B,
+  SHA256 `879ec6036de2c476a8b0a1573dee9ded4a4051165cbd6aeb33e46a8e3f13730b`;
+  `.3dsx` 936,180 B, SHA256
+  `ca08df4e5ca93a48c17b0ccf78b85f23284627117128357b443ebaad8b297bd1`.
+  Build-only; no frame claim.
+
 * ARM compile-only `-Mode com -Isolated edit_text`: `.elf` 6,178,376 B,
   SHA256 `2fd3e1af9ec6de706e762f20012340a90f74ad61dec2b64ccdf339cfecc4191e`;
   `.3dsx` 913,460 B, SHA256
@@ -1104,10 +1133,11 @@ Verification:
    `GotoLabel`, SetTarget, WaitForFrame and all side effects remain named
    refusals/counters.
 3. **Atlas cache/real GFx fonts** — `gfxfontlib.swf` (imported font ids 34/41)
-   is absent and the `fonts_en.swf` fallback lacks those exact ids; no name
-   substitution is performed.  `fonts_en.swf`/`fonts_console.swf`,
-   `FontConfig.txt`, texture cache/rehydration, richer shaping (ligatures,
-   bidi, fallback fonts), HTML face-to-font matching/letter-spacing/class spans
+   is absent, but the shipped `Interface/fontconfig.txt` now maps 34/41 to
+   real `fonts_en.swf` faces (ids 3/1) and all three authored labels produce
+   real glyph geometry.  There is still no persistent texture/glyph cache,
+   `fonts_console.swf` is not merged, and richer shaping (ligatures,
+   bidi, multi-font fallback), letter-spacing/class spans
    and text metrics beyond advance+kerning remain.  The host COM demo can
    create/upload an A8 atlas and draw the combined shape/control-text batch;
    there is no persistent cache, PICA A8 sampling or real GFx text object yet.
@@ -1222,9 +1252,15 @@ frame.
 * DefineEditText parsing collects 22 definitions.  Three nonempty plain sources
   yield 72 source glyph slots across three record instances.  Structured imports
   declare ids 34/41 from `gfxfontlib.swf`; the URL is absent and the
-  `fonts_en.swf` fallback lacks both exact ids, so all 57 records are named
-  refusals.  No local/name substitution or real-text COM vertices are claimed;
-  the exact-id resolved-text path is implemented but not exercised by this data.
+  `fonts_en.swf` library lacks both exact ids, so the shipped
+  `Interface/fontconfig.txt` maps `$EverywhereMediumFont` -> Futura Condensed
+  Normal -> DefineFont3 id 3 and `$EverywhereFont` -> Futura CondensedLight
+  Normal -> DefineFont3 id 1.  All 57 records resolve, and the three labels
+  produce **72 real glyph placements, 0 missing, 3,024 vertices / 4,320
+  indices / 1,440 triangles**.  Every substitution is logged; no face or glyph
+  is invented.  Shape + resolved text would be 60,508 vertices / 90,480
+  indices, inside the 16-bit range; the fixed indexed shape census remains
+  57,484 / 86,160.
 * The bounded A8 rasteriser puts code 33 into 32x32 coverage with sum **41,464**
   over 182 pixels (used rect `12,1..20,31`) and into 64x64 with sum **178,003**
   over 726 pixels (used rect `24,1..40,63`); the advance 5,040 is preserved.

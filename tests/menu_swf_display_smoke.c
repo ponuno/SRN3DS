@@ -437,7 +437,8 @@ static void test_synthetic(void) {
     check(f->font_id == 5 && f->glyph_count == 2 && f->stored_glyphs == 2,
           "font glyph count");
     check(f->font_type == 3 && f->shape_scale == 20 && f->em_square == 1024 &&
-              f->has_layout && f->wide_codes && !f->wide_offsets,
+              f->flags == 0x85 && f->has_layout && f->wide_codes &&
+              !f->wide_offsets,
           "font DefineFont3 flags");
     check(f->ascent == 800 && f->descent == 200 && f->leading == 0,
           "font layout metrics");
