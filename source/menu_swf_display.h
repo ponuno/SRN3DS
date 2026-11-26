@@ -1,10 +1,10 @@
 #pragma once
-/* Bounded SWF display-list and DefineFont3 metrics for the main menu.
+/* Bounded SWF display-list, DefineFont3 metrics and DefineEditText definitions.
  *
  * This module does not execute AVM/AS2, rasterise glyphs, build a renderable
  * display list or draw.  It models PlaceObject/RemoveObject state at each
- * ShowFrame, records bounded matrices/colours/names, summarizes sprites and
- * reports DefineFont2/3 glyph metrics (code -> shape offset, advances, bounds).
+ * ShowFrame, records bounded matrices/colours/names, summarizes sprites,
+ * reports DefineFont2/3 glyph metrics and collects DefineEditText records.
  * All limits are compile-time constants; overflow is visible via `truncated`
  * fields or a named error.
  */
@@ -23,6 +23,9 @@
 #define MENU_SWF_DISPLAY_MAX_KERNING 256u
 #define MENU_SWF_DISPLAY_NAME_MAX 48u
 #define MENU_SWF_DISPLAY_SPRITE_DEPTH 16u
+#define MENU_SWF_DISPLAY_MAX_EDIT_TEXTS 64u
+#define MENU_SWF_DISPLAY_EDIT_TEXT_MAX 4096u
+#define MENU_SWF_DISPLAY_EDIT_VARIABLE_MAX 256u
 
 typedef struct {
     uint16_t depth;
@@ -136,6 +139,54 @@ typedef struct {
     MenuSwfKerning kerning[MENU_SWF_DISPLAY_MAX_KERNING];
 } MenuSwfFontSummary;
 
+typedef enum {
+    MENU_SWF_EDIT_TEXT_ALIGN_LEFT = 0,
+    MENU_SWF_EDIT_TEXT_ALIGN_RIGHT = 1,
+    MENU_SWF_EDIT_TEXT_ALIGN_CENTER = 2,
+    MENU_SWF_EDIT_TEXT_ALIGN_JUSTIFY = 3
+} MenuSwfEditTextAlign;
+
+typedef struct {
+    uint16_t character_id;
+    int32_t bounds[4]; /* xmin, xmax, ymin, ymax in twips */
+    uint16_t flags;
+    uint8_t has_text;
+    uint8_t word_wrap;
+    uint8_t multiline;
+    uint8_t password;
+    uint8_t read_only;
+    uint8_t has_text_color;
+    uint8_t has_max_length;
+    uint8_t has_font;
+    uint8_t has_layout;
+    uint8_t no_select;
+    uint8_t has_border;
+    uint8_t was_static;
+    uint8_t html;
+    uint8_t use_outlines;
+    uint16_t font_id;
+    uint16_t font_height; /* twips */
+    uint16_t max_length;
+    uint8_t color[4]; /* RGBA */
+    uint8_t alignment;
+    int32_t left_margin;  /* twips */
+    int32_t right_margin; /* twips */
+    int32_t indent;       /* twips, first line */
+    int32_t leading;      /* signed twips */
+    char variable_name[MENU_SWF_DISPLAY_EDIT_VARIABLE_MAX];
+    char initial_text[MENU_SWF_DISPLAY_EDIT_TEXT_MAX];
+    uint32_t initial_text_length;
+    uint32_t trailing_bytes;
+} MenuSwfEditText;
+
+typedef struct {
+    MenuSwfEditText *items; /* caller-owned */
+    uint32_t capacity;
+    uint32_t count;
+    uint32_t total;         /* definitions encountered, including overflow */
+    int truncated;
+} MenuSwfEditTextList;
+
 typedef struct {
     MenuSwfDisplayList top;
     uint32_t sprite_total;
@@ -166,3 +217,20 @@ MenuSwfStatus menu_swf_display_parse_place(const uint8_t *p, size_t len,
 MenuSwfStatus menu_swf_display_summary(const uint8_t *data, size_t size,
                                        MenuSwfDisplaySummary *out,
                                        char *reason, size_t reason_cap);
+
+/* Parse one DefineEditText (37) payload.  Text/variable overflow is a named
+ * BUDGET refusal, malformed fields are FORMAT, and an unsupported alignment is
+ * NOTIMPL.  `out` is cleared on failure. */
+MenuSwfStatus menu_swf_display_parse_edit_text(
+    const uint8_t *payload, size_t len, MenuSwfEditText *out,
+    char *reason, size_t reason_cap);
+
+/* Walk top-level and nested DefineSprite tags and collect DefineEditText
+ * definitions into caller-owned `list->items`.  Capacity overflow is a named
+ * BUDGET refusal with total/truncated recorded. */
+MenuSwfStatus menu_swf_display_collect_edit_texts(
+    const uint8_t *data, size_t size, MenuSwfEditTextList *list,
+    char *reason, size_t reason_cap);
+
+const MenuSwfEditText *menu_swf_display_find_edit_text(
+    const MenuSwfEditTextList *list, uint16_t character_id);

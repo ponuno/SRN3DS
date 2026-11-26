@@ -1,12 +1,13 @@
 /* Real StartMenu CPU -> COM integration smoke (no GPU/frame claim).
  *
  * The first flattened display-list frame is tessellated record by record.  An
- * unmasked shape becomes transformed triangle-list geometry; sprite, mask,
- * DefineEditText and unknown character records are counted and skipped.  One
- * real DefineFont3 glyph (!) is rasterised, packed beside a white A8 texel and
- * appended as a text quad.  The combined indexed batch is submitted through
- * d3d9_menu_text in bounded DrawPrimitiveUP chunks.  Fill styles/gradients,
- * masks, AVM and visual equivalence are deliberately outside this smoke.
+ * unmasked shape becomes transformed triangle-list geometry.  DefineEditText
+ * records are parsed and their plain sources counted; unavailable imported
+ * fonts are named refusals rather than substituted.  One local DefineFont3
+ * glyph (!) remains as a raster/atlas/batch/COM control beside a white A8
+ * texel.  The combined indexed batch is submitted through d3d9_menu_text in
+ * bounded DrawPrimitiveUP chunks.  Fill styles/gradients, masks, AVM and visual
+ * equivalence are deliberately outside this smoke.
  */
 
 #include "bsa_reader.h"
@@ -29,7 +30,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define E2E_MAX_TEXT_IDS 256u
 #define E2E_MAX_BATCH_VERTICES 262144u
 #define E2E_MAX_BATCH_INDICES 786432u
 #define E2E_DRAW_MAX_INDICES 4095u /* 1,365 triangles, d3d9_menu_text limit */
@@ -49,95 +49,6 @@ static void check(int condition, const char *what) {
     if (!condition) {
         ++failures;
         printf("FAIL: %s\n", what);
-    }
-}
-
-static uint16_t get_u16(const uint8_t *p) {
-    return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
-}
-
-static uint32_t get_u32(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-typedef struct {
-    uint16_t ids[E2E_MAX_TEXT_IDS];
-    uint32_t id_count;
-    uint32_t definitions;
-    uint32_t tags;
-    char *reason;
-    size_t reason_cap;
-} EditTextScan;
-
-static MenuSwfStatus scan_fail(EditTextScan *s, MenuSwfStatus status,
-                               const char *why) {
-    if (s->reason && s->reason_cap)
-        snprintf(s->reason, s->reason_cap, "swf edit-text scan: %s", why);
-    return status;
-}
-
-static int edit_text_has_id(const EditTextScan *s, uint16_t id) {
-    for (uint32_t i = 0; i < s->id_count; ++i)
-        if (s->ids[i] == id) return 1;
-    return 0;
-}
-
-static MenuSwfStatus scan_tag_stream(EditTextScan *s, const uint8_t *p,
-                                     size_t len, unsigned depth) {
-    if (depth > MENU_SWF_MAX_SPRITE_DEPTH)
-        return scan_fail(s, MENU_SWF_ERR_BUDGET, "sprite depth exceeded");
-    size_t off = 0;
-    for (;;) {
-        if (off >= len)
-            return scan_fail(s, MENU_SWF_ERR_END, "missing End tag");
-        if (len - off < 2)
-            return scan_fail(s, MENU_SWF_ERR_TRUNCATED, "short tag header");
-        uint16_t header = get_u16(p + off);
-        off += 2;
-        unsigned code = header >> 6;
-        uint32_t payload_len = header & 0x3fu;
-        if (payload_len == 0x3fu) {
-            if (len - off < 4)
-                return scan_fail(s, MENU_SWF_ERR_TRUNCATED,
-                                 "short long tag header");
-            payload_len = get_u32(p + off);
-            off += 4;
-        }
-        if (payload_len > len - off)
-            return scan_fail(s, MENU_SWF_ERR_TRUNCATED,
-                             "tag payload past stream");
-        const uint8_t *payload = p + off;
-        off += payload_len;
-        if (++s->tags > MENU_SWF_MAX_TAGS)
-            return scan_fail(s, MENU_SWF_ERR_BUDGET, "tag limit exceeded");
-
-        if (code == 0) {
-            if (payload_len)
-                return scan_fail(s, MENU_SWF_ERR_FORMAT,
-                                 "nonzero End payload");
-            return MENU_SWF_OK;
-        }
-        if (code == 37) { /* DefineEditText */
-            if (payload_len < 2)
-                return scan_fail(s, MENU_SWF_ERR_FORMAT,
-                                 "short DefineEditText");
-            ++s->definitions;
-            uint16_t id = get_u16(payload);
-            if (!edit_text_has_id(s, id)) {
-                if (s->id_count >= E2E_MAX_TEXT_IDS)
-                    return scan_fail(s, MENU_SWF_ERR_BUDGET,
-                                     "edit-text id limit exceeded");
-                s->ids[s->id_count++] = id;
-            }
-        } else if (code == 39) { /* DefineSprite */
-            if (payload_len < 4)
-                return scan_fail(s, MENU_SWF_ERR_FORMAT,
-                                 "short DefineSprite");
-            MenuSwfStatus st = scan_tag_stream(s, payload + 4,
-                                               payload_len - 4, depth + 1);
-            if (st != MENU_SWF_OK) return st;
-        }
     }
 }
 
@@ -197,6 +108,13 @@ typedef struct {
     uint32_t shape_batch_indices;
     uint32_t text_definitions;
     uint32_t text_ids;
+    uint32_t text_nonempty_definitions;
+    uint32_t text_source_records;
+    uint32_t text_nonempty_records;
+    uint32_t text_source_lines;
+    uint32_t text_source_chars;
+    uint32_t text_refused_records;
+    uint32_t text_refused_font_mask;
     uint32_t avm_tags;
     uint32_t glyph_tess_vertices;
     uint32_t glyph_tess_triangles;
@@ -242,6 +160,13 @@ static uint32_t record_color(const MenuSwfDisplayListRecord *record) {
     uint32_t b = color_channel(record->color.mult[2], record->color.add[2]);
     uint32_t a = color_channel(record->color.mult[3], record->color.add[3]);
     return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+static const MenuSwfFontSummary *find_font(const MenuSwfDisplaySummary *display,
+                                          uint16_t font_id) {
+    for (uint32_t i = 0; i < display->stored_fonts; ++i)
+        if (display->fonts[i].font_id == font_id) return &display->fonts[i];
+    return NULL;
 }
 
 static int append_shape_mesh(const MenuSwfDisplayListRecord *record,
@@ -605,9 +530,9 @@ static void run_com_batch(MenuSwfBatchVertex *vertices, uint32_t vertex_count,
 
     stats->batch_triangles = index_count / 3u;
     printf("real: COM draw_calls=%u expanded_vertices=%u max_draw_vertices=%u "
-           "FVF=0x142 A8=%ux%u\n",
+           "FVF=0x142 A8=%ux%u control_text_quads=%u\n",
            mock.draw_calls, mock.expanded_vertices, mock.max_draw_vertices,
-           E2E_ATLAS_SIZE, E2E_ATLAS_SIZE);
+           E2E_ATLAS_SIZE, E2E_ATLAS_SIZE, stats->text_quads);
 
 done_demo:
     check(!d9_com_demo_destroy(&demo), "COM demo destroy");
@@ -672,12 +597,16 @@ static void run_real(const char *data_dir) {
         MENU_SWF_DISPLAY_LIST_MAX_RECORDS, sizeof *records);
     MenuSwfShapeResult *shapes = calloc(1, sizeof *shapes);
     MenuSwfDisplaySummary *display = calloc(1, sizeof *display);
+    MenuSwfEditText *edit_items = calloc(MENU_SWF_DISPLAY_MAX_EDIT_TEXTS,
+                                         sizeof *edit_items);
     MenuSwfBatchVertex *batch_vertices = malloc(
         E2E_MAX_BATCH_VERTICES * sizeof *batch_vertices);
     uint32_t *batch_indices = malloc(E2E_MAX_BATCH_INDICES * sizeof *batch_indices);
-    check(records && shapes && display && batch_vertices && batch_indices,
+    check(records && shapes && display && edit_items && batch_vertices &&
+              batch_indices,
           "real pipeline buffer allocation");
-    if (!records || !shapes || !display || !batch_vertices || !batch_indices)
+    if (!records || !shapes || !display || !edit_items || !batch_vertices ||
+        !batch_indices)
         goto done;
 
     MenuSwfDisplayListResult list_result;
@@ -714,21 +643,14 @@ static void run_real(const char *data_dir) {
         goto done;
     }
 
-    EditTextScan edit_texts;
-    memset(&edit_texts, 0, sizeof edit_texts);
-    edit_texts.reason = reason;
-    edit_texts.reason_cap = sizeof reason;
-    MenuSwfView view;
-    st = menu_swf_view_open(swf, swf_bytes, &view, reason, sizeof reason);
-    check(st == MENU_SWF_OK, "real StartMenu tag view");
-    if (st == MENU_SWF_OK) {
-        st = scan_tag_stream(&edit_texts, view.body + view.tag_offset,
-                             view.body_len - view.tag_offset, 0);
-        menu_swf_view_close(&view);
-    }
-    check(st == MENU_SWF_OK, "real DefineEditText id scan");
+    MenuSwfEditTextList edit_list = {
+        edit_items, MENU_SWF_DISPLAY_MAX_EDIT_TEXTS, 0, 0, 0};
+    st = menu_swf_display_collect_edit_texts(swf, swf_bytes, &edit_list,
+                                             reason, sizeof reason);
+    check(st == MENU_SWF_OK && edit_list.count == 22,
+          "real 22 DefineEditText definitions");
     if (st != MENU_SWF_OK) {
-        printf("real: edit-text scan refused: %s (%s)\n",
+        printf("real: edit-text collect refused: %s (%s)\n",
                menu_swf_status_name(st), reason);
         ++failures;
         goto done;
@@ -739,9 +661,28 @@ static void run_real(const char *data_dir) {
     stats.records = list_result.record_count;
     stats.sprites = list_result.sprite_count;
     stats.shape_definitions = shapes->shape_total;
-    stats.text_definitions = edit_texts.definitions;
-    stats.text_ids = edit_texts.id_count;
+    stats.text_definitions = edit_list.total;
+    stats.text_ids = edit_list.count;
     stats.avm_tags = summary.do_action;
+
+    char plain[MENU_SWF_TEXT_MAX_CHARS + 1];
+    for (uint32_t i = 0; i < edit_list.count; ++i) {
+        size_t len = 0;
+        st = menu_swf_text_edit_plain(&edit_items[i], plain, sizeof plain,
+                                      &len, reason, sizeof reason);
+        if (st != MENU_SWF_OK) {
+            printf("real: edit id=%u plain refused: %s (%s)\n",
+                   edit_items[i].character_id, menu_swf_status_name(st),
+                   reason);
+            ++failures;
+            goto done;
+        }
+        if (len) {
+            ++stats.text_nonempty_definitions;
+            printf("real: edit_source id=%u chars=%u text='%.*s'\n",
+                   edit_items[i].character_id, (unsigned)len, (int)len, plain);
+        }
+    }
 
     uint32_t vertex_count = 0, index_count = 0;
     int cpu_ok = 1;
@@ -785,8 +726,34 @@ static void run_real(const char *data_dir) {
                 cpu_ok = 0;
                 break;
             }
-        } else if (edit_text_has_id(&edit_texts, record->character_id)) {
+        } else if (menu_swf_display_find_edit_text(&edit_list,
+                                                    record->character_id)) {
             ++stats.text_records;
+            ++stats.text_source_records;
+            const MenuSwfEditText *edit = menu_swf_display_find_edit_text(
+                &edit_list, record->character_id);
+            size_t len = 0;
+            st = menu_swf_text_edit_plain(edit, plain, sizeof plain, &len,
+                                          reason, sizeof reason);
+            if (st != MENU_SWF_OK) {
+                printf("real: record=%u edit=%u plain refused: %s (%s)\n",
+                       i, record->character_id, menu_swf_status_name(st),
+                       reason);
+                ++failures;
+                cpu_ok = 0;
+                break;
+            }
+            if (len) {
+                ++stats.text_nonempty_records;
+                ++stats.text_source_lines;
+                for (size_t j = 0; j < len; ++j)
+                    if (plain[j] == '\n') ++stats.text_source_lines;
+                stats.text_source_chars += (uint32_t)len;
+            }
+            if (!find_font(display, edit->font_id)) {
+                ++stats.text_refused_records;
+                stats.text_refused_font_mask |= 1u << (edit->font_id & 31u);
+            }
         } else {
             ++stats.unsupported_records;
         }
@@ -797,6 +764,14 @@ static void run_real(const char *data_dir) {
           "every display-list record classified exactly once");
     check(stats.shape_records > 0 && stats.tess_triangles > 0,
           "real shape records produced geometry");
+    check(stats.text_records == 57 && stats.text_source_records == 57 &&
+              stats.text_nonempty_definitions == 3 &&
+              stats.text_nonempty_records == 3 &&
+              stats.text_source_lines == 3 && stats.text_source_chars == 72 &&
+              stats.text_refused_records == 57 &&
+              (stats.text_refused_font_mask & (1u << 2)) &&
+              (stats.text_refused_font_mask & (1u << 9)),
+          "real edit-text sources counted and imported fonts refused by name");
     if (!cpu_ok) goto done;
 
     const MenuSwfFontSummary *font = NULL;
@@ -981,9 +956,17 @@ static void run_real(const char *data_dir) {
            stats.shape_definitions, stats.shape_records, stats.text_records,
            stats.mask_records, stats.unsupported_records);
     printf("real: edit_text_definitions=%u edit_text_ids=%u "
-           "empty_shapes=%u degenerate_shapes=%u strokes_skipped=%u\n",
-           stats.text_definitions, stats.text_ids, stats.empty_shape_records,
-           stats.degenerate_shape_records, stats.stroke_segments);
+           "nonempty_definitions=%u source_records=%u nonempty_records=%u "
+           "source_lines=%u source_glyph_slots=%u refused_records=%u "
+           "refused_font_mask=%08x resolved_text_glyphs=0\n",
+           stats.text_definitions, stats.text_ids,
+           stats.text_nonempty_definitions, stats.text_source_records,
+           stats.text_nonempty_records, stats.text_source_lines,
+           stats.text_source_chars, stats.text_refused_records,
+           stats.text_refused_font_mask);
+    printf("real: empty_shapes=%u degenerate_shapes=%u strokes_skipped=%u\n",
+           stats.empty_shape_records, stats.degenerate_shape_records,
+           stats.stroke_segments);
     printf("real: tessellated_vertices=%u triangles=%u "
            "shape_batch_vertices=%u shape_batch_indices=%u\n",
            stats.tess_vertices, stats.tess_triangles,
@@ -1009,6 +992,7 @@ done:
     free(batch_indices);
     free(batch_vertices);
     free(display);
+    free(edit_items);
     free(shapes);
     free(records);
     free(swf);

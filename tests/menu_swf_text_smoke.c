@@ -250,10 +250,105 @@ static size_t make_swf(uint8_t *out, size_t cap, const uint8_t *payload,
     return 8 + at;
 }
 
+static size_t put_tag(uint8_t *out, size_t cap, size_t at, unsigned code,
+                      const uint8_t *payload, uint32_t len) {
+    int long_form = len >= 0x3f;
+    size_t need = 2 + (long_form ? 4 : 0) + len;
+    if (at > cap || need > cap - at) return 0;
+    put_u16(out + at, (uint16_t)((code << 6) | (long_form ? 0x3fu : len)));
+    at += 2;
+    if (long_form) {
+        put_u32(out + at, len);
+        at += 4;
+    }
+    if (len) memcpy(out + at, payload, len);
+    return at + len;
+}
+
+static size_t make_edit_swf(uint8_t *out, size_t cap,
+                            const uint8_t *font, uint32_t font_len,
+                            const uint8_t *edit, uint32_t edit_len) {
+    uint8_t body[8192];
+    size_t at = 0;
+    body[at++] = 0;
+    put_u16(body + at, 0x1e00);
+    at += 2;
+    put_u16(body + at, 1);
+    at += 2;
+    at = put_tag(body, sizeof body, at, 75, font, font_len);
+    at = put_tag(body, sizeof body, at, 37, edit, edit_len);
+    at = put_tag(body, sizeof body, at, 0, NULL, 0);
+    if (!at || cap < 8 + at) return 0;
+    memcpy(out, "FWS", 3);
+    out[3] = 10;
+    put_u32(out + 4, (uint32_t)(8 + at));
+    memcpy(out + 8, body, at);
+    return 8 + at;
+}
+
+static size_t build_edit_payload(uint8_t *out, size_t cap, uint16_t id,
+                                 uint16_t flags, uint16_t font_id,
+                                 uint16_t font_height, uint8_t align,
+                                 uint16_t left, uint16_t right,
+                                 int16_t indent, int16_t leading,
+                                 int32_t xmin, int32_t xmax,
+                                 int32_t ymin, int32_t ymax,
+                                 const char *variable, const char *text) {
+    uint8_t rect[32];
+    size_t n = rect_bytes(rect, sizeof rect, xmin, xmax, ymin, ymax);
+    if (!n || cap < 2 + n + 2 + 32 + strlen(variable) + 1 +
+                      (text ? strlen(text) + 1 : 0))
+        return 0;
+    size_t at = 0;
+    put_u16(out + at, id);
+    at += 2;
+    memcpy(out + at, rect, n);
+    at += n;
+    put_u16(out + at, flags);
+    at += 2;
+    if (flags & 0x0080u) {
+        put_u16(out + at, font_id);
+        at += 2;
+        put_u16(out + at, font_height);
+        at += 2;
+    }
+    if (flags & 0x0020u) {
+        out[at++] = 0x11;
+        out[at++] = 0x22;
+        out[at++] = 0x33;
+        out[at++] = 0x44;
+    }
+    if (flags & 0x0040u) {
+        put_u16(out + at, 8);
+        at += 2;
+    }
+    if (flags & 0x0100u) {
+        out[at++] = align;
+        put_u16(out + at, left);
+        at += 2;
+        put_u16(out + at, right);
+        at += 2;
+        put_s16(out + at, indent);
+        at += 2;
+        put_s16(out + at, leading);
+        at += 2;
+    }
+    size_t var_len = strlen(variable) + 1;
+    memcpy(out + at, variable, var_len);
+    at += var_len;
+    if (flags & 0x0001u) {
+        size_t text_len = strlen(text) + 1;
+        memcpy(out + at, text, text_len);
+        at += text_len;
+    }
+    return at;
+}
+
 typedef struct {
     MenuSwfTextVertex vertices[8192];
     uint32_t indices[24576];
     MenuSwfTextGlyph glyphs[32];
+    MenuSwfTextLine lines[32];
     MenuSwfTessVertex tvert[8192];
     uint32_t tindices[24576];
     uint16_t tfills[8192];
@@ -271,6 +366,8 @@ static void fixture_init(TextFixture *f, MenuSwfTextMesh *m) {
     m->index_capacity = 24576;
     m->glyphs = f->glyphs;
     m->glyph_capacity = 32;
+    m->lines = f->lines;
+    m->line_capacity = 32;
     m->glyph_tess.vertices = f->tvert;
     m->glyph_tess.vertex_capacity = 8192;
     m->glyph_tess.indices = f->tindices;
@@ -460,6 +557,228 @@ static void test_synthetic(void) {
     free(display);
 }
 
+static void test_edit_text(void) {
+    uint8_t font_tag[2048], edit_tag[2048], file[8192];
+    size_t font_len = build_font_tag(font_tag, sizeof font_tag);
+    uint16_t flags = 0x0001u | 0x0004u | 0x0010u | 0x0020u |
+                     0x0040u | 0x0080u | 0x0100u;
+    size_t edit_len = build_edit_payload(
+        edit_tag, sizeof edit_tag, 7, flags, 1, 400,
+        MENU_SWF_EDIT_TEXT_ALIGN_CENTER, 20, 30, 10, 100,
+        -2000, 2000, -200, 800, "label", "AV A");
+    size_t file_len = make_edit_swf(file, sizeof file, font_tag,
+                                    (uint32_t)font_len, edit_tag,
+                                    (uint32_t)edit_len);
+    check(font_len && edit_len && file_len, "edit-text fixture builds");
+
+    MenuSwfEditText parsed;
+    char reason[BSA_REASON_MAX];
+    MenuSwfStatus st = menu_swf_display_parse_edit_text(
+        edit_tag, edit_len, &parsed, reason, sizeof reason);
+    check(st == MENU_SWF_OK, "DefineEditText parse");
+    check(parsed.character_id == 7 && parsed.flags == flags &&
+              parsed.word_wrap == 0 && parsed.multiline && parsed.read_only &&
+              parsed.has_text_color && parsed.has_max_length && parsed.has_font &&
+              parsed.has_layout && parsed.font_id == 1 &&
+              parsed.font_height == 400 && parsed.max_length == 8,
+          "DefineEditText flags/font/max fields");
+    check(parsed.bounds[0] == -2000 && parsed.bounds[1] == 2000 &&
+              parsed.bounds[2] == -200 && parsed.bounds[3] == 800 &&
+              parsed.alignment == MENU_SWF_EDIT_TEXT_ALIGN_CENTER &&
+              parsed.left_margin == 20 && parsed.right_margin == 30 &&
+              parsed.indent == 10 && parsed.leading == 100 &&
+              !strcmp(parsed.variable_name, "label") &&
+              !strcmp(parsed.initial_text, "AV A"),
+          "DefineEditText bounds/layout/strings");
+
+    MenuSwfEditText items[4];
+    MenuSwfEditTextList list = {items, 4, 0, 0, 0};
+    st = menu_swf_display_collect_edit_texts(file, file_len, &list, reason,
+                                             sizeof reason);
+    check(st == MENU_SWF_OK && list.count == 1 && list.total == 1 &&
+              menu_swf_display_find_edit_text(&list, 7) == &items[0],
+          "DefineEditText caller-owned collector");
+
+    MenuSwfDisplaySummary *display = malloc(sizeof *display);
+    check(display != NULL, "edit display allocation");
+    if (!display) return;
+    st = menu_swf_display_summary(file, file_len, display, reason, sizeof reason);
+    check(st == MENU_SWF_OK && display->stored_fonts == 1,
+          "edit fixture display/font summary");
+    if (st != MENU_SWF_OK) {
+        free(display);
+        return;
+    }
+    const MenuSwfFontSummary *font = &display->fonts[0];
+    static TextFixture fixture;
+    MenuSwfTextMesh mesh;
+    MenuSwfTextStyle style;
+    memset(&style, 0, sizeof style);
+    style.m00 = style.m11 = 8192; /* 0.125 pixels per raw font unit */
+    style.color = 0xff112233u;
+
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &parsed, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && mesh.glyph_count == 4 &&
+              mesh.missing_glyphs == 0 && mesh.line_count == 1 &&
+              mesh.vertex_count == 11 && mesh.triangle_count == 5,
+          "DefineEditText basic layout");
+    check(mesh.lines && mesh.lines[0].glyph_count == 4 &&
+              mesh.lines[0].has_content,
+          "DefineEditText line record");
+
+    MenuSwfEditText wrapped = parsed;
+    wrapped.word_wrap = 1;
+    wrapped.bounds[0] = -1000;
+    wrapped.bounds[1] = 1000;
+    memcpy(wrapped.initial_text, "AV", 3);
+    wrapped.initial_text_length = 2;
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &wrapped, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && mesh.glyph_count == 2 &&
+              mesh.line_count == 2 && mesh.lines[0].glyph_count == 1 &&
+              mesh.lines[1].glyph_count == 1,
+          "DefineEditText WordWrap");
+
+    MenuSwfEditText multiline = parsed;
+    multiline.leading = 100;
+    memcpy(multiline.initial_text, "A\nV", 4);
+    multiline.initial_text_length = 3;
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &multiline, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && mesh.line_count == 2 &&
+              mesh.glyphs[1].y - mesh.glyphs[0].y == 25,
+          "DefineEditText Multiline/leading");
+
+    for (unsigned align = 0; align < 4; ++align) {
+        MenuSwfEditText aligned = parsed;
+        aligned.alignment = (uint8_t)align;
+        aligned.left_margin = aligned.right_margin = aligned.indent = 0;
+        memcpy(aligned.initial_text, "A", 2);
+        aligned.initial_text_length = 1;
+        if (align == MENU_SWF_EDIT_TEXT_ALIGN_JUSTIFY) {
+            memcpy(aligned.initial_text, "A V\nA", 6);
+            aligned.initial_text_length = 5;
+        }
+        fixture_init(&fixture, &mesh);
+        st = menu_swf_text_layout_edit(file, file_len, font, &aligned, &style,
+                                       &mesh, reason, sizeof reason);
+        check(st == MENU_SWF_OK, "DefineEditText alignment layout");
+        if (st == MENU_SWF_OK) {
+            if (align == MENU_SWF_EDIT_TEXT_ALIGN_LEFT)
+                check(mesh.glyphs[0].x == -100, "edit align left");
+            else if (align == MENU_SWF_EDIT_TEXT_ALIGN_RIGHT)
+                check(mesh.glyphs[0].x == 25, "edit align right");
+            else if (align == MENU_SWF_EDIT_TEXT_ALIGN_CENTER)
+                check(mesh.glyphs[0].x == -38, "edit align center");
+            else
+                check(mesh.glyphs[2].x == 25 && mesh.glyphs[3].x == -100,
+                      "edit justify distributes non-final line");
+        }
+    }
+
+    MenuSwfEditText html = parsed;
+    html.html = 1;
+    html.initial_text[0] = 0;
+    html.initial_text_length = 0;
+    strcpy(html.variable_name, "<p>AV</p>");
+    char plain[64];
+    size_t plain_len = 0;
+    st = menu_swf_text_edit_plain(&html, plain, sizeof plain, &plain_len,
+                                  reason, sizeof reason);
+    check(st == MENU_SWF_OK && plain_len == 2 && !memcmp(plain, "AV", 2),
+          "DefineEditText HTML plain extraction");
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &html, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && mesh.glyph_count == 2 &&
+              mesh.glyphs[0].code == 'A' && mesh.glyphs[1].code == 'V',
+          "DefineEditText GFx HTML variable payload");
+
+    MenuSwfEditText empty = parsed;
+    empty.initial_text[0] = 0;
+    empty.initial_text_length = 0;
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &empty, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && mesh.glyph_count == 0 &&
+              mesh.vertex_count == 0 && mesh.line_count == 1 &&
+              mesh.has_bounds && mesh.bounds.xmin == -100 &&
+              mesh.bounds.xmax == 100 && mesh.bounds.ymin == -10 &&
+              mesh.bounds.ymax == 40,
+          "empty DefineEditText keeps bounds/empty rect");
+
+    MenuSwfEditText password = parsed;
+    password.password = 1;
+    memcpy(password.initial_text, "AV", 3);
+    password.initial_text_length = 2;
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &password, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_ERR_NOTIMPL && strstr(reason, "password mask"),
+          "Password without '*' is named NOTIMPL");
+
+    MenuSwfEditText unknown = parsed;
+    unknown.font_id = 99;
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &unknown, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_ERR_ARGUMENT && strstr(reason, "font id"),
+          "unknown DefineEditText font id is named");
+
+    fixture_init(&fixture, &mesh);
+    mesh.glyph_capacity = 0;
+    st = menu_swf_text_layout_edit(file, file_len, font, &parsed, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET && strstr(reason, "glyph capacity"),
+          "DefineEditText glyph overflow is named");
+
+    size_t sentinel_len = build_edit_payload(
+        edit_tag, sizeof edit_tag, 8, 0x0080u | 0x0100u, 1, 400, 0xff,
+        0xffff, 0xffff, 0, 0, -2000, 2000, -200, 800, "x", "");
+    st = menu_swf_display_parse_edit_text(edit_tag, sentinel_len, &parsed,
+                                          reason, sizeof reason);
+    check(st == MENU_SWF_OK &&
+              parsed.alignment == MENU_SWF_EDIT_TEXT_ALIGN_LEFT &&
+              parsed.left_margin == 0 && parsed.right_margin == 0,
+          "retail GFx alignment/margin sentinels normalize");
+
+    size_t bad_align_len = build_edit_payload(
+        edit_tag, sizeof edit_tag, 8, 0x0100u, 1, 400, 4,
+        0, 0, 0, 0, -2000, 2000, -200, 800, "x", "");
+    st = menu_swf_display_parse_edit_text(edit_tag, bad_align_len, &parsed,
+                                          reason, sizeof reason);
+    check(st == MENU_SWF_ERR_NOTIMPL && strstr(reason, "alignment"),
+          "unknown DefineEditText alignment is named");
+
+    char long_variable[320];
+    memset(long_variable, 'v', sizeof long_variable - 1);
+    long_variable[sizeof long_variable - 1] = 0;
+    size_t long_len = build_edit_payload(
+        edit_tag, sizeof edit_tag, 8, 0, 1, 400, 0,
+        0, 0, 0, 0, -2000, 2000, -200, 800, long_variable, "");
+    st = menu_swf_display_parse_edit_text(edit_tag, long_len, &parsed,
+                                          reason, sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET && strstr(reason, "variable name length"),
+          "DefineEditText variable overflow is named");
+
+    st = menu_swf_display_parse_edit_text(edit_tag, sentinel_len - 1, &parsed,
+                                          reason, sizeof reason);
+    check(st == MENU_SWF_ERR_FORMAT, "truncated DefineEditText is named");
+
+    MenuSwfEditTextList no_capacity = {NULL, 0, 0, 0, 0};
+    st = menu_swf_display_collect_edit_texts(file, file_len, &no_capacity,
+                                             reason, sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET && no_capacity.total == 1 &&
+              no_capacity.truncated,
+          "DefineEditText collector capacity overflow is named");
+
+    free(display);
+}
+
 static void test_real(const char *data_dir) {
     const char *archives[2] = {"Update.bsa", "Skyrim - Interface.bsa"};
     char path[1024];
@@ -490,7 +809,20 @@ static void test_real(const char *data_dir) {
         check(bsa_read(archive, &match.entry, bytes, size, &got, reason,
                        sizeof reason) == BSA_OK && got == size,
               "real StartMenu read");
+    BsaMatch font_match;
+    int has_fontlib = bsa_find(archive, "interface/gfxfontlib.swf",
+                               &font_match) == BSA_OK;
+    printf("real: gfxfontlib.swf present=%d\n", has_fontlib);
     bsa_close(archive);
+    BsaArchive *base_archive = NULL;
+    char base_path[1024];
+    snprintf(base_path, sizeof base_path, "%s/Skyrim - Interface.bsa", data_dir);
+    if (bsa_open_path(base_path, NULL, &base_archive, NULL, 0) == BSA_OK) {
+        int base_has_font = bsa_find(base_archive, "interface/gfxfontlib.swf",
+                                     &font_match) == BSA_OK;
+        printf("real: base gfxfontlib.swf present=%d\n", base_has_font);
+        bsa_close(base_archive);
+    }
     if (!bytes) return;
 
     MenuSwfDisplaySummary *display =
@@ -507,6 +839,53 @@ static void test_real(const char *data_dir) {
                                                 sizeof reason);
     check(st == MENU_SWF_OK, "real display summary");
     if (st == MENU_SWF_OK) {
+        MenuSwfSummary import_summary;
+        st = menu_swf_summary(bytes, got, &import_summary, reason, sizeof reason);
+        check(st == MENU_SWF_OK, "real import summary");
+        if (st == MENU_SWF_OK) {
+            for (uint32_t i = 0; i < import_summary.name_count; ++i) {
+                const MenuSwfName *name = &import_summary.names[i];
+                if (name->kind == MENU_SWF_NAME_IMPORT ||
+                    name->kind == MENU_SWF_NAME_IMPORT_URL)
+                    printf("real: import id=%u kind=%u name='%s'\n", name->id,
+                           name->kind, name->name);
+            }
+        }
+        MenuSwfEditText *edit_items = calloc(MENU_SWF_DISPLAY_MAX_EDIT_TEXTS,
+                                             sizeof *edit_items);
+        MenuSwfEditTextList edit_list = {edit_items,
+                                         MENU_SWF_DISPLAY_MAX_EDIT_TEXTS,
+                                         0, 0, 0};
+        check(edit_items != NULL, "real edit-text allocation");
+        if (edit_items) {
+            st = menu_swf_display_collect_edit_texts(
+                bytes, got, &edit_list, reason, sizeof reason);
+            check(st == MENU_SWF_OK && edit_list.count == 22,
+                  "real 22 DefineEditText definitions");
+            if (st == MENU_SWF_OK) {
+                uint32_t nonempty = 0, chars = 0;
+                for (uint32_t i = 0; i < edit_list.count; ++i) {
+                    const MenuSwfEditText *e = &edit_items[i];
+                    if (e->initial_text_length) ++nonempty;
+                    chars += e->initial_text_length;
+                    printf("real: edit id=%u flags=%04x font=%u height=%u "
+                           "bounds=%d,%d,%d,%d align=%u var='%s' len=%u "
+                           "text='%.*s'\n",
+                           e->character_id, e->flags, e->font_id,
+                           e->font_height, e->bounds[0], e->bounds[1],
+                           e->bounds[2], e->bounds[3], e->alignment,
+                           e->variable_name, e->initial_text_length,
+                           (int)e->initial_text_length, e->initial_text);
+                }
+                printf("real: edit_text definitions=%u nonempty=%u chars=%u\n",
+                       edit_list.count, nonempty, chars);
+            } else {
+                printf("real: edit-text collect failed: %s (%s)\n",
+                       menu_swf_status_name(st), reason);
+            }
+        }
+        free(edit_items);
+
         const MenuSwfFontSummary *font = NULL;
         for (uint32_t i = 0; i < display->stored_fonts; ++i)
             if (display->fonts[i].glyph_count == 243) {
@@ -515,6 +894,8 @@ static void test_real(const char *data_dir) {
             }
         check(font != NULL, "real 243-glyph font found");
         if (font) {
+            printf("real: local font id=%u name='%s' glyphs=%u\n",
+                   font->font_id, font->name, font->glyph_count);
             check(font->stored_kerning == 94, "real 94 kerning records");
             char text[8];
             size_t text_len = 0;
@@ -580,6 +961,7 @@ static void test_real(const char *data_dir) {
 int main(int argc, char **argv) {
     printf("menu SWF text tests\n");
     test_synthetic();
+    test_edit_text();
     const char *real = argc > 1 ? argv[1] : getenv("SKYRIM_N3DS_REAL_DATA");
     if (real && real[0]) {
         if (!strcmp(real, "1")) real = "F:\\Skyrim\\Data";

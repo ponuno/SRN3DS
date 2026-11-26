@@ -58,11 +58,13 @@ static int rd_u32(Reader *r, uint32_t *v) {
     return 0;
 }
 
-static int rd_string(Reader *r, char *dst, size_t cap, int *truncated) {
+static int rd_string_measured(Reader *r, char *dst, size_t cap, int *truncated,
+                              uint32_t *actual) {
     size_t start = r->off;
     while (r->off < r->len && r->p[r->off]) ++r->off;
     if (r->off >= r->len) return -1;
     size_t n = r->off - start;
+    if (actual) *actual = (uint32_t)n;
     ++r->off;
     if (n >= cap) {
         n = cap - 1;
@@ -71,6 +73,10 @@ static int rd_string(Reader *r, char *dst, size_t cap, int *truncated) {
     if (n) memcpy(dst, r->p + start, n);
     dst[n] = 0;
     return 0;
+}
+
+static int rd_string(Reader *r, char *dst, size_t cap, int *truncated) {
+    return rd_string_measured(r, dst, cap, truncated, NULL);
 }
 
 static int rd_fixed_name(Reader *r, size_t n, char *dst, size_t cap,
@@ -306,6 +312,156 @@ MenuSwfStatus menu_swf_display_parse_place(const uint8_t *p, size_t len,
         set_reason(reason, reason_cap,
                    "swf: malformed PlaceObject%d tag",
                    tag_code == 70 ? 3 : 2);
+        return MENU_SWF_ERR_FORMAT;
+    }
+    return MENU_SWF_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* DefineEditText                                                      */
+/* ------------------------------------------------------------------ */
+
+/* 0 = parsed, -1 = malformed, -2 = named NOTIMPL, -3 = named BUDGET. */
+static int parse_edit_text(const uint8_t *p, size_t len, MenuSwfEditText *out,
+                           char *reason, size_t reason_cap) {
+    memset(out, 0, sizeof *out);
+    Reader r = {p, len, 0};
+    uint16_t flags;
+    if (rd_u16(&r, &out->character_id)) return -1;
+    Bits b = {p, len, r.off * 8};
+    if (read_rect(&b, out->bounds)) return -1;
+    bt_align(&b);
+    r.off = b.bit / 8;
+    if (rd_u16(&r, &flags)) return -1;
+    if (flags & 0xc000u) return -1; /* reserved DefineEditText flag bits */
+    out->flags = flags;
+    out->has_text = (flags & 0x0001u) != 0;
+    out->word_wrap = (flags & 0x0002u) != 0;
+    out->multiline = (flags & 0x0004u) != 0;
+    out->password = (flags & 0x0008u) != 0;
+    out->read_only = (flags & 0x0010u) != 0;
+    out->has_text_color = (flags & 0x0020u) != 0;
+    out->has_max_length = (flags & 0x0040u) != 0;
+    out->has_font = (flags & 0x0080u) != 0;
+    out->has_layout = (flags & 0x0100u) != 0;
+    out->no_select = (flags & 0x0200u) != 0;
+    out->has_border = (flags & 0x0400u) != 0;
+    out->was_static = (flags & 0x0800u) != 0;
+    out->html = (flags & 0x1000u) != 0;
+    out->use_outlines = (flags & 0x2000u) != 0;
+
+    if (out->has_font &&
+        (rd_u16(&r, &out->font_id) || rd_u16(&r, &out->font_height)))
+        return -1;
+    if (out->has_text_color) {
+        for (unsigned i = 0; i < 4; ++i)
+            if (rd_u8(&r, &out->color[i])) return -1;
+    } else {
+        out->color[0] = out->color[1] = out->color[2] = out->color[3] = 255;
+    }
+    if (out->has_max_length && rd_u16(&r, &out->max_length)) return -1;
+    if (out->has_layout) {
+        uint16_t left, right;
+        int16_t indent, leading;
+        if (rd_u8(&r, &out->alignment) || rd_u16(&r, &left) ||
+            rd_u16(&r, &right) || rd_s16(&r, &indent) ||
+            rd_s16(&r, &leading))
+            return -1;
+        /* Retail GFx writes 0xff/0xffff for default alignment/margins. */
+        if (out->alignment == 0xffu) out->alignment = MENU_SWF_EDIT_TEXT_ALIGN_LEFT;
+        if (left == 0xffffu) left = 0;
+        if (right == 0xffffu) right = 0;
+        out->left_margin = left;
+        out->right_margin = right;
+        out->indent = indent;
+        out->leading = leading;
+        if (out->alignment > MENU_SWF_EDIT_TEXT_ALIGN_JUSTIFY) return -2;
+    }
+
+    int truncated = 0;
+    uint32_t actual = 0;
+    if (rd_string_measured(&r, out->variable_name,
+                           sizeof out->variable_name, &truncated, &actual)) {
+        set_reason(reason, reason_cap,
+                   "swf: DefineEditText id %u variable string at %u has no NUL",
+                   out->character_id, (unsigned)r.off);
+        return -1;
+    }
+    if (truncated) {
+        set_reason(reason, reason_cap,
+                   "swf: DefineEditText id %u variable name length %u exceeds %u",
+                   out->character_id, actual,
+                   (unsigned)sizeof out->variable_name);
+        return -3;
+    }
+    if (out->has_text) {
+        if (r.off == r.len) {
+            out->initial_text_length = 0;
+            out->initial_text[0] = 0;
+        } else {
+            size_t initial_start = r.off;
+            if (rd_string_measured(&r, out->initial_text,
+                                   sizeof out->initial_text, &truncated,
+                                   &actual)) {
+                set_reason(reason, reason_cap,
+                           "swf: DefineEditText id %u initial string at %u/%u "
+                           "has no NUL (bytes %02x %02x %02x %02x %02x %02x %02x %02x)",
+                           out->character_id, (unsigned)initial_start,
+                           (unsigned)r.len,
+                           initial_start < r.len ? p[initial_start] : 0,
+                           initial_start + 1 < r.len ? p[initial_start + 1] : 0,
+                           initial_start + 2 < r.len ? p[initial_start + 2] : 0,
+                           initial_start + 3 < r.len ? p[initial_start + 3] : 0,
+                           initial_start + 4 < r.len ? p[initial_start + 4] : 0,
+                           initial_start + 5 < r.len ? p[initial_start + 5] : 0,
+                           initial_start + 6 < r.len ? p[initial_start + 6] : 0,
+                           initial_start + 7 < r.len ? p[initial_start + 7] : 0);
+                return -1;
+            }
+            if (truncated) {
+                set_reason(reason, reason_cap,
+                           "swf: DefineEditText id %u initial text length %u exceeds %u",
+                           out->character_id, actual,
+                           (unsigned)sizeof out->initial_text);
+                return -3;
+            }
+            out->initial_text_length = actual;
+        }
+    }
+    if (r.off != r.len) out->trailing_bytes = (uint32_t)(r.len - r.off);
+    return 0;
+}
+
+MenuSwfStatus menu_swf_display_parse_edit_text(
+    const uint8_t *payload, size_t len, MenuSwfEditText *out,
+    char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!payload || !out) return MENU_SWF_ERR_ARGUMENT;
+    memset(out, 0, sizeof *out);
+    int rc = parse_edit_text(payload, len, out, reason, reason_cap);
+    if (rc == -2) {
+        set_reason(reason, reason_cap,
+                   "swf: DefineEditText id %u flags=%04x font=%u height=%u "
+                   "alignment=%u margins=%d/%d indent=%d leading=%d",
+                   out->character_id, out->flags, out->font_id,
+                   out->font_height, out->alignment, out->left_margin,
+                   out->right_margin, out->indent, out->leading);
+        memset(out, 0, sizeof *out);
+        return MENU_SWF_ERR_NOTIMPL;
+    }
+    if (rc == -3) {
+        if (!reason || !reason[0])
+            set_reason(reason, reason_cap,
+                       "swf: DefineEditText variable/text exceeds bounded storage");
+        memset(out, 0, sizeof *out);
+        return MENU_SWF_ERR_BUDGET;
+    }
+    if (rc) {
+        if (!reason || !reason[0])
+            set_reason(reason, reason_cap,
+                       "swf: malformed DefineEditText id %u tag",
+                       out->character_id);
+        memset(out, 0, sizeof *out);
         return MENU_SWF_ERR_FORMAT;
     }
     return MENU_SWF_OK;
@@ -633,6 +789,7 @@ typedef struct {
 
 typedef struct {
     MenuSwfDisplaySummary *out;
+    MenuSwfEditTextList *edit_texts;
     uint32_t tags_seen;
     SpritePayload sprite_payloads[MENU_SWF_DISPLAY_MAX_SPRITES];
 } ParseContext;
@@ -696,6 +853,31 @@ static MenuSwfStatus parse_display_stream(ParseContext *ctx, const uint8_t *p,
         }
         if (code == 1) {
             builder_show(b);
+        } else if (code == 37) {
+            if (ctx->edit_texts) {
+                MenuSwfEditTextList *list = ctx->edit_texts;
+                ++list->total;
+                if (list->count >= list->capacity) {
+                    list->truncated = 1;
+                    set_reason(reason, reason_cap,
+                               "swf display: DefineEditText capacity %u exceeded",
+                               list->capacity);
+                    return MENU_SWF_ERR_BUDGET;
+                }
+                MenuSwfEditText item;
+                MenuSwfStatus est = menu_swf_display_parse_edit_text(
+                    payload, tlen, &item, reason, reason_cap);
+                if (est != MENU_SWF_OK) return est;
+                for (uint32_t i = 0; i < list->count; ++i) {
+                    if (list->items[i].character_id == item.character_id) {
+                        set_reason(reason, reason_cap,
+                                   "swf display: duplicate DefineEditText id %u",
+                                   item.character_id);
+                        return MENU_SWF_ERR_FORMAT;
+                    }
+                }
+                list->items[list->count++] = item;
+            }
         } else if (code == 26) {
             MenuSwfDisplayObject obj;
             if (parse_place2(payload, tlen, &obj) ||
@@ -767,6 +949,17 @@ static MenuSwfStatus parse_display_stream(ParseContext *ctx, const uint8_t *p,
                 } else {
                     out->truncated = 1;
                 }
+            } else if (ctx->edit_texts) {
+                if (depth >= MENU_SWF_DISPLAY_SPRITE_DEPTH) {
+                    set_reason(reason, reason_cap,
+                               "swf display: DefineSprite nesting exceeds %u",
+                               MENU_SWF_DISPLAY_SPRITE_DEPTH);
+                    return MENU_SWF_ERR_TAG;
+                }
+                MenuSwfStatus st = parse_sprite_body(
+                    ctx, payload, tlen, depth, 0, collect_fonts, NULL, NULL,
+                    reason, reason_cap);
+                if (st != MENU_SWF_OK) return st;
             }
         } else if (code == 75 || code == 48) {
             if (collect_fonts) {
@@ -893,4 +1086,39 @@ MenuSwfStatus menu_swf_display_summary(const uint8_t *data, size_t size,
 
     menu_swf_view_close(&view);
     return MENU_SWF_OK;
+}
+
+MenuSwfStatus menu_swf_display_collect_edit_texts(
+    const uint8_t *data, size_t size, MenuSwfEditTextList *list,
+    char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!list || (list->capacity && !list->items))
+        return MENU_SWF_ERR_ARGUMENT;
+    list->count = 0;
+    list->total = 0;
+    list->truncated = 0;
+
+    MenuSwfView view;
+    MenuSwfStatus st = menu_swf_view_open(data, size, &view, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
+
+    ParseContext ctx;
+    memset(&ctx, 0, sizeof ctx);
+    ctx.edit_texts = list;
+    DisplayBuilder top;
+    memset(&top, 0, sizeof top);
+    st = parse_display_stream(&ctx, view.body + view.tag_offset,
+                              view.body_len - view.tag_offset, 0, &top, 0, 0,
+                              reason, reason_cap);
+    menu_swf_view_close(&view);
+    return st;
+}
+
+const MenuSwfEditText *menu_swf_display_find_edit_text(
+    const MenuSwfEditTextList *list, uint16_t character_id) {
+    if (!list || !list->items) return NULL;
+    uint32_t count = list->count < list->capacity ? list->count : list->capacity;
+    for (uint32_t i = 0; i < count; ++i)
+        if (list->items[i].character_id == character_id) return &list->items[i];
+    return NULL;
 }

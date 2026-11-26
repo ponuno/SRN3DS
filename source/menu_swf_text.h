@@ -1,12 +1,14 @@
 #pragma once
-/* Bounded DefineFont3/2 glyph tessellation and simple Latin-1 text layout.
+/* Bounded DefineFont3/2 glyph tessellation, Latin-1 text layout and
+ * DefineEditText field layout.
  *
  * A string is laid out with per-glyph advances and kerning from the caller's
  * MenuSwfFontSummary.  Each glyph's SHAPE is tessellated through
  * menu_swf_tess_glyph() in raw font units, then transformed into the caller's
- * output buffers.  Positions, per-glyph triangle ranges, per-vertex ARGB
- * colours and bounds are returned.  There is no rasterisation, atlas, shaping
- * beyond advance+kerning, bidi, or frame.
+ * output buffers.  DefineEditText adds WordWrap/Multiline/alignment/Justify,
+ * margins/indent/leading, Password masking and bounded HTML plain extraction.
+ * There is no rasterisation, atlas, rich-text spans, shaping beyond
+ * advance+kerning, bidi, or frame.
  *
  * Font3 coordinates and advances are in 20x font units; Font2 uses 1x units.
  * The 16.16 matrix in MenuSwfTextStyle is the caller's unit conversion (for
@@ -24,6 +26,7 @@
 #define MENU_SWF_TEXT_MAX_VERTICES 262144u
 #define MENU_SWF_TEXT_MAX_INDICES 786432u
 #define MENU_SWF_TEXT_MAX_TRIANGLES 262144u
+#define MENU_SWF_TEXT_MAX_LINES 256u
 #define MENU_SWF_TEXT_MISSING_GLYPH 0xffffu
 
 typedef struct {
@@ -45,12 +48,19 @@ typedef struct {
     MenuSwfShapeRect bounds;
     uint8_t has_geometry;
     uint8_t missing;
+    uint16_t line_index;
 } MenuSwfTextGlyph;
 
 typedef struct {
     int32_t x, y; /* transformed output units */
     uint32_t color;
 } MenuSwfTextVertex;
+
+typedef struct {
+    int32_t x, y, width, height;
+    uint32_t glyph_first, glyph_count;
+    uint8_t has_content;
+} MenuSwfTextLine;
 
 typedef struct {
     /* Caller output buffers.  A NULL pointer is allowed only with zero
@@ -62,6 +72,10 @@ typedef struct {
     MenuSwfTextGlyph *glyphs;
     uint32_t glyph_capacity;
 
+    /* Optional caller-owned line records for edit-text layout. */
+    MenuSwfTextLine *lines;
+    uint32_t line_capacity;
+
     /* Caller scratch for one glyph.  The caller fills the buffers/capacities
      * exactly as for menu_swf_tess_shape(); its output counts are reset. */
     MenuSwfTessMesh glyph_tess;
@@ -71,6 +85,7 @@ typedef struct {
     uint32_t index_count;
     uint32_t triangle_count;
     uint32_t glyph_count;
+    uint32_t line_count;
     uint32_t missing_glyphs;
     int32_t pen_x, pen_y; /* raw font-unit pen after the last advance */
     MenuSwfShapeRect bounds;
@@ -94,3 +109,22 @@ MenuSwfStatus menu_swf_text_layout(const uint8_t *data, size_t size,
                                    const MenuSwfTextStyle *style,
                                    MenuSwfTextMesh *out, char *reason,
                                    size_t reason_cap);
+
+/* Lay out one DefineEditText in local pixel coordinates.  `style` maps raw
+ * font units to pixels and must be axis-aligned/positive.  WordWrap uses the
+ * edit bounds/margins, explicit newlines require Multiline, alignment and
+ * first-line indent/leading are applied, and Justify distributes extra space
+ * after spaces on non-final lines.  Password fields display '*' when the font
+ * provides it, otherwise NOTIMPL.  Retail GFx HTML payloads stored in the
+ * variable-name slot are stripped to bounded plain text.  Empty text keeps the
+ * transformed edit bounds and emits one empty line/zero glyphs. */
+MenuSwfStatus menu_swf_text_layout_edit(
+    const uint8_t *data, size_t size, const MenuSwfFontSummary *font,
+    const MenuSwfEditText *edit, const MenuSwfTextStyle *style,
+    MenuSwfTextMesh *out, char *reason, size_t reason_cap);
+
+/* Extract the bounded plain source used by edit layout (including the measured
+ * GFx HTML-in-variable-name convention).  No font is required. */
+MenuSwfStatus menu_swf_text_edit_plain(
+    const MenuSwfEditText *edit, char *dst, size_t capacity, size_t *out_len,
+    char *reason, size_t reason_cap);
