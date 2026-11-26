@@ -1297,6 +1297,33 @@ static int path_for_impl(const char *name,char *out,size_t cap) {
     const char *relative=name;
     const char *base=cwd;
     int virtual_root=0;
+    /* Guest code may already hand back an SD path (and mixes separators when
+     * it joins the configured root): sdmc:/Skyrim\DATA\... .  Treat that as
+     * the sandbox root, not as an arbitrary component with a colon. */
+    if(name && (name[0]=='s'||name[0]=='S') && (name[1]=='d'||name[1]=='D') &&
+       (name[2]=='m'||name[2]=='M') && (name[3]=='c'||name[3]=='C') &&
+       name[4]==':' && (name[5]=='/'||name[5]=='\\')) {
+        const char *p=name+6;
+        /* Drop an optional leading "Skyrim\" component so sdmc:/Skyrim\DATA
+         * does not become sdmc:/Skyrim/Skyrim/DATA. */
+        {
+            const char *word="skyrim";
+            unsigned k;
+            for(k=0;k<6;++k){
+                char ch=p[k];
+                if(!ch)break;
+                if(ch>='A'&&ch<='Z')ch=(char)(ch+('a'-'A'));
+                if(ch!=word[k])break;
+            }
+            if(k==6&&(p[6]==0||p[6]=='/'||p[6]=='\\')){
+                p+=6;
+                if(*p)++p;
+            }
+        }
+        relative=*p?p:".";
+        base=root;
+        virtual_root=1;
+    }
     if(name && ((name[0]>='A'&&name[0]<='Z')||(name[0]>='a'&&name[0]<='z')) &&
        name[1]==':' && (name[2]=='\\'||name[2]=='/')) {
         const char *p=name+3;
