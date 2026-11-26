@@ -136,6 +136,119 @@ static void host_sleep_ms(uint32_t ms) {
 #endif
 }
 
+/* ---- hang watchdog (diagnostic, off by default) ------------------------- */
+/* Progress is a scheduler event, not a guest instruction: a cooperative spin
+ * inside one lifted function keeps executing code but never yields, sleeps or
+ * calls a shim, so wall-clock since the last switch is the honest signal. */
+static volatile uint64_t g_activity_ms;
+static volatile int g_watchdog_running;
+static volatile int g_watchdog_armed;
+static unsigned g_watchdog_ms;
+static void activity(void) { g_activity_ms = win32_thread_now_ms(); }
+
+static const char *state_name(unsigned s) {
+    switch (s) {
+    case ST_FREE: return "free";
+    case ST_READY: return "ready";
+    case ST_RUNNING: return "running";
+    case ST_BLOCKED: return "blocked";
+    case ST_EXITED: return "exited";
+    default: return "?";
+    }
+}
+static void dump_thread(const char *role, W32Thread *t) {
+    if (!t || t->state == ST_FREE) return;
+    fprintf(stderr, "[hang] %s id=%lu state=%s handle=%03x start=%08x "
+                    "esp=%08x ebp=%08x eax=%08x ebx=%08x ecx=%08x edx=%08x "
+                    "esi=%08x edi=%08x irc_depth=%lu",
+            role, (unsigned long)t->id, state_name(t->state), (unsigned)t->handle,
+            (unsigned)t->start, (unsigned)t->cpu.r[4], (unsigned)t->cpu.r[5],
+            (unsigned)t->cpu.r[0], (unsigned)t->cpu.r[3], (unsigned)t->cpu.r[1],
+            (unsigned)t->cpu.r[2], (unsigned)t->cpu.r[6], (unsigned)t->cpu.r[7],
+            (unsigned long)t->rt.irc_depth);
+    if (t->state == ST_BLOCKED) {
+        fprintf(stderr, " wait_n=%u all=%d timed=%u status=%d wait=",
+                t->wait_n, t->wait_all, (unsigned)t->timed, t->wait_status);
+        for (unsigned k = 0; k < t->wait_n; ++k)
+            fprintf(stderr, "%s%03x", k ? "," : "", (unsigned)t->wait_h[k]);
+    }
+    fputc('\n', stderr);
+    uint32_t esp = t->cpu.r[4];
+    if (!mem || !esp) return;
+    uint32_t raw[8] = {0};
+    for (unsigned k = 0; k < 8; ++k) (void)guest_read32(mem, esp + 4 * k, &raw[k]);
+    fprintf(stderr, "[hang]   stack[%08x..]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+            (unsigned)esp, (unsigned)raw[0], (unsigned)raw[1], (unsigned)raw[2],
+            (unsigned)raw[3], (unsigned)raw[4], (unsigned)raw[5], (unsigned)raw[6],
+            (unsigned)raw[7]);
+    unsigned shown = 0;
+    fprintf(stderr, "[hang]   image ret:");
+    for (unsigned k = 0; k < 128 && shown < 16; ++k) {
+        uint32_t v = 0;
+        if (guest_read32(mem, esp + 4 * k, &v)) break;
+        if (v >= 0x00400000u && v < 0x0106a310u) {
+            fprintf(stderr, " [%08x]=%08x", (unsigned)(esp + 4 * k), (unsigned)v);
+            ++shown;
+        }
+    }
+    fputc('\n', stderr);
+}
+static void hang_dump(unsigned elapsed) {
+    fprintf(stderr, "[hang] Guest hang: no scheduling progress for %lu ms "
+                    "(TESV_HANG_WATCHDOG_MS=%u); dumping every guest thread\n",
+            (unsigned long)elapsed, g_watchdog_ms);
+    fprintf(stderr, "[hang] current=%lu last_call=%08x ir_ip=%08x live_threads=%u\n",
+            (unsigned long)(cur ? cur->id : 0), (unsigned)n3ds_lift_last_call(),
+            (unsigned)n3ds_lift_current_ip(), win32_thread_live_count());
+    if (scheduler_up) dump_thread("main", &main_thread);
+    for (unsigned i = 0; i < MAX_THREADS; ++i)
+        if (threads[i].state != ST_FREE) dump_thread("thread", &threads[i]);
+    n3ds_lift_dump_recent_calls(stderr);
+    win32_sync_dump(stderr);
+    win32_cs_dump(stderr);
+    win32_icx_dump(stderr);
+    fflush(stderr);
+}
+#ifdef _WIN32
+static DWORD WINAPI watchdog_proc(LPVOID unused) {
+    (void)unused;
+    for (;;) {
+        Sleep(50);
+        uint64_t now = win32_thread_now_ms();
+        uint64_t last = g_activity_ms;
+        if (g_watchdog_armed && now - last > g_watchdog_ms) {
+            hang_dump((unsigned)(now - last));
+            fprintf(stderr, "[hang] watchdog aborting the run (diagnostic only)\n");
+            fflush(stderr);
+            ExitProcess(70);
+        }
+    }
+}
+#endif
+static void watchdog_start(void) {
+    if (g_watchdog_running) return;
+    const char *v = getenv("TESV_HANG_WATCHDOG_MS");
+    if (!v || !*v) return;
+    unsigned long ms = strtoul(v, NULL, 0);
+    if (!ms) return;
+    g_watchdog_ms = ms > 3600000ul ? 3600000u : (unsigned)ms;
+    g_watchdog_running = 1;
+    activity();
+#ifdef _WIN32
+    HANDLE h = CreateThread(NULL, 0, watchdog_proc, NULL, 0, NULL);
+    if (h) CloseHandle(h);
+#else
+    fprintf(stderr, "[hang] TESV_HANG_WATCHDOG_MS is host-only; not started\n");
+#endif
+}
+/* Arm after the first real Present: loading has legitimate long gaps between
+ * scheduler events, while the menu loop after Present must keep presenting. */
+void n3ds_hang_watchdog_arm(void) {
+    if (!g_watchdog_running || g_watchdog_armed) return;
+    activity();
+    g_watchdog_armed = 1;
+}
+
 /* ---- ready queue ------------------------------------------------------- */
 static void enqueue(W32Thread *t) {
     if (!t || t->state == ST_FREE || t->state == ST_EXITED) return;
@@ -170,6 +283,7 @@ static int trace_on(void) { static int v = -1; if (v < 0) v = getenv("THREAD_TRA
 static void switch_to(W32Thread *n) {
     W32Thread *prev = cur;
     if (!n || !prev) abort();
+    activity();
     SCHED_TR("[sched] %u(%d,%llu) -> %u(%d,%llu)\n", prev->id, prev->state,
              (unsigned long long)prev->ready_seq, n->id, n->state,
              (unsigned long long)n->ready_seq);
@@ -242,6 +356,7 @@ static int block_current(const uint32_t *handles, unsigned count, int wait_all,
                          uint32_t timeout_ms) {
     W32Thread *t = cur;
     if (!t) return WAIT_NO_SCHED;
+    activity();
     if (t->suspends) return WAIT_DEADLOCK; /* cannot be resumed while blocked */
     if (count > MAX_WAIT) count = MAX_WAIT;
     memset(t->wait_h, 0, sizeof t->wait_h);
@@ -284,6 +399,7 @@ static int block_current(const uint32_t *handles, unsigned count, int wait_all,
     if (st == -1) st = WAIT_SIGNALED;
     if (st == WAIT_DEADLOCK) deadlock_self = t;
     else t->wait_n = 0;
+    activity();
     return st;
 }
 
@@ -300,6 +416,7 @@ const char *win32_thread_deadlock_text(void) {
 
 /* ---- public scheduler hooks ------------------------------------------- */
 void win32_thread_wake(uint32_t handle) {
+    activity();
     W32Thread *hit[1 + MAX_THREADS];
     unsigned n = 0;
     if (scheduler_up && main_thread.state == ST_BLOCKED) {
@@ -327,6 +444,7 @@ void win32_thread_wake(uint32_t handle) {
 
 void win32_thread_yield(void) {
     if (!scheduler_up) return;
+    activity();
     W32Thread *self = cur;
     if (!self) return;
     enqueue(self);
@@ -336,6 +454,7 @@ void win32_thread_yield(void) {
 }
 
 void win32_thread_sleep(uint32_t ms) {
+    activity();
     if (!scheduler_up) { host_sleep_ms(ms); return; }
     if (ms == 0) { win32_thread_yield(); return; }
     block_current(NULL, 0, 0, ms);
@@ -429,6 +548,7 @@ int win32_thread_init(GuestMemory *m) {
     reap_pending = NULL;
     win32_sync_set_current_thread(MAIN_THREAD_ID);
     win32_sync_set_waker(win32_thread_wake);
+    watchdog_start();
     return 0;
 }
 void win32_thread_shutdown(void) {

@@ -29,6 +29,7 @@ void rt_unimpl(CPU *c, uint32_t addr, const char *what) __attribute__((noreturn)
 void rt_int3(CPU *c, uint32_t addr) __attribute__((noreturn));
 void rt_cpuid(CPU *c, uint32_t *a, uint32_t *b, uint32_t *cc, uint32_t *d);
 uint64_t rt_rdtsc(void);
+void n3ds_lift_set_ir_ip(uint32_t ip);
 
 /* ---------------------------------------------------------------- state */
 
@@ -1380,6 +1381,7 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
     uint32_t ip = addr;
     for (;;) {
         IrExecBlock b;
+        n3ds_lift_set_ir_ip(ip);
         if (n3ds_ir_fetch_block(c, ip, func_end, &b))
             rt_unimpl(c, ip, "IR: block does not fit the decode cache");
         uint32_t next = 0;

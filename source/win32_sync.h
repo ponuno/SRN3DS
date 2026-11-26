@@ -1,4 +1,5 @@
 #pragma once
+#include <stdio.h>
 #include "rt_table.h"
 #include "x86.h"
 #include "guest.h"
@@ -50,6 +51,8 @@ const FnEntry *win32_sync_lookup(uint32_t addr);
  * 0 for an unknown, foreign or already-closed handle. Closing drops the
  * object and its name. No last-error update: there is no CPU argument. */
 int win32_sync_close(uint32_t handle);
+/* Hang-watchdog diagnostic: dump every live sync object. */
+void win32_sync_dump(FILE *f);
 
 /* Semantics (cooperative guest threads, current thread id from
  * win32_thread_current_id()):

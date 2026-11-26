@@ -36,6 +36,10 @@ const char *win32_unresolved_trap_text(unsigned index);
 /* Last ExitProcess seen (code and guest return address). */
 uint32_t win32_last_exit_code(void);
 uint32_t win32_last_exit_from(void);
+/* Hang-watchdog diagnostic: tracked critical sections and their owners. */
+void win32_cs_dump(FILE *f);
+/* Hang-watchdog diagnostic: recent InterlockedCompareExchange/Exchange words. */
+void win32_icx_dump(FILE *f);
 /* Process last-error slot for shim modules that run without a TEB. */
 void win32_set_last_error(uint32_t value);
 /* Allocation accounting: what the guest asked for and how much is live. */

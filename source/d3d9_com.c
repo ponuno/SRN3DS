@@ -19,6 +19,8 @@ static void capture_present_event(void);
 #endif
 #include "win32_shims.h"
 #include <string.h>
+/* Host-only hang watchdog (win32_thread.c); no-op unless enabled by env. */
+void n3ds_hang_watchdog_arm(void);
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -2026,6 +2028,7 @@ static void end_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1)RET(INVALID,1);g.
 static uint32_t present_common(CPU *c){
     if(g.phase!=2){d3d_fail("Present","Present requires EndScene",INVALID);return INVALID;}
     if(A(1)||A(2)||A(3)||A(4))return INVALID;
+    n3ds_hang_watchdog_arm();
     int rc=d9_present(g.device);
     /* Once submitted, the core ends the scene even if the screen blit fails. */
     g.phase=0;

@@ -40,6 +40,27 @@ static char fault[256];
 /* Diagnostic only: last guest function the dispatcher entered. */
 static uint32_t g_last_call;
 static CPU *g_last_cpu;
+/* Diagnostic only (TESV_HANG_WATCHDOG_MS): current IR block address and a
+ * short ring of the most recent guest entries. AOT keeps its registers in
+ * locals, so the entry ring is the only cheap PC evidence for a lifted spin. */
+static uint32_t g_ir_ip;
+#define RT_CALL_RING 12u
+static struct { uint32_t addr, from; } g_call_ring[RT_CALL_RING];
+static unsigned g_call_ring_n;
+void n3ds_lift_set_ir_ip(uint32_t ip){g_ir_ip=ip;}
+uint32_t n3ds_lift_current_ip(void){return g_ir_ip;}
+uint32_t n3ds_lift_last_call(void){return g_last_call;}
+void n3ds_lift_dump_recent_calls(FILE *f){
+    if(!f)return;
+    unsigned n=g_call_ring_n<RT_CALL_RING?g_call_ring_n:RT_CALL_RING;
+    fprintf(f,"[hang] recent guest entries (oldest first):");
+    for(unsigned k=0;k<n;++k){
+        unsigned slot=(g_call_ring_n - n + k)%RT_CALL_RING;
+        fprintf(f," %08x<-%08x",(unsigned)g_call_ring[slot].addr,
+                (unsigned)g_call_ring[slot].from);
+    }
+    fprintf(f,"\n");
+}
 #if defined(_WIN32)
 __declspec(dllimport) unsigned short __stdcall RtlCaptureStackBackTrace(
     unsigned long frames_to_skip, unsigned long frames_to_capture,
@@ -540,6 +561,11 @@ void rt_int3(CPU *c,uint32_t addr) {rt_unimpl(c,addr,"int3");}
 int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return 0;
     g_last_call=addr; g_last_cpu=c;
+    uint32_t from=0;
+    if(memory&&c) (void)guest_read32(memory,c->r[4],&from);
+    g_call_ring[g_call_ring_n%RT_CALL_RING].addr=addr;
+    g_call_ring[g_call_ring_n%RT_CALL_RING].from=from;
+    ++g_call_ring_n;
     const FnEntry *e=lookup(addr);
     if(e){e->fn(c);return 0;}
     int slice = n3ds_ir_has(addr) != 0;

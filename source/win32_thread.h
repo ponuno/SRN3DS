@@ -107,3 +107,6 @@ unsigned win32_thread_live_count(void);
 /* Diagnostics: guest mapping and host stack reserved for a thread slot. */
 int win32_thread_memory(unsigned slot, uint32_t *guest_bytes, size_t *host_bytes);
 size_t win32_thread_struct_size(void);
+/* Measurement-only hang watchdog: start counting only once the first real
+ * Present has been submitted. No-op unless TESV_HANG_WATCHDOG_MS is set. */
+void n3ds_hang_watchdog_arm(void);

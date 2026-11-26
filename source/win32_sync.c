@@ -392,3 +392,30 @@ int win32_sync_close(uint32_t handle) {
     memset(&objects[i], 0, sizeof objects[i]);
     return 1;
 }
+/* Hang-watchdog diagnostic: every live mutex/semaphore/event with its owner
+ * and count. Read-only and safe to call while guest threads are suspended. */
+void win32_sync_dump(FILE *f) {
+    if (!f) return;
+    static const char *kind_name[] = {"free", "mutex", "semaphore", "event"};
+    unsigned live = 0;
+    for (unsigned i = 0; i < MAX_OBJECTS; ++i) {
+        SyncObject *o = &objects[i];
+        if (o->kind == OBJ_FREE) continue;
+        ++live;
+        fprintf(f, "[hang] sync 0x%03x %-9s name=\"%s\"",
+                (unsigned)(WIN32_SYNC_HANDLE_BASE + i),
+                o->kind <= OBJ_EVENT ? kind_name[o->kind] : "?",
+                o->name[0] ? o->name : "-");
+        if (o->kind == OBJ_MUTEX)
+            fprintf(f, " owner=%lu rec=%lu", (unsigned long)o->owner,
+                    (unsigned long)o->recursion);
+        else if (o->kind == OBJ_SEMAPHORE)
+            fprintf(f, " count=%ld max=%ld", (long)o->count, (long)o->maximum);
+        else if (o->kind == OBJ_EVENT)
+            fprintf(f, " manual=%u signaled=%u", (unsigned)o->manual,
+                    (unsigned)o->signaled);
+        fputc('\n', f);
+    }
+    fprintf(f, "[hang] sync live objects=%u current_thread=%lu\n", live,
+            (unsigned long)current_thread);
+}

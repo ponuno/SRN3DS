@@ -1,4 +1,5 @@
 #pragma once
+#include <stdio.h>
 #include "guest.h"
 #include "rt_table.h"
 #include "ir_core.h"
@@ -29,6 +30,12 @@ const char *n3ds_lift_fault(void);
 /* Bounded guest tracing helpers used only by diagnostic generated slices. */
 void n3ds_trace_cstr(const char *tag, uint32_t ptr);
 void n3ds_trace_u32(const char *tag, uint32_t value);
+/* Hang-watchdog evidence: current IR block, last dispatched entry, and the
+ * recent guest-entry ring. AOT functions keep their PC in host locals, so the
+ * ring plus the guest stack scan is the available location evidence. */
+uint32_t n3ds_lift_current_ip(void);
+uint32_t n3ds_lift_last_call(void);
+void n3ds_lift_dump_recent_calls(FILE *f);
 /* Measurement-only dump for the NiDX9TextureBufferData descriptor slot. */
 void n3ds_cube_desc_probe(uint32_t arg, uint32_t index, uint32_t base, uint32_t slot);
 /* Measurement-only fill for f_CECDC0's uninitialised base local.

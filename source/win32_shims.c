@@ -726,8 +726,24 @@ fprintf(stderr,"[lock] lock[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08
 }
 static void s_InterlockedIncrement(CPU *c){uint32_t p=A(0);M32(p)+=1;guest_watch_check(mem,"InterlockedIncrement");RET(M32(p),1);}
 static void s_InterlockedDecrement(CPU *c){uint32_t p=A(0);M32(p)-=1;guest_watch_check(mem,"InterlockedDecrement");RET(M32(p),1);}
-static void s_InterlockedExchange(CPU *c){uint32_t p=A(0),v=M32(p);M32(p)=A(1);guest_watch_check(mem,"InterlockedExchange");RET(v,2);}
-static void s_InterlockedCompareExchange(CPU *c){uint32_t p=A(0),v=M32(p);if(v==A(2))M32(p)=A(1);guest_watch_check(mem,"InterlockedCompareExchange");RET(v,3);}
+#define ICX_RING 8
+static struct {uint32_t p,expect,repl,thread;} icx_ring[ICX_RING];
+static unsigned icx_n;
+void win32_icx_dump(FILE *f){
+    if(!f)return;
+    unsigned n=icx_n<ICX_RING?icx_n:ICX_RING;
+    fprintf(f,"[hang] interlocked ring (oldest first):");
+    for(unsigned k=0;k<n;++k){
+        unsigned slot=(icx_n-n+k)%ICX_RING;
+        fprintf(f," t%lu@%08x exp=%08x set=%08x now=%08x",
+                (unsigned long)icx_ring[slot].thread,(unsigned)icx_ring[slot].p,
+                (unsigned)icx_ring[slot].expect,(unsigned)icx_ring[slot].repl,
+                (unsigned)M32(icx_ring[slot].p));
+    }
+    fputc('\n',f);
+}
+static void s_InterlockedExchange(CPU *c){uint32_t p=A(0),v=M32(p);unsigned s=icx_n%ICX_RING;icx_ring[s].p=p;icx_ring[s].expect=v;icx_ring[s].repl=A(1);icx_ring[s].thread=win32_thread_current_id();++icx_n;M32(p)=A(1);guest_watch_check(mem,"InterlockedExchange");RET(v,2);}
+static void s_InterlockedCompareExchange(CPU *c){uint32_t p=A(0),v=M32(p);icx_ring[icx_n%ICX_RING].p=p;icx_ring[icx_n%ICX_RING].expect=v;icx_ring[icx_n%ICX_RING].repl=A(1);icx_ring[icx_n%ICX_RING].thread=win32_thread_current_id();++icx_n;if(v==A(2))M32(p)=A(1);guest_watch_check(mem,"InterlockedCompareExchange");RET(v,3);}
 static void s_lstrlenA(CPU *c){RET(A(0)?strlen(str(c,A(0))):0,1);}
 static void s_lstrcmpiA(CPU *c){RET(icmp(str(c,A(0)),str(c,A(1))),2);}
 static void s_OutputDebugStringA(CPU *c){fprintf(stderr,"[guest] %s\n",str(c,A(0)));RET(0,1);}
@@ -755,13 +771,37 @@ static void s_GetStartupInfoA(CPU *c){uint32_t p=A(0);memset(checked(c,p,68),0,6
  * cannot be waited for in the one-shot thread model, so the attempt faults
  * instead of silently entering. */
 #define CS_BYTES 24
+#define CS_MAX_TRACKED 64
+static uint32_t cs_tracked[CS_MAX_TRACKED];
+static unsigned cs_tracked_n;
+static void cs_track_add(uint32_t p){
+    for(unsigned i=0;i<cs_tracked_n;++i)if(cs_tracked[i]==p)return;
+    if(cs_tracked_n<CS_MAX_TRACKED)cs_tracked[cs_tracked_n++]=p;
+}
+static void cs_track_del(uint32_t p){
+    for(unsigned i=0;i<cs_tracked_n;++i)if(cs_tracked[i]==p){cs_tracked[i]=cs_tracked[--cs_tracked_n];return;}
+}
+/* Hang-watchdog diagnostic: tracked critical sections and their owners. */
+void win32_cs_dump(FILE *f){
+    if(!f)return;
+    fprintf(f,"[hang] critical sections tracked=%u\n",cs_tracked_n);
+    for(unsigned i=0;i<cs_tracked_n;++i){
+        uint32_t p=cs_tracked[i],owner=0,rec=0,held=0;
+        if(!guest_read32(mem,p+4,&owner)){}
+        if(!guest_read32(mem,p+8,&rec)){}
+        if(!guest_read32(mem,p+12,&held)){}
+        fprintf(f,"[hang] cs %08x owner=%08x rec=%lu held=%lu\n",p,owner,
+                (unsigned long)rec,(unsigned long)held);
+    }
+}
 static void cs_init(CPU *c,uint32_t p,uint32_t spin){
     if(spin>0x00ffffffu)spin=0x00ffffffu;
     memset(checked(c,p,CS_BYTES),0,CS_BYTES);M32(p+4)=0xffffffffu;M32(p+20)=spin;
+    cs_track_add(p);
 }
 static void s_InitializeCriticalSection(CPU *c){cs_init(c,A(0),0);RET(0,1);}
 static void s_InitializeCriticalSectionAndSpinCount(CPU *c){cs_init(c,A(0),A(1));RET(1,2);}
-static void s_DeleteCriticalSection(CPU *c){uint32_t p=A(0);memset(checked(c,p,CS_BYTES),0,CS_BYTES);M32(p+4)=0xffffffffu;RET(0,1);}
+static void s_DeleteCriticalSection(CPU *c){uint32_t p=A(0);memset(checked(c,p,CS_BYTES),0,CS_BYTES);M32(p+4)=0xffffffffu;cs_track_del(p);RET(0,1);}
 static void s_EnterCriticalSection(CPU *c){
     uint32_t p=A(0),me=win32_sync_current_thread();checked(c,p,CS_BYTES);
     uint32_t owner=M32(p+4);
