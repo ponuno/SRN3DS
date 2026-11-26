@@ -67,6 +67,13 @@ links from it.
   Full clean only when flags or generated inputs change.
 - The cache is content-addressed and safe to share between worktrees. Delete
   `E:\host_objcache` to force a clean rebuild.
+- Triage a census log with **`python tools/census_report.py <log>`** instead of
+  grepping megabytes of trace: it prints the first fault with context, per-method
+  call/result counts, common diagnostics, depth binds, the last trace lines and
+  the unresolved-import count (~40 lines).
+- Timebox each layer to ~20–25 minutes. If it is not solved, commit the honest
+  partial state plus the exact blocker and return it; do not spend an hour
+  before the first commit. A clean partial commit is cheap to continue from.
 
 Azahar install/run (SD card is `%APPDATA%\Azahar\sdmc`):
 - `"C:\Program Files\Azahar\azahar.exe" -i <cia>` installs;
