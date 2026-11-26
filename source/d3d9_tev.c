@@ -13,6 +13,9 @@
  *   (colour, alpha, R, G, B and their one-minus forms), and a combine function
  *   (replace, modulate, add, add_signed, interpolate, subtract, dot3,
  *   multiply_add, add_multiply).  That is exactly C3D_TexEnv's shape.
+ * Temporary provenance is tracked per channel: partial writes carry their
+ * untouched RGB/alpha side, so a live r0.a survives an unrelated RGB stage and
+ * independent oC0.rgb/oC0.w writes do not stale the other side.
  *
  * Known precision limits (documented in docs/SHADERS.md):
  *   - TEV stage outputs and the per-stage constant colour are clamped/
@@ -87,8 +90,18 @@ static void reject(char *why, size_t cap, const char *fmt, ...) {
 
 /* (component extraction is inlined at each use site) */
 
-typedef struct { int kind; int index; uint8_t defined; } Value;
-enum { VAL_NONE = 0, VAL_TEX = 1, VAL_CONST = 2, VAL_INPUT = 3, VAL_PREV = 4 };
+/* A temporary is tracked per channel.  PICA can still address a texture,
+ * input or constant after PREVIOUS has moved on, and a partial TEV write can
+ * carry the untouched RGB or alpha side.  Keeping one coarse Value kind made
+ * a live r0.a look stale as soon as an unrelated RGB result replaced PREVIOUS. */
+typedef struct {
+    uint8_t src[4];          /* D9TEV_SRC_*, or 0xFF when the channel is stale */
+    uint8_t comp[4];         /* component selected from src (0..3) */
+    uint8_t const_reg[4];    /* c# when src == D9TEV_SRC_CONST */
+    uint8_t defined;
+} Value;
+
+enum { VAL_NONE = 0xFF };
 
 typedef struct {
     int is_def;
@@ -137,20 +150,38 @@ static int validate_def_literal(unsigned reg, const float value[4],
     return 0;
 }
 
+static Value empty_value(void) {
+    Value value;
+    memset(&value, 0, sizeof value);
+    for (int c = 0; c < 4; ++c) value.src[c] = VAL_NONE;
+    return value;
+}
+
 static void set_temp(Ctx *ctx, int reg, Value value) {
     if (reg < 0 || reg >= 16) return;
     ctx->temp[reg] = value;
 }
 
 static Value temp_value(Ctx *ctx, int reg) {
-    Value none = {VAL_NONE, 0, 0};
-    if (reg < 0 || reg >= 16) return none;
+    if (reg < 0 || reg >= 16) return empty_value();
     return ctx->temp[reg];
 }
 
+/* Advance the hardware PREVIOUS register.  A REPLACE(PREVIOUS) on one side
+ * keeps every temporary channel sourced from that side addressable; channels
+ * overwritten by the new stage become stale. */
+static void advance_prev(Ctx *ctx, int keep_rgb, int keep_a) {
+    for (int r = 0; r < 16; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            int keep = c == 3 ? keep_a : keep_rgb;
+            if (ctx->temp[r].src[c] == D9TEV_SRC_PREV && !keep)
+                ctx->temp[r].src[c] = VAL_NONE;
+        }
+    }
+}
+
 static void invalidate_prev(Ctx *ctx) {
-    for (int i = 0; i < 16; ++i)
-        if (ctx->temp[i].kind == VAL_PREV) ctx->temp[i].kind = VAL_NONE;
+    advance_prev(ctx, 0, 0);
 }
 
 static int add_texture(Ctx *ctx, int texcoord, int sampler) {
@@ -297,9 +328,26 @@ uint32_t d9_tev_pack_rgba8(const float rgba[4]) {
     return out;
 }
 
-/* Map one D3D operand to a PICA (source, rgb operand, alpha operand). */
-static int map_operand(Ctx *ctx, uint32_t token, unsigned *src,
-                       unsigned *rgb_op, unsigned *a_op, uint8_t *taint,
+static unsigned rgb_selector(unsigned comp, int negate) {
+    unsigned op = comp == 0 ? D9TEV_RGB_R : comp == 1 ? D9TEV_RGB_G
+               : comp == 2 ? D9TEV_RGB_B : D9TEV_RGB_ALPHA;
+    return negate ? op ^ 1u : op;
+}
+
+static unsigned alpha_selector(unsigned comp, int negate) {
+    unsigned op = comp == 3 ? D9TEV_A_ALPHA : comp == 0 ? D9TEV_A_R
+               : comp == 1 ? D9TEV_A_G : D9TEV_A_B;
+    return negate ? op ^ 1u : op;
+}
+
+/* Map one D3D operand to independent PICA RGB and alpha sources/selectors.
+ * This is what lets r0.rgb come from TEXTURE0 while r0.a comes from TEXTURE1,
+ * instead of forcing both sides through the last PREVIOUS result. */
+static int map_operand(Ctx *ctx, uint32_t token,
+                       unsigned *src_rgb, unsigned *rgb_op,
+                       unsigned *src_a, unsigned *a_op,
+                       unsigned creg[2], uint8_t *taint,
+                       unsigned needed,
                        char *why, size_t cap, const char *opname) {
     if (!(token & 0x80000000u)) {
         reject(why, cap, "%s: malformed operand token 0x%08x", opname, token);
@@ -318,75 +366,91 @@ static int map_operand(Ctx *ctx, uint32_t token, unsigned *src,
     unsigned type = REGTYPE(token);
     unsigned index = REGNUM(token);
     uint32_t sw = SWZ(token);
-    unsigned c0 = (sw >> 0) & 3u, c1 = (sw >> 2) & 3u, c2 = (sw >> 4) & 3u, c3 = (sw >> 6) & 3u;
-    unsigned base_src;
+    unsigned selected[4] = {(sw >> 0) & 3u, (sw >> 2) & 3u,
+                            (sw >> 4) & 3u, (sw >> 6) & 3u};
+    unsigned psrc[4], pcomp[4], preg[4];
     *taint = 0;
+    creg[0] = creg[1] = 0xFFu;
     if (type == D9TEV_REG_TEMP) {
         Value value = temp_value(ctx, (int)index);
-        if (value.kind == VAL_NONE) {
+        for (int k = 0; k < 4; ++k) {
+            unsigned channel = selected[k];
+            psrc[k] = value.src[channel];
+            pcomp[k] = value.comp[channel];
+            preg[k] = value.const_reg[channel];
+            if (psrc[k] == VAL_NONE && (needed & (1u << k)))
+                *taint |= (uint8_t)(1u << k);
+        }
+        if (*taint) {
             reject(why, cap, "%s: reads r%u before it is written or after the "
                    "TEV previous stage moved on", opname, index);
             return -1;
         }
-        /* Track undefined lanes instead of rejecting: a shader may write .xyz
-         * and only ever use .xyz.  The taint propagates to the result. */
-        uint8_t lanes;
-        if (c0 == 0 && c1 == 1 && c2 == 2) lanes = 0x7u;
-        else if (c0 == c1 && c1 == c2) lanes = (uint8_t)(1u << c0);
-        else {
-            reject(why, cap, "%s: non-uniform RGB swizzle .%c%c%c is not "
-                   "expressible by one PICA TEV operand", opname,
-                   "xyzw"[c0], "xyzw"[c1], "xyzw"[c2]);
-            return -1;
+        unsigned fallback = (needed & 1u) ? 0u : (needed & 2u) ? 1u :
+                            (needed & 4u) ? 2u : 3u;
+        for (int k = 0; k < 4; ++k) {
+            if (needed & (1u << k)) continue;
+            psrc[k] = psrc[fallback];
+            pcomp[k] = pcomp[fallback];
+            preg[k] = preg[fallback];
         }
-        lanes |= (uint8_t)(1u << c3);
-        *taint = (uint8_t)(lanes & ~value.defined);
-        base_src = value.kind == VAL_TEX ? (D9TEV_SRC_TEX0 + (unsigned)value.index)
-                 : value.kind == VAL_CONST ? D9TEV_SRC_CONST
-                 : value.kind == VAL_INPUT ? D9TEV_SRC_PRIMARY
-                 : D9TEV_SRC_PREV;
-    } else if (type == D9TEV_REG_CONST) {
-        if (note_constant(ctx, (int)index) < 0) {
-            reject(why, cap, "%s: more than %d distinct constants", opname, D9TEV_MAX_CONSTANTS);
-            return -1;
+        for (int k = 0; k < 4; ++k) {
+            if (psrc[k] != D9TEV_SRC_CONST) continue;
+            if (note_constant(ctx, (int)preg[k]) < 0) {
+                reject(why, cap, "%s: more than %d distinct constants",
+                       opname, D9TEV_MAX_CONSTANTS);
+                return -1;
+            }
         }
-        base_src = D9TEV_SRC_CONST;
-    } else if (type == D9TEV_REG_INPUT) {
-        int source = ensure_input_source(ctx, (int)index, why, cap, opname);
-        if (source < 0) return -1;
-        base_src = (unsigned)source;
+        /* Channel provenance was recorded above. */
+
+
+
     } else {
-        reject(why, cap, "%s: source register type %u is outside the TEV subset",
-               opname, type);
-        return -1;
+        unsigned base_src;
+        if (type == D9TEV_REG_CONST) {
+            if (note_constant(ctx, (int)index) < 0) {
+                reject(why, cap, "%s: more than %d distinct constants", opname, D9TEV_MAX_CONSTANTS);
+                return -1;
+            }
+            base_src = D9TEV_SRC_CONST;
+        } else if (type == D9TEV_REG_INPUT) {
+            int source = ensure_input_source(ctx, (int)index, why, cap, opname);
+            if (source < 0) return -1;
+            base_src = (unsigned)source;
+        } else {
+            reject(why, cap, "%s: source register type %u is outside the TEV subset",
+                   opname, type);
+            return -1;
+        }
+        for (int k = 0; k < 4; ++k) {
+            psrc[k] = base_src;
+            pcomp[k] = selected[k];
+            preg[k] = type == D9TEV_REG_CONST ? index : 0xFFu;
+        }
     }
 
     /* RGB selector: colour (per-channel) or one replicated component. */
-    unsigned op;
-    if (c0 == 0 && c1 == 1 && c2 == 2) op = D9TEV_RGB_COLOR;
-    else if (c0 == c1 && c1 == c2) {
-        op = c0 == 0 ? D9TEV_RGB_R : c0 == 1 ? D9TEV_RGB_G
-           : c0 == 2 ? D9TEV_RGB_B : D9TEV_RGB_ALPHA;
+    if (psrc[0] != psrc[1] || psrc[1] != psrc[2]) {
+        reject(why, cap, "%s: RGB channels need different PICA sources; "
+               "one TEV RGB operand cannot select them independently", opname);
+        return -1;
+    }
+    if (pcomp[0] == 0 && pcomp[1] == 1 && pcomp[2] == 2) {
+        *rgb_op = mod ? D9TEV_RGB_1M_COLOR : D9TEV_RGB_COLOR;
+    } else if (pcomp[0] == pcomp[1] && pcomp[1] == pcomp[2]) {
+        *rgb_op = rgb_selector(pcomp[0], mod == 1);
     } else {
         reject(why, cap, "%s: non-uniform RGB swizzle .%c%c%c is not "
                "expressible by one PICA TEV operand", opname,
-               "xyzw"[c0], "xyzw"[c1], "xyzw"[c2]);
+               "xyzw"[pcomp[0]], "xyzw"[pcomp[1]], "xyzw"[pcomp[2]]);
         return -1;
     }
-    if (mod == 1) {
-        switch (op) {
-        case D9TEV_RGB_COLOR: op = D9TEV_RGB_1M_COLOR; break;
-        case D9TEV_RGB_R: op = D9TEV_RGB_1M_R; break;
-        case D9TEV_RGB_G: op = D9TEV_RGB_1M_G; break;
-        case D9TEV_RGB_B: op = D9TEV_RGB_1M_B; break;
-        default: op = D9TEV_RGB_1M_ALPHA; break;
-        }
-    }
-    unsigned aop = c3 == 3 ? D9TEV_A_ALPHA : c3 == 0 ? D9TEV_A_R : c3 == 1 ? D9TEV_A_G : D9TEV_A_B;
-    if (mod == 1) aop ^= 1u;
-    *src = base_src;
-    *rgb_op = op;
-    *a_op = aop;
+    *src_rgb = psrc[0];
+    *src_a = psrc[3];
+    *a_op = alpha_selector(pcomp[3], mod == 1);
+    if (*src_rgb == D9TEV_SRC_CONST) creg[0] = preg[0];
+    if (*src_a == D9TEV_SRC_CONST) creg[1] = preg[3];
     return 0;
 }
 
@@ -398,18 +462,19 @@ static int stage_full(Ctx *ctx, char *why, size_t cap, const char *opname) {
     return 0;
 }
 
-/* Emit one combiner stage.  Each operand is already a PICA source/selector. */
+/* Emit one combiner stage.  Each operand already has independent RGB/alpha
+ * PICA sources and selectors. */
 static D9TevStage *emit_stage(Ctx *ctx, unsigned func_rgb, unsigned func_a,
-                              const unsigned src[3], const unsigned rop[3],
-                              const unsigned aop[3]) {
+                               const unsigned src_rgb[3], const unsigned rop[3],
+                               const unsigned src_a[3], const unsigned aop[3]) {
     D9TevStage *stage = &ctx->out->stage[ctx->out->stages++];
     memset(stage, 0, sizeof *stage);
     stage->func_rgb = (uint8_t)func_rgb;
     stage->func_a = (uint8_t)func_a;
     stage->const_reg = 0xFF;
     for (int i = 0; i < 3; ++i) {
-        stage->src_rgb[i] = (uint8_t)src[i];
-        stage->src_a[i] = (uint8_t)src[i];
+        stage->src_rgb[i] = (uint8_t)src_rgb[i];
+        stage->src_a[i] = (uint8_t)src_a[i];
         stage->op_rgb[i] = (uint8_t)rop[i];
         stage->op_a[i] = (uint8_t)aop[i];
     }
@@ -453,7 +518,7 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
     p->version = version;
     p->stage_limit = D9TEV_MAX_STAGES;
     for (int i = 0; i < 16; ++i) {
-        ctx->temp[i].kind = VAL_NONE;
+        ctx->temp[i] = empty_value();
         ctx->input_tev_source[i] = 0xFF;
     }
 
@@ -665,23 +730,34 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
             }
             if (dst_type == D9TEV_REG_COLOROUT) {
                 /* A direct texld -> oC0 still needs one REPLACE stage because
-                 * PICA has no "write texel directly" path. */
-                unsigned src[3] = {(unsigned)(D9TEV_SRC_TEX0 + unit),
-                                   D9TEV_SRC_PREV, D9TEV_SRC_PREV};
+                 * PICA has no "write texel directly" path.  On a later partial
+                 * output write, carry the untouched side through PREVIOUS. */
+                unsigned src_rgb[3] = {(unsigned)(D9TEV_SRC_TEX0 + unit),
+                                       D9TEV_SRC_PREV, D9TEV_SRC_PREV};
+                unsigned src_a[3] = {(unsigned)(D9TEV_SRC_TEX0 + unit),
+                                     D9TEV_SRC_PREV, D9TEV_SRC_PREV};
                 unsigned rop[3] = {D9TEV_RGB_COLOR, D9TEV_RGB_COLOR, D9TEV_RGB_COLOR};
                 unsigned aop[3] = {D9TEV_A_ALPHA, D9TEV_A_ALPHA, D9TEV_A_ALPHA};
+                int keep_rgb = p->stages > 0 && !(mask & 7u);
+                int keep_a = p->stages > 0 && !(mask & 8u);
+                if (keep_rgb) src_rgb[0] = D9TEV_SRC_PREV;
+                if (keep_a) src_a[0] = D9TEV_SRC_PREV;
                 if (stage_full(ctx, why, cap, "texld") < 0) return -1;
-                invalidate_prev(ctx);
-                emit_stage(ctx, D9TEV_FUNC_REPLACE, D9TEV_FUNC_REPLACE, src, rop, aop);
+                emit_stage(ctx, D9TEV_FUNC_REPLACE, D9TEV_FUNC_REPLACE,
+                           src_rgb, rop, src_a, aop);
+                advance_prev(ctx, keep_rgb, keep_a);
                 have_output = 1;
                 output_mask = (uint8_t)mask;
                 output_defined = (uint8_t)mask;
                 output_stage = (int)p->stages - 1;
             } else {
-                Value value;
-                value.kind = VAL_TEX;
-                value.index = unit;
-                value.defined = (uint8_t)mask;
+                Value value = empty_value();
+                for (int c = 0; c < 4; ++c) {
+                    if (!(mask & (1u << c))) continue;
+                    value.src[c] = (uint8_t)(D9TEV_SRC_TEX0 + unit);
+                    value.comp[c] = (uint8_t)c;
+                    value.defined |= (uint8_t)(1u << c);
+                }
                 set_temp(ctx, (int)dst_index, value);
             }
             pos += total;
@@ -729,35 +805,41 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
             return -1;
         }
 
-        unsigned src[3], rop[3], aop[3];
+        unsigned src_rgb[3], src_a[3], rop[3], aop[3];
+        unsigned creg[3][2];
         uint8_t taint[3] = {0, 0, 0};
         for (unsigned i = 0; i < nsrc; ++i) {
-            if (map_operand(ctx, arg[1 + i], &src[i], &rop[i], &aop[i], &taint[i],
+            if (map_operand(ctx, arg[1 + i], &src_rgb[i], &rop[i],
+                            &src_a[i], &aop[i], creg[i], &taint[i],
+                            op == 0x08 ? 0xFu : mask,
                             why, cap, d9_tev_opcode_name(op)) < 0)
                 return -1;
         }
         for (unsigned i = nsrc; i < 3; ++i) {
-            src[i] = D9TEV_SRC_PREV;
+            src_rgb[i] = src_a[i] = D9TEV_SRC_PREV;
             rop[i] = D9TEV_RGB_COLOR;
             aop[i] = D9TEV_A_ALPHA;
+            creg[i][0] = creg[i][1] = 0xFFu;
         }
 
-        /* Distinct constants used by this instruction. */
+        /* Distinct constants used by this instruction, including a constant
+         * reached through a temporary's per-channel provenance. */
         int const_index[3];
         int nconst = 0;
         int const_is_literal[3];
         for (unsigned i = 0; i < nsrc; ++i) {
-            if (src[i] != D9TEV_SRC_CONST) continue;
-            unsigned reg = 0;
-            /* Recover the constant register number from the operand token. */
-            reg = REGNUM(arg[1 + i]);
-            int seen = 0;
-            for (int k = 0; k < nconst; ++k) if (const_index[k] == (int)reg) seen = 1;
-            if (!seen && nconst < 3) {
-                const_index[nconst] = (int)reg;
-                DefConst *def = lookup_def(ctx, (int)reg);
-                const_is_literal[nconst] = def ? 1 : 0;
-                ++nconst;
+            for (int side = 0; side < 2; ++side) {
+                unsigned source = side ? src_a[i] : src_rgb[i];
+                unsigned reg = creg[i][side];
+                if (source != D9TEV_SRC_CONST || reg == 0xFFu) continue;
+                int seen = 0;
+                for (int k = 0; k < nconst; ++k) if (const_index[k] == (int)reg) seen = 1;
+                if (!seen && nconst < 3) {
+                    const_index[nconst] = (int)reg;
+                    DefConst *def = lookup_def(ctx, (int)reg);
+                    const_is_literal[nconst] = def ? 1 : 0;
+                    ++nconst;
+                }
             }
         }
         if (nconst > 2) {
@@ -772,7 +854,7 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
         int loaded_const = -1;
         if (nconst == 2) {
             for (unsigned i = 0; i < nsrc; ++i) {
-                if (src[i] == D9TEV_SRC_PREV) {
+                if (src_rgb[i] == D9TEV_SRC_PREV || src_a[i] == D9TEV_SRC_PREV) {
                     reject(why, cap, "%s uses two constants and a previous-stage "
                            "operand; PICA has no third constant slot",
                            d9_tev_opcode_name(op));
@@ -780,12 +862,13 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
                 }
             }
             if (stage_full(ctx, why, cap, d9_tev_opcode_name(op)) < 0) return -1;
-            unsigned load_src[3] = {D9TEV_SRC_CONST, D9TEV_SRC_PREV, D9TEV_SRC_PREV};
+            unsigned load_src_rgb[3] = {D9TEV_SRC_CONST, D9TEV_SRC_PREV, D9TEV_SRC_PREV};
+            unsigned load_src_a[3] = {D9TEV_SRC_CONST, D9TEV_SRC_PREV, D9TEV_SRC_PREV};
             unsigned load_rop[3] = {D9TEV_RGB_COLOR, D9TEV_RGB_COLOR, D9TEV_RGB_COLOR};
             unsigned load_aop[3] = {D9TEV_A_ALPHA, D9TEV_A_ALPHA, D9TEV_A_ALPHA};
             invalidate_prev(ctx);
             D9TevStage *load = emit_stage(ctx, D9TEV_FUNC_REPLACE, D9TEV_FUNC_REPLACE,
-                                          load_src, load_rop, load_aop);
+                                          load_src_rgb, load_rop, load_src_a, load_aop);
             load->const_reg = (uint8_t)const_index[0];
             load->const_is_literal = (uint8_t)const_is_literal[0];
             if (const_is_literal[0]) {
@@ -793,9 +876,12 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
                 load->const_rgba8 = d9_tev_pack_rgba8(def->value);
             }
             loaded_const = const_index[0];
-            for (unsigned i = 0; i < nsrc; ++i)
-                if (src[i] == D9TEV_SRC_CONST && (int)REGNUM(arg[1 + i]) == loaded_const)
-                    src[i] = D9TEV_SRC_PREV;
+            for (unsigned i = 0; i < nsrc; ++i) {
+                if (src_rgb[i] == D9TEV_SRC_CONST && (int)creg[i][0] == loaded_const)
+                    src_rgb[i] = D9TEV_SRC_PREV;
+                if (src_a[i] == D9TEV_SRC_CONST && (int)creg[i][1] == loaded_const)
+                    src_a[i] = D9TEV_SRC_PREV;
+            }
         }
 
         unsigned func_rgb, func_a;
@@ -810,22 +896,71 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
             func_rgb = func_a = D9TEV_FUNC_INTERPOLATE;
             {
                 unsigned t;
-                t = src[1]; src[1] = src[2]; src[2] = t;
+                t = src_rgb[1]; src_rgb[1] = src_rgb[2]; src_rgb[2] = t;
                 t = rop[1]; rop[1] = rop[2]; rop[2] = t;
+                t = src_a[1]; src_a[1] = src_a[2]; src_a[2] = t;
                 t = aop[1]; aop[1] = aop[2]; aop[2] = t;
             }
             break;
         default: func_rgb = func_a = D9TEV_FUNC_REPLACE; break;
         }
 
-        if (stage_full(ctx, why, cap, d9_tev_opcode_name(op)) < 0) return -1;
-        invalidate_prev(ctx);
-        D9TevStage *stage = emit_stage(ctx, func_rgb, func_a, src, rop, aop);
+        int writes_rgb = (mask & 7u) != 0;
+        int writes_a = (mask & 8u) != 0;
+        int have_prev = p->stages > 0;
+        Value old_temp = dst_type == D9TEV_REG_TEMP ? temp_value(ctx, (int)dst_index)
+                                                   : empty_value();
+        int keep_rgb = 0, keep_a = 0;
+
         if (op == 0x08) {
-            /* DOT3_RGBA writes the scalar to alpha too; the alpha operands are
-             * unused but keep them defined for the evaluator. */
-            stage->func_a = D9TEV_FUNC_DOT3_RGBA;
+            /* DOT3_RGBA replicates the dot into alpha.  For a partial write,
+             * override only the untouched side below. */
+            func_rgb = mask == 0xFu ? D9TEV_FUNC_DOT3_RGBA : D9TEV_FUNC_DOT3_RGB;
+            func_a = D9TEV_FUNC_DOT3_RGBA;
         }
+
+        /* A partial temp write must preserve the old RGB/alpha side.  If that
+         * side is still directly addressable, carry it in the same stage; if
+         * it is PREVIOUS, REPLACE(PREVIOUS) keeps it live for a later read. */
+        if (!writes_rgb) {
+            int addressable = old_temp.src[0] != VAL_NONE &&
+                              old_temp.src[1] == old_temp.src[0] &&
+                              old_temp.src[2] == old_temp.src[0] &&
+                              old_temp.src[0] != D9TEV_SRC_CONST;
+            int identity = old_temp.comp[0] == 0 && old_temp.comp[1] == 1 &&
+                           old_temp.comp[2] == 2;
+            int replicated = old_temp.comp[0] == old_temp.comp[1] &&
+                             old_temp.comp[1] == old_temp.comp[2];
+            if (dst_type == D9TEV_REG_TEMP && addressable && (identity || replicated)) {
+                func_rgb = D9TEV_FUNC_REPLACE;
+                src_rgb[0] = old_temp.src[0];
+                rop[0] = identity ? D9TEV_RGB_COLOR : rgb_selector(old_temp.comp[0], 0);
+                keep_rgb = 1;
+            } else if (dst_type == D9TEV_REG_COLOROUT && have_prev) {
+                func_rgb = D9TEV_FUNC_REPLACE;
+                src_rgb[0] = D9TEV_SRC_PREV;
+                rop[0] = D9TEV_RGB_COLOR;
+                keep_rgb = 1;
+            }
+        }
+        if (!writes_a) {
+            if (dst_type == D9TEV_REG_TEMP && old_temp.src[3] != VAL_NONE &&
+                old_temp.src[3] != D9TEV_SRC_CONST) {
+                func_a = D9TEV_FUNC_REPLACE;
+                src_a[0] = old_temp.src[3];
+                aop[0] = alpha_selector(old_temp.comp[3], 0);
+                keep_a = 1;
+            } else if (dst_type == D9TEV_REG_COLOROUT && have_prev) {
+                func_a = D9TEV_FUNC_REPLACE;
+                src_a[0] = D9TEV_SRC_PREV;
+                aop[0] = D9TEV_A_ALPHA;
+                keep_a = 1;
+            }
+        }
+
+        if (stage_full(ctx, why, cap, d9_tev_opcode_name(op)) < 0) return -1;
+        D9TevStage *stage = emit_stage(ctx, func_rgb, func_a, src_rgb, rop, src_a, aop);
+        advance_prev(ctx, keep_rgb, keep_a);
         if (nconst == 1) {
             stage->const_reg = (uint8_t)const_index[0];
             stage->const_is_literal = (uint8_t)const_is_literal[0];
@@ -846,31 +981,31 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
             }
         }
 
-        Value result;
-        result.kind = VAL_PREV;
-        result.index = (int)p->stages - 1;
         uint8_t result_taint = 0;
         for (unsigned i = 0; i < nsrc; ++i) {
-            if (!taint[i]) continue;
-            uint32_t sw = SWZ(arg[1 + i]);
-            unsigned c0 = (sw >> 0) & 3u, c3 = (sw >> 6) & 3u;
-            if (op == 0x08) {
-                if (taint[i] & 0x7u) result_taint |= 0xFu;
-            } else {
-                if (c0 == 0 && ((sw >> 2) & 3u) == 1u && ((sw >> 4) & 3u) == 2u) {
-                    for (unsigned lane = 0; lane < 3; ++lane)
-                        if (taint[i] & (1u << lane)) result_taint |= (uint8_t)(1u << lane);
-                } else if (taint[i] & (1u << c0)) {
-                    result_taint |= 0x7u;
-                }
-                if (taint[i] & (1u << c3)) result_taint |= 0x8u;
+            if (op == 0x08 && (taint[i] & 7u)) result_taint |= 0xFu;
+            else result_taint |= taint[i];
+        }
+        Value result = old_temp;
+        for (int c = 0; c < 4; ++c) {
+            int written = (mask & (1u << c)) != 0;
+            int overwritten = c == 3 ? writes_a : writes_rgb;
+            if (written && !(result_taint & (1u << c))) {
+                result.src[c] = D9TEV_SRC_PREV;
+                result.comp[c] = (uint8_t)c;
+                result.const_reg[c] = 0xFFu;
+                result.defined |= (uint8_t)(1u << c);
+            } else if (written || (overwritten && !((c == 3 ? keep_a : keep_rgb)))) {
+                result.src[c] = VAL_NONE;
+                result.defined &= (uint8_t)~(1u << c);
             }
         }
-        result.defined = (uint8_t)(mask & ~result_taint);
         if (dst_type == D9TEV_REG_COLOROUT) {
             have_output = 1;
-            output_mask = (uint8_t)mask;
-            output_defined = result.defined;
+            output_mask |= (uint8_t)mask;
+            if (writes_rgb) output_defined &= (uint8_t)~7u;
+            if (writes_a) output_defined &= (uint8_t)~8u;
+            output_defined |= (uint8_t)(mask & result.defined);
             output_stage = (int)p->stages - 1;
         } else {
             set_temp(ctx, (int)dst_index, result);
@@ -897,11 +1032,12 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
      * chain is REPLACE(PREV), so the visible colour is unchanged. */
     if (!(output_defined & 0x8u)) {
         if (stage_full(ctx, why, cap, "alpha fixup") < 0) return -1;
-        unsigned src[3] = {D9TEV_SRC_PREV, D9TEV_SRC_PREV, D9TEV_SRC_PREV};
+        unsigned src_rgb[3] = {D9TEV_SRC_PREV, D9TEV_SRC_PREV, D9TEV_SRC_PREV};
+        unsigned src_a[3] = {D9TEV_SRC_PREV, D9TEV_SRC_PREV, D9TEV_SRC_PREV};
         unsigned rop[3] = {D9TEV_RGB_COLOR, D9TEV_RGB_COLOR, D9TEV_RGB_COLOR};
         unsigned aop[3] = {D9TEV_A_ALPHA, D9TEV_A_ALPHA, D9TEV_A_ALPHA};
         D9TevStage *fix = emit_stage(ctx, D9TEV_FUNC_REPLACE, D9TEV_FUNC_REPLACE,
-                                     src, rop, aop);
+                                     src_rgb, rop, src_a, aop);
         fix->const_reg = 0xFF;
         fix->const_is_literal = 1;
         fix->const_rgba8 = 0xFFFFFFFFu;

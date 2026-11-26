@@ -123,6 +123,40 @@ static void test_tint(void) {
     for (int i = 0; i < 4; ++i) check_near(out[i], expect[i], "tint: tex * const");
 }
 
+static void test_channel_carry(void) {
+    static const uint32_t code[] = {
+        VER_PS30,
+        DI(0x1F, 2), DCL_TEXCOORD(0), TEXD(0),
+        DI(0x1F, 2), DCL_SAMPLER2D, SAMP(0),
+        DI(0x1F, 2), DCL_COLOR(0), SRC_T(1),
+        DI(0x51, 5), DST_C(0), 0x3F000000u, 0x3E800000u, 0x3F800000u, 0x3F800000u,
+        DI(0x42, 3), DST_R(0), SRC_T(0), SAMP(0),
+        DI(0x05, 3), DST_R(0), SRC_R(0), SRC_T(1),
+        DI(0x05, 3), DST_C0_RGB, SRC_R(0), SRC_CX(0),
+        DI(0x01, 2), 0x80080800u, SRC_R(0),
+        END_TOKEN,
+    };
+    D9TevProgram p;
+    char why[256];
+    check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) == 0, why);
+    check(p.stages == 3, "channel carry: three stages");
+    check(p.stage[1].func_a == D9TEV_FUNC_REPLACE &&
+          p.stage[1].src_a[0] == D9TEV_SRC_PREV,
+          "channel carry: RGB output write preserves live alpha");
+    check(p.stage[2].func_rgb == D9TEV_FUNC_REPLACE &&
+          p.stage[2].src_rgb[0] == D9TEV_SRC_PREV,
+          "channel carry: alpha output write preserves live RGB");
+    float c[D9TEV_MAX_STAGES][4] = {{0}};
+    float out[4];
+    eval_with(&p, c, out);
+    const float q50 = 128.0f / 255.0f;
+    const float expect[4] = {k_tex[0][0] * q50,
+                             k_tex[0][1] * 0.5f * q50,
+                             k_tex[0][2] * 0.25f * q50,
+                             k_tex[0][3] * 0.75f};
+    for (int i = 0; i < 4; ++i) check_near(out[i], expect[i], "channel carry: math");
+}
+
 static void test_lrp(void) {
     static const uint32_t code[] = {
         VER_PS30,
@@ -551,6 +585,7 @@ static void test_pack(void) {
 int main(void) {
     test_blit();
     test_tint();
+    test_channel_carry();
     test_lrp();
     test_mad_two_constants();
     test_dp3();

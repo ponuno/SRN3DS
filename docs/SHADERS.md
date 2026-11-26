@@ -335,11 +335,11 @@ Measured translator acceptance over the extracted chunks (the translator in
 | lighting/deferred/shadows | 6,902 | 0 (0.0 %) | first cause: `defi`/loops 3,300; `rcp` 2,150; VPOS read 695; >3 input vectors 338; `rsq` 154 |
 | skinning/characters | 1,872 | 0 (0.0 %) | stale temp 580; `defi` 480; `rcp` 184; >3 input vectors 76; VPOS 59 |
 | terrain/landscape | 327 | 0 (0.0 %) | `rsq` 101; stale temp 41; VPOS 26; `rcp` 15; >3 input vectors 3 |
-| ui/interface | 195 | 0 (0.0 %) | 96 need two live intermediates; 38 UVs computed in temps; 25 `rcp`; 15 `texkill`; 9 `dp4` |
+| ui/interface | 195 | 3 (1.5 %) | 96 need two live intermediates; 38 UVs computed in temps; 25 `rcp`; 15 `texkill`; 9 `dp4` |
 | particles/effects | 172 | 5 (2.9 %) | 160 use non-uniform `.zwz` sprite swizzles; 3 `texkill`; 1 `rcp`; 1 out-of-range `def` |
 | post-process/imagespace | 60 | 4 (6.7 %) | 22 UVs in temps; 16 non-uniform swizzles; 6 `rcp`; 3 `defi`; 2 use >3 textures; 1 out-of-range `def` |
 | blit/copy | 11 | **8 (72.7 %)** | 3 `mov .xxy` fills (non-uniform swizzle) |
-| sky | 10 | 2 (20.0 %) | 2 `frc`; 6 multi-temp |
+| sky | 10 | 7 (70.0 %) | 2 `frc`; 1 multi-temp |
 | water | 72 | 0 (0.0 %) | 24 loops; 4–7 texld; `rcp`/`rsq` |
 | grass/trees | 0 | — | no shipped bytecode |
 
@@ -347,6 +347,13 @@ The literal-range audit reduced aggregate acceptance from 21 to 19: one
 particles/effects chunk and one post-process/imagespace chunk had previously
 been accepted after silently clamping an out-of-range `def` component. Both are
 now rejected by name; the simple-copy and sky counts are unchanged.
+
+The 2026-11-27 channel-liveness layer raises generic acceptance to **27/9,621**:
+UI **0 → 3**, sky **2 → 7**, all other families unchanged. Per-channel temp
+provenance and RGB/alpha side carry remove false stale-temp refusals without
+widening the six-stage/three-texture envelope. The new three-stage
+`oC0.rgb`/`oC0.w` regression matches the independent D3D9 interpreter on 4,000
+vectors with zero error.
 
 The accepted column is the generic translator only. The separate fixed-pipeline
 matcher in §7.4 recognises 6 additional base-lit chunks (5 `p5_MAD_NORMAL`, 1
@@ -404,9 +411,12 @@ all branch/loop/call instructions.
 
 Further limits: straight-line code only; at most 6 stages; at most 3 texture
 units; at most 2 distinct constants in one instruction (one may be loaded into
-`PREVIOUS` by an extra stage); a temp may be read while it is the immediately
-previous stage's output, otherwise the value is stale; RGB swizzles must be
-identity or a replicated component (`.xxxx`, `.yyyy`, `.zzzz`, `.wwww`); source
+`PREVIOUS` by an extra stage); a temp channel may be read while it is the
+immediately previous stage's output or a still-addressable texture/input/
+constant, otherwise it is stale. Partial RGB/alpha writes carry the untouched
+side; non-side-aligned partial writes are accepted only when their unwritten
+lanes are never consumed. RGB swizzles must be identity or a replicated
+component (`.xxxx`, `.yyyy`, `.zzzz`, `.wwww`); source
 modifiers must be none or negate; `texld` UV/sampler operands must be
 unmodified, non-relative register tokens, with a UV register below 16; 2D
 samplers only; no MRT, no depth output. `oC0.rgb` must be fully defined; an
