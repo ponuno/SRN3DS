@@ -33,6 +33,7 @@ const char *menu_swf_batch_status_name(MenuSwfBatchStatus status) {
     case MENU_SWF_BATCH_ERR_NAN: return "non-finite batch transform";
     case MENU_SWF_BATCH_ERR_SCALE: return "degenerate/negative batch scale";
     case MENU_SWF_BATCH_ERR_CLIP: return "unsupported viewport clip";
+    case MENU_SWF_BATCH_ERR_FILL: return "unsupported batch fill";
     default: return "unknown batch status";
     }
 }
@@ -282,6 +283,205 @@ MenuSwfBatchStatus menu_swf_batch_text(
     out->vertex_count = vcount;
     out->index_count = icount;
     out->quad_count = vcount / 4u;
+    out->bounds.xmin = bxmin;
+    out->bounds.xmax = bxmax;
+    out->bounds.ymin = bymin;
+    out->bounds.ymax = bymax;
+    out->has_bounds = (uint8_t)have_bounds;
+    return MENU_SWF_BATCH_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shape triangle batches                                             */
+/* ------------------------------------------------------------------ */
+
+static int shape_transform(const MenuSwfBatchShapeStyle *s, int32_t x,
+                           int32_t y, int32_t *ox, int32_t *oy) {
+    const int64_t divisor = 65536ll * 20ll;
+    int64_t px, t;
+    if (__builtin_mul_overflow((int64_t)s->m00, (int64_t)x, &px))
+        return -1;
+    if (__builtin_mul_overflow((int64_t)s->m01, (int64_t)y, &t) ||
+        __builtin_add_overflow(px, t, &px))
+        return -1;
+    if (__builtin_mul_overflow((int64_t)s->tx, 65536ll, &t) ||
+        __builtin_add_overflow(px, t, &px))
+        return -1;
+    int64_t py;
+    if (__builtin_mul_overflow((int64_t)s->m10, (int64_t)x, &py))
+        return -1;
+    if (__builtin_mul_overflow((int64_t)s->m11, (int64_t)y, &t) ||
+        __builtin_add_overflow(py, t, &py))
+        return -1;
+    if (__builtin_mul_overflow((int64_t)s->ty, 65536ll, &t) ||
+        __builtin_add_overflow(py, t, &py))
+        return -1;
+    int64_t rx = px >= 0 ? (px + divisor / 2) / divisor
+                         : -((-px + divisor / 2) / divisor);
+    int64_t ry = py >= 0 ? (py + divisor / 2) / divisor
+                         : -((-py + divisor / 2) / divisor);
+    if (rx < INT32_MIN || rx > INT32_MAX || ry < INT32_MIN || ry > INT32_MAX)
+        return -1;
+    *ox = (int32_t)rx;
+    *oy = (int32_t)ry;
+    return 0;
+}
+
+static uint8_t shape_channel(uint32_t base, int32_t mult, int32_t add) {
+    int64_t value = ((int64_t)base * mult + (int64_t)add * 256ll) / 256ll;
+    if (value < 0) value = 0;
+    if (value > 255) value = 255;
+    return (uint8_t)value;
+}
+
+static MenuSwfBatchStatus shape_fill_color(const MenuSwfTessMesh *mesh,
+                                           uint16_t style_index,
+                                           const MenuSwfBatchShapeStyle *style,
+                                           uint32_t *out, char *reason,
+                                           size_t reason_cap) {
+    if (!style_index || style_index > mesh->fill_count) {
+        batch_reason(reason, reason_cap,
+                     "shape batch: triangle references fill %u of %u",
+                     style_index, mesh->fill_count);
+        return MENU_SWF_BATCH_ERR_FILL;
+    }
+    const MenuSwfTessFill *fill = &mesh->fills[style_index - 1];
+    if (fill->kind == MENU_SWF_FILL_LINEAR ||
+        fill->kind == MENU_SWF_FILL_RADIAL ||
+        fill->kind == MENU_SWF_FILL_FOCAL) {
+        batch_reason(reason, reason_cap,
+                     "gradient fills are not implemented");
+        return MENU_SWF_BATCH_ERR_FILL;
+    }
+    if (fill->kind == MENU_SWF_FILL_BITMAP) {
+        batch_reason(reason, reason_cap,
+                     "bitmap fills are not implemented");
+        return MENU_SWF_BATCH_ERR_FILL;
+    }
+    uint32_t rgba = fill->rgba;
+    uint8_t r = shape_channel((rgba >> 16) & 255u, style->mult[0],
+                              style->add[0]);
+    uint8_t g = shape_channel((rgba >> 8) & 255u, style->mult[1],
+                              style->add[1]);
+    uint8_t b = shape_channel(rgba & 255u, style->mult[2], style->add[2]);
+    uint8_t a = shape_channel((rgba >> 24) & 255u, style->mult[3],
+                              style->add[3]);
+    *out = ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+    return MENU_SWF_BATCH_OK;
+}
+
+MenuSwfBatchStatus menu_swf_batch_shape(
+    const MenuSwfTessMesh *mesh, const MenuSwfBatchShapeStyle *style,
+    const MenuSwfBatchViewport *viewport, MenuSwfBatchVertex *vertices,
+    uint32_t vertex_capacity, uint32_t *indices, uint32_t index_capacity,
+    MenuSwfBatchResult *out, char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!out) return MENU_SWF_BATCH_ERR_ARGUMENT;
+    memset(out, 0, sizeof *out);
+    if (!mesh || !style) {
+        batch_reason(reason, reason_cap,
+                     "shape batch: needs a mesh and a style");
+        return MENU_SWF_BATCH_ERR_ARGUMENT;
+    }
+    if (mesh->index_count != mesh->triangle_count * 3u ||
+        (mesh->triangle_count && (!mesh->indices || !mesh->triangle_fills ||
+                                  !mesh->fills))) {
+        batch_reason(reason, reason_cap,
+                     "shape batch: mesh indices/fills are incomplete");
+        return MENU_SWF_BATCH_ERR_ARGUMENT;
+    }
+    if (viewport && viewport->enabled) {
+        batch_reason(reason, reason_cap,
+                     "shape batch viewport clipping is not implemented");
+        return MENU_SWF_BATCH_ERR_CLIP;
+    }
+    int64_t det = (int64_t)style->m00 * style->m11 -
+                  (int64_t)style->m01 * style->m10;
+    if (det == 0) {
+        batch_reason(reason, reason_cap,
+                     "shape batch: scale determinant is zero");
+        return MENU_SWF_BATCH_ERR_SCALE;
+    }
+    int flip = det < 0;
+    uint32_t triangles = mesh->triangle_count;
+    uint32_t need_vertices = triangles * 3u;
+    uint32_t need_indices = triangles * 3u;
+    if (need_vertices > MENU_SWF_BATCH_MAX_SHAPE_VERTICES ||
+        need_indices > MENU_SWF_BATCH_MAX_SHAPE_INDICES ||
+        need_vertices > vertex_capacity || need_indices > index_capacity ||
+        (need_vertices && (!vertices || !indices))) {
+        batch_reason(reason, reason_cap,
+                     "shape batch: %u triangles need %u vertices/%u indices "
+                     "(capacity %u/%u)",
+                     triangles, need_vertices, need_indices, vertex_capacity,
+                     index_capacity);
+        return MENU_SWF_BATCH_ERR_OVERFLOW;
+    }
+    if (!triangles) return MENU_SWF_BATCH_OK;
+
+    /* Validate every fill and transformed point before writing anything. */
+    for (uint32_t t = 0; t < triangles; ++t) {
+        uint32_t color;
+        MenuSwfBatchStatus st = shape_fill_color(
+            mesh, mesh->triangle_fills[t], style, &color, reason, reason_cap);
+        if (st != MENU_SWF_BATCH_OK) return st;
+        for (unsigned k = 0; k < 3; ++k) {
+            uint32_t index = mesh->indices[t * 3u + k];
+            if (index >= mesh->vertex_count) {
+                batch_reason(reason, reason_cap,
+                             "shape batch: index %u is outside %u vertices",
+                             index, mesh->vertex_count);
+                return MENU_SWF_BATCH_ERR_ARGUMENT;
+            }
+            int32_t x, y;
+            if (shape_transform(style, mesh->vertices[index].x,
+                                mesh->vertices[index].y, &x, &y)) {
+                batch_reason(reason, reason_cap,
+                             "shape batch: transformed point overflow");
+                return MENU_SWF_BATCH_ERR_OVERFLOW;
+            }
+        }
+    }
+
+    uint32_t vcount = 0, icount = 0;
+    int have_bounds = 0;
+    int32_t bxmin = 0, bxmax = 0, bymin = 0, bymax = 0;
+    for (uint32_t t = 0; t < triangles; ++t) {
+        uint32_t color;
+        MenuSwfBatchStatus st = shape_fill_color(
+            mesh, mesh->triangle_fills[t], style, &color, reason, reason_cap);
+        if (st != MENU_SWF_BATCH_OK) return st;
+        uint32_t base = vcount;
+        for (unsigned k = 0; k < 3; ++k) {
+            uint32_t index = mesh->indices[t * 3u + k];
+            MenuSwfBatchVertex *v = &vertices[vcount++];
+            if (shape_transform(style, mesh->vertices[index].x,
+                                mesh->vertices[index].y, &v->x, &v->y)) {
+                batch_reason(reason, reason_cap,
+                             "shape batch: transformed point overflow");
+                return MENU_SWF_BATCH_ERR_OVERFLOW;
+            }
+            v->u = style->u;
+            v->v = style->v;
+            v->color = color;
+            if (!have_bounds) {
+                bxmin = bxmax = v->x;
+                bymin = bymax = v->y;
+                have_bounds = 1;
+            } else {
+                if (v->x < bxmin) bxmin = v->x;
+                if (v->x > bxmax) bxmax = v->x;
+                if (v->y < bymin) bymin = v->y;
+                if (v->y > bymax) bymax = v->y;
+            }
+        }
+        indices[icount++] = base + 0;
+        indices[icount++] = base + (flip ? 2u : 1u);
+        indices[icount++] = base + (flip ? 1u : 2u);
+    }
+    out->vertex_count = vcount;
+    out->index_count = icount;
+    out->triangle_count = triangles;
     out->bounds.xmin = bxmin;
     out->bounds.xmax = bxmax;
     out->bounds.ymin = bymin;

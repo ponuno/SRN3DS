@@ -60,6 +60,7 @@ typedef struct {
     MenuSwfTessEdge edges[MENU_SWF_TESS_MAX_EDGES];
     uint32_t active[MENU_SWF_TESS_MAX_EDGES];
     int32_t bands[MENU_SWF_TESS_MAX_BANDS];
+    MenuSwfTessFill fill_styles[MENU_SWF_SHAPE_MAX_STYLES];
 } TessFixture;
 
 static TessFixture tess_fixture;
@@ -80,6 +81,8 @@ static void tess_fixture_init(MenuSwfTessMesh *mesh) {
     mesh->active_capacity = MENU_SWF_TESS_MAX_EDGES;
     mesh->bands = tess_fixture.bands;
     mesh->band_capacity = MENU_SWF_TESS_MAX_BANDS;
+    mesh->fills = tess_fixture.fill_styles;
+    mesh->fill_capacity = MENU_SWF_SHAPE_MAX_STYLES;
 }
 
 typedef struct {
@@ -126,41 +129,6 @@ typedef struct {
     uint32_t batch_triangles;
 } PipelineStats;
 
-static int transform_point(const MenuSwfDisplayListRecord *record,
-                           const MenuSwfTessVertex *point,
-                           int32_t *out_x, int32_t *out_y) {
-    const int64_t divisor = 65536 * 20; /* 16.16 matrix, twips -> pixels */
-    int64_t x = (int64_t)record->matrix.m00 * point->x +
-                (int64_t)record->matrix.m01 * point->y +
-                (int64_t)record->matrix.tx * 65536;
-    int64_t y = (int64_t)record->matrix.m10 * point->x +
-                (int64_t)record->matrix.m11 * point->y +
-                (int64_t)record->matrix.ty * 65536;
-    int64_t rx = x >= 0 ? (x + divisor / 2) / divisor
-                        : -((-x + divisor / 2) / divisor);
-    int64_t ry = y >= 0 ? (y + divisor / 2) / divisor
-                        : -((-y + divisor / 2) / divisor);
-    if (rx < INT32_MIN || rx > INT32_MAX || ry < INT32_MIN || ry > INT32_MAX)
-        return -1;
-    *out_x = (int32_t)rx;
-    *out_y = (int32_t)ry;
-    return 0;
-}
-
-static uint8_t color_channel(int32_t mult, int32_t add) {
-    int32_t value = (255 * mult + add * 256) / 256;
-    if (value < 0) value = 0;
-    if (value > 255) value = 255;
-    return (uint8_t)value;
-}
-
-static uint32_t record_color(const MenuSwfDisplayListRecord *record) {
-    uint32_t r = color_channel(record->color.mult[0], record->color.add[0]);
-    uint32_t g = color_channel(record->color.mult[1], record->color.add[1]);
-    uint32_t b = color_channel(record->color.mult[2], record->color.add[2]);
-    uint32_t a = color_channel(record->color.mult[3], record->color.add[3]);
-    return (a << 24) | (r << 16) | (g << 8) | b;
-}
 
 static const MenuSwfFontSummary *find_font(const MenuSwfDisplaySummary *display,
                                           uint16_t font_id) {
@@ -169,24 +137,17 @@ static const MenuSwfFontSummary *find_font(const MenuSwfDisplaySummary *display,
     return NULL;
 }
 
-static int append_shape_mesh(const MenuSwfDisplayListRecord *record,
-                             const MenuSwfTessMesh *mesh,
-                             MenuSwfBatchVertex *vertices,
-                             uint32_t *vertex_count, uint32_t *indices,
-                             uint32_t *index_count, uint32_t white_u,
-                             uint32_t white_v, PipelineStats *stats,
-                             char *reason, size_t reason_cap) {
-    if ((mesh->index_count % 3u) != 0 || mesh->triangle_count != mesh->index_count / 3u) {
+static int append_shape_batch(const MenuSwfDisplayListRecord *record,
+                              const MenuSwfTessMesh *mesh,
+                              MenuSwfBatchVertex *vertices,
+                              uint32_t *vertex_count, uint32_t *indices,
+                              uint32_t *index_count, PipelineStats *stats,
+                              char *reason, size_t reason_cap) {
+    if ((mesh->index_count % 3u) != 0 ||
+        mesh->triangle_count != mesh->index_count / 3u) {
         snprintf(reason, reason_cap, "shape %u did not produce triangles",
                  record->character_id);
         return -1;
-    }
-    for (uint32_t i = 0; i < mesh->index_count; ++i) {
-        if (mesh->indices[i] >= mesh->vertex_count) {
-            snprintf(reason, reason_cap, "shape %u has an out-of-range index",
-                     record->character_id);
-            return -1;
-        }
     }
     if (!mesh->triangle_count) {
         ++stats->empty_shape_records;
@@ -198,33 +159,46 @@ static int append_shape_mesh(const MenuSwfDisplayListRecord *record,
         ++stats->degenerate_shape_records;
         return 0;
     }
-    if (mesh->vertex_count > E2E_MAX_BATCH_VERTICES - *vertex_count ||
-        mesh->index_count > E2E_MAX_BATCH_INDICES - *index_count) {
+    uint32_t need = mesh->triangle_count * 3u;
+    if (need > E2E_MAX_BATCH_VERTICES - *vertex_count ||
+        need > E2E_MAX_BATCH_INDICES - *index_count) {
         snprintf(reason, reason_cap,
                  "combined batch limit %u vertices/%u indices exceeded",
                  E2E_MAX_BATCH_VERTICES, E2E_MAX_BATCH_INDICES);
         return -1;
     }
 
-    uint32_t base = *vertex_count;
-    uint32_t color = record_color(record);
-    for (uint32_t i = 0; i < mesh->vertex_count; ++i) {
-        MenuSwfBatchVertex *dst = &vertices[base + i];
-        if (transform_point(record, &mesh->vertices[i], &dst->x, &dst->y)) {
-            snprintf(reason, reason_cap, "shape %u transformed point overflow",
-                     record->character_id);
-            return -1;
-        }
-        dst->u = white_u;
-        dst->v = white_v;
-        dst->color = color;
+    MenuSwfBatchShapeStyle style;
+    memset(&style, 0, sizeof style);
+    style.m00 = record->matrix.m00;
+    style.m01 = record->matrix.m01;
+    style.m10 = record->matrix.m10;
+    style.m11 = record->matrix.m11;
+    style.tx = record->matrix.tx;
+    style.ty = record->matrix.ty;
+    memcpy(style.mult, record->color.mult, sizeof style.mult);
+    memcpy(style.add, record->color.add, sizeof style.add);
+    style.u = 0;
+    style.v = 0;
+
+    MenuSwfBatchResult br;
+    MenuSwfBatchStatus bs = menu_swf_batch_shape(
+        mesh, &style, NULL, vertices + *vertex_count,
+        E2E_MAX_BATCH_VERTICES - *vertex_count, indices + *index_count,
+        E2E_MAX_BATCH_INDICES - *index_count, &br, reason, reason_cap);
+    if (bs != MENU_SWF_BATCH_OK) {
+        if (reason && !reason[0])
+            snprintf(reason, reason_cap, "shape %u batch refused: %s",
+                     record->character_id, menu_swf_batch_status_name(bs));
+        return -1;
     }
-    for (uint32_t i = 0; i < mesh->index_count; ++i)
-        indices[*index_count + i] = base + mesh->indices[i];
-    *vertex_count += mesh->vertex_count;
-    *index_count += mesh->index_count;
-    stats->shape_batch_vertices += mesh->vertex_count;
-    stats->shape_batch_indices += mesh->index_count;
+    uint32_t base = *vertex_count;
+    for (uint32_t i = 0; i < br.index_count; ++i)
+        indices[*index_count + i] += base;
+    *vertex_count += br.vertex_count;
+    *index_count += br.index_count;
+    stats->shape_batch_vertices += br.vertex_count;
+    stats->shape_batch_indices += br.index_count;
     return 0;
 }
 
@@ -717,9 +691,9 @@ static void run_real(const char *data_dir) {
             stats.tess_triangles += mesh.triangle_count;
             stats.stroke_segments += mesh.line_count;
             /* Filled in after atlas packing; white texel is reserved below. */
-            if (append_shape_mesh(record, &mesh, batch_vertices, &vertex_count,
-                                  batch_indices, &index_count, 0, 0, &stats,
-                                  reason, sizeof reason)) {
+            if (append_shape_batch(record, &mesh, batch_vertices,
+                                   &vertex_count, batch_indices, &index_count,
+                                   &stats, reason, sizeof reason)) {
                 printf("real: record=%u shape=%u append refused: %s\n",
                        i, record->character_id, reason);
                 ++failures;
@@ -904,6 +878,12 @@ static void run_real(const char *data_dir) {
         batch_vertices[i].u = white_u;
         batch_vertices[i].v = white_v;
     }
+    unsigned shape_coloured = 0;
+    for (uint32_t i = 0; i < stats.shape_batch_vertices; ++i)
+        if (batch_vertices[i].color != 0xffffffffu) ++shape_coloured;
+    printf("real: shape_colour_vertices=%u/%u\n", shape_coloured,
+           stats.shape_batch_vertices);
+    check(shape_coloured > 0, "shape vertices carry fill colours");
 
     MenuSwfBatchStyle batch_style;
     memset(&batch_style, 0, sizeof batch_style);

@@ -4,9 +4,9 @@
  * DefineShape/2/3/4 are parsed into path summaries in twips (1/20 px):
  * start/end, point/segment counts, closed flag, conservative bounds and the
  * fill0/fill1/line style indices active at the path start.  Fill/line style
- * arrays are validated and counted by kind (solid/gradient/bitmap); bitmap
- * fills keep their opaque bitmap id.  DefineFont2/3 glyph SHAPE records are
- * linked to their code table and reduced to per-glyph path summaries.
+ * arrays are validated and retained: solid RGBA, gradient matrix/stops, and
+ * bitmap character id.  DefineFont2/3 glyph SHAPE records are linked to their
+ * code table and reduced to per-glyph path summaries.
  *
  * No pixels, atlas, AVM or renderable display list are produced.
  */
@@ -22,7 +22,49 @@
 #define MENU_SWF_SHAPE_MAX_GLYPH_PATHS 1024u
 #define MENU_SWF_SHAPE_MAX_SEGMENTS 4096u
 #define MENU_SWF_SHAPE_MAX_STYLES 256u
+#define MENU_SWF_SHAPE_MAX_FILLS 1024u
+#define MENU_SWF_SHAPE_MAX_STOPS 8u
 #define MENU_SWF_SHAPE_MAX_DEPTH 16u
+
+typedef enum {
+    MENU_SWF_FILL_SOLID = 0,
+    MENU_SWF_FILL_LINEAR = 1,
+    MENU_SWF_FILL_RADIAL = 2,
+    MENU_SWF_FILL_FOCAL = 3,
+    MENU_SWF_FILL_BITMAP = 4
+} MenuSwfFillKind;
+
+/* SWF MATRIX fields, kept in their on-disk fixed-point units. */
+typedef struct {
+    int32_t scale_x, scale_y;       /* 16.16 */
+    int32_t rotate_skew0, rotate_skew1; /* 16.16 */
+    int32_t translate_x, translate_y;   /* twips */
+} MenuSwfShapeMatrix;
+
+typedef struct {
+    uint8_t ratio;
+    uint8_t r, g, b, a;
+} MenuSwfShapeGradientStop;
+
+/* One parsed FILLSTYLE.  Solid fills carry RGBA; gradients retain their
+ * matrix and up to MENU_SWF_SHAPE_MAX_STOPS color records; bitmap fills keep
+ * the opaque bitmap character id.  `stop_total` is the advertised count even
+ * when only the first stops were stored. */
+typedef struct {
+    uint32_t rgba;       /* 0xAARRGGBB for solid fills */
+    uint16_t bitmap_id;
+    uint8_t kind;        /* MenuSwfFillKind */
+    uint8_t has_alpha;   /* shape tag stores alpha channels */
+    uint8_t stop_count;  /* stored gradient stops */
+    uint8_t stop_total;  /* advertised gradient stops */
+    uint8_t spread;      /* gradient spread mode */
+    uint8_t interpolation;
+    uint8_t bitmap_repeat;
+    uint8_t focal_present;
+    int16_t focal;       /* 8.8 fixed point */
+    MenuSwfShapeMatrix matrix;
+    MenuSwfShapeGradientStop stops[MENU_SWF_SHAPE_MAX_STOPS];
+} MenuSwfShapeFill;
 
 typedef struct {
     int32_t xmin, xmax, ymin, ymax; /* twips */
@@ -53,10 +95,15 @@ typedef struct {
     uint16_t line_count;
     uint16_t solid_fills;
     uint16_t gradient_fills;
+    uint16_t linear_fills;
+    uint16_t radial_fills;
+    uint16_t focal_fills;
     uint16_t bitmap_fills;
     uint16_t solid_lines;
     uint16_t gradient_lines;
     uint16_t bitmap_lines;
+    uint32_t fill_first;    /* index into shape_fills[] */
+    uint16_t stored_fills;  /* fills retained for the current style array */
     uint32_t path_count;
     uint32_t stored_paths;
     uint32_t path_first;
@@ -87,6 +134,8 @@ typedef struct {
     MenuSwfShapeSummary shapes[MENU_SWF_SHAPE_MAX_SHAPES];
     MenuSwfShapePath shape_paths[MENU_SWF_SHAPE_MAX_PATHS];
     uint32_t shape_path_used;
+    MenuSwfShapeFill shape_fills[MENU_SWF_SHAPE_MAX_FILLS];
+    uint32_t shape_fill_used;
     uint32_t font_total;
     uint32_t stored_fonts;
     uint32_t glyph_total;
@@ -106,6 +155,12 @@ typedef struct {
     void *user;
     void (*begin_shape)(void *user, uint16_t shape_id, uint8_t tag_code);
     void (*end_shape)(void *user);
+    /* Called before each FILLSTYLEARRAY (including StateNewStyles).  Style
+     * indices restart at 1. */
+    void (*begin_fill_styles)(void *user, uint16_t count);
+    /* One callback per parsed fill style.  `index` is 1-based. */
+    void (*fill_style)(void *user, uint16_t index,
+                       const MenuSwfShapeFill *fill);
     void (*begin_path)(void *user, int32_t x, int32_t y, uint16_t fill0,
                        uint16_t fill1, uint16_t line);
     void (*line_to)(void *user, int32_t x, int32_t y);
@@ -137,6 +192,12 @@ typedef struct {
 /* Find a parsed shape by character id (NULL when absent). */
 const MenuSwfShapeSummary *menu_swf_shape_find(const MenuSwfShapeResult *result,
                                                uint16_t shape_id);
+
+/* Return the 1-based fill style for a shape, or NULL when the index is out of
+ * range / the style array was truncated. */
+const MenuSwfShapeFill *menu_swf_shape_fill(
+    const MenuSwfShapeResult *result, const MenuSwfShapeSummary *shape,
+    uint16_t index);
 
 /* Stream shape geometry to `sink` without building a summary.  Only
  * DefineShape/2/3/4 tags are decoded; glyph and font tags are skipped.  The

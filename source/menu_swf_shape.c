@@ -17,9 +17,21 @@ typedef struct {
 } Bits;
 
 typedef struct {
+    MenuSwfShapeFill *pool;
+    uint32_t capacity;
+    uint32_t used;      /* global entries consumed */
+    uint32_t first;     /* global first entry of the current array */
+    uint16_t stored;    /* stored entries in the current array */
+    int truncated;
+} FillSink;
+
+typedef struct {
     uint16_t fill_count, line_count;
-    uint16_t solid_fills, gradient_fills, bitmap_fills;
+    uint16_t solid_fills, gradient_fills;
+    uint16_t linear_fills, radial_fills, focal_fills;
+    uint16_t bitmap_fills;
     uint16_t solid_lines, gradient_lines, bitmap_lines;
+    FillSink *fills;
 } StyleState;
 
 typedef struct {
@@ -120,22 +132,35 @@ static int read_rect(Bits *b, MenuSwfShapeRect *r) {
     return 0;
 }
 
-static int skip_matrix(Reader *r) {
+static int read_matrix(Reader *r, MenuSwfShapeMatrix *m) {
     Bits b = {r->p, r->len, r->off * 8};
     uint32_t flag, nbits;
     int32_t v;
-    if (bt_bits(&b, 1, &flag)) return -1;
-    if (flag) {
-        if (bt_bits(&b, 5, &nbits) || nbits > 31) return -1;
-        if (bt_signed(&b, nbits, &v) || bt_signed(&b, nbits, &v)) return -1;
+    if (m) {
+        memset(m, 0, sizeof *m);
+        m->scale_x = m->scale_y = 0x10000;
     }
     if (bt_bits(&b, 1, &flag)) return -1;
     if (flag) {
         if (bt_bits(&b, 5, &nbits) || nbits > 31) return -1;
-        if (bt_signed(&b, nbits, &v) || bt_signed(&b, nbits, &v)) return -1;
+        if (bt_signed(&b, nbits, &v)) return -1;
+        if (m) m->scale_x = v;
+        if (bt_signed(&b, nbits, &v)) return -1;
+        if (m) m->scale_y = v;
+    }
+    if (bt_bits(&b, 1, &flag)) return -1;
+    if (flag) {
+        if (bt_bits(&b, 5, &nbits) || nbits > 31) return -1;
+        if (bt_signed(&b, nbits, &v)) return -1;
+        if (m) m->rotate_skew0 = v;
+        if (bt_signed(&b, nbits, &v)) return -1;
+        if (m) m->rotate_skew1 = v;
     }
     if (bt_bits(&b, 5, &nbits) || nbits > 31) return -1;
-    if (bt_signed(&b, nbits, &v) || bt_signed(&b, nbits, &v)) return -1;
+    if (bt_signed(&b, nbits, &v)) return -1;
+    if (m) m->translate_x = v;
+    if (bt_signed(&b, nbits, &v)) return -1;
+    if (m) m->translate_y = v;
     bt_align(&b);
     if (b.bit > r->len * 8) return -1;
     r->off = b.bit / 8;
@@ -143,18 +168,32 @@ static int skip_matrix(Reader *r) {
 }
 
 static int parse_fill_style(Reader *r, int shape_type, StyleState *st,
+                            uint16_t index, MenuSwfShapeFill *out,
                             char *reason, size_t reason_cap) {
     uint8_t type;
+    (void)index;
+    if (out) {
+        memset(out, 0, sizeof *out);
+        out->has_alpha = (uint8_t)(shape_type >= 3);
+    }
     if (rd_u8(r, &type)) return -1;
     if (type == 0x00) {
         size_t n = shape_type >= 3 ? 4u : 3u;
         if (r->len - r->off < n) return -1;
+        if (out) {
+            uint8_t c[4] = {0, 0, 0, 255};
+            memcpy(c, r->p + r->off, n);
+            out->kind = MENU_SWF_FILL_SOLID;
+            out->rgba = ((uint32_t)c[3] << 24) | ((uint32_t)c[0] << 16) |
+                        ((uint32_t)c[1] << 8) | c[2];
+        }
         r->off += n;
         ++st->solid_fills;
         return 0;
     }
     if (type == 0x10 || type == 0x12 || type == 0x13) {
-        if (skip_matrix(r)) return -1;
+        MenuSwfShapeMatrix matrix;
+        if (read_matrix(r, &matrix)) return -1;
         uint8_t header;
         if (rd_u8(r, &header)) return -1;
         unsigned colors = header & 0x0fu;
@@ -165,12 +204,50 @@ static int parse_fill_style(Reader *r, int shape_type, StyleState *st,
         }
         size_t color_size = shape_type >= 3 ? 4u : 3u;
         if ((uint64_t)colors * (1u + color_size) > r->len - r->off) return -1;
-        r->off += colors * (1u + color_size);
+        uint8_t kind = type == 0x10 ? MENU_SWF_FILL_LINEAR
+                       : type == 0x12 ? MENU_SWF_FILL_RADIAL
+                                      : MENU_SWF_FILL_FOCAL;
+        if (out) {
+            out->kind = kind;
+            out->matrix = matrix;
+            out->stop_total = (uint8_t)colors;
+            out->spread = (uint8_t)((header >> 6) & 3u);
+            out->interpolation = (uint8_t)((header >> 4) & 3u);
+        }
+        for (unsigned i = 0; i < colors; ++i) {
+            uint8_t c[4] = {0, 0, 0, 255};
+            uint8_t ratio;
+            if (rd_u8(r, &ratio)) return -1;
+            memcpy(c, r->p + r->off, color_size);
+            r->off += color_size;
+            if (out && out->stop_count < MENU_SWF_SHAPE_MAX_STOPS) {
+                MenuSwfShapeGradientStop *stop =
+                    &out->stops[out->stop_count++];
+                stop->ratio = ratio;
+                stop->r = c[0];
+                stop->g = c[1];
+                stop->b = c[2];
+                stop->a = c[3];
+            }
+        }
         if (type == 0x13) {
             if (r->len - r->off < 4) return -1;
+            uint32_t focal = (uint32_t)r->p[r->off] |
+                             ((uint32_t)r->p[r->off + 1] << 8) |
+                             ((uint32_t)r->p[r->off + 2] << 16) |
+                             ((uint32_t)r->p[r->off + 3] << 24);
             r->off += 4;
+            if (out) {
+                out->focal_present = 1;
+                out->focal = (int16_t)(int32_t)focal;
+            }
         }
         ++st->gradient_fills;
+        if (out) {
+            if (kind == MENU_SWF_FILL_LINEAR) ++st->linear_fills;
+            else if (kind == MENU_SWF_FILL_RADIAL) ++st->radial_fills;
+            else ++st->focal_fills;
+        }
         return 0;
     }
     if (type == 0x40 || type == 0x41 || type == 0x42 || type == 0x43) {
@@ -181,8 +258,15 @@ static int parse_fill_style(Reader *r, int shape_type, StyleState *st,
                        "swf shape: bitmap fill has no bitmap id");
             return -1;
         }
-        if (skip_matrix(r)) return -1;
+        MenuSwfShapeMatrix matrix;
+        if (read_matrix(r, &matrix)) return -1;
         ++st->bitmap_fills;
+        if (out) {
+            out->kind = MENU_SWF_FILL_BITMAP;
+            out->bitmap_id = bitmap_id;
+            out->matrix = matrix;
+            out->bitmap_repeat = (uint8_t)((type & 1u) ? 0u : 1u);
+        }
         return 0;
     }
     set_reason(reason, reason_cap,
@@ -191,6 +275,7 @@ static int parse_fill_style(Reader *r, int shape_type, StyleState *st,
 }
 
 static int parse_fill_array(Reader *r, int shape_type, StyleState *st,
+                            const MenuSwfShapeSink *events, void *user,
                             char *reason, size_t reason_cap) {
     uint8_t count8;
     uint32_t count;
@@ -209,9 +294,30 @@ static int parse_fill_array(Reader *r, int shape_type, StyleState *st,
     }
     st->fill_count = (uint16_t)count;
     st->solid_fills = st->gradient_fills = st->bitmap_fills = 0;
+    st->linear_fills = st->radial_fills = st->focal_fills = 0;
+    if (st->fills) {
+        st->fills->first = st->fills->used;
+        st->fills->stored = 0;
+        st->fills->truncated = 0;
+    }
+    if (events && events->begin_fill_styles)
+        events->begin_fill_styles(user, (uint16_t)count);
     for (uint32_t i = 0; i < count; ++i) {
-        int rc = parse_fill_style(r, shape_type, st, reason, reason_cap);
+        MenuSwfShapeFill fill;
+        int collect = st->fills || (events && events->fill_style);
+        int rc = parse_fill_style(r, shape_type, st, (uint16_t)(i + 1),
+                                  collect ? &fill : NULL, reason, reason_cap);
         if (rc) return rc;
+        if (events && events->fill_style)
+            events->fill_style(user, (uint16_t)(i + 1), &fill);
+        if (st->fills) {
+            if (st->fills->used < st->fills->capacity) {
+                st->fills->pool[st->fills->used++] = fill;
+                ++st->fills->stored;
+            } else {
+                st->fills->truncated = 1;
+            }
+        }
     }
     return 0;
 }
@@ -257,7 +363,8 @@ static int parse_line_array(Reader *r, int shape_type, StyleState *st,
             }
             if (has_fill) {
                 StyleState dummy = {0};
-                int rc = parse_fill_style(r, 4, &dummy, reason, reason_cap);
+                int rc = parse_fill_style(r, 4, &dummy, 0, NULL, reason,
+                                          reason_cap);
                 if (rc) return rc;
                 ++st->gradient_lines;
             } else {
@@ -415,8 +522,8 @@ static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
                 }
                 bt_align(&b);
                 Reader r = {p, len, b.bit / 8};
-                int rc = parse_fill_array(&r, shape_type, styles, reason,
-                                          reason_cap);
+                int rc = parse_fill_array(&r, shape_type, styles, events, user,
+                                          reason, reason_cap);
                 if (!rc) rc = parse_line_array(&r, shape_type, styles, reason,
                                                reason_cap);
                 if (rc) return rc;
@@ -541,7 +648,16 @@ static int parse_shape_tag(const uint8_t *p, size_t len, uint8_t tag_code,
 
     StyleState styles;
     memset(&styles, 0, sizeof styles);
-    int rc = parse_fill_array(&r, shape_type, &styles, reason, reason_cap);
+    FillSink fill_sink;
+    memset(&fill_sink, 0, sizeof fill_sink);
+    if (out) {
+        fill_sink.pool = out->shape_fills;
+        fill_sink.capacity = MENU_SWF_SHAPE_MAX_FILLS;
+        fill_sink.used = out->shape_fill_used;
+        styles.fills = &fill_sink;
+    }
+    int rc = parse_fill_array(&r, shape_type, &styles, events, user, reason,
+                              reason_cap);
     if (!rc) rc = parse_line_array(&r, shape_type, &styles, reason, reason_cap);
     if (rc) return rc;
 
@@ -574,10 +690,19 @@ static int parse_shape_tag(const uint8_t *p, size_t len, uint8_t tag_code,
     shape.line_count = styles.line_count;
     shape.solid_fills = styles.solid_fills;
     shape.gradient_fills = styles.gradient_fills;
+    shape.linear_fills = styles.linear_fills;
+    shape.radial_fills = styles.radial_fills;
+    shape.focal_fills = styles.focal_fills;
     shape.bitmap_fills = styles.bitmap_fills;
     shape.solid_lines = styles.solid_lines;
     shape.gradient_lines = styles.gradient_lines;
     shape.bitmap_lines = styles.bitmap_lines;
+    shape.fill_first = fill_sink.first;
+    shape.stored_fills = fill_sink.stored;
+    if (fill_sink.truncated) {
+        shape.truncated = 1;
+        if (out) out->truncated = 1;
+    }
     shape.path_count = g.path_count;
     shape.point_count = g.point_count;
     shape.segment_count = g.segment_count;
@@ -585,6 +710,7 @@ static int parse_shape_tag(const uint8_t *p, size_t len, uint8_t tag_code,
 
     if (events && events->end_shape) events->end_shape(user);
     if (!out) return 0;
+    out->shape_fill_used = fill_sink.used;
     if (out->stored_shapes >= MENU_SWF_SHAPE_MAX_SHAPES) {
         set_reason(reason, reason_cap, "swf shape: shape limit %u exceeded",
                    MENU_SWF_SHAPE_MAX_SHAPES);
@@ -846,6 +972,17 @@ const MenuSwfShapeSummary *menu_swf_shape_find(const MenuSwfShapeResult *result,
     for (uint32_t i = 0; i < result->stored_shapes; ++i)
         if (result->shapes[i].shape_id == shape_id) return &result->shapes[i];
     return NULL;
+}
+
+const MenuSwfShapeFill *menu_swf_shape_fill(
+    const MenuSwfShapeResult *result, const MenuSwfShapeSummary *shape,
+    uint16_t index) {
+    if (!result || !shape || index == 0 || index > shape->stored_fills)
+        return NULL;
+    uint32_t at = shape->fill_first + (uint32_t)(index - 1);
+    if (at >= MENU_SWF_SHAPE_MAX_FILLS || at >= result->shape_fill_used)
+        return NULL;
+    return &result->shape_fills[at];
 }
 
 MenuSwfStatus menu_swf_shape_walk(const uint8_t *data, size_t size,

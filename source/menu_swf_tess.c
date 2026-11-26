@@ -19,6 +19,7 @@ typedef struct {
     int32_t start_x, start_y;
     int32_t cur_x, cur_y;
     uint16_t fill0, fill1, line;
+    uint16_t fill_base; /* global style offset after StateNewStyles */
     MenuSwfStatus status;
     char *reason;
     size_t reason_cap;
@@ -52,6 +53,7 @@ static void reset_output(MenuSwfTessMesh *m) {
     m->contour_count = 0;
     m->edge_count = 0;
     m->curve_segments = 0;
+    m->fill_count = 0;
     memset(&m->bounds, 0, sizeof m->bounds);
     m->has_bounds = 0;
 }
@@ -165,13 +167,44 @@ static void tess_begin_shape(void *user, uint16_t shape_id, uint8_t tag_code) {
     (void)tag_code;
     TessCtx *c = (TessCtx *)user;
     c->in_shape = (shape_id == c->shape_id);
-    if (c->in_shape) c->shape_found = 1;
+    if (c->in_shape) {
+        c->shape_found = 1;
+        c->fill_base = 0;
+    }
 }
 
 static void tess_end_shape(void *user) {
     TessCtx *c = (TessCtx *)user;
     c->in_shape = 0;
     c->in_path = 0;
+}
+
+static void tess_begin_fill_styles(void *user, uint16_t count) {
+    TessCtx *c = (TessCtx *)user;
+    if (!c->in_shape || c->status != MENU_SWF_OK) return;
+    if (c->glyph_mode) return;
+    c->fill_base = (uint16_t)c->mesh->fill_count;
+    if (c->mesh->fills &&
+        (uint32_t)count > c->mesh->fill_capacity - c->mesh->fill_count) {
+        tess_fail(c, MENU_SWF_ERR_BUDGET,
+                  "swf tess: fill capacity %u cannot hold %u more styles",
+                  c->mesh->fill_capacity, count);
+    }
+}
+
+static void tess_fill_style(void *user, uint16_t index,
+                            const MenuSwfShapeFill *fill) {
+    TessCtx *c = (TessCtx *)user;
+    (void)index;
+    if (!c->in_shape || c->status != MENU_SWF_OK || c->glyph_mode) return;
+    if (!c->mesh->fills) return;
+    if (c->mesh->fill_count >= c->mesh->fill_capacity) {
+        tess_fail(c, MENU_SWF_ERR_BUDGET,
+                  "swf tess: fill capacity %u exceeded",
+                  c->mesh->fill_capacity);
+        return;
+    }
+    c->mesh->fills[c->mesh->fill_count++] = *fill;
 }
 
 static void tess_begin_path(void *user, int32_t x, int32_t y, uint16_t fill0,
@@ -193,8 +226,8 @@ static void tess_begin_path(void *user, int32_t x, int32_t y, uint16_t fill0,
         c->fill1 = 0;
         c->line = 0;
     } else {
-        c->fill0 = fill0;
-        c->fill1 = fill1;
+        c->fill0 = fill0 ? (uint16_t)(fill0 + c->fill_base) : 0;
+        c->fill1 = fill1 ? (uint16_t)(fill1 + c->fill_base) : 0;
         c->line = line;
     }
     add_bounds(c, x, y);
@@ -481,7 +514,8 @@ static int check_buffers(const MenuSwfTessMesh *m, char *reason,
         (!m->lines && m->line_capacity) ||
         (!m->edges && m->edge_capacity) ||
         (!m->active && m->active_capacity) ||
-        (!m->bands && m->band_capacity)) {
+        (!m->bands && m->band_capacity) ||
+        (!m->fills && m->fill_capacity)) {
         tess_reason(reason, reason_cap,
                     "swf tess: NULL buffer with a nonzero capacity");
         return -1;
@@ -578,6 +612,8 @@ MenuSwfStatus menu_swf_tess_shape(const uint8_t *data, size_t size,
     sink.user = &c;
     sink.begin_shape = tess_begin_shape;
     sink.end_shape = tess_end_shape;
+    sink.begin_fill_styles = tess_begin_fill_styles;
+    sink.fill_style = tess_fill_style;
     sink.begin_path = tess_begin_path;
     sink.line_to = tess_line_to;
     sink.curve_to = tess_curve_to;

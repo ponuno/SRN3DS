@@ -455,6 +455,14 @@ static void test_real(const char *data_dir) {
                s.stored_shapes, s.shape_total, s.stored_fonts, s.font_total,
                s.stored_glyphs, s.glyph_total, s.shape_path_used,
                shape_segments, shape_points, s.glyph_path_used);
+        unsigned solid = 0, gradient = 0, bitmap = 0;
+        for (uint32_t i = 0; i < s.stored_shapes; ++i) {
+            solid += s.shapes[i].solid_fills;
+            gradient += s.shapes[i].gradient_fills;
+            bitmap += s.shapes[i].bitmap_fills;
+        }
+        printf("real: fills solid=%u gradient=%u bitmap=%u\n", solid,
+               gradient, bitmap);
         if (shape2) {
             printf("real: shape2 paths=%u segs=%u pts=%u bounds=%d,%d,%d,%d\n",
                    shape2->path_count, shape2->segment_count,

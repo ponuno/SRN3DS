@@ -4,7 +4,10 @@
  * The input is one DefineShape/2/3/4 character from a validated SWF.  The
  * output is a caller-owned vertex/index pool plus a separate list of stroked
  * line segments.  Curves are flattened adaptively, both even-odd and non-zero
- * fill rules are supported, and holes are resolved by the chosen rule.
+ * fill rules are supported, and holes are resolved by the chosen rule.  When
+ * the caller supplies a fill buffer, the shape's parsed fill styles are copied
+ * there and triangle_fills carries global 1-based style indices; after a
+ * StateNewStyles record later style arrays continue at the next index.
  *
  * No rasterisation, atlas, AVM or frame is produced.  The tessellator itself
  * allocates nothing: all output and scratch memory comes from the caller.  The
@@ -34,6 +37,9 @@ typedef enum {
     MENU_SWF_TESS_NON_ZERO = 1
 } MenuSwfTessFillRule;
 
+/* Parsed fill-style metadata copied from the shape's FILLSTYLEARRAY. */
+typedef MenuSwfShapeFill MenuSwfTessFill;
+
 typedef struct {
     int32_t x, y; /* twips */
 } MenuSwfTessVertex;
@@ -60,10 +66,17 @@ typedef struct {
     uint32_t vertex_capacity;
     uint32_t *indices;
     uint32_t index_capacity;       /* number of uint32_t entries, not triangles */
-    uint16_t *triangle_fills;      /* one shape style index per triangle */
+    uint16_t *triangle_fills;      /* one 1-based style index per triangle;
+                                    * global across StateNewStyles arrays */
     uint32_t triangle_capacity;
     MenuSwfTessLine *lines;
     uint32_t line_capacity;
+
+    /* Optional caller-owned fill-style table.  When `fills` is non-NULL and
+     * `fill_capacity` is non-zero, the tessellator copies the shape's parsed
+     * styles here in 1-based order so a batch can colour triangles. */
+    MenuSwfTessFill *fills;
+    uint32_t fill_capacity;
 
     /* Caller-provided scratch.  `active_capacity` must cover the peak active
      * edge count and `band_capacity` the two endpoints of every edge. */
@@ -82,6 +95,7 @@ typedef struct {
     uint32_t contour_count;
     uint32_t edge_count;
     uint32_t curve_segments;
+    uint32_t fill_count;   /* entries written to fills[] */
     MenuSwfShapeRect bounds;
     uint8_t has_bounds;
     uint8_t fill_rule;
