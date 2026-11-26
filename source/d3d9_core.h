@@ -64,7 +64,8 @@ enum {
     D9_RS_LOCALVIEWER=146,
     D9_RS_AMBIENTMATERIALSOURCE=147,
     D9_RS_SPECULARMATERIALSOURCE=148,
-    D9_RS_EMISSIVEMATERIALSOURCE=149
+    D9_RS_EMISSIVEMATERIALSOURCE=149,
+    D9_RS_CLIPPLANEENABLE=152
 };
 enum {D9_MCS_MATERIAL=0,D9_MCS_COLOR1=1,D9_MCS_COLOR2=2};
 typedef struct {
@@ -534,6 +535,12 @@ int d9_get_material(const D9Device *d,D9MaterialState *m);
 int d9_multiply_transform(D9Device *d,unsigned which,const D9Matrix *m);
 /* Shader constants c0..c3 as four D3D column-vector clip rows, or NULL for fixed transforms. */
 int d9_set_shader_clip(D9Device *d,const D9Matrix *rows);
+/* Six D3D user clip planes.  Values are copied and must be finite.  PICA has
+ * no user clip-plane stage, so any draw with D3DRS_CLIPPLANEENABLE != 0 is a
+ * named D9_UNSUPPORTED refusal; disabled planes are stored but never applied. */
+#define D9_MAX_CLIP_PLANES 6u
+int d9_set_clip_plane(D9Device *d,unsigned index,const float plane[4]);
+int d9_get_clip_plane(const D9Device *d,unsigned index,float plane[4]);
 /* D3D9 numeric D3DRS/D3DSAMP values. Unsupported enum/state returns D9_INVALID. */
 int d9_set_render_state(D9Device *d,unsigned id,unsigned value);
 int d9_get_render_state(D9Device *d,unsigned id,unsigned *value);

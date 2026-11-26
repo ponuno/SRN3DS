@@ -82,6 +82,8 @@ struct D9Device {
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
     float tev_constants[9][4];
+    float clip_planes[D9_MAX_CLIP_PLANES][4];
+    unsigned clip_plane_enable;
     float ps_constants[D9_PS_CONST_F_REGS][4];
     int32_t ps_constants_i[D9_PS_CONST_I_REGS][4];
     uint8_t ps_constants_b[D9_PS_CONST_B_REGS];
@@ -1469,6 +1471,15 @@ int d9_get_vs_constants_b(const D9Device *d,unsigned start,int32_t *values,unsig
 unsigned d9_ps_constants_f_mask(const D9Device *d){return d?d->ps_constants_f_mask&0xFFu:0u;}
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;d->transforms[which]=*m;return D9_OK;}
+int d9_set_clip_plane(D9Device *d,unsigned index,const float plane[4]){
+    if(!d||!plane||index>=D9_MAX_CLIP_PLANES)return D9_INVALID;
+    for(unsigned i=0;i<4;++i)if(!isfinite(plane[i]))return D9_INVALID;
+    memcpy(d->clip_planes[index],plane,16);return D9_OK;
+}
+int d9_get_clip_plane(const D9Device *d,unsigned index,float plane[4]){
+    if(!d||!plane||index>=D9_MAX_CLIP_PLANES)return D9_INVALID;
+    memcpy(plane,d->clip_planes[index],16);return D9_OK;
+}
 int d9_set_shader_clip(D9Device *d,const D9Matrix *m){if(!d)return D9_INVALID;if(!m){d->shader_active=0;return D9_OK;}
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;
     for(unsigned i=0;i<4;++i){d->shader_clip.m[0][i]=m->m[1][i];d->shader_clip.m[1][i]=-m->m[0][i];
@@ -1672,6 +1683,10 @@ static int tnl_get_state(const D9Device *d,unsigned id,unsigned *v){
 }
 int d9_set_render_state(D9Device *d,unsigned id,unsigned v){
     if(!d)return D9_INVALID;
+    if(id==D9_RS_CLIPPLANEENABLE){
+        if(v&~0x3Fu){set_diagnosis(d,"only clip planes 0..5 exist");return D9_INVALID;}
+        d->clip_plane_enable=v;return D9_OK;
+    }
     if(d->tnl_proto){
         int rc=tnl_set_state(d,id,v);
         if(rc!=D9_INVALID)return rc;
@@ -1681,6 +1696,7 @@ int d9_set_render_state(D9Device *d,unsigned id,unsigned v){
 }
 int d9_get_render_state(D9Device *d,unsigned id,unsigned *v){
     if(!d||!v)return D9_INVALID;
+    if(id==D9_RS_CLIPPLANEENABLE){*v=d->clip_plane_enable;return D9_OK;}
     if(d->tnl_proto){
         int rc=tnl_get_state(d,id,v);
         if(rc==D9_OK)return D9_OK;
@@ -1844,6 +1860,10 @@ static void fill_cube_view(D9CubeView *view,const CubeTexture *c){
 }
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
+    if(d->clip_plane_enable){
+        set_diagnosis(d,"user clip planes are enabled; PICA has no user clip-plane stage");
+        return D9_UNSUPPORTED;
+    }
     CubeTexture *ct=NULL;int cube_mode=0;
     if(d->cube_texture1){
         set_diagnosis(d,"cube-map sampling on texture stage 1 is not implemented; bind the cube to stage 0");

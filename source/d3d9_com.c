@@ -77,6 +77,7 @@ static struct {
     Obj o[MAX_OBJECTS];unsigned next;
     Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*volume,*volume1,*vs,*ps,*declaration;
     unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;float constants_c8[4];
+    uint32_t clip_status_union,clip_status_intersection;
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
     uint16_t gamma[3][256];size_t surface_bytes;
     unsigned frame_index,draw_index,capture_present;uint32_t capture_present_flags;
@@ -580,7 +581,7 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
     g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.back->handle?1:0;
-    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);memset(&g.constants_c8,0,sizeof g.constants_c8);
+    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);memset(&g.constants_c8,0,sizeof g.constants_c8);g.clip_status_union=g.clip_status_intersection=0;
     g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
     /* Reset also discards every closure observation and material evidence. */
     d9_menu_closure_reset();
@@ -1873,6 +1874,56 @@ static void get_light_enable(CPU *c){
     int enable=0;if(d9_get_light_enable(g.device,index,&enable))RET(INVALID,3);
     M32(out)=enable?1u:0u;RET(OK,3);
 }
+/* ---- legacy miscellaneous device state -------------------------------- */
+static void set_clip_plane(CPU *c){
+    unsigned index=A(1);uint32_t p=A(2);float plane[4];
+    if(!obj(A(0),DEVICE)||index>=D9_MAX_CLIP_PLANES||!ptr(p,16)){
+        d3d_fail("SetClipPlane","only clip planes 0..5 and a readable 4-float pointer are implemented",INVALID);
+        RET(INVALID,3);
+    }
+    memcpy(plane,ptr(p,16),16);
+    if(d9_set_clip_plane(g.device,index,plane)){
+        d3d_fail("SetClipPlane","clip plane values must be finite",INVALID);RET(INVALID,3);
+    }
+    g.last_diagnostic[0]=0;RET(OK,3);
+}
+static void get_clip_plane(CPU *c){
+    unsigned index=A(1);uint32_t p=A(2);float plane[4];
+    if(!obj(A(0),DEVICE)||index>=D9_MAX_CLIP_PLANES||!ptr(p,16)){
+        d3d_fail("GetClipPlane","only clip planes 0..5 and a writable 4-float pointer are implemented",INVALID);
+        RET(INVALID,3);
+    }
+    if(d9_get_clip_plane(g.device,index,plane))RET(INVALID,3);
+    memcpy(ptr(p,16),plane,16);RET(OK,3);
+}
+static void set_clip_status(CPU *c){
+    uint32_t p=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(p,8)){
+        d3d_fail("SetClipStatus","invalid device or 8-byte D3DCLIPSTATUS9 pointer",INVALID);RET(INVALID,2);
+    }
+    memcpy(&g.clip_status_union,ptr(p,4),4);memcpy(&g.clip_status_intersection,ptr(p+4,4),4);
+    g.last_diagnostic[0]=0;RET(OK,2);
+}
+static void get_clip_status(CPU *c){
+    uint32_t p=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(p,8)){
+        d3d_fail("GetClipStatus","invalid device or 8-byte D3DCLIPSTATUS9 pointer",INVALID);RET(INVALID,2);
+    }
+    memcpy(ptr(p,4),&g.clip_status_union,4);memcpy(ptr(p+4,4),&g.clip_status_intersection,4);
+    RET(OK,2);
+}
+static void set_software_vp(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,2);
+    if(A(1)){
+        d3d_fail("SetSoftwareVertexProcessing","software vertex processing is not implemented; the bridge is hardware-only",UNAVAILABLE);
+        RET(UNAVAILABLE,2);
+    }
+    RET(OK,2);
+}
+static void get_software_vp(CPU *c){
+    if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);
+    M32(A(1))=0;RET(OK,2); /* the bridge always advertises hardware processing */
+}
 static void set_fvf(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,2);
     unsigned fvf=A(1);const char *why=NULL;D9Decl decl;
     if(d9_decl_from_fvf(fvf,g.tnl_proto,&decl,&why)){
@@ -2567,6 +2618,7 @@ static void draw_indexed_up(CPU *c){
  X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
  X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) \
  X(set_vs_const_i) X(get_vs_const_i) X(set_vs_const_b) X(get_vs_const_b) \
+ X(set_clip_plane) X(get_clip_plane) X(set_clip_status) X(get_clip_status) X(set_software_vp) X(get_software_vp) \
  X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(create_query) \
  X(query_get_device) X(query_get_type) X(query_get_data_size) X(query_issue) X(query_get_data) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
@@ -2713,6 +2765,9 @@ static void init_tables(void){
     SLOT(DEVICE,45,get_transform);SLOT(DEVICE,46,multiply_transform);
     SLOT(DEVICE,49,set_material);SLOT(DEVICE,50,get_material);
     SLOT(DEVICE,51,set_light);SLOT(DEVICE,52,get_light);SLOT(DEVICE,53,light_enable);SLOT(DEVICE,54,get_light_enable);
+    SLOT(DEVICE,55,set_clip_plane);SLOT(DEVICE,56,get_clip_plane);
+    SLOT(DEVICE,62,set_clip_status);SLOT(DEVICE,63,get_clip_status);
+    SLOT(DEVICE,77,set_software_vp);SLOT(DEVICE,78,get_software_vp);
     SLOT(DEVICE,47,set_viewport);SLOT(DEVICE,48,get_viewport);SLOT(DEVICE,64,get_texture);SLOT(DEVICE,65,texture);
     SLOT(DEVICE,21,set_gamma_ramp);SLOT(DEVICE,22,get_gamma_ramp);
     SLOT(DEVICE,75,set_scissor_rect);SLOT(DEVICE,76,get_scissor_rect);
