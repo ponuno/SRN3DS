@@ -108,11 +108,26 @@ missing input/precondition/backend gap. Nothing is submitted: no partial batch,
 no fallback texture and no fake success. The explicit mask starts empty and is
 reset on device creation and `Reset`.
 
-Current backend gap (honest): the PICA descriptor path still accepts only one
-texture unit, no vertex colour and no external constants; the fixed PICA VS
-produces position+texcoord0 only. Therefore the copy plan is the only one of
-the five that is currently drawable; the logo, fog, tint and VS family are
-selected and then refused by name. This is not a rendered-menu claim.
+PICA backend status after this layer:
+
+- two 2D texture units (`s0`/`s1`) are validated and bound;
+- `color0` is routed through the existing colour vertex shader as
+  `GPU_PRIMARY_COLOR`;
+- external c0..c7 are materialised per TEV stage from the COM constant bank;
+- the logo's `NdotL*c4 + color1` stage is split into `MODULATE(c4)` +
+  `ADD(c8)` and `color1` is supplied as the explicit
+  `d9_com_menu_set_ambient_emissive()` value (internal c8).
+
+This makes the copy, logo, fog and tint plans PICA-valid (`menu_closure`
+checks 6 stages/2 textures/ambient fold for the logo).  It does **not** provide
+per-vertex color1 interpolation: PICA has one interpolated vertex colour and the
+fragment-lighting source is a different, material/light-driven value.  The
+menu-light plan therefore uses the explicit c8 fold documented above.
+
+The fixed PICA vertex shader still emits position+texcoord0 only, so the
+`menu.generic.vs` family is selected and then refused at draw time by name.  A
+material loader must still supply normal/tangent evidence and the c8 ambient
+value.  No menu frame or pixel proof is claimed.
 
 ### 1.4 Caps and closure separation
 
@@ -154,14 +169,14 @@ diagnostic only; no compiler, no bytecode cache and no fake success were added.
   name until the backend grows those varyings.
 - **Automatic material selection.** Observable texture/declaration/constant
   evidence is derived automatically. A NIF/material loader still has to
-  validate and report the normal map, tangent basis and ambient+emissive
-  varying; without those bits the logo draw is refused by name.
+  validate and report the normal map, tangent basis and the explicit c8
+  ambient+emissive value; without those bits the logo draw is refused by name.
 - **Other measured blobs.** The closure covers two PS entries and one fixed fog
   contract. The remaining ~6.6k distinct bytecode blobs are rejected while the
   closure is armed; there is no generic SM3 translation and no fallback.
-- **PICA backend features needed by the selected plans:** two texture units,
-  vertex colour, external constants, color0/color1 VS varyings, and the fixed
-  fog/tint blend/depth state.
+- **PICA backend features still absent:** per-vertex color1 interpolation and
+  color0/color1 VS varyings beyond position+texcoord0.  Two texture units,
+  color0, external c0..c7 and the c8 menu ambient fold are now implemented.
 - **Exact retail fog/tint stage semantics.** No `.fxp` ships for
   `BSEffectShaderProperty`; the fog/tint plans above are explicit contract
   plans, not bytecode matches. The logo's own c7.a tint stage is part of the
@@ -182,7 +197,7 @@ powershell -File tools\run_host_tests.ps1 `
 ```
 
 Result: **14 passed, 0 diagnostic, 0 failed** (the run also executes the Python
-lane). New `menu_closure` coverage: 255 checks, 0 failures, including
+lane). New `menu_closure` coverage: 271 checks, 0 failures, including
 
 - exact logo selection, five-stage plan and c7.a tint stage;
 - exact copy selection and one-stage `REPLACE(TEXTURE0)`;
@@ -197,12 +212,22 @@ lane). New `menu_closure` coverage: 255 checks, 0 failures, including
   stage-mismatch, wrong-key and order-independence cases;
 - observable-only material bits cannot satisfy the logo's explicit
   normal/tangent/ambient requirements;
-- caps unchanged, `MaxVertexShaderConst = 4`, zero SM3 slots after selection.
+- caps unchanged, `MaxVertexShaderConst = 4`, zero SM3 slots after selection;
+- PICA descriptor accepts the exact logo plan (6 stages, 2 textures, ambient
+  fold) and the fog/tint fixed plans.
+
+`pica_tev` covers the wider descriptor tier directly: logo/fog/tint acceptance,
+2 texture units, color0/ambient flags, c3/c4/c7/c8 constant list, and negative
+third texture/duplicate sampler/external c9/color1-without-fold cases.
+`two_stage` submits a synthetic 2-texture + color0 + external-c7 menu plan
+through the core's `draw_menu` route and asserts the null backend received both
+textures and the constant bank.
 
 `tev_com` additionally drives the COM path: synthetic VS create, named
 SetVertexShader refusal on an incompatible FVF, compatible bind, named
 draw-time fixed-VS refusal with no backend draw, missing color1 create refusal
-with a zero output slot, and the observable c0..c7/texture/colour mask.
+with a zero output slot, observable c0..c7/texture/colour mask, and the explicit
+c8 ambient setter (NaN refused).
 
 Real-chunk measurement (`tev_real`, read-only data under
 `E:\Skyrim_N3DS_build`): 9,621 chunks, 19 accepted by the generic translator,
@@ -223,7 +248,7 @@ powershell -File tools\run_host_tests.ps1 `
   -OutDir C:\Users\vasya\Documents\Skyrim_N3DS_wt\menu-shader-vs\build_host_full_menu_abs
 ```
 
-Result: **72 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
+Result: **74 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
 hitting the documented guest memory gate (`Not enough memory to run
 application.`), not a rendering PASS.
 

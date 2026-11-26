@@ -7,9 +7,11 @@
  *
  * Accepted backend subset:
  *   - 1..6 TEV stages;
- *   - zero or one 2D texture, always sampler 0 / texcoord 0;
- *   - literal (def c#) constants only, quantised by the translator to RGBA8;
- *   - no vertex colour, fragment-colour varying, VPOS/VFACE, or other PS input.
+ *   - generic translation: zero or one 2D texture, sampler 0 / texcoord 0,
+ *     literal (def c#) constants only, no vertex colour or extra PS input;
+ *   - menu plans (D9TEV_PLAN_MENU_*): up to two 2D textures, color0 as
+ *     GPU_PRIMARY_COLOR, external constants c0..c7, and an explicit
+ *     ambient+emissive fold into c8 for the menu-light plan.
  *
  * A NULL descriptor output performs validation only.  On failure the descriptor
  * is reset to an empty program and the convenience path zeroes its translated
@@ -22,7 +24,11 @@
 #include "d3d9_tev.h"
 
 #define D9_PICA_TEV_MAX_STAGES D9TEV_MAX_STAGES
+#define D9_PICA_TEV_MAX_TEXTURES 2u
 #define D9_PICA_TEV_NO_SAMPLER 0xFFu
+/* Internal menu material slot: ambient+emissive folded from the color1
+ * varying.  It is not a D3D9 constant register and does not change caps. */
+#define D9_PICA_TEV_AMBIENT_CONST 8u
 
 typedef enum {
     D9_PICA_TEV_OK = 0,
@@ -60,15 +66,23 @@ typedef struct {
     uint8_t scale_rgb;
     uint8_t scale_a;
     uint8_t uses_constant;
+    uint8_t const_is_literal;    /* 1 = def literal, 0 = external c# */
+    uint8_t const_reg;           /* c# / D9_PICA_TEV_AMBIENT_CONST */
     /* PICA TEV constants are ABGR8888, not the translator's RGBA8 packing. */
     uint32_t constant_abgr;
 } D9PicaTevStage;
 
 typedef struct {
     uint8_t stage_count;
-    uint8_t texture_count;       /* 0 or 1 */
-    uint8_t sampler_reg;         /* 0, or D9_PICA_TEV_NO_SAMPLER */
-    uint8_t texcoord_reg;        /* 0, or D9_PICA_TEV_NO_SAMPLER */
+    uint8_t texture_count;       /* 0..2 */
+    uint8_t sampler_reg;         /* texture 0: 0, or D9_PICA_TEV_NO_SAMPLER */
+    uint8_t texcoord_reg;        /* texture 0: 0, or NO_SAMPLER */
+    uint8_t sampler_reg1;        /* texture 1: 1, or NO_SAMPLER */
+    uint8_t texcoord_reg1;       /* texture 1: 0, or NO_SAMPLER */
+    uint8_t constant_count;
+    uint8_t constant_reg[8];     /* external c# values the plan reads */
+    uint8_t uses_primary_color;  /* color0 via GPU_PRIMARY_COLOR */
+    uint8_t uses_ambient_fold;   /* color1 folded into c8 constant */
     D9PicaTevStage stage[D9_PICA_TEV_MAX_STAGES];
 } D9PicaTevProgram;
 

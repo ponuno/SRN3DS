@@ -244,6 +244,41 @@ static int draw_colored(void *ctx,const D9ColorVertex *vertices,size_t count,
                         const D9Matrix *clip,void *texture,const D9DrawState *state){
     return draw_color_stages(ctx,vertices,count,clip,texture,state,NULL,NULL);
 }
+/* Menu TEV plans: the colour vertex program carries color0, the plan can bind
+ * two texture units, and external stage constants come from the c0..c8 bank.
+ * c8 is the internal ambient+emissive fold, not a D3D9 cap. */
+static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
+                     const D9Matrix *clip,void *texture0,void *texture1,
+                     const D9DrawState *state,const float (*constants)[4]){
+    D9Citro *c=ctx;
+    if(!c||!c->scene||!c->program_color_ready||!vertices||!clip||!state||
+       !state->pixel_shader||!count||count%3)return -1;
+    if(count>FRAME_VERTICES-c->cursor_color)return -1;
+    memcpy(c->arena_color+c->cursor_color,vertices,count*sizeof *vertices);
+    GSPGPU_FlushDataCache(c->arena_color+c->cursor_color,count*sizeof *vertices);
+    prepare_draw_color(c);
+    D9Matrix mtx=*clip;orient_clip(c,&mtx);
+    C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_color,&m);
+    apply_state(state,1);
+    if(texture0)configure_native_texture(texture0,state);
+    if(texture1)configure_native_texture(texture1,state);
+    d9_pica_citro3d_restore_tev();
+    NativeTex *native0=texture0,*native1=texture1;
+    if(d9_pica_citro3d_apply_tev_ex(state->pixel_shader,
+                                    native0?&native0->tex:NULL,
+                                    native1?&native1->tex:NULL,
+                                    constants,9,NULL,0)){
+        d9_pica_citro3d_restore_tev();
+        prepare_draw(c);
+        return -1;
+    }
+    C3D_DrawArrays(GPU_TRIANGLES,(int)c->cursor_color,(int)count);
+    d9_pica_citro3d_restore_tev();
+    c->cursor_color+=count;
+    prepare_draw(c);
+    return 0;
+}
 static void end(void *ctx){D9Citro *c=ctx;if(c->scene){C3D_FrameEnd(0);c->scene=0;}c->active_target=NULL;}
 static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
     (void)ctx;if(!native||w<8||h<8||w>1024||h>1024||(w&(w-1))||(h&(h-1))||
@@ -422,4 +457,4 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
 }
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
-    target_write,depth_clear,target_viewport};return &ops;}
+    target_write,depth_clear,target_viewport,draw_menu};return &ops;}

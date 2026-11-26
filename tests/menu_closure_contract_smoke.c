@@ -16,6 +16,7 @@
 #include "d3d9_menu_closure.h"
 #include "d3d9_menu_shader_runtime.h"
 #include "d3d9_menu_light.h"
+#include "d3d9_pica_tev.h"
 #include "d3d9_adapter.h"
 #include "fixtures/menu_closure_real_shaders.h"
 
@@ -846,6 +847,37 @@ static void test_menu_runtime_fxp_keys(void) {
     CHECK_EQ(second, D9_MENU_ENTRY_MENU_GENERIC_VS);
 }
 
+static void test_menu_pica_descriptors(void) {
+    D9MenuShaderMatch m;
+    D9PicaTevProgram d;
+    D9PicaTevReject reason;
+    char why[256];
+
+    CHECK_EQ(d9_menu_shader_match_ps(menu_logo_ps, MENU_LOGO_PS_WORDS,
+                                     &m, why, sizeof why), 1);
+    CHECK_EQ(d9_pica_tev_validate(&m.plan, &d, &reason, why, sizeof why), 0);
+    CHECK_EQ(d.stage_count, 6);
+    CHECK_EQ(d.texture_count, 2);
+    CHECK_EQ(d.sampler_reg, 0);
+    CHECK_EQ(d.sampler_reg1, 1);
+    CHECK_EQ(d.uses_primary_color, 1);
+    CHECK_EQ(d.uses_ambient_fold, 1);
+
+    CHECK_EQ(d9_menu_shader_match_fixed(D9_MENU_SHADER_FOG_FIXED,
+                                        menu_all_preconditions(),
+                                        &m, why, sizeof why), 1);
+    CHECK_EQ(d9_pica_tev_validate(&m.plan, &d, &reason, why, sizeof why), 0);
+    CHECK_EQ(d.texture_count, 2);
+    CHECK_EQ(d.uses_primary_color, 1);
+
+    CHECK_EQ(d9_menu_shader_match_fixed(D9_MENU_SHADER_TINT_FIXED,
+                                        menu_all_preconditions(),
+                                        &m, why, sizeof why), 1);
+    CHECK_EQ(d9_pica_tev_validate(&m.plan, &d, &reason, why, sizeof why), 0);
+    CHECK_EQ(d.texture_count, 1);
+    CHECK_EQ(d.uses_primary_color, 1);
+}
+
 static void test_menu_runtime_observable_mask(void) {
     D9MenuShaderMatch logo;
     char why[256];
@@ -921,6 +953,7 @@ int main(void) {
     test_menu_runtime_exact_hash_only();
     test_menu_runtime_structural_negatives();
     test_menu_runtime_fixed();
+    test_menu_pica_descriptors();
     test_menu_runtime_vs_family();
     test_menu_runtime_fxp_keys();
     test_menu_runtime_observable_mask();

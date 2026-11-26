@@ -194,8 +194,9 @@ This is a compatibility contract, not a D3D9 capability claim.
 | `source/d3d9_renderer_requirements.c` | Unchanged. The closure predicate remains a non-D3D9 answer; it is not mapped to a caps success. |
 | `source/d3d9_menu_light.c` | **Used by the runtime.** `menu.logo.ps` must match `p1200005_ADD_NORMAL`; draw is refused until the normal/basis/alpha/constant preconditions are reported. |
 | TESV compatibility gate `0x00c6e22d` | Still not flipped. It may consult only `d9_menu_closure_predicate()`; `GetDeviceCaps` stays 2.0 and `D3DXCompileShader` stays `E_NOTIMPL`. |
+| `source/d3d9_pica_tev.c` / `d3d9_pica_citro3d.c` | **Menu tier connected.** Two 2D texture units, color0 as PRIMARY, external c0..c7, and the c8 ambient+emissive fold. The logo plan becomes six PICA stages; generic ps_3_0 keeps the older strict tier. |
 | `source/d3d9_capture.c` / first-draw capture | **Not connected.** The selector exposes the entry id but capture does not record it yet. |
-| Fixed fog/tint | **API only.** Explicit contract plans with named precondition refusals; no material loader calls them yet. |
+| Fixed fog/tint | **API + descriptor.** Explicit contract plans validate; no material loader calls them yet. |
 | Material precondition source | **Observable bits connected.** Bound LDR textures, declaration colour and c0..c7 are derived in `d3d9_com.c`; normal/tangent/ambient remain explicit-only. `MaxVertexShaderConst` stays 4. |
 
 ## 5. Artifacts

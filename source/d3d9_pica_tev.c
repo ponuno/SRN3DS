@@ -110,7 +110,7 @@ static unsigned combine_operands(unsigned func) {
     }
 }
 
-static int validate_source(unsigned source, unsigned texture_count,
+static int validate_source(unsigned source, unsigned texture_count, int menu,
                            D9PicaTevReject *reason,
                            char *why, size_t why_size, unsigned stage) {
     switch (source) {
@@ -118,23 +118,31 @@ static int validate_source(unsigned source, unsigned texture_count,
     case D9TEV_SRC_PREV:
         return 0;
     case D9TEV_SRC_TEX0:
-        if (texture_count == 1) return 0;
+        if (texture_count >= 1) return 0;
         return reject(reason, D9_PICA_TEV_TEXTURE_SOURCE, why, why_size,
                       "TEV stage %u reads texture unit 0 but the program has no texture", stage);
     case D9TEV_SRC_TEX1:
+        if (menu && texture_count >= 2) return 0;
+        return reject(reason, D9_PICA_TEV_TEXTURE_SOURCE, why, why_size,
+                      "TEV stage %u reads texture unit 1 but only %s is bound",
+                      stage, menu ? "texture unit 1" : "texture unit 0");
     case D9TEV_SRC_TEX2:
     case 0x06: /* GPU_TEXTURE3 */
         return reject(reason, D9_PICA_TEV_TEXTURE_SOURCE, why, why_size,
-                      "TEV stage %u reads texture unit %u; only texture unit 0 is bound",
+                      "TEV stage %u reads texture unit %u; at most two units are supported",
                       stage, source - D9TEV_SRC_TEX0);
     case D9TEV_SRC_PRIMARY:
+        if (menu) return 0;
         return reject(reason, D9_PICA_TEV_VERTEX_COLOR, why, why_size,
                       "TEV stage %u reads PRIMARY colour (vertex colour is not provided)", stage);
     case D9TEV_SRC_FRAG_PRIMARY:
+        return reject(reason, D9_PICA_TEV_FRAGMENT_VARYING, why, why_size,
+                      "TEV stage %u reads fragment varying FRAG_PRIMARY; only the menu-light ambient fold is supported",
+                      stage);
     case D9TEV_SRC_FRAG_SECONDARY:
         return reject(reason, D9_PICA_TEV_FRAGMENT_VARYING, why, why_size,
-                      "TEV stage %u reads fragment varying %s; the backend does not route it",
-                      stage, source == D9TEV_SRC_FRAG_PRIMARY ? "FRAG_PRIMARY" : "FRAG_SECONDARY");
+                      "TEV stage %u reads fragment varying FRAG_SECONDARY; specular fragment lighting is not configured",
+                      stage);
     case 0x0D: /* GPU_PREVIOUS_BUFFER */
         return reject(reason, D9_PICA_TEV_TEV_SOURCE, why, why_size,
                       "TEV stage %u reads PREVIOUS_BUFFER; only PREVIOUS is supported", stage);
@@ -142,6 +150,91 @@ static int validate_source(unsigned source, unsigned texture_count,
         return reject(reason, D9_PICA_TEV_TEV_SOURCE, why, why_size,
                       "TEV stage %u uses unsupported source 0x%02x", stage, source);
     }
+}
+
+/* The menu-light plan is a five-stage pre-baked D3D plan:
+ *   NdotL, NdotL*c4 + color1, diffuse*light, vertex tint, c7.a fade.
+ * PICA has one interpolated vertex colour and one TEV constant per stage, so
+ * the c4*NdotL + color1 stage cannot be emitted literally.  Fold color1 into
+ * the internal c8 material slot and split that one MAD into MUL + ADD.  This
+ * keeps the algebra (rounding aside) and six stages, and is only allowed for
+ * D9TEV_PLAN_MENU_LIGHT.  Per-vertex color1 interpolation is not claimed. */
+static int stage_is_menu_ambient_mad(const D9TevStage *s) {
+    if (s->func_rgb != D9TEV_FUNC_MULTIPLY_ADD || s->func_a != D9TEV_FUNC_MULTIPLY_ADD)
+        return 0;
+    for (unsigned i = 0; i < 3; ++i) {
+        if (s->src_rgb[i] != s->src_a[i]) return 0;
+        unsigned want = i == 0 ? D9TEV_SRC_PREV :
+                        i == 1 ? D9TEV_SRC_CONST : D9TEV_SRC_FRAG_PRIMARY;
+        if (s->src_rgb[i] != want) return 0;
+    }
+    return s->const_reg != 0xFFu;
+}
+
+static int expand_menu_ambient(const D9TevProgram *program,
+                               D9TevStage out[D9_PICA_TEV_MAX_STAGES],
+                               unsigned *out_count, int *ambient_fold,
+                               char *why, size_t why_size) {
+    unsigned count = 0;
+    *ambient_fold = 0;
+    for (unsigned s = 0; s < program->stages; ++s) {
+        const D9TevStage *stage = &program->stage[s];
+        int uses_frag = 0;
+        for (unsigned i = 0; i < 3; ++i)
+            if (stage->src_rgb[i] == D9TEV_SRC_FRAG_PRIMARY ||
+                stage->src_a[i] == D9TEV_SRC_FRAG_PRIMARY) uses_frag = 1;
+        if (!uses_frag) {
+            if (count >= D9_PICA_TEV_MAX_STAGES) {
+                if (why && why_size) snprintf(why, why_size, "more than %d TEV stages",
+                                              D9_PICA_TEV_MAX_STAGES);
+                return -1;
+            }
+            out[count++] = *stage;
+            continue;
+        }
+        if (!(program->backend_flags & D9TEV_PLAN_MENU_LIGHT) ||
+            !stage_is_menu_ambient_mad(stage) || count + 1 >= D9_PICA_TEV_MAX_STAGES) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "FRAG_PRIMARY (color1) has no PICA vertex output; only the menu-light c4*factor + ambient fold is supported");
+            return -1;
+        }
+        D9TevStage a = *stage;
+        a.func_rgb = a.func_a = D9TEV_FUNC_MODULATE;
+        for (unsigned i = 0; i < 3; ++i) {
+            a.src_rgb[i] = a.src_a[i] = (uint8_t)(i == 0 ? D9TEV_SRC_PREV :
+                                                  i == 1 ? D9TEV_SRC_CONST : D9TEV_SRC_PREV);
+            a.op_rgb[i] = D9TEV_RGB_COLOR;
+            a.op_a[i] = D9TEV_A_ALPHA;
+        }
+        a.const_is_literal = 0;
+        a.const_rgba8 = 0;
+        D9TevStage b;
+        memset(&b, 0, sizeof b);
+        b.func_rgb = b.func_a = D9TEV_FUNC_ADD;
+        for (unsigned i = 0; i < 3; ++i) {
+            b.src_rgb[i] = b.src_a[i] = (uint8_t)(i == 0 ? D9TEV_SRC_PREV :
+                                                  i == 1 ? D9TEV_SRC_CONST : D9TEV_SRC_PREV);
+            b.op_rgb[i] = D9TEV_RGB_COLOR;
+            b.op_a[i] = D9TEV_A_ALPHA;
+        }
+        b.const_reg = D9_PICA_TEV_AMBIENT_CONST;
+        b.const_is_literal = 0;
+        b.const_rgba8 = 0;
+        out[count++] = a;
+        out[count++] = b;
+        *ambient_fold = 1;
+    }
+    *out_count = count;
+    return 0;
+}
+
+static int add_descriptor_constant(D9PicaTevProgram *result, unsigned reg) {
+    for (unsigned i = 0; i < result->constant_count; ++i)
+        if (result->constant_reg[i] == reg) return 0;
+    if (result->constant_count >= sizeof result->constant_reg) return -1;
+    result->constant_reg[result->constant_count++] = (uint8_t)reg;
+    return 0;
 }
 
 int d9_pica_tev_validate(const D9TevProgram *program,
@@ -170,51 +263,100 @@ int d9_pica_tev_validate(const D9TevProgram *program,
     if (program->textures > D9TEV_MAX_TEXTURES)
         return reject(reason, D9_PICA_TEV_TEXTURE_COUNT, why, why_size,
                       "invalid texture count %u", program->textures);
-    if (program->textures > 1)
-        return reject(reason, D9_PICA_TEV_TEXTURE_COUNT, why, why_size,
-                      "multiple textures (%u); backend binds only texture unit 0",
-                      program->textures);
     if (program->inputs > D9TEV_MAX_INPUTS)
         return reject(reason, D9_PICA_TEV_INPUT_COUNT, why, why_size,
                       "invalid shader input count %u", program->inputs);
-    if (program->inputs > 1)
-        return reject(reason, D9_PICA_TEV_INPUT_COUNT, why, why_size,
-                      "multiple shader inputs (%u); only texcoord0 is available",
-                      program->inputs);
     if (program->constants > D9TEV_MAX_CONSTANTS)
         return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
                       "invalid external constant count %u", program->constants);
-    if (program->uses_vertex_color)
-        return reject(reason, D9_PICA_TEV_VERTEX_COLOR, why, why_size,
-                      "vertex colour input (dcl_color) is not provided by the backend");
 
+    int menu = (program->backend_flags &
+                (D9TEV_PLAN_MENU_LIGHT | D9TEV_PLAN_MENU_FIXED)) != 0;
+    if (!menu) {
+        if (program->textures > 1)
+            return reject(reason, D9_PICA_TEV_TEXTURE_COUNT, why, why_size,
+                          "multiple textures (%u); generic translation binds only texture unit 0",
+                          program->textures);
+        if (program->inputs > 1)
+            return reject(reason, D9_PICA_TEV_INPUT_COUNT, why, why_size,
+                          "multiple shader inputs (%u); only texcoord0 is available",
+                          program->inputs);
+        if (program->uses_vertex_color)
+            return reject(reason, D9_PICA_TEV_VERTEX_COLOR, why, why_size,
+                          "vertex colour input (dcl_color) is not provided by the generic path");
+    } else if (program->textures > D9_PICA_TEV_MAX_TEXTURES ||
+               program->inputs > 2) {
+        return reject(reason, D9_PICA_TEV_TEXTURE_COUNT, why, why_size,
+                      "menu TEV plan has %u textures / %u inputs; at most 2/2 are supported",
+                      program->textures, program->inputs);
+    }
+
+    int uses_primary = 0;
+    int wants_ambient = 0;
     for (unsigned i = 0; i < program->inputs; ++i) {
         const D9TevInput *input = &program->input[i];
         if (input->usage == D9TEV_USAGE_POSITION)
             return reject(reason, D9_PICA_TEV_VPOS, why, why_size,
                           "VPOS (dcl_position vPos) is not a PICA TEV source");
-        if (input->usage == D9TEV_USAGE_COLOR)
-            return reject(reason, D9_PICA_TEV_VERTEX_COLOR, why, why_size,
-                          "vertex colour input v%u is not provided", input->reg_index);
+        if (input->usage == D9TEV_USAGE_COLOR) {
+            if (!menu)
+                return reject(reason, D9_PICA_TEV_VERTEX_COLOR, why, why_size,
+                              "vertex colour input v%u is not provided by the generic path",
+                              input->reg_index);
+            if (input->usage_index > 1u)
+                return reject(reason, D9_PICA_TEV_INPUT_USAGE, why, why_size,
+                              "color%u input v%u is outside the menu colour contract",
+                              input->usage_index, input->reg_index);
+            if (input->usage_index == 0u) {
+                if (input->tev_source != D9TEV_SRC_PRIMARY)
+                    return reject(reason, D9_PICA_TEV_INPUT_USAGE, why, why_size,
+                                  "color0 must use GPU_PRIMARY_COLOR");
+                uses_primary = 1;
+            } else {
+                if (input->tev_source != D9TEV_SRC_FRAG_PRIMARY)
+                    return reject(reason, D9_PICA_TEV_INPUT_USAGE, why, why_size,
+                                  "color1 must use the menu-light ambient fold");
+                wants_ambient = 1;
+            }
+            continue;
+        }
         if (input->usage != D9TEV_USAGE_TEXCOORD)
             return reject(reason, D9_PICA_TEV_INPUT_USAGE, why, why_size,
-                          "%s input v%u is unsupported; only texcoord0 is available",
-                          input_usage_name(input->usage), input->reg_index);
+                          "%s input v%u is unsupported", input_usage_name(input->usage),
+                          input->reg_index);
         if (input->usage_index || input->reg_index)
             return reject(reason, D9_PICA_TEV_INPUT_USAGE, why, why_size,
                           "texcoord v%u.%u is unsupported; only texcoord0 is available",
                           input->reg_index, input->usage_index);
-        if (input->tev_source != 0xFFu)
-            return reject(reason, D9_PICA_TEV_INPUT_USAGE, why, why_size,
-                          "texcoord input v%u requests a colour/fragment varying", input->reg_index);
     }
 
-    if (program->textures == 1) {
-        const D9TevTexture *texture = &program->texture[0];
-        if (texture->sampler_reg != 0)
+    unsigned stage_count = program->stages;
+    D9TevStage stages[D9_PICA_TEV_MAX_STAGES];
+    int ambient_fold = 0;
+    memset(stages, 0, sizeof stages);
+    if (program->backend_flags & D9TEV_PLAN_MENU_LIGHT) {
+        if (expand_menu_ambient(program, stages, &stage_count, &ambient_fold,
+                                why, why_size)) {
+            if (reason) *reason = D9_PICA_TEV_FRAGMENT_VARYING;
+            return -1;
+        }
+    } else {
+        for (unsigned s = 0; s < program->stages; ++s) stages[s] = program->stage[s];
+    }
+    if (wants_ambient && !ambient_fold)
+        return reject(reason, D9_PICA_TEV_FRAGMENT_VARYING, why, why_size,
+                      "color1 has no PICA vertex output; only the menu-light ambient fold is supported");
+    if (stage_count > D9_PICA_TEV_MAX_STAGES)
+        return reject(reason, D9_PICA_TEV_STAGE_COUNT, why, why_size,
+                      "%u TEV stages after the menu ambient fold; PICA200 supports %d",
+                      stage_count, D9_PICA_TEV_MAX_STAGES);
+
+    for (unsigned t = 0; t < program->textures; ++t) {
+        const D9TevTexture *texture = &program->texture[t];
+        if (texture->sampler_reg != t)
             return reject(reason, D9_PICA_TEV_SAMPLER, why, why_size,
-                          "sampler s%u is unsupported; backend binds only sampler 0",
-                          texture->sampler_reg);
+                          "texture %u must use sampler s%u, not sampler s%u",
+                          t, t, texture->sampler_reg);
         if (texture->sampler_type != 2)
             return reject(reason, D9_PICA_TEV_SAMPLER_TYPE, why, why_size,
                           "sampler s%u has type %u; only 2D textures are supported",
@@ -227,11 +369,12 @@ int d9_pica_tev_validate(const D9TevProgram *program,
 
     D9PicaTevProgram result;
     d9_pica_tev_program_init(&result);
-    for (unsigned s = 0; s < program->stages; ++s) {
-        const D9TevStage *stage = &program->stage[s];
+    for (unsigned s = 0; s < stage_count; ++s) {
+        const D9TevStage *stage = &stages[s];
         D9PicaTevStage out;
         memset(&out, 0, sizeof out);
         int uses_constant = 0;
+        int wants_external = 0;
 
         if (stage->func_rgb > D9TEV_FUNC_ADD_MULTIPLY)
             return reject(reason, D9_PICA_TEV_TEV_FUNCTION, why, why_size,
@@ -251,9 +394,9 @@ int d9_pica_tev_validate(const D9TevProgram *program,
                           s, stage->const_is_literal);
 
         for (unsigned i = 0; i < 3; ++i) {
-            if (validate_source(stage->src_rgb[i], program->textures, reason,
+            if (validate_source(stage->src_rgb[i], program->textures, menu, reason,
                                 why, why_size, s)) return -1;
-            if (validate_source(stage->src_a[i], program->textures, reason,
+            if (validate_source(stage->src_a[i], program->textures, menu, reason,
                                 why, why_size, s)) return -1;
             if (!valid_rgb_operand(stage->op_rgb[i]))
                 return reject(reason, D9_PICA_TEV_TEV_OPERAND, why, why_size,
@@ -282,10 +425,28 @@ int d9_pica_tev_validate(const D9TevProgram *program,
                     return reject(reason, D9_PICA_TEV_TEV_SOURCE, why, why_size,
                                   "TEV stage 0 alpha reads PREVIOUS before a stage produced it");
         }
-        if (uses_constant && !stage->const_is_literal)
-            return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
-                          "TEV stage %u uses external constant c%u; literal def c# only",
-                          s, stage->const_reg);
+        if (uses_constant) {
+            if (stage->const_reg == 0xFFu)
+                return reject(reason, D9_PICA_TEV_TEV_CONSTANT, why, why_size,
+                              "TEV stage %u reads a constant but names no c# register", s);
+            if (stage->const_is_literal) {
+                out.const_is_literal = 1;
+                out.const_reg = stage->const_reg;
+                out.constant_abgr = d9_pica_tev_color_abgr(stage->const_rgba8);
+            } else {
+                if (!menu)
+                    return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
+                                  "TEV stage %u uses external constant c%u; generic translation requires literal def c# only",
+                                  s, stage->const_reg);
+                if (stage->const_reg > D9_PICA_TEV_AMBIENT_CONST)
+                    return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
+                                  "TEV stage %u uses unsupported external constant c%u",
+                                  s, stage->const_reg);
+                out.const_is_literal = 0;
+                out.const_reg = stage->const_reg;
+                wants_external = 1;
+            }
+        }
 
         memcpy(out.src_rgb, stage->src_rgb, sizeof out.src_rgb);
         memcpy(out.src_a, stage->src_a, sizeof out.src_a);
@@ -296,33 +457,46 @@ int d9_pica_tev_validate(const D9TevProgram *program,
         out.scale_rgb = stage->scale_rgb;
         out.scale_a = stage->scale_a;
         out.uses_constant = (uint8_t)uses_constant;
-        out.constant_abgr = uses_constant ? d9_pica_tev_color_abgr(stage->const_rgba8)
-                                         : 0xFFFFFFFFu;
+        if (!uses_constant) out.constant_abgr = 0xFFFFFFFFu;
+        if (wants_external && add_descriptor_constant(&result, stage->const_reg))
+            return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
+                          "more than 8 external constants");
         if (descriptor) result.stage[s] = out;
     }
 
-    /* D9TevProgram.constants counts every referenced c#, including literal def
-     * values.  Each referenced register must therefore have at least one stage
-     * that materialises it as a literal; otherwise it needs an external upload. */
+    /* Every external c# listed by the program must be materialised by a stage.
+     * Literal def values are not external. */
     for (unsigned c = 0; c < program->constants; ++c) {
-        int found_literal = 0;
-        for (unsigned s = 0; s < program->stages; ++s)
-            if (program->stage[s].const_is_literal &&
-                program->stage[s].const_reg == program->constant_reg[c])
-                found_literal = 1;
-        if (!found_literal)
+        int found = 0;
+        for (unsigned s = 0; s < stage_count; ++s) {
+            int uses_const = 0;
+            for (unsigned k = 0; k < 3; ++k)
+                if (stages[s].src_rgb[k] == D9TEV_SRC_CONST ||
+                    stages[s].src_a[k] == D9TEV_SRC_CONST) uses_const = 1;
+            if (uses_const && stages[s].const_reg == program->constant_reg[c])
+                found = 1;
+        }
+        if (!found && !menu)
             return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
-                          "external constant c%u; SetPixelShaderConstantF is not wired",
-                          program->constant_reg[c]);
+                          "external constant c%u is not materialised", program->constant_reg[c]);
     }
+    if (ambient_fold && add_descriptor_constant(&result, D9_PICA_TEV_AMBIENT_CONST))
+        return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
+                      "could not reserve the ambient constant slot");
 
     if (descriptor) {
-        result.stage_count = (uint8_t)program->stages;
+        result.stage_count = (uint8_t)stage_count;
         result.texture_count = (uint8_t)program->textures;
         result.sampler_reg = program->textures ? program->texture[0].sampler_reg
                                               : D9_PICA_TEV_NO_SAMPLER;
         result.texcoord_reg = program->textures ? program->texture[0].texcoord_reg
                                                : D9_PICA_TEV_NO_SAMPLER;
+        result.sampler_reg1 = program->textures > 1 ? program->texture[1].sampler_reg
+                                                   : D9_PICA_TEV_NO_SAMPLER;
+        result.texcoord_reg1 = program->textures > 1 ? program->texture[1].texcoord_reg
+                                                    : D9_PICA_TEV_NO_SAMPLER;
+        result.uses_primary_color = (uint8_t)uses_primary;
+        result.uses_ambient_fold = (uint8_t)ambient_fold;
         *descriptor = result;
     }
     return 0;

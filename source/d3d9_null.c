@@ -213,9 +213,32 @@ static int null_draw_two(void *ctx,const D9ColorVertex *vertices,size_t count,
         return -1;
     return null_draw_colored(ctx,vertices,count,clip,tex0,stage0);
 }
+static int null_draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
+                          const D9Matrix *clip,void *tex0,void *tex1,
+                          const D9DrawState *state,const float (*constants)[4]){
+    D9NullStats *s=stats(ctx);
+    if(!s->scene||!vertices||!count||count%3||!clip||!state||!state->pixel_shader)
+        return -1;
+    for(size_t i=0;i<count;++i){
+        const D9ColorVertex *v=&vertices[i];
+        if(!isfinite(v->x)||!isfinite(v->y)||!isfinite(v->z)||
+           !isfinite(v->u)||!isfinite(v->v)||!isfinite(v->r)||
+           !isfinite(v->g)||!isfinite(v->b)||!isfinite(v->a)) return -1;
+    }
+    for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)
+        if(!isfinite(clip->m[i][j]))return -1;
+    if(state->pixel_shader->textures>=1&&!tex0)return -1;
+    if(state->pixel_shader->textures>=2&&!tex1)return -1;
+    if(!constants)return -1;
+    memcpy(s->last_menu_constants,constants,sizeof s->last_menu_constants);
+    s->menu_textures=state->pixel_shader->textures;
+    ++s->menu_draws;++s->draws;++s->color_draws;
+    s->triangles+=(unsigned)(count/3);s->vertices+=count;s->color_vertices+=(unsigned)count;
+    return 0;
+}
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
-    null_target_write,null_depth_clear,null_target_viewport};
+    null_target_write,null_depth_clear,null_target_viewport,null_draw_menu};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

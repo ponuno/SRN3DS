@@ -33,42 +33,61 @@ game frame or visual equivalence.
 `d9_pica_tev_validate()` accepts a translated `D9TevProgram` only when all of the
 following hold:
 
-| Requirement | Accepted value |
-|---|---|
-| Shader | `ps_3_0` |
-| TEV stages | 1..6 |
-| Textures | 0 or 1 |
-| Sampler | `s0` only |
-| Sampler type | 2D only |
-| UV input | `texcoord0` only |
-| PS inputs | no vertex colour, VPOS/VFACE, normal, or fragment-colour varying |
-| Constants | literal `def c#` values already packed by the translator as RGBA8 |
-| TEV encodings | sources/operators/functions/scales supported by the existing descriptor enums |
-| Stage 0 | must not depend on a meaningful `PREVIOUS` value |
+There are two explicit tiers.  Generic bytecode translation keeps the older
+strict subset; pre-baked menu plans opt into the wider tier with
+`D9TevProgram.backend_flags`.
+
+| Requirement | Generic translation | Menu plans (`D9TEV_PLAN_MENU_*`) |
+|---|---|---|
+| Shader | `ps_3_0` | `ps_3_0` |
+| TEV stages | 1..6 | 1..6 (the menu-light ambient split uses all 6) |
+| Textures | 0 or 1 | 0..2, sampler `s0`/`s1`, 2D only |
+| UV input | `texcoord0` only | `texcoord0` only |
+| PS inputs | no vertex colour, VPOS/VFACE, normal, or fragment-colour varying | `color0` as `GPU_PRIMARY_COLOR`; `color1` only through the menu-light ambient fold |
+| Constants | literal `def c#` only | literal `def c#` plus external c0..c7 |
+| Ambient fold | n/a | `color1` is folded into internal c8 (`D9_PICA_TEV_AMBIENT_CONST`) |
+| Stage 0 | must not depend on a meaningful `PREVIOUS` value | same |
 
 The zero-texture case is intentional: a literal constant-colour TEV program does
 not need a bound texture.  A textured program does; the citro3d adapter rejects a
 missing texture rather than silently drawing the wrong result.
 
+### Menu-light ambient fold
+
+PICA has one interpolated vertex colour (`GPU_PRIMARY_COLOR`) and one TEV
+constant per stage.  The retail menu-light stage
+`NdotL*c4 + color1` therefore cannot be emitted literally.  For
+`D9TEV_PLAN_MENU_LIGHT`, `d9_pica_tev_validate()`:
+
+1. treats `color1` as an explicit material constant, not a per-vertex varying;
+2. splits that stage into `MODULATE(PREV, c4)` plus `ADD(PREV, c8)`;
+3. records c3/c4/c7/c8 in `D9PicaTevProgram.constant_reg[]`.
+
+The algebra is preserved (rounding aside) and the result is six stages, but
+per-vertex color1 interpolation is **not** claimed.  `c8` is an internal menu
+slot; `MaxVertexShaderConst` remains 4.  `d9_pica_citro3d_apply_tev_ex()` takes
+the c0..c8 bank and materialises each referenced constant with
+`C3D_TexEnvColor()`.
+
 ### Important translator detail
 
 `D9TevProgram.constants` counts **all referenced `c#` registers**, including
 registers defined by literal `def` instructions.  It is not an external-only
-count despite the older comment in `d3d9_tev.h`.  Therefore the backend gate uses
-each stage's `const_is_literal` flag as the authority and verifies that every
-entry in `program->constant_reg[]` is materialised by at least one literal stage.
-A stage that reads `GPU_CONSTANT` with `const_is_literal == 0` is rejected as an
-external constant.
+count despite the older comment in `d3d9_tev.h`.  The backend gate uses each
+stage's `const_is_literal` flag and verifies that every entry in
+`program->constant_reg[]` is materialised by a stage.  A generic stage that reads
+`GPU_CONSTANT` with `const_is_literal == 0` is still rejected; only menu plans
+may use the external bank.
 
 ### Named rejections
 
 `D9PicaTevReject` and `d9_pica_tev_reject_name()` provide stable reason names.
 The human-readable `why` names the unsupported feature, for example:
 
-- `multiple textures (2); backend binds only texture unit 0`
-- `sampler s1 is unsupported; backend binds only sampler 0`
-- `external constant c0; ... literal def c# only`
-- `vertex colour input (dcl_color ...) is not provided`
+- `multiple textures (2); generic translation binds only texture unit 0`
+- `texture 0 must use sampler s0, not sampler s1`
+- `external constant c9` (outside the c0..c8 menu bank)
+- `color1 has no PICA vertex output; only the menu-light ambient fold is supported`
 - `VPOS (dcl_position vPos) is not a PICA TEV source`
 - `TEV stage 0 reads fragment varying FRAG_PRIMARY ...`
 - `7 TEV stages; PICA200 supports 1..6`
@@ -83,8 +102,17 @@ that preflight, the existing translator, and the descriptor gate.
 ## 2. Descriptor and citro3d state contract
 
 `D9PicaTevProgram` is independent of citro3d.  It contains a stage count, a
-zero/one texture count, sampler/texcoord markers, and up to six flat
-`D9PicaTevStage` descriptors.  Unused descriptor slots are zeroed.
+zero/two texture count, s0/s1 sampler and texcoord markers, a c# constant list,
+primary/ambient flags, and up to six flat `D9PicaTevStage` descriptors.  Unused
+descriptor slots are zeroed.  `d9_pica_citro3d_apply_tev_ex()` binds both 2D
+texture units and materialises each stage constant from the c0..c8 float bank.
+
+Host coverage: `pica_tev` **152 checks, 0 failures** (including the exact
+menu-light plan, fog/tint plans, third-texture/duplicate-sampler/c9/color1
+negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
+menu plan through `draw_menu`, and the full suite is **74 passed, 1 diagnostic,
+0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
+(`.3dsx` 786,472 B, `.elf` 5,368,816 B).  No Azahar pixel run is claimed.
 
 The translator packs literals as RGBA8 with red in bits 0..7.  PICA TEV constants
 are ABGR8888, so the descriptor stores `constant_abgr`, produced by

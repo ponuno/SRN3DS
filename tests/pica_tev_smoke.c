@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "d3d9_pica_tev.h"
+#include "d3d9_menu_light.h"
 
 #define DI(op, operands) ((uint32_t)(op) | ((uint32_t)(operands) << 24))
 #define SW_ID 0xE4u
@@ -486,6 +487,147 @@ static void test_literal_only_stage(void) {
                              D9_PICA_TEV_EXTERNAL_CONSTANT, "external constant");
 }
 
+static D9TevProgram menu_light_plan(void) {
+    D9MenuLightMatch match;
+    D9TevProgram plan;
+    char why[256];
+    memset(&match, 0, sizeof match);
+    match.signature = D9_MENU_LIGHT_P1200005_ADD_NORMAL;
+    match.instructions = 25;
+    match.normal_decode[0] = -0.5f;
+    match.normal_decode[1] = 1.0f;
+    if (d9_menu_light_plan(&match, &plan, why, sizeof why)) {
+        fprintf(stderr, "menu light plan setup failed: %s\n", why);
+        ++failures;
+        memset(&plan, 0, sizeof plan);
+    }
+    return plan;
+}
+
+static D9TevProgram menu_fixed_plan(int fog) {
+    D9TevProgram p;
+    memset(&p, 0, sizeof p);
+    p.version = 0xFFFF0300u;
+    p.stage_limit = D9TEV_MAX_STAGES;
+    p.backend_flags = D9TEV_PLAN_MENU_FIXED;
+    p.textures = fog ? 2u : 1u;
+    p.texture[0].texcoord_reg = 0;
+    p.texture[0].sampler_reg = 0;
+    p.texture[0].sampler_type = 2;
+    if (fog) {
+        p.texture[1].texcoord_reg = 0;
+        p.texture[1].sampler_reg = 1;
+        p.texture[1].sampler_type = 2;
+    }
+    p.inputs = 1;
+    p.input[0].usage = D9TEV_USAGE_COLOR;
+    p.input[0].usage_index = 0;
+    p.input[0].reg_index = 1;
+    p.input[0].tev_source = D9TEV_SRC_PRIMARY;
+    p.uses_vertex_color = 1;
+    p.stages = fog ? 2u : 1u;
+    D9TevStage *s = &p.stage[0];
+    s->func_rgb = s->func_a = D9TEV_FUNC_MODULATE;
+    s->src_rgb[0] = s->src_a[0] = D9TEV_SRC_TEX0;
+    s->op_rgb[0] = D9TEV_RGB_COLOR;
+    s->op_a[0] = D9TEV_A_ALPHA;
+    s->src_rgb[1] = s->src_a[1] = D9TEV_SRC_PRIMARY;
+    s->op_rgb[1] = D9TEV_RGB_COLOR;
+    s->op_a[1] = D9TEV_A_ALPHA;
+    s->const_reg = 0xFF;
+    if (fog) {
+        s = &p.stage[1];
+        s->func_rgb = s->func_a = D9TEV_FUNC_MODULATE;
+        s->src_rgb[0] = s->src_a[0] = D9TEV_SRC_TEX1;
+        s->op_rgb[0] = D9TEV_RGB_COLOR;
+        s->op_a[0] = D9TEV_A_ALPHA;
+        s->src_rgb[1] = s->src_a[1] = D9TEV_SRC_PREV;
+        s->op_rgb[1] = D9TEV_RGB_COLOR;
+        s->op_a[1] = D9TEV_A_ALPHA;
+        s->const_reg = 0xFF;
+    }
+    return p;
+}
+
+static int descriptor_has_constant(const D9PicaTevProgram *d, unsigned reg) {
+    for (unsigned i = 0; i < d->constant_count; ++i)
+        if (d->constant_reg[i] == reg) return 1;
+    return 0;
+}
+
+static void test_menu_descriptors(void) {
+    D9PicaTevProgram d;
+    D9PicaTevReject reason;
+    char why[256];
+
+    D9TevProgram p = menu_light_plan();
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) == 0, why);
+    check(d.stage_count == 6, "menu light: c4+ambient stage split to six");
+    check(d.texture_count == 2, "menu light: two texture units");
+    check(d.sampler_reg == 0 && d.texcoord_reg == 0 &&
+          d.sampler_reg1 == 1 && d.texcoord_reg1 == 0,
+          "menu light: s0/uv0 and s1/uv0");
+    check(d.uses_primary_color == 1, "menu light: color0 primary");
+    check(d.uses_ambient_fold == 1, "menu light: color1 ambient fold");
+    check(descriptor_has_constant(&d, 3) && descriptor_has_constant(&d, 4) &&
+          descriptor_has_constant(&d, 7) && descriptor_has_constant(&d, 8),
+          "menu light: c3/c4/c7/c8 constants");
+    check(d.stage[0].const_reg == 3 && d.stage[1].const_reg == 4 &&
+          d.stage[2].const_reg == 8 && d.stage[5].const_reg == 7,
+          "menu light: constant stage order");
+    check(d.stage[1].func_rgb == D9TEV_FUNC_MODULATE &&
+          d.stage[2].func_rgb == D9TEV_FUNC_ADD,
+          "menu light: MUL + ADD ambient fold");
+    check(d.stage[3].src_rgb[0] == D9TEV_SRC_TEX0 &&
+          d.stage[3].src_rgb[1] == D9TEV_SRC_PREV &&
+          d.stage[4].src_rgb[1] == D9TEV_SRC_PRIMARY,
+          "menu light: diffuse against light then color0");
+
+    /* fog/tint fixed plans: color0 + one/two textures, no external constant. */
+    p = menu_fixed_plan(0);
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) == 0, why);
+    check(d.texture_count == 1 && d.uses_primary_color == 1 &&
+          d.constant_count == 0, "tint: one texture and primary color");
+    p = menu_fixed_plan(1);
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) == 0, why);
+    check(d.texture_count == 2 && d.sampler_reg1 == 1 &&
+          d.uses_primary_color == 1, "fog: two textures and primary color");
+
+    /* Negative: a third texture unit. */
+    p = menu_light_plan();
+    p.textures = 3;
+    p.texture[2] = p.texture[1];
+    p.texture[2].sampler_reg = 2;
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) < 0 &&
+          reason == D9_PICA_TEV_TEXTURE_COUNT, "menu: third texture rejected");
+
+    /* Negative: missing s1 slot while a stage reads TEXTURE1. */
+    p = menu_fixed_plan(1);
+    p.texture[1].sampler_reg = 0;
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) < 0 &&
+          reason == D9_PICA_TEV_SAMPLER, "menu: duplicate/missing s1 rejected");
+
+    /* Negative: external constant outside c0..c8. */
+    p = menu_fixed_plan(0);
+    p.stage[0].const_is_literal = 0;
+    p.stage[0].const_reg = 9;
+    p.stage[0].src_rgb[1] = p.stage[0].src_a[1] = D9TEV_SRC_CONST;
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) < 0 &&
+          reason == D9_PICA_TEV_EXTERNAL_CONSTANT &&
+          strstr(why, "c9") != NULL, "menu: external c9 rejected");
+
+    /* Negative: color1 without the menu-light ambient fold. */
+    p = menu_fixed_plan(0);
+    p.inputs = 2;
+    p.input[1].usage = D9TEV_USAGE_COLOR;
+    p.input[1].usage_index = 1;
+    p.input[1].reg_index = 2;
+    p.input[1].tev_source = D9TEV_SRC_FRAG_PRIMARY;
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) < 0 &&
+          reason == D9_PICA_TEV_FRAGMENT_VARYING,
+          "menu: color1 without fold rejected");
+}
+
 static void test_helpers(void) {
     check(d9_pica_tev_color_abgr(0x11223344u) == 0x44332211u,
           "ABGR conversion");
@@ -507,6 +649,7 @@ int main(void) {
     test_descriptor_rejections();
     test_raw_rejections();
     test_literal_only_stage();
+    test_menu_descriptors();
     test_helpers();
     printf("pica TEV backend: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

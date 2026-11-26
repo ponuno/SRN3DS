@@ -30,6 +30,10 @@ const char *d9_com_last_shader_rejection(void);
  * includes normal/tangent/ambient evidence, which must be reported explicitly
  * by a material loader.  Host diagnostic hook, not a D3D9 capability. */
 uint32_t d9_com_menu_observed_preconditions(void);
+/* Material-loader hook: supply the menu-light ambient+emissive colour.  It is
+ * stored in the internal c8 TEV slot and marks the corresponding explicit
+ * precondition.  The D3D9 vertex-constant cap is unchanged. */
+uint32_t d9_com_menu_set_ambient_emissive(const float rgba[4]);
 /* Reason recorded by the most recent rejected StretchRect call, or "" after a
  * successful one.  Intended for host tests and trace diagnostics. */
 const char *d9_com_last_stretch_reject(void);

@@ -10,6 +10,7 @@
 #include "n3ds_lift_runtime.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,6 +196,12 @@ int main(void){
     assert((observed&D9_MENU_SHADER_PRE_MATERIAL_ALPHA_C4)!=0);
     assert(!(observed&D9_MENU_SHADER_PRE_NORMAL_PREBAKED));
     assert(!(observed&D9_MENU_SHADER_PRE_TANGENT_BASIS_PREBAKED));
+    float ambient_emissive[4]={0.1f,0.2f,0.3f,1.0f};
+    assert(d9_com_menu_set_ambient_emissive(ambient_emissive)==0);
+    observed=d9_com_menu_observed_preconditions();
+    assert((observed&D9_MENU_SHADER_PRE_AMBIENT_EMISSIVE_VARYING)!=0);
+    float bad_ambient[4]={NAN,0,0,1};
+    assert(d9_com_menu_set_ambient_emissive(bad_ambient)==INVALID);
 
     uint32_t code[128],shader=0;size_t n=0;prefix(code,&n);
     code[n++]=DI(0x42,3);code[n++]=DST_C0;code[n++]=SRC_T0;code[n++]=SAMP0;code[n++]=END;

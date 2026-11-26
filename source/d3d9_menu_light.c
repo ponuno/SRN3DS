@@ -263,6 +263,7 @@ int d9_menu_light_plan(const D9MenuLightMatch *signature,D9TevProgram *out,
         return -1;
     }
     memset(out,0,sizeof *out);out->version=0xFFFF0300u;out->stage_limit=D9TEV_MAX_STAGES;
+    out->backend_flags=D9TEV_PLAN_MENU_LIGHT;
     out->instructions=signature->instructions;out->textures=2;
     out->texture[0].texcoord_reg=0;out->texture[0].sampler_reg=0;out->texture[0].sampler_type=2;
     out->texture[1].texcoord_reg=0;out->texture[1].sampler_reg=1;out->texture[1].sampler_type=2;

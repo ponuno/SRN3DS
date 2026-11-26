@@ -21,6 +21,16 @@
 int d9_pica_citro3d_apply_tev(const D9TevProgram *program, C3D_Tex *texture,
                               char *why, size_t why_size);
 
+/* Menu-capable variant: up to two 2D texture units, color0 as PRIMARY, and a
+ * c0..c8 float bank for external stage constants.  `constants` may be NULL only
+ * when the validated descriptor has no external constant.  c8 is the internal
+ * ambient+emissive fold slot, not a D3D9 cap. */
+int d9_pica_citro3d_apply_tev_ex(const D9TevProgram *program,
+                                 C3D_Tex *texture0, C3D_Tex *texture1,
+                                 const float (*constants)[4],
+                                 unsigned constant_count,
+                                 char *why, size_t why_size);
+
 /* Restore deterministic fixed-function TEV state: stage 0 replaces PRIMARY,
  * stages 1..5 pass PREVIOUS through.  Safe to call after every draw. */
 void d9_pica_citro3d_restore_tev(void);

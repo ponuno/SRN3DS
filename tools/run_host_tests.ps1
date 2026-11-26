@@ -209,7 +209,7 @@ Add-Test "bc_shader" $common ($d3dFull + @("tests/bc_shader_smoke.c")) @()
 Add-Test "tev_translate" $common ($tevSources + @("tests/tev_translate_smoke.c")) @()
 Add-Test "tev_accuracy" $common ($tevSources + @("tests/tev_accuracy_smoke.c")) @()
 Add-Test "menu_light" $common ($tevSources + @("tests/menu_light_smoke.c")) @()
-Add-Test "pica_tev" $common @("source/d3d9_tev.c", "source/d3d9_pica_tev.c", "tests/pica_tev_smoke.c") @()
+Add-Test "pica_tev" $common @("source/d3d9_tev.c", "source/d3d9_menu_light.c", "source/d3d9_pica_tev.c", "tests/pica_tev_smoke.c") @()
 Add-Test "tev_com" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c") + $picaSources + @("tests/tev_com_smoke.c")) @()
 Add-Test "uicopy_host" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_capture.c") + $picaSources + $pipelineSources + @("tests/isolated/uicopy/host_smoke.c")) @()
 Add-Test "com" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_demo_scene.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_com_demo.c") + $picaSources + @("tests/com_smoke.c")) @()
@@ -238,7 +238,7 @@ Add-Test "texture_surface" $liftCommon ($legacySources + @("source/d3d9_core.c",
 Add-Test "color_com" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_demo_scene.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_com_demo.c") + $picaSources + @("source/d3d9_color_tev.c", "tests/d3d9_color_com_smoke.c")) @()
 $menuClosureFixture = Join-Path $root "tests/fixtures/menu_closure_real_shaders.h"
 if (Test-Path $menuClosureFixture) {
-    Add-Test "menu_closure" $common @("source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_menu_light.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "tests/menu_closure_contract_smoke.c") @()
+    Add-Test "menu_closure" $common @("source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_menu_light.c", "source/d3d9_pica_tev.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "tests/menu_closure_contract_smoke.c") @()
 } else {
     Write-Log "menu_closure: tests/fixtures/menu_closure_real_shaders.h is absent; run tools/extract_closure_fixtures.py with your Shaders.bsa to enable this test"
 }

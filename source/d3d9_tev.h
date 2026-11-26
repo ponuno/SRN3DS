@@ -28,6 +28,15 @@
 #define D9TEV_MAX_CONSTANTS 8
 #define D9TEV_MAX_DEFS 8
 
+/* Explicit backend policy carried by a pre-baked menu plan.  Generic bytecode
+ * translation leaves this zero, so the PICA gate can keep its older strict
+ * subset for arbitrary PS and only enable menu-specific features for the
+ * plans built here. */
+enum {
+    D9TEV_PLAN_MENU_LIGHT = 1u << 0,
+    D9TEV_PLAN_MENU_FIXED = 1u << 1
+};
+
 /* GPU_TEVSRC */
 enum {
     D9TEV_SRC_PRIMARY        = 0x00,
@@ -133,6 +142,7 @@ typedef struct {
     unsigned uses_vertex_color;
     unsigned requires_alpha_fixup;/* final alpha was undefined and forced to 1 */
     unsigned stage_limit;         /* 6: PICA200 hardware limit */
+    uint32_t backend_flags;       /* D9TEV_PLAN_*; 0 for generic translation */
 } D9TevProgram;
 
 /* Translate one ps_3_0 program.

@@ -131,6 +131,13 @@ typedef struct {
      * screen is never passed here: its native rotated size is what the screen
      * clip mapping expects. */
     int (*target_viewport)(void *ctx,unsigned w,unsigned h);
+    /* Optional menu-TEV submission: up to two texture units, color0 vertices,
+     * and a c0..c8 float bank for external constants.  Called only when the
+     * selected pixel plan needs one of those features; a NULL callback keeps
+     * the older single-texture/no-vertex-colour path. */
+    int (*draw_menu)(void *ctx,const D9ColorVertex *vertices,size_t count,
+                     const D9Matrix *clip,void *tex0,void *tex1,
+                     const D9DrawState *state,const float (*constants)[4]);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -276,6 +283,10 @@ int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *value);
 int d9_set_texture(D9Device *d,D9Handle h);
 /* Borrowed ps_3_0 TEV program; NULL selects the fixed-function backend path. */
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program);
+/* Material constants for menu TEV plans: c0..c7 are the D3D registers, c8 is
+ * the internal ambient+emissive fold.  Values are copied; non-finite entries
+ * are rejected.  This is evidence for the menu path, not a D3D9 cap. */
+int d9_set_tev_constants(D9Device *d,const float values[9][4]);
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m);
 /* Shader constants c0..c3 as four D3D column-vector clip rows, or NULL for fixed transforms. */
 int d9_set_shader_clip(D9Device *d,const D9Matrix *rows);

@@ -209,16 +209,19 @@ int main(int argc,char **argv){
     sampler_args[1]=5;assert(call(&h,device,68,sampler_args,3)==0&&rd(&h,OUT)==1);
     sampler_args[1]=6;assert(call(&h,device,68,sampler_args,3)==0&&rd(&h,OUT)==1);
 
-    /* The menu material source observes c0..c7; c4 is stored separately so it
-     * cannot pollute the c0..c3 clip rows.  c8 remains invalid. */
+    /* The menu material source observes c0..c8; c4..c8 are stored separately so
+     * they cannot pollute the c0..c3 clip rows.  c9 remains invalid. */
     float constants[4][4]={{1,0,0,1},{0,1,0,1},{0,0,1,1},{0,0,0,1}};wr(&h,VIEW,constants,sizeof constants);
-    uint32_t const_args[]={8,VIEW,1};assert(call(&h,device,94,const_args,3)==0x8876086cu);
+    uint32_t const_args[]={9,VIEW,1};assert(call(&h,device,94,const_args,3)==0x8876086cu);
     const_args[0]=3;const_args[2]=2;assert(call(&h,device,94,const_args,3)==0);
     const_args[0]=0;const_args[2]=4;assert(call(&h,device,94,const_args,3)==0);
     const_args[0]=4;const_args[2]=1;assert(call(&h,device,94,const_args,3)==0);
+    const_args[0]=8;const_args[2]=1;assert(call(&h,device,94,const_args,3)==0);
     uint32_t get_const[]={0,OUT,4};assert(call(&h,device,95,get_const,3)==0);
     assert(rd(&h,OUT)==0x3f800000u&&rd(&h,OUT+12)==0x3f800000u);
     uint32_t get_high[]={4,OUT2,1};assert(call(&h,device,95,get_high,3)==0);
+    assert(rd(&h,OUT2)==0x3f800000u);
+    uint32_t get_ambient[]={8,OUT2,1};assert(call(&h,device,95,get_ambient,3)==0);
     assert(rd(&h,OUT2)==0x3f800000u);
 
     /* CPU-backed off-screen plain surfaces have real bytes, not fake pixels. */

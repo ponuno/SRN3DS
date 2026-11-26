@@ -123,6 +123,7 @@ static void fixed_header(D9TevProgram *out) {
     memset(out, 0, sizeof *out);
     out->version = 0xFFFF0300u;
     out->stage_limit = D9TEV_MAX_STAGES;
+    out->backend_flags = D9TEV_PLAN_MENU_FIXED;
 }
 
 /* menu.fog.fixed has no shipped .fxp.  The closure contract is two texture

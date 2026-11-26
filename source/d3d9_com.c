@@ -70,7 +70,7 @@ static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
     Obj o[MAX_OBJECTS];unsigned next;
     Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*vs,*ps,*declaration;
-    unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;
+    unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;float constants_c8[4];
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
     uint16_t gamma[3][256];size_t surface_bytes;
     unsigned frame_index,draw_index,capture_present;uint32_t capture_present_flags;
@@ -80,6 +80,7 @@ static struct {
     void (*handlers[KIND_COUNT][MAX_SLOTS])(CPU *c);
     int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;
 } g;
+static void upload_tev_constants(void);
 static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
 #define A(n) arg(c,n)
 static void trace_result(uint32_t value);
@@ -522,6 +523,7 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
      * no material-precondition evidence. */
     d9_menu_closure_reset();
     d9_menu_shader_runtime_reset();
+    memset(&g.constants_c8,0,sizeof g.constants_c8);upload_tev_constants();
     M32(out)=g.dev->guest;RET(OK,7);}
 static int explicit_resources(void){
     for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->refs&&o->kind!=FACTORY&&o->kind!=DEVICE&&!(o->kind==SURFACE&&o==g.back))return 1;}
@@ -551,11 +553,12 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
     g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.back->handle?1:0;
-    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);
+    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);memset(&g.constants_c8,0,sizeof g.constants_c8);
     g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
     /* Reset also discards every closure observation and material evidence. */
     d9_menu_closure_reset();
     d9_menu_shader_runtime_reset();
+    upload_tev_constants();
 #if D9_CAPTURE_HOOK
     g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
 #endif
@@ -1199,9 +1202,19 @@ static uint32_t menu_observed_preconditions(void){
         if(isfinite(alpha)&&alpha>=0.0f&&alpha<=1.0f)
             mask|=D9_MENU_SHADER_PRE_MATERIAL_ALPHA_C4;
     }
+    if(g.constants_mask&(1u<<8))
+        mask|=D9_MENU_SHADER_PRE_AMBIENT_EMISSIVE_VARYING;
     return mask;
 }
 uint32_t d9_com_menu_observed_preconditions(void){return menu_observed_preconditions();}
+uint32_t d9_com_menu_set_ambient_emissive(const float rgba[4]){
+    if(!rgba||!g.device)return INVALID;
+    for(unsigned i=0;i<4;++i)if(!isfinite(rgba[i]))return INVALID;
+    memcpy(g.constants_c8,rgba,16);g.constants_mask|=1u<<8;
+    upload_tev_constants();
+    d9_menu_shader_note_preconditions(D9_MENU_SHADER_PRE_AMBIENT_EMISSIVE_VARYING);
+    return OK;
+}
 static int menu_vs_state(void){
     char why[D9_MENU_SHADER_REASON_MAX];
     if(!g.vs||!g.vs->has_menu_vs)return 0;
@@ -1381,11 +1394,17 @@ static void set_ps(CPU *c){Obj *o=obj(A(1),PS);if(!obj(A(0),DEVICE)||(A(1)&&!o)|
     bind(&g.ps,o);RET(OK,2);}
 static void get_vs(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.vs);M32(A(1))=g.vs?g.vs->guest:0;RET(OK,2);}
 static void get_ps(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ps);M32(A(1))=g.ps?g.ps->guest:0;RET(OK,2);}
-static float *vs_const_row(unsigned i){return i<4?g.constants.m[i]:g.constants_hi.m[i-4];}
-static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!obj(A(0),DEVICE)||start>=8||n>8-start||g.phase==2||(n&&!ptr(p,n*16)))RET(INVALID,4);
-    float values[8][4];if(n)memcpy(values,ptr(p,n*16),n*16);for(unsigned i=0;i<n;++i)for(unsigned j=0;j<4;++j)if(!isfinite(values[i][j]))RET(INVALID,4);
-    for(unsigned i=0;i<n;++i){memcpy(vs_const_row(start+i),values[i],16);g.constants_mask|=1u<<(start+i);}RET(OK,4);}
-static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=8||n>8-start||(n&&!ptr(A(2),n*16)))RET(INVALID,4);
+static float *vs_const_row(unsigned i){return i<4?g.constants.m[i]:i<8?g.constants_hi.m[i-4]:g.constants_c8;}
+static void upload_tev_constants(void){
+    float bank[9][4];memset(bank,0,sizeof bank);
+    for(unsigned i=0;i<4;++i){memcpy(bank[i],g.constants.m[i],16);memcpy(bank[4+i],g.constants_hi.m[i],16);}
+    memcpy(bank[8],g.constants_c8,16);
+    if(g.device)d9_set_tev_constants(g.device,bank);
+}
+static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!obj(A(0),DEVICE)||start>=9||n>9-start||g.phase==2||(n&&!ptr(p,n*16)))RET(INVALID,4);
+    float values[9][4];if(n)memcpy(values,ptr(p,n*16),n*16);for(unsigned i=0;i<n;++i)for(unsigned j=0;j<4;++j)if(!isfinite(values[i][j]))RET(INVALID,4);
+    for(unsigned i=0;i<n;++i){memcpy(vs_const_row(start+i),values[i],16);g.constants_mask|=1u<<(start+i);}upload_tev_constants();RET(OK,4);}
+static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=9||n>9-start||(n&&!ptr(A(2),n*16)))RET(INVALID,4);
     for(unsigned i=0;i<n;++i)memcpy(ptr(A(2)+i*16,16),vs_const_row(start+i),16);RET(OK,4);}
 static void shader_function(CPU *c){Obj *o=obj(A(0),0);uint32_t size_ptr=A(2);if(!o||(o->kind!=VS&&o->kind!=PS)||!ptr(size_ptr,4))RET(INVALID,3);
     uint32_t need=o->words*4,provided=M32(size_ptr);M32(size_ptr)=need;if(!A(1))RET(OK,3);

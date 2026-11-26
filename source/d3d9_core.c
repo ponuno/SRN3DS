@@ -38,6 +38,7 @@ struct D9Device {
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEXTURES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
+    float tev_constants[9][4];
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
     D9Handle texture1;
     D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
@@ -586,6 +587,13 @@ int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
     if(h&&!t->rt_target){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
     if(stage)d->texture1=h;else d->texture=h;return D9_OK;}
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
+int d9_set_tev_constants(D9Device *d,const float values[9][4]){
+    if(!d||!values)return D9_INVALID;
+    for(unsigned i=0;i<9;++i)for(unsigned j=0;j<4;++j)
+        if(!isfinite(values[i][j]))return D9_INVALID;
+    memcpy(d->tev_constants,values,sizeof d->tev_constants);
+    return D9_OK;
+}
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;d->transforms[which]=*m;return D9_OK;}
 int d9_set_shader_clip(D9Device *d,const D9Matrix *m){if(!d)return D9_INVALID;if(!m){d->shader_active=0;return D9_OK;}
@@ -750,6 +758,40 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     }else if(d->shader_active)clip=d->shader_clip;
     else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
     D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
+    int has_color=d->decl_active&&d->declaration.color!=UINT32_MAX;
+    /* Menu TEV plans can need a second texture unit, color0 and an external
+     * constant bank.  Route those before the fixed-function two-stage path. */
+    if(state.pixel_shader&&d->ops.draw_menu&&
+       (state.pixel_shader->textures>1||state.pixel_shader->constants>0||
+        state.pixel_shader->uses_vertex_color)){
+        if(!has_color){
+            set_diagnosis(d,"menu TEV plan requires per-vertex COLOR0; the declaration has no color");
+            return D9_UNSUPPORTED;
+        }
+        Texture *second=NULL;
+        if(state.pixel_shader->textures>1){
+            second=texture(d,d->texture1);
+            if(!second||!second->native||second->locked||!second->level[0].uploaded){
+                set_diagnosis(d,"menu TEV plan requires a ready texture unit 1");
+                return D9_UNSUPPORTED;
+            }
+            if(!padded_filter_supported(second,&d->second)){
+                set_diagnosis(d,"menu TEV texture unit 1 supports point sampling at level zero");
+                return D9_UNSUPPORTED;
+            }
+        }
+        if(state.pixel_shader->textures>0&&(!t||!t->native)) {
+            set_diagnosis(d,"menu TEV plan requires a ready texture unit 0");
+            return D9_UNSUPPORTED;
+        }
+        if(d->ops.draw_menu(d->ctx,d->color_scratch,n,&clip,
+                            t?t->native:NULL,second?second->native:NULL,
+                            &state,(const float (*)[4])d->tev_constants)){
+            set_diagnosis(d,"menu TEV draw rejected by the backend");
+            return D9_BACKEND;
+        }
+        set_diagnosis(d,"");return D9_OK;
+    }
     if(!state.pixel_shader && state.stage_colorop!=D9_TOP_DISABLE && d->second.stage_colorop!=D9_TOP_DISABLE){
         Texture *second=texture(d,d->texture1);
         if(!t||!second||!second->native||second->locked||!second->level[0].uploaded||
@@ -773,7 +815,6 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         }
         set_diagnosis(d,"");return D9_OK;
     }
-    int has_color=d->decl_active&&d->declaration.color!=UINT32_MAX;
     if(has_color){
         if(!d->ops.draw_colored){
             set_diagnosis(d,"draw requires per-vertex COLOR0 (DIFFUSE/COLOR0); backend has no color-capable PICA vertex shader, refusing draw instead of dropping the tint");

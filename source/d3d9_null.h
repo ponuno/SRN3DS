@@ -35,6 +35,8 @@ typedef struct {
     D9ColorVertex last_color_vertices[3];
     unsigned last_color_count;
     D9DrawState last_color_state;
+    unsigned menu_draws,menu_textures;
+    float last_menu_constants[9][4];
 } D9NullStats;
 
 const D9Backend *d9_null_backend(void);
