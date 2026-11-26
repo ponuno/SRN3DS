@@ -15,8 +15,10 @@ these six slots now point at host thunks in the `0xfd000000` window.
 
 Supported DDS payloads for texture creation: `A8R8G8B8`, `X8R8G8B8`,
 `DXT1`, `DXT3`, `DXT5`; power-of-two dimensions up to 1024 (the existing
-`d3d9_core` limit). Legacy DDS headers only; a `DX10` header is rejected
-explicitly rather than guessed.
+`d3d9_core` limit), with a compressed base level of at least 8×8. A
+non-power-of-two size or a compressed level below 8×8 is rejected with a named
+`D3DERR_NOTAVAILABLE` before any resource is created. Legacy DDS headers only;
+a `DX10` header is rejected explicitly rather than guessed.
 
 `D3DXGetImageInfoFromFileInMemory` also reports cube and volume DDS metadata
 (resource type 5 / 4, volume depth), but their pixel upload is not implemented.
@@ -31,6 +33,11 @@ export name plus guest path in `d3dx_texture_shims_last_error()`:
   arguments are pending.
 * `D3DXCreateCubeTextureFromFileInMemory` — cube upload pending.
 * `D3DXCreateVolumeTextureFromFileInMemory` — volume upload pending.
+
+These are real limits, not a closed texture pipeline: file-path loads and
+cube/volume creation fail closed with a named error instead of faking a
+texture. TESV's cubemaps (environment/skyspec) therefore still need one of
+these implementations.
 
 Unknown D3DX names (for example `D3DXMatrixMultiply`) are deliberately not
 captured; the existing staged-DLL/hotpatch resolution keeps handling them.

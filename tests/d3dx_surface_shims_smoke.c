@@ -33,8 +33,8 @@
 #define HR_E_NOTIMPL 0x80004001u
 
 /* Both D3DX modules are bound in the same slice.  Their thunk windows must
- * not overlap: d3dx_texture_shims owns 0xfd000000, this module 0xfd010000. */
-#define D3DX_TEXTURE_THUNK_BASE 0xfd000000u
+ * not overlap: d3dx_texture_shims owns 0xfd000000, this module 0xfd010000.
+ * The texture base comes from d3dx_texture_shims.h. */
 
 typedef struct {
     GuestMemory memory;
@@ -255,6 +255,40 @@ static void test_from_memory(H *h) {
             assert(got[y * 16 + x] == want);
         }
 
+    /* Non-zero source origin with a padded pitch: the source span starts at
+     * src + y0*pitch + x0*4 and each row advances by src_pitch, not row_bytes.
+     * This is the only non-trivial pointer arithmetic in the shim. */
+    uint32_t dest3 = create_surface(h, 16, 16, D9_A8R8G8B8);
+    uint32_t padded[11 * 20];
+    for (unsigned y = 0; y < 11; ++y)
+        for (unsigned x = 0; x < 20; ++x)
+            padded[y * 20 + x] = 0xff000000u | (y << 8) | x;
+    wr(h, DATA + 0x2000, padded, sizeof padded);
+    int32_t pdr[4] = {2, 2, 10, 10};
+    int32_t psr[4] = {2, 3, 10, 11};
+    wr(h, RECT + 0x80, pdr, sizeof pdr);
+    wr(h, RECT + 0xa0, psr, sizeof psr);
+    uint32_t padded_args[10] = {dest3, 0, RECT + 0x80, DATA + 0x2000,
+                                D9_A8R8G8B8, 20 * 4, 0, RECT + 0xa0, 0, 0};
+    assert(d3dx_call(h, "D3DXLoadSurfaceFromMemory", padded_args, 10, &r) == 0);
+    read_surface(h, dest3, 16, 16, got);
+    for (unsigned y = 0; y < 16; ++y)
+        for (unsigned x = 0; x < 16; ++x) {
+            uint32_t want = (x >= 2 && x < 10 && y >= 2 && y < 10)
+                                ? padded[(y - 2 + 3) * 20 + (x - 2 + 2)] : 0;
+            assert(got[y * 16 + x] == want);
+        }
+
+    /* A render-target destination is not CPU-writable.  It must be a named
+     * NOTAVAILABLE (the old path reported INVALIDCALL from LockRect). */
+    uint32_t rt_args[] = {16, 16, D9_X8R8G8B8, 0, 0, 0, OUT2, 0};
+    assert(call(h, h->device, 28, rt_args, 8) == 0);
+    uint32_t rt = rd(h, OUT2);
+    assert(rt);
+    uint32_t rt_fill[10] = {rt, 0, 0, DATA, D9_X8R8G8B8, 16 * 4, 0, 0, 0, 0};
+    assert(d3dx_call(h, "D3DXLoadSurfaceFromMemory", rt_fill, 10, &r) == HR_NOTAVAILABLE);
+    assert(strstr(d3dx_surface_last_error(), "render target"));
+
     /* Format conversion is a named failure and must not write pixels. */
     uint32_t before = got[0];
     uint32_t conv[10] = {dest2, 0, 0, DATA, D9_X8R8G8B8, 16 * 4, 0, 0, 0, 0};
@@ -353,8 +387,21 @@ static void test_compile_shader(H *h) {
     printf("d3dx compile shader named unsupported: PASS\n");
 }
 
+/* The shader refusal must not disappear when the D3D9 session is absent.  The
+ * resolver install is memory-only; surface copies then fail by name, but
+ * D3DXCompileShader still reaches its host thunk. */
+static void test_no_d3d9_install(void) {
+    GuestMemory m;
+    memset(&m, 0, sizeof m);
+    assert(!d3dx_surface_init(&m));
+    PeImport shader = {.dll = "d3dx9_42.dll", .name = "D3DXCompileShader"};
+    assert(win32_resolve(&shader, NULL) == D3DX_SURFACE_THUNK_BASE + 8u);
+    d3dx_surface_shutdown();
+}
+
 int main(void) {
     H h;
+    test_no_d3d9_install();
     assert(!harness_start(&h));
     test_resolution(&h);
     test_shared_binding(&h);

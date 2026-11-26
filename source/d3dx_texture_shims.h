@@ -20,6 +20,11 @@
 #include "pe_imports.h"
 #include "rt_table.h"
 
+/* Host thunk window for the plain D3DX9_42 texture exports.  Below
+ * WIN32_THUNK_BASE (0xff000000), disjoint from the D3D9 bridge (0xfe000000)
+ * and from the surface module (0xfd010000). */
+#define D3DX_TEXTURE_THUNK_BASE UINT32_C(0xfd000000)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -7,10 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Host thunk window for the plain D3DX9_42 exports.  Below WIN32_THUNK_BASE
- * (0xff000000) and disjoint from the D3D9 bridge window (0xfe000000). */
-#define D3DX_SHIM_BASE 0xfd000000u
-
 #define D3DX_OK 0u
 #define D3DX_E_NOTIMPL 0x80004001u
 #define D3DX_D3DERR_INVALIDCALL 0x8876086cu
@@ -110,11 +106,11 @@ static unsigned dds_format(uint32_t pf_flags,uint32_t fourcc,uint32_t bits,
             return D3DFMT_R8G8B8;
         if(bits==16){
             if(rmask==0xf800u&&gmask==0x07e0u&&bmask==0x001fu)
-                return amask?D3DFMT_A1R5G5B5:D3DFMT_R5G6B5;
+                return amask?0:D3DFMT_R5G6B5;
             if(rmask==0x7c00u&&gmask==0x03e0u&&bmask==0x001fu)
                 return amask==0x8000u?D3DFMT_A1R5G5B5:D3DFMT_X1R5G5B5;
             if(rmask==0x0f00u&&gmask==0x00f0u&&bmask==0x000fu)
-                return amask==0xf000u?D3DFMT_A4R4G4B4:D3DFMT_X1R5G5B5;
+                return amask==0xf000u?D3DFMT_A4R4G4B4:0;
             return 0;
         }
     }
@@ -260,6 +256,16 @@ static void shim_create_tex_mem(CPU *c){
                d.width,d.height);
         RET(D3DX_D3DERR_NOTAVAILABLE,4);
     }
+    if((w&(w-1u))||(h&(h-1u))){
+        reject("D3DXCreateTextureFromFileInMemory: %ux%u is not power-of-two; "
+               "the D3D9 bridge only creates pow2 textures",d.width,d.height);
+        RET(D3DX_D3DERR_NOTAVAILABLE,4);
+    }
+    if(bc_bytes(d.format)&&(w<8u||h<8u)){
+        reject("D3DXCreateTextureFromFileInMemory: compressed base level %ux%u "
+               "is below the D3D9 bridge's 8x8 floor",d.width,d.height);
+        RET(D3DX_D3DERR_NOTAVAILABLE,4);
+    }
     while(w>1||h>1){if(w>1)w>>=1;if(h>1)h>>=1;++max_mips;}
     if(d.mips>max_mips){
         reject("D3DXCreateTextureFromFileInMemory: %u mip levels do not fit %ux%u",
@@ -352,7 +358,7 @@ static const struct {const char *name;unsigned index;} export_names[]={
     {"D3DXCreateCubeTextureFromFileInMemory",D3DX_create_cube_mem},
     {"D3DXCreateVolumeTextureFromFileInMemory",D3DX_create_volume_mem},
 };
-#define ENTRY(f) {D3DX_SHIM_BASE+D3DX_##f*4,shim_##f},
+#define ENTRY(f) {D3DX_TEXTURE_THUNK_BASE+D3DX_##f*4,shim_##f},
 static const FnEntry d3dx_entries[]={D3DX_FUNCTIONS(ENTRY)};
 
 uint32_t d3dx_texture_shims_resolve(const PeImport *entry,void *ctx){
@@ -361,13 +367,13 @@ uint32_t d3dx_texture_shims_resolve(const PeImport *entry,void *ctx){
     if(!same_dll(entry->dll,"d3dx9_42.dll")&&!same_dll(entry->dll,"d3dx9_42"))return 0;
     for(unsigned i=0;i<sizeof export_names/sizeof export_names[0];++i)
         if(!strcmp(entry->name,export_names[i].name))
-            return D3DX_SHIM_BASE+export_names[i].index*4;
+            return D3DX_TEXTURE_THUNK_BASE+export_names[i].index*4;
     return 0;
 }
 int d3dx_texture_shims_install(GuestMemory *memory){
     if(!memory)return -1;
+    if(win32_add_external_resolver(d3dx_texture_shims_resolve,NULL))return -1;
     g.memory=memory;g.last_error[0]=0;
-    win32_add_external_resolver(d3dx_texture_shims_resolve,NULL);
     return 0;
 }
 void d3dx_texture_shims_uninstall(void){g.memory=NULL;g.last_error[0]=0;}

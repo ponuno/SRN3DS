@@ -57,14 +57,16 @@ FnModule tables[6] = {..., {"d3dx-texture", NULL, 0}, {"d3dx-surface", NULL, 0}}
 if (d3dx_texture_shims_install(&b.memory) == 0) { /* after d9_com_init() */
     tables[table_count++] = d3dx_texture_shims_module();
 }
-if (d3dx_surface_init(&b.memory) == 0) {          /* after d9_com_init() */
+if (d3dx_surface_init(&b.memory) == 0) {          /* memory only; no D3D9 session needed */
     tables[table_count++] = d3dx_surface_module();
 }
 ```
 
 `d3dx_surface_init()` binds the memory and installs the resolver; shutdown calls
 `d3dx_surface_shutdown()` and `d3dx_texture_shims_uninstall()` before
-`d9_com_shutdown()`.
+`d9_com_shutdown()`. Installing the resolver and the `D3DXCompileShader`
+refusal do not require a D3D9 session; the two surface-copy exports return
+`D3DERR_NOTAVAILABLE` when `d9_com_memory()` is not bound.
 
 ## Merging with the texture/image shim module
 

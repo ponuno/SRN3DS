@@ -19,9 +19,9 @@
  * Thunks live at D3DX_SURFACE_THUNK_BASE + 4*i, below WIN32_THUNK_BASE and
  * outside the d3d9 bridge window (0xfe000000).  The window is disjoint by
  * 0x10000 from d3dx_texture_shims (0xfd000000..0xfd000014).  Register the
- * FnModule with n3ds_lift_bind_modules(), then call d3dx_surface_init() after
- * d9_com_init(); init appends the resolver to the win32 extra-resolver chain,
- * the same mechanism d3dx_texture_shims uses. */
+ * FnModule with n3ds_lift_bind_modules(), then call d3dx_surface_init(); the
+ * install does not require a D3D9 session, but the two surface-copy exports do
+ * (they return D3DERR_NOTAVAILABLE otherwise). */
 
 #define D3DX_SURFACE_THUNK_BASE UINT32_C(0xfd010000)
 enum {
@@ -32,9 +32,10 @@ enum {
 };
 
 /* Binds the guest memory and installs d3dx_surface_resolve() in the win32
- * extra-resolver chain (the same chain as d3dx_texture_shims).  Must run after
- * d9_com_init() on the same GuestMemory.  Returns 0 on success, -1 for a
- * mismatched/absent d3d9 session.  Idempotent. */
+ * extra-resolver chain (the same chain as d3dx_texture_shims).  A D3D9 session
+ * is not required: D3DXCompileShader still refuses by name, and the two
+ * surface-copy exports return D3DERR_NOTAVAILABLE when d9_com_memory() is not
+ * bound.  Returns 0 on success, -1 for NULL memory or a full chain. */
 int d3dx_surface_init(GuestMemory *memory);
 /* Drops the memory binding and the last diagnostic.  The chain slot itself is
  * cleared by win32_shutdown() and is inert while memory is NULL. */

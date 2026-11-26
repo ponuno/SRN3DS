@@ -173,6 +173,11 @@ static uint32_t load_from_memory(CPU *c) {
                    "IDirect3DSurface9", (unsigned long)dest);
         return SHIM_HR_INVALIDCALL;
     }
+    if (info.render_target) {
+        diagnostic("D3DXLoadSurfaceFromMemory: destination is a render target or "
+                   "back buffer and cannot be CPU-written");
+        return SHIM_HR_NOTAVAILABLE;
+    }
     if (!ldr_format(info.format) || !ldr_format(src_format)) {
         diagnostic("D3DXLoadSurfaceFromMemory: only X8R8G8B8/A8R8G8B8 LDR "
                    "pixels are supported (source %s, destination %s)",
@@ -281,6 +286,11 @@ static uint32_t load_from_surface(CPU *c) {
                    (unsigned long)src, (unsigned long)dest);
         return SHIM_HR_INVALIDCALL;
     }
+    if (di.render_target) {
+        diagnostic("D3DXLoadSurfaceFromSurface: destination is a render target or "
+                   "back buffer and cannot be CPU-written");
+        return SHIM_HR_NOTAVAILABLE;
+    }
     if (dest == src) {
         diagnostic("D3DXLoadSurfaceFromSurface: source and destination are the "
                    "same surface");
@@ -385,8 +395,9 @@ static uint32_t load_from_surface(CPU *c) {
 }
 
 static void zero_output(uint32_t address) {
-    if (address && memory && guest_ptr(memory, address, 4u))
-        *(uint32_t *)guest_ptr(memory, address, 4u) = 0;
+    if (!address || !memory) return;
+    uint32_t *p = guest_ptr(memory, address, 4u);
+    if (p) *p = 0;
 }
 
 static uint32_t compile_shader(CPU *c) {
@@ -449,10 +460,10 @@ uint32_t d3dx_surface_resolve(const PeImport *entry, void *ctx) {
 }
 
 int d3dx_surface_init(GuestMemory *m) {
-    if (!m || d9_com_memory() != m) return -1;
+    if (!m) return -1;
+    if (win32_add_external_resolver(d3dx_surface_resolve, NULL)) return -1;
     memory = m;
     last_error[0] = 0;
-    win32_add_external_resolver(d3dx_surface_resolve, NULL);
     return 0;
 }
 

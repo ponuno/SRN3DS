@@ -32,6 +32,7 @@
 #define HR_E_NOTIMPL 0x80004001u
 #define HR_INVALIDDATA 0x88760b59u
 #define HR_INVALIDCALL 0x8876086cu
+#define HR_NOTAVAILABLE 0x8876086au
 
 #define FMT_A8R8G8B8 21u
 #define FMT_DXT1 0x31545844u
@@ -225,6 +226,34 @@ int main(void){
     assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),128),src+128,128));
     level=0;assert(call(&h,tex,20,&level,1)==HR_OK);
     assert(call(&h,tex,2,NULL,0)==0);
+
+    /* 4b. A 4x4 DXT1 is valid metadata but below the bridge's 8x8 compressed
+     * floor: creation is a named NOTAVAILABLE before any resource exists. */
+    dds_a8=make_dxt1_dds(ddsbuf,4,4,0x50);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,dds_a8));
+    uint32_t small_info[]={DATA,(uint32_t)dds_a8,INFO};
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",small_info,3)==HR_OK);
+    assert(rd(&h,INFO+12)==1&&rd(&h,INFO+16)==FMT_DXT1);
+    uint32_t small_ct[]={h.device,DATA,(uint32_t)dds_a8,OUT};
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",small_ct,4)==HR_NOTAVAILABLE);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"8x8"));
+
+    /* 4c. Non-power-of-two is unsupported, not invalid: named NOTAVAILABLE. */
+    dds_a8=make_a8r8g8b8_dds(ddsbuf,12,12,1,0x60);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,dds_a8));
+    uint32_t np2_ct[]={h.device,DATA,(uint32_t)dds_a8,OUT};
+    assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+    assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",np2_ct,4)==HR_NOTAVAILABLE);
+    assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"power-of-two"));
+
+    /* 4d. A 4-4-4 header without alpha must not be reported as X1R5G5B5 (whose
+     * masks contradict the header).  The enum has no X4R4G4B4 here, so the
+     * shim refuses to guess and returns INVALIDDATA. */
+    size_t d44=dds_header(ddsbuf,8,8,1,0x41u,0,16,0x0f00u,0x00f0u,0x000fu,0,0,1);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,d44));
+    uint32_t i44[]={DATA,(uint32_t)d44,INFO};
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",i44,3)==HR_INVALIDDATA);
 
     /* 5. Non-DDS input is a named failure and leaves the info zeroed. */
     const uint8_t junk[64]="this is not a DDS file";

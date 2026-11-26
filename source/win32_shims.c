@@ -293,10 +293,11 @@ void win32_shutdown(void) {
     memset(extra_resolvers,0,sizeof extra_resolvers);memset(extra_context,0,sizeof extra_context);
 }
 void win32_set_external_resolver(PeImportResolve r,void *ctx){external_resolver=r;external_context=ctx;}
-void win32_add_external_resolver(PeImportResolve r,void *ctx){
-    if(!r)return;
-    for(unsigned i=0;i<MAX_EXTRA_RESOLVERS;++i)if(extra_resolvers[i]==r&&extra_context[i]==ctx)return;
-    for(unsigned i=0;i<MAX_EXTRA_RESOLVERS;++i)if(!extra_resolvers[i]){extra_resolvers[i]=r;extra_context[i]=ctx;return;}
+int win32_add_external_resolver(PeImportResolve r,void *ctx){
+    if(!r)return -1;
+    for(unsigned i=0;i<MAX_EXTRA_RESOLVERS;++i)if(extra_resolvers[i]==r&&extra_context[i]==ctx)return 0;
+    for(unsigned i=0;i<MAX_EXTRA_RESOLVERS;++i)if(!extra_resolvers[i]){extra_resolvers[i]=r;extra_context[i]=ctx;return 0;}
+    return -1;
 }
 void win32_set_linker(const PeLinker *linker){process_linker=linker;}
 static uint32_t arg(CPU *c,unsigned n) {return M32(c->r[4]+4+n*4);}
