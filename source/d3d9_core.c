@@ -380,6 +380,44 @@ int d9_texture_surface_unlocked(D9Device *d,D9Handle h,unsigned level){
         return D9_BACKEND;
     return D9_OK;
 }
+int d9_texture_copy_levels(D9Device *d,D9Handle dst,D9Handle src){
+    Texture *a=d?texture(d,dst):NULL,*b=d?texture(d,src):NULL;
+    if(!a||!b){
+        set_diagnosis(d,"UpdateTexture: invalid 2D texture handle");
+        return D9_INVALID;
+    }
+    if(d->scene||d->teardown){
+        set_diagnosis(d,"UpdateTexture: cannot update while a scene is active");
+        return D9_INVALID;
+    }
+    if(a==b)return D9_OK;
+    if(a->format!=b->format||a->w!=b->w||a->h!=b->h||a->levels!=b->levels){
+        set_diagnosis(d,"UpdateTexture: source and destination must share format, dimensions and level count");
+        return D9_INVALID;
+    }
+    if(a->gpu_only||b->gpu_only||!a->pixels||!b->pixels){
+        set_diagnosis(d,"UpdateTexture: both textures need a CPU guest copy; render-target/GPU-only textures are not updatable");
+        return D9_UNSUPPORTED;
+    }
+    if(a->locked||b->locked){
+        set_diagnosis(d,"UpdateTexture: source or destination texture is locked");
+        return D9_INVALID;
+    }
+    for(unsigned i=0;i<a->levels;++i)
+        memcpy(a->pixels+a->level[i].offset,b->pixels+b->level[i].offset,a->level[i].bytes);
+    if(!a->cpu_only){
+        for(unsigned i=0;i<a->levels&&i<a->gpu_levels;++i){
+            int rc=d9_texture_surface_unlocked(d,dst,i);
+            if(rc){
+                snprintf(d->diagnosis,sizeof d->diagnosis,
+                         "UpdateTexture: destination level %u upload failed",i);
+                return rc;
+            }
+        }
+    }
+    set_diagnosis(d,"");
+    return D9_OK;
+}
 int d9_texture_resource_info(D9Device *d,D9Handle h,unsigned *pool,
                              unsigned *usage,unsigned *format,
                              unsigned *levels,size_t *guest_bytes,

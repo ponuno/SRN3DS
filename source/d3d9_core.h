@@ -280,6 +280,12 @@ int d9_texture_level_view(D9Device *d,D9Handle h,unsigned level,void **pixels,
 /* Re-upload a level after a surface view was written.  Marks the level
  * uploaded and commits the pending GPU copy. */
 int d9_texture_surface_unlocked(D9Device *d,D9Handle h,unsigned level);
+/* Copy every mip level from src's CPU store into dst and re-upload the
+ * destination levels through the normal surface-unlock rules.  Both handles
+ * must name 2D textures with a guest copy; formats, dimensions and level
+ * counts must match.  Render-target/GPU-only textures and locked resources are
+ * refused by name. */
+int d9_texture_copy_levels(D9Device *d,D9Handle dst,D9Handle src);
 int d9_texture_lock(D9Device *d,D9Handle h,void **ptr,size_t *pitch);
 int d9_texture_unlock(D9Device *d,D9Handle h);
 int d9_texture_lock_level(D9Device *d,D9Handle h,unsigned level,void **ptr,size_t *pitch);

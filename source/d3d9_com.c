@@ -762,6 +762,116 @@ static void stretch_rect(CPU *c){
         (unsigned long)(d==g.back?0:d->guest),drect.left,drect.top,drect.right,drect.bottom,(unsigned long)A(5));
     RET(OK,6);
 }
+static int read_update_rect(uint32_t address,unsigned w,unsigned h,int32_t r[4]){
+    if(!address){r[0]=0;r[1]=0;r[2]=(int32_t)w;r[3]=(int32_t)h;return 0;}
+    const int32_t *p=ptr(address,16);if(!p)return 1;
+    memcpy(r,p,16);
+    if(r[0]<0||r[1]<0||r[2]<=r[0]||r[3]<=r[1]||
+       (uint64_t)r[2]>w||(uint64_t)r[3]>h)return 2;
+    return 0;
+}
+static int read_update_point(uint32_t address,int32_t *x,int32_t *y){
+    if(!address){*x=0;*y=0;return 0;}
+    const int32_t *p=ptr(address,8);if(!p)return 1;
+    *x=p[0];*y=p[1];
+    return (*x<0||*y<0)?2:0;
+}
+static void update_surface(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,5);
+    Obj *s=obj(A(1),SURFACE),*d=obj(A(3),SURFACE);
+    if(!s||!d)RET(INVALID,5);
+    const char *why=NULL;
+    if(g.phase)why="UpdateSurface cannot run inside BeginScene/EndScene";
+    else if(s->is_depth||d->is_depth)why="depth-stencil surfaces are not supported by UpdateSurface";
+    else if(s->view_cube||d->view_cube)why="cube-face surfaces are not supported by UpdateSurface";
+    else if(s->handle||d->handle)why="GPU-only render-target/back-buffer surfaces are not supported by UpdateSurface";
+    else if(!s->pixels||!d->pixels)why="both surfaces need a CPU-backed pixel store";
+    else if(s->lock_guest||d->lock_guest)why="a locked surface cannot participate in UpdateSurface";
+    else if(s->block_bytes||d->block_bytes)why="compressed surfaces are not supported by UpdateSurface";
+    else if(s->format!=d->format)why="source and destination formats must match";
+    if(why){d3d_fail("UpdateSurface",why,INVALID);RET(INVALID,5);}
+    int32_t r[4];
+    int rr=read_update_rect(A(2),s->width,s->height,r);
+    if(rr){d3d_fail("UpdateSurface",rr==1?
+        "source rectangle is outside guest memory":"source rectangle must be non-empty and inside the source surface",INVALID);RET(INVALID,5);}
+    int32_t px,py;
+    int pr=read_update_point(A(4),&px,&py);
+    if(pr){d3d_fail("UpdateSurface",pr==1?
+        "destination point is outside guest memory":"destination point must be non-negative",INVALID);RET(INVALID,5);}
+    unsigned cw=(unsigned)(r[2]-r[0]),ch=(unsigned)(r[3]-r[1]);
+    if((uint64_t)px+cw>d->width||(uint64_t)py+ch>d->height){
+        d3d_fail("UpdateSurface","the copied rectangle does not fit the destination surface",INVALID);RET(INVALID,5);}
+    size_t row=(size_t)cw*4u;
+    for(unsigned y=0;y<ch;++y)
+        memmove(d->pixels+(size_t)(py+y)*d->pitch+(size_t)px*4,
+                s->pixels+(size_t)(r[1]+y)*s->pitch+(size_t)r[0]*4,row);
+    if(d->is_view&&d->view_parent&&!d->view_cube){
+        int rc=d9_texture_surface_unlocked(g.device,d->view_texture,d->view_level);
+        if(rc){d3d_fail("UpdateSurface",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),5);}
+    }
+    g.last_diagnostic[0]=0;
+    trace_detail("UpdateSurface src=0x%08lx rect=%ld,%ld..%ld,%ld dst=0x%08lx point=%ld,%ld",
+                 (unsigned long)s->guest,(long)r[0],(long)r[1],(long)r[2],(long)r[3],
+                 (unsigned long)d->guest,(long)px,(long)py);
+    RET(OK,5);
+}
+static void update_texture(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    Obj *s=obj(A(1),0),*d=obj(A(2),0);
+    if(!s||!d){d3d_fail("UpdateTexture","source and destination must be valid texture objects",INVALID);RET(INVALID,3);}
+    if(s->kind!=TEX||d->kind!=TEX){
+        d3d_fail("UpdateTexture","only IDirect3DTexture9 objects are supported; cube/volume textures are not substituted",UNAVAILABLE);
+        RET(UNAVAILABLE,3);
+    }
+    int rc=d9_texture_copy_levels(g.device,d->handle,s->handle);
+    if(rc){d3d_fail("UpdateTexture",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),3);}
+    g.last_diagnostic[0]=0;
+    RET(OK,3);
+}
+static void color_fill(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,4);
+    Obj *o=obj(A(1),SURFACE);uint32_t color=A(2);
+    if(!o){d3d_fail("ColorFill","argument is not a valid IDirect3DSurface9",INVALID);RET(INVALID,4);}
+    if(o->is_depth){d3d_fail("ColorFill","depth-stencil surfaces cannot be colour-filled",UNAVAILABLE);RET(UNAVAILABLE,4);}
+    if(o->view_cube){d3d_fail("ColorFill","cube-face surfaces are not supported",UNAVAILABLE);RET(UNAVAILABLE,4);}
+    if(o->lock_guest){d3d_fail("ColorFill","a locked surface cannot be colour-filled",INVALID);RET(INVALID,4);}
+    int32_t r[4];
+    int rr=read_update_rect(A(3),o->width,o->height,r);
+    if(rr){d3d_fail("ColorFill",rr==1?
+        "fill rectangle is outside guest memory":"fill rectangle must be non-empty and inside the surface",INVALID);RET(INVALID,4);}
+    unsigned x=(unsigned)r[0],y=(unsigned)r[1];
+    unsigned w=(unsigned)(r[2]-r[0]),h=(unsigned)(r[3]-r[1]);
+    if(o->handle){
+        size_t bytes=(size_t)w*h*4u;
+        uint32_t *buf=malloc(bytes);if(!buf)RET(OUTMEM,4);
+        for(size_t i=0;i<(size_t)w*h;++i)buf[i]=color;
+        int rc=d9_render_target_write(g.device,o->handle,buf,(size_t)w*4u,x,y,w,h);
+        free(buf);
+        if(rc){
+            d3d_fail("ColorFill",rc==D9_UNSUPPORTED?d9_last_draw_diagnostic(g.device):
+                     "backend cannot write this render-target surface pixel store",hr(rc));
+            RET(hr(rc),4);
+        }
+    }else{
+        if(!o->pixels){
+            d3d_fail("ColorFill","surface has neither a CPU store nor a writable backend render target",UNAVAILABLE);
+            RET(UNAVAILABLE,4);
+        }
+        for(unsigned yy=0;yy<h;++yy){
+            uint32_t *row=(uint32_t *)(o->pixels+(size_t)(y+yy)*o->pitch)+x;
+            for(unsigned xx=0;xx<w;++xx)row[xx]=color;
+        }
+        if(o->is_view&&o->view_parent&&!o->view_cube){
+            int rc=d9_texture_surface_unlocked(g.device,o->view_texture,o->view_level);
+            if(rc){d3d_fail("ColorFill",d9_last_draw_diagnostic(g.device),hr(rc));RET(hr(rc),4);}
+        }
+    }
+    g.last_diagnostic[0]=0;
+    trace_detail("ColorFill=0x%08lx color=0x%08lx rect=%ld,%ld..%ld,%ld",
+                 (unsigned long)o->guest,(unsigned long)color,(long)r[0],(long)r[1],
+                 (long)r[2],(long)r[3]);
+    RET(OK,4);
+}
 static void set_depth_stencil(CPU *c){
     if(!obj(A(0),DEVICE))RET(INVALID,2);
     if(!A(1)){
@@ -2340,7 +2450,7 @@ static void draw_indexed_up(CPU *c){
  X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
- X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
+ X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(update_surface) X(update_texture) X(color_fill) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
  X(set_scissor_rect) X(get_scissor_rect) X(set_gamma_ramp) X(get_gamma_ramp) X(set_npatch_mode) X(get_npatch_mode) \
  X(surface_desc) X(surface_container) X(surface_lock) X(surface_unlock) X(surface_dc) X(surface_release_dc) \
  X(cube_level_count) X(cube_desc) X(cube_get_surface) X(cube_lock) X(cube_unlock) X(cube_add_dirty_rect) \
@@ -2473,6 +2583,7 @@ static void init_tables(void){
     SLOT(DEVICE,70,validate_device);
     SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
     SLOT(DEVICE,23,create_tex);SLOT(DEVICE,24,create_volume_tex);SLOT(DEVICE,25,create_cube_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
+    SLOT(DEVICE,30,update_surface);SLOT(DEVICE,31,update_texture);SLOT(DEVICE,35,color_fill);
     SLOT(DEVICE,36,create_offscreen);SLOT(DEVICE,37,set_render_target);SLOT(DEVICE,38,get_render_target);SLOT(DEVICE,34,stretch_rect);SLOT(DEVICE,39,set_depth_stencil);
     SLOT(DEVICE,40,get_depth_stencil);SLOT(DEVICE,41,begin_scene);SLOT(DEVICE,42,end_scene);SLOT(DEVICE,43,clear);SLOT(DEVICE,44,transform);
     SLOT(DEVICE,45,get_transform);SLOT(DEVICE,46,multiply_transform);

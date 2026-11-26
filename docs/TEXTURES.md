@@ -323,6 +323,32 @@ GPU-only and never retain the container. MANAGED token eviction/rehydrate,
 Reset handle preservation, dynamic DISCARD, and automatic disposable guest drop
 remain pending.
 
+## 5.1 UpdateTexture / UpdateSurface / ColorFill
+
+Device slots 31/30/35 are implemented for CPU-backed stores; no GPU copy is
+invented.
+
+* `UpdateTexture(source, destination)` copies every mip level from the source
+  CPU store into the destination CPU store, then re-uploads each destination
+  level through the existing surface-unlock/TexCache rules. Both textures must
+  be 2D, unlocked, share format/dimensions/level count and retain a guest copy.
+  Render-target/GPU-only textures, cube/volume handles, locks, format/size/level
+  mismatches and a missing guest copy are named refusals.
+* `UpdateSurface(source, sourceRect, destination, destPoint)` copies a
+  rectangle between CPU-backed surfaces. `NULL` source rect means the whole
+  source; `NULL` destination point means `(0,0)`. Formats must match, the rect
+  must be non-empty/inside the source, and the copy must fit the destination.
+  Destination texture-level views are re-uploaded after the copy. Depth, cube
+  faces, compressed surfaces, locked surfaces and any GPU-only render
+  target/back buffer are named refusals.
+* `ColorFill(surface, argb, rect)` fills the whole level (`rect = NULL`) or a
+  sub-rect. CPU-backed surfaces and texture-level views are filled directly and
+  re-uploaded through the level-unlock rule. A render target with a backend
+  target is filled through `d9_render_target_write` (the same read/modify/write
+  path Clear/Unlock use), so the bytes really reach the backend; a target
+  without read/write support is a named refusal, not a CPU-only fake. Depth and
+  cube-face surfaces are refused.
+
 ## 6. Isolated ARM / Azahar evidence
 
 Build and run:
