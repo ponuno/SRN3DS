@@ -3,10 +3,12 @@
  * The first flattened display-list frame is tessellated record by record.  An
  * unmasked shape becomes transformed triangle-list geometry.  DefineEditText
  * records are parsed and their plain sources counted.  Structured imports try
- * the declared URL, then the documented Interface/fonts_en.swf fallback, and
- * resolve DefineFont ids exactly (never by name).  The retail ids 34/41 are
- * absent from the fallback, so they remain named refusals.  An exact-id match
- * lays out/tessellates real edit text into the combined geometry batch.  Solid
+ * the declared URL, then the documented Interface/fonts_en.swf library.  The
+ * retail ids 34/41 are absent from that library, so resolution goes through the
+ * shipped Interface/fontconfig.txt: symbol -> face/style -> one exact
+ * DefineFont3 name.  Every substitution is logged.  Resolved labels are laid
+ * out/tessellated into their own real geometry (kept separate from the fixed
+ * shape batch census).  Solid
  * shape fills keep their parsed RGBA colours.  One local Font3 glyph (!)
  * remains as a raster/atlas/batch/COM control beside a white A8 texel.  The
  * combined batch uses compact indexed submission when available, otherwise
@@ -960,7 +962,7 @@ static void run_real(const char *data_dir) {
               res34.resolved_id == 3 && res34.font->glyph_count == 187 &&
               !strcmp(res34.face, "Futura Condensed") &&
               !strcmp(res34.import_name, "$EverywhereMediumFont"),
-          "imported id 34 resolved via fontconfig to Godot-free real face id 3");
+          "imported id 34 resolved via fontconfig to real face id 3");
     check(menu_swf_font_resolve(&import_list, &config, &font_list, 41,
                                 font_source_name, &res41, reason,
                                 sizeof reason) == MENU_SWF_OK &&
@@ -1464,14 +1466,16 @@ static void run_real(const char *data_dir) {
     printf("real: edit_text_definitions=%u edit_text_ids=%u "
            "nonempty_definitions=%u source_records=%u nonempty_records=%u "
            "source_lines=%u source_glyph_slots=%u refused_records=%u "
-           "resolved_records=%u layout_records=%u refused_font_mask=%08x "
+           "resolved_records=%u exact_records=%u substituted_records=%u "
+           "layout_records=%u refused_font_mask=%08x "
            "resolved_text_glyphs=%u missing_glyphs=%u real_text_vertices=%u "
            "real_text_indices=%u\n",
            stats.text_definitions, stats.text_ids,
            stats.text_nonempty_definitions, stats.text_source_records,
            stats.text_nonempty_records, stats.text_source_lines,
            stats.text_source_chars, stats.text_refused_records,
-           stats.text_resolved_records, stats.text_layout_records,
+           stats.text_resolved_records, stats.text_exact_id_records,
+           stats.text_substituted_records, stats.text_layout_records,
            stats.text_refused_font_mask, stats.text_real_glyphs,
            stats.text_missing_glyphs, stats.text_real_vertices,
            stats.text_real_indices);

@@ -1,15 +1,19 @@
 # MENU_SWF — bounded StartMenu.swf summary
 
-Status: the SWF **container, tag stream, structured font imports, exact-id font
-resolution, flattened display list, solid fill colours, DefineEditText
+Status: the SWF **container, tag stream, structured font imports, fontconfig
+face resolution, flattened display list, solid fill colours, DefineEditText
 parsing/layout, shape/glyph tessellation, A8 raster/atlas/batch and host CPU ->
 COM indexed/UP menu submission** are implemented.  Real StartMenu declares
 imported font ids 34/41 from `gfxfontlib.swf`; that URL is absent and the
-`Interface/fonts_en.swf` fallback contains neither id, so all 57 text records are
-named refusals rather than name-substituted.  An exact-id match is wired through
-edit layout/tessellation into the COM geometry batch.  This is still not a menu
-frame: focal/bitmap fill sampling, mask/clip rendering, AVM/AS2, full GFx
-text/assets and PICA sampling remain open.
+`Interface/fonts_en.swf` library contains neither id.  The shipped
+`Interface/fontconfig.txt` maps the imported symbols to real faces
+(`$EverywhereMediumFont` -> Futura Condensed, `$EverywhereFont` -> Futura
+CondensedLight) and those faces exist in `fonts_en.swf` (DefineFont3 ids 3 and
+1).  Resolution therefore uses a logged, proven face substitution instead of a
+guess: all 57 text records resolve and the 3 authored labels produce **72 real
+glyphs / 3,024 vertices / 4,320 indices / 1,440 triangles**.  This is still not
+a menu frame: focal/bitmap fill sampling, mask/clip rendering, AVM/AS2, full
+GFx assets and PICA sampling remain open.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -21,6 +25,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, recursive tag walk, bounded summary and structured ImportAssets/ImportAssets2 URL + id/symbol collection |
 | `source/menu_swf_avm.h` / `.c` | Bounded DoAction/DoInitAction AVM1 decoder, caller-owned opcode histogram/byte inventory, unknown-opcode refusals and side-effect-free Stop/Play/GotoFrame display annotation |
 | `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, caller-owned DefineFont2/3 collection, exact-id imported-font resolution and DefineEditText collection |
+| `source/menu_swf_font.h` / `.c` | Bounded `Interface/fontconfig.txt` parser (`map "$Alias" = "Face" Style`), alias/face lookup, exact-id first then alias -> face/style -> one DefineFont3, explicit substitution marker and named refusals |
 | `source/menu_swf_display_list.h` / `.c` | First-frame flattened display list with recursive sprite expansion, accumulated 16.16 matrices/colour transforms, clip depth and cycle/depth limits |
 | `source/menu_swf_clip.h` / `.c` | Clip-depth mask pairs/rectangles, active-mask lists, intersection, fully-clipped flags and rectangle mask quads |
 | `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, retained solid RGBA/gradient stops+matrix/bitmap ids, streaming geometry sink, and DefineFont2/3 glyph SHAPE contours/bounds |
@@ -47,8 +52,10 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_mask_batch_smoke.c` | Synthetic clip records: fully inside/outside, axis-aligned partial clipping, rotated-style clipping, missing bounds and fully clipped; real StartMenu zero-mask batch equivalence |
 | `tests/menu_swf_partial_mask_smoke.c` | Edge-crossing triangle positions/area/colour/winding, inside/outside, source dedup, partially clipped text UVs, rotated-mask and rotated-text named refusals, real StartMenu zero-mask equivalence |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
-| `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: URL/fallback font load, exact-id resolve/refusals, solid-fill shape batch + resolved edit-text tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_html`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_swf_gradient`, `menu_swf_mask_batch`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
+| `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: font library + fontconfig load, exact-id/alias-face resolution and substitution log, solid-fill shape batch, separate resolved-label tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
+| `tests/menu_font_resolve_smoke.c` | Synthetic fontconfig parser/lookup/refusal cases plus real StartMenu/fonts_en/fontconfig: ids 34/41 -> DefineFont3 3/1, 72 real glyphs, raster + A8 atlas, 16-bit batch headroom |
+| `tests/menu_swf_glyph_smoke.c` | Real fonts_en single-glyph tessellation across multiple faces, target filter, and named missing-code refusal |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_html`, `menu_swf_font_resolve`, `menu_swf_glyph`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_swf_gradient`, `menu_swf_mask_batch`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
 | `tests/menu_indexed_draw_smoke.c` | Core recording backend: exact compact vertices/indices, >4,095-index batch, 32-bit and 65,536-vertex fallbacks, named expansion limit and DevCaps 0x00082000 |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
@@ -113,7 +120,7 @@ Retail `DefineFontName` carries a copyright string after the font name; the
 font name is kept and the trailing bytes are ignored.  `ImportAssets2` is the
 retail variant of `ImportAssets` (two reserved bytes before the symbol count).
 
-### Structured import records and exact-id font resolution
+### Structured import records and fontconfig face resolution
 
 `menu_swf_collect_imports()` preserves each `ImportAssets` (57) /
 `ImportAssets2` (71) URL with its ordered `UI16 id -> symbol-name` list.  It
@@ -129,20 +136,47 @@ and `DefineFont3` (75) tags into a caller-owned `MenuSwfFontList`.  Malformed
 fonts, duplicate stored ids and caller capacity overflow are fatal named
 refusals.  An unrelated font whose glyph/kerning table exceeds the bounded
 summary is skipped and recorded in `skipped`/`skip_reason`, allowing later
-candidate ids to remain searchable.
+candidate ids to remain searchable.  Each summary retains the raw FontFlags so
+Bold/Italic can be matched without guessing from the name.
 
-`menu_swf_display_resolve_import_font()` requires **exact equality** between the
-imported symbol id and a candidate `DefineFont` id.  Symbol/font names are
-diagnostic only.  A miss returns `MENU_SWF_ERR_NOTIMPL` and the reason
-`imported font id N is not present in <candidate_source>` plus symbol/URL
-context; no same-name font is substituted.
+`menu_swf_display_resolve_import_font()` still implements strict numeric-id
+equality and returns `MENU_SWF_ERR_NOTIMPL` with
+`imported font id N is not present in <candidate_source>` when that id is
+absent.  The retail path uses the new `menu_swf_font` resolver instead:
 
-The real e2e loader searches `Update.bsa`, `Skyrim - Interface.bsa`, then loose
+1. an exact `DefineFont` id match wins (`MENU_SWF_FONT_MATCH_EXACT_ID`);
+2. otherwise the id must be declared by an ImportAssets record;
+3. the imported symbol name must have a shipped `fontconfig.txt` `map` entry;
+4. the mapped face (trimmed, case-insensitive) plus Bold/Italic must select
+   exactly one candidate (`MENU_SWF_FONT_MATCH_FACE`).
+
+Missing declaration, missing map, absent face, a style mismatch or more than
+one equally good candidate is a named `NOTIMPL` refusal.  Glyphs are never
+invented.  `MenuSwfFontResolution` carries the requested/resolved ids,
+symbol, face and style so the caller can log the substitution.
+
+Retail mapping from the real files:
+
+| Import | Symbol | fontconfig face/style | fonts_en DefineFont3 |
+|---|---|---|---|
+| 34 | `$EverywhereMediumFont` | `Futura Condensed` Normal | id 3, 187 glyphs |
+| 41 | `$EverywhereFont` | `Futura CondensedLight` Normal | id 1, 187 glyphs |
+
+The e2e loader searches `Update.bsa`, `Skyrim - Interface.bsa`, then loose
 `Data/Interface`.  It tries the declared URL first and, when that file is
-absent, `Interface/fonts_en.swf`.  Multiple import URLs are not merged into one
-candidate namespace.  For an exact-id match, nonempty DefineEditText sources
-are laid out with the edit font height, tessellated, transformed by the display
-record and appended to the white-A8 geometry batch before COM submission.
+absent, `Interface/fonts_en.swf`; `Interface/fontconfig.txt` comes from the same
+archive set.  Multiple import URLs are not merged into one candidate namespace.
+Resolved labels are laid out with the edit font height and HTML per-run faces
+(`menu_swf_text_layout_edit_resolved()`), tessellated, and counted as their own
+real geometry.  They are deliberately not merged into the e2e shape batch, so
+the fixed shape census stays **57,484 vertices / 86,160 indices / 28,720
+triangles, one indexed draw, 0 expanded UP vertices**; shape + resolved text
+would be 60,508 vertices, still inside the 16-bit range.
+
+`menu_swf_tess_glyph()` sets `MenuSwfFontSink.filter`/`want_font_id`/
+`want_code`, so a lookup decodes only the requested glyph.  Before that filter,
+an unrelated complex face in `fonts_en.swf` could trip the 4,096-segment limit
+and make a simple glyph lookup fail.
 
 ### AVM1/AS2 action inventory and safe frame control
 
