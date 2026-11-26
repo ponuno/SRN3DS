@@ -20,6 +20,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_raster.h` / `.c` | Bounded A8 coverage rasterisation of tessellated glyph triangles with 4x4 subpixel samples, caller buffers, 16.16-quantised matrix/pen and named refusals |
 | `source/menu_swf_atlas.h` / `.c` | Deterministic shelf packing of A8 coverage rectangles into a caller atlas, zero-filled padding, per-glyph rect/UV and named refusals |
 | `source/menu_swf_batch.h` / `.c` | Text quad/index batch from layout placements + atlas UVs, 16.16 style transform, optional axis-aligned viewport clipping and count-before-write overflow |
+| `source/d3d9_menu_text.h` / `.c` | Host/menu COM demo: A8 texture creation/upload and one DrawPrimitiveUP from the atlas+batch |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_display_smoke.c` | Synthetic PlaceObject2/3, RemoveObject2, sprite, ShowFrame and DefineFont3 fixtures; optional real display/font summary |
 | `tests/menu_swf_shape_smoke.c` | Synthetic rectangle/curve/two-style/glyph shapes plus truncation, bitmap-id, segment-limit and AVM2/DefineFont4 refusals; optional real shape/glyph summary |
@@ -28,7 +29,8 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_raster_smoke.c` | Synthetic square/triangle exact coverage, hole rules, subpixel/rotation/mirror/clip, empty glyph and named refusals; optional real code-33 32x32 and 64x64 coverage |
 | `tests/menu_swf_atlas_smoke.c` | Synthetic varied-size pack/determinism/UV/composition/overflow/empty cases; optional real codes 33..36 coverage-sum comparison |
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas` and `menu_swf_batch`; `menu_bsa` now links `menu_swf.c` |
+| `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch` and `menu_text_draw`; `menu_bsa` now links `menu_swf.c` |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -421,7 +423,43 @@ real: first quad x=1..14 y=6..57 uv=17664,0..21760,15872
 All four quads are inside the viewport and do not overlap; their UV corners
 match the packed atlas entries.  This is CPU vertex/index data only.
 
-## 12. Tests
+## 12. Host COM A8 draw
+
+`d3d9_menu_text` closes the CPU atlas/batch onto the host D3D9 COM demo:
+
+* Core 2D textures accept `D3DFMT_A8` (28): pitch is width bytes, level bytes
+  are `width*height`, COM LockRect uses 1 byte/pixel, and A8 UnlockRect passes
+  the raw coverage bytes to the backend.  No A8 texture is replaced by
+  A8R8G8B8.  If the backend cannot create/upload A8, init fails with
+  `MENU_TEXT_DRAW_ERR_A8`/`ERR_UPLOAD` and no fallback texture is created.
+* `menu_text_draw_init()` creates the A8 texture through the COM device path,
+  uploads the atlas with exact pitch, and maps a caller guest scratch region
+  for expanded vertices.
+* `menu_text_draw_batch()` expands the indexed batch into 24-byte
+  `XYZ|DIFFUSE|TEX1` vertices (float3 position, D3DCOLOR, float2 UV), then:
+  - `SetTexture(0, texture)`;
+  - sampler stage 0: MIN/MAG POINT, MIP NONE, ADDRESS U/V CLAMP;
+  - stage 0 COLOROP/ALPHAOP = MODULATE, ARG1 = TEXTURE, ARG2 = DIFFUSE;
+  - `SetFVF(0x142)`;
+  - exactly one `DrawPrimitiveUP(TRIANGLELIST)`.
+  The caller must have an active BeginScene; the module does not claim a frame.
+* Empty batches, invalid indices, more than 1,365 triangles, scratch overflow,
+  state/FVF/draw failures and A8 creation/upload failures are named.  The API
+  never logs a successful batch as a rendered frame.
+
+Measured COM-demo result (2 synthetic glyphs, 8x8 atlas, 8x8 A8 texture):
+
+```text
+texture format=28 width=8 height=8 pitch=8, lock bytes == atlas coverage
+draw: 12 expanded vertices, 1 DrawPrimitiveUP, FVF=0x142
+state: POINT/CLAMP, COLOROP=MODULATE, ARG1=TEXTURE, ARG2=DIFFUSE
+```
+
+The test also verifies a texture-create refusal is `ERR_A8`, an empty batch is
+`ERR_EMPTY`, and an oversized index count is `ERR_OVERFLOW`.  There is no
+sampling result, frame, or GPU pixel claim.
+
+## 13. Tests
 
 Synthetic-only:
 
@@ -487,13 +525,14 @@ full viewport clipping, overflow without buffer mutation, NaN/negative-scale/
 rotated-clip refusals, and real 33..36 atlas quads.
 
 Full host suite with the main-tree generated slice and IR container:
-**107 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
+**109 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
 contributes 21 synthetic checks, `menu_swf_atlas` 27, `menu_swf_raster` 44,
 `menu_swf_text` 33, `menu_swf_tess` 47, `menu_swf_shape` 28,
-`menu_swf_display` 38 and `menu_swf` 86; no real-data checks are run in that
+`menu_swf_display` 38 and `menu_swf` 86; `menu_text_draw` is an assertion-based
+COM test outside that real-data matrix.  No real-data checks are run in that
 suite.
 
-## 13. What remains
+## 14. What remains
 
 1. **Renderable display list** — bounded state, shape geometry and triangle
    tessellation exist, but this is not a GFx display list: sprite/movie-clip
@@ -502,17 +541,18 @@ suite.
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
    the menu's script behaviour.  `DoAction`/clip-action payloads are not
    executed.
-3. **Atlas upload/cache** — `fonts_en.swf`/`fonts_console.swf`,
-   `FontConfig.txt`, texture object/upload, cache/rehydration, richer shaping
-   (ligatures, bidi, fallback fonts) and text metrics beyond advance+kerning.
-   The CPU A8 atlas and quad batch exist in caller memory; no texture, upload,
-   cache entry or draw call has been created.
+3. **Atlas cache/real GFx fonts** — `fonts_en.swf`/`fonts_console.swf`,
+   `FontConfig.txt`, texture cache/rehydration, richer shaping (ligatures,
+   bidi, fallback fonts) and text metrics beyond advance+kerning.  The host
+   COM demo can create/upload an A8 texture and draw one quad batch; there is
+   no persistent cache, PICA A8 sampling or real GFx text object yet.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
-5. **Draw path** — GFx batch contract, dynamic vertex buffer/FVF,
-   `SetTextureStageState`, TEV/PICA submission and the first real frame.
+5. **Draw path** — real GFx display list/masks, dynamic vertex buffer/FVF,
+   TEV/PICA submission and the first real frame.  The host COM DrawPrimitiveUP
+   is not a frame claim.
 
-## 14. Integration
+## 15. Integration
 
 ```c
 /* r came from menu_bsa_resolve_startmenu(&heap, ...). */
@@ -577,7 +617,7 @@ The summary/display/shape/tess/text/raster/atlas/batch structures are metadata,
 CPU geometry, A8 coverage/atlas memory and CPU vertex/index data only.  They
 must not be reported as a parsed movie, renderable display list or frame.
 
-## 15. Honest claim
+## 16. Honest claim
 
 * StartMenu.swf is validated as one CWS/zlib stream with the declared size,
   frame header and complete top-level tag stream through End.
@@ -604,5 +644,9 @@ must not be reported as a parsed movie, renderable display list or frame.
   / 24 indices**, bounds `1,104,1,63`; the first quad is `x=1..14,y=6..57`
   with UV `17664,0..21760,15872`, and all quads stay inside the 128x64
   viewport without overlap.
-* No AVM action is executed, no texture upload/cache or draw call is built, and
-  no frame/pixel/Azahar/hardware result is claimed.
+* The host COM demo creates an **8x8 D3DFMT_A8** texture with pitch **8**,
+  uploads coverage byte-exactly, sets POINT/CLAMP + MODULATE(TEXTURE,DIFFUSE)
+  + FVF `0x142`, and issues one DrawPrimitiveUP for **12 expanded vertices**.
+  A refusing backend is `ERR_A8` with no RGBA substitution.
+* No AVM action is executed, no texture cache or real GFx draw/frame is built,
+  and no frame/pixel/Azahar/hardware result is claimed.

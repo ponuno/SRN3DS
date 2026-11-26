@@ -301,7 +301,8 @@ uint32_t d9_com_host_upload_texture_level(uint32_t texture,unsigned level,
     if(d9_texture_level_info(g.device,o->handle,level,&w,&h,&pitch,&bytes))return INVALID;
     unsigned bb=d9_bc_block_bytes(o->format);
     size_t rows=bb?(size_t)((h+3u)/4u):(size_t)h;
-    size_t row=bb?(size_t)((w+3u)/4u)*bb:(size_t)w*4u;
+    size_t row=bb?(size_t)((w+3u)/4u)*bb:
+               (size_t)w*(o->format==D9_A8?1u:4u);
     if(!rows||src_pitch<row)return INVALID;
     if(src_bytes&&((rows-1u)>((SIZE_MAX-row)/src_pitch)||
        (rows-1u)*src_pitch+row>src_bytes))return INVALID;
@@ -1383,7 +1384,8 @@ static int lock_texture(Obj *o,unsigned level,uint32_t rect,unsigned flags){
     unsigned bb=d9_bc_block_bytes(o->format);size_t offset,row_bytes,rows;
     if(bb){if((x&3)||(y&3)||((r&3)&&r!=w)||((b&3)&&b!=h))return D9_INVALID;
         offset=(size_t)(y/4)*pitch+(x/4)*bb;row_bytes=(size_t)((r+3)/4-x/4)*bb;rows=(b+3)/4-y/4;}
-    else{offset=(size_t)y*pitch+x*4;row_bytes=(size_t)(r-x)*4;rows=b-y;}
+    else{unsigned bpp=o->format==D9_A8?1u:4u;offset=(size_t)y*pitch+(size_t)x*bpp;
+         row_bytes=(size_t)(r-x)*bpp;rows=b-y;}
     size_t span=(rows-1)*pitch+row_bytes;if(offset>bytes||span>bytes-offset||span>LOCK_STRIDE)return D9_INVALID;
     uint32_t address=lock_addr(o);if(guest_map(g.mem,address,(uint32_t)span))return D9_MEMORY;
     void *host;size_t actual;int rc=d9_texture_lock_level_ex(g.device,o->handle,level,&host,&actual,!!(flags&0x10));

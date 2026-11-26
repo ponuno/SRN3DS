@@ -15,7 +15,7 @@ typedef struct {float x,y,z,u,v;} D9Vertex; /* D3DFVF_XYZ | D3DFVF_TEX1 */
 typedef struct {float x,y,z,u,v;float r,g,b,a;} D9ColorVertex;
 typedef struct {float m[4][4];} D9Matrix; /* D3D row-vector convention */
 enum {D9_TRIANGLELIST=4,D9_TRIANGLESTRIP=5,D9_TRIANGLEFAN=6,D9_A8R8G8B8=21,D9_X8R8G8B8=22,
-      D9_D24S8=75,D9_D24X8=77,D9_INDEX16=101,D9_INDEX32=102};
+      D9_A8=28,D9_D24S8=75,D9_D24X8=77,D9_INDEX16=101,D9_INDEX32=102};
 enum {D9_DXT1=0x31545844u,D9_DXT3=0x33545844u,D9_DXT5=0x35545844u};
 enum {D9_POOL_DEFAULT=0,D9_POOL_MANAGED=1,D9_POOL_SYSTEMMEM=2};
 enum {D9_USAGE_RENDERTARGET=1};

@@ -35,8 +35,11 @@ static int null_texture_create(void *ctx,unsigned w,unsigned h,unsigned levels,v
 static int null_texture_upload(void *ctx,void *native,unsigned level,const void *data,size_t bytes){
     D9NullStats *s=stats(ctx);NullTex *t=native;
     if(!t||level>=t->levels||!data||!bytes){null_log("UnlockRect","invalid texture, mip level or pixel data");return -1;}
-    size_t want=(size_t)level_dim(t->w,level)*level_dim(t->h,level)*4;
-    if(bytes!=want){null_log("UnlockRect","upload size does not match the RGBA8 mip level size");return -1;}
+    size_t pixels=(size_t)level_dim(t->w,level)*level_dim(t->h,level);
+    if(bytes!=pixels&&bytes!=pixels*4){
+        null_log("UnlockRect","upload size does not match an A8 or RGBA8 mip level");
+        return -1;
+    }
     ++s->texture_uploads;return 0;
 }
 static void null_texture_delete(void *ctx,void *native){

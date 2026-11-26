@@ -217,6 +217,12 @@ read stage without fake successes. *Not met.*
       with proportional UVs, deterministic pen order and count-before-write
       overflow. Real codes 33..36: 4 quads / 16 vertices / 24 indices, bounds
       1,104,1,63. No upload, draw or GPU. See `docs/MENU_SWF.md`.
+- [x] Host COM A8 text draw: real D3DFMT_A8 texture creation/upload, 8x8 pitch
+      8 byte-exact coverage, POINT/CLAMP + MODULATE(TEXTURE,DIFFUSE), FVF
+      0x142 and one DrawPrimitiveUP for 12 expanded vertices. Named A8 refusal
+      without RGBA substitution. No sampling/frame/pixel claim; real GFx
+      display list, masks, fonts and PICA A8 sampling remain open.
+      See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer

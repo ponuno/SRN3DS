@@ -131,6 +131,7 @@ int d9_texture_layout(unsigned w,unsigned h,unsigned f,size_t *pitch,size_t *byt
     if(!pitch||!bytes||!pow2(w)||!pow2(h))return D9_INVALID;
     unsigned bb=d9_bc_block_bytes(f);
     if(bb){*pitch=(size_t)((w+3)/4)*bb;*bytes=*pitch*((h+3)/4);return D9_OK;}
+    if(f==D9_A8){*pitch=(size_t)w;*bytes=*pitch*h;return D9_OK;}
     if(f!=D9_A8R8G8B8&&f!=D9_X8R8G8B8)return D9_INVALID;*pitch=(size_t)w*4;*bytes=*pitch*h;return D9_OK;
 }
 static unsigned native_dim(unsigned n){return n<8?8:n;}
@@ -368,12 +369,17 @@ int d9_texture_surface_unlocked(D9Device *d,D9Handle h,unsigned level){
     if(!t||level>=t->levels||d->scene||d->teardown)return D9_INVALID;
     Level *l=&t->level[level];
     if(!t->cpu_only&&!t->gpu_only&&level<t->gpu_levels){
-        size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;
-        const void *src=t->pixels+l->offset;
-        int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):
-            d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
-        if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
-        free(tmp);if(rc)return rc;
+        if(t->format==D9_A8){
+            if(d->ops.texture_upload(d->ctx,t->native,level,t->pixels+l->offset,
+                                     l->bytes))return D9_BACKEND;
+        }else{
+            size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;
+            const void *src=t->pixels+l->offset;
+            int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):
+                d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
+            if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
+            free(tmp);if(rc)return rc;
+        }
     }
     l->uploaded=1;
     D9TexEntry *e=d9_texcache_find(&d->tex_cache,t->id);
@@ -445,11 +451,16 @@ static int finish_texture_unlock(D9Device *d,Texture *t,unsigned level,int reado
     if(!t||level>=t->levels||t->locked!=level+1||d->scene||d->teardown)return D9_INVALID;
     Level *l=&t->level[level];
     if(!readonly&&!t->cpu_only&&level<t->gpu_levels){
-        size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;const void *src=t->pixels+l->offset;
-        int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):
-            d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
-        if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
-        free(tmp);if(rc)return rc;
+        if(t->format==D9_A8){
+            if(d->ops.texture_upload(d->ctx,t->native,level,t->pixels+l->offset,
+                                     l->bytes))return D9_BACKEND;
+        }else{
+            size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;const void *src=t->pixels+l->offset;
+            int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):
+                d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
+            if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
+            free(tmp);if(rc)return rc;
+        }
     }
     D9TexEntry *e=d9_texcache_find(&d->tex_cache,t->id);
     int rc=D9TEXCACHE_OK;
