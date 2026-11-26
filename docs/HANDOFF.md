@@ -25,6 +25,29 @@ Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
   on Azahar. Never claim a frame/pixel result without it.
 - `docs/PORT_LOG.md` is append-only, numbered rows. Add one row per landed layer.
 
+## Census state (2026-11-27, `hunger-renderer`)
+
+- Commit `8db224e` trims each shader copy to its declared token stream. The
+  walker steps over instruction/comment lengths, so operand words that equal
+  `0xffff` cannot truncate `GetFunction`; a regression covers that case.
+- The fresh diagnostic container is
+  `E:\census_ir2\ir_container\tesv.irc`: 90,900 functions / 90,027 decoded,
+  64,445,696 B, index CRC verified, and `00f520f0` carries 25 blocks (including
+  `00f520e0`) with `N3DS_IRC_FN_PREENTRY`. `F:\Skyrim\ir\tesv.irc` has the same
+  entry but only 24 blocks and no PREENTRY flag, so it still faults at
+  `00f520e0`; use the E: container for diagnosis.
+- With the E: container the census passes `00f520e0`, creates the 512x1024
+  depth/target pair, runs `BeginScene`/`EndScene`/`Present`, and then spends the
+  remaining step budget in an untraced guest loop whose last shim is
+  `[sync] Sleep 28 ms from 006f40cf thread=11`. There is no fault message; a
+  100M-step run does not write a profile, so the next step is to identify that
+  spin (likely a guest thread waiting on a lock the main thread never releases)
+  before the next fault can be named.
+- `tools/ir_pack.py` on the 90,900-function profile reached 69 GiB private
+  commit in its final phase and starved the desktop; it was stopped after the
+  container, index and report were already written and CRC-valid. Do not rerun
+  it blindly; cap memory or pack a smaller corpus.
+
 ## Commands (Windows)
 
 ```powershell
