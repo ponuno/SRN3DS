@@ -241,7 +241,7 @@ All measured render-target creations now succeed:
 
 | Size | Format | Count | HRESULT | Texture / surface handles | Backend target IDs |
 |---|---|---:|---|---|---|
-| 1024x1024 | `0x72` A32B32G32R32F | 5 | `S_OK` | `0x500021c0`/`0x500021d0`, `0x500021e0`/`0x500021f0`, `0x50002200`/`0x50002210`, `0x50002220`/`0x50002230`, `0x50002240`/`0x50002250` | `15`, `17`, `19`, `21`, `23` |
+| 1024x1024 | `0x72` R32F | 5 | `S_OK` | `0x500021c0`/`0x500021d0`, `0x500021e0`/`0x500021f0`, `0x50002200`/`0x50002210`, `0x50002220`/`0x50002230`, `0x50002240`/`0x50002250` | `15`, `17`, `19`, `21`, `23` |
 | 512x512 | `0x15` A8R8G8B8 | 3 | `S_OK` | `0x50002260`/`0x50002270`, `0x50002280`/`0x50002290`, `0x500022a0`/`0x500022b0` | `25`, `27`, `29` |
 | 512x512 | `0x71` A16B16G16R16F | 1 | `S_OK` | `0x500022c0`/`0x500022d0` | `31` |
 
@@ -287,6 +287,107 @@ occurred, so there are no capture entries to correlate with the new handles.
 The next concrete blocker is the guest render-target-group/accessor state at
 `0x00fb5bd0`, after target allocation and before depth/scene setup. The fallback
 and 64 MiB budget remain measurement-only; no frame is claimed.
+
+### Cube-capable / bounded-RT census (2026-11-26)
+
+Base: `main` at `061736c`, including six-face cube support `f23f03b`, bounded
+native render targets `7256169`, the budget override `949701b`, HDR fallback
+`ab4ec06`, depth descriptors `5e15944` and the R32F correction `68a3159`.
+A fresh slice was built from `E:\Skyrim_N3DS_build\analysis\growth_probe\gen01`
+with the generated D3DX table from
+`C:\Users\vasya\Documents\Skyrim_N3DS\pilot_out_mult\D3DXMatrixMultiply\gen`
+and six clang jobs. The build/test script took **163.7035036 s** and reported
+**10 passed, 1 diagnostic, 0 failed**; the diagnostic is the slice's expected
+200k-step harness run. The resulting binary was
+`C:\Users\vasya\AppData\Local\Temp\opencode\sm3-gate-probe-cube-census-061736c-pilot\run_tesv_slice_37408\tesv_slice.exe`
+(480,036,352 bytes).
+
+The census used a 2,000,000,000-step budget and ran for **91.5521216 s**, exit `1`.
+Arguments were `F:\Skyrim\TESV.exe F:\Skyrim 2000000000 167772160`:
+
+```text
+TESV_MEMPROBE=1
+TESV_D3D9_CAPS_PROBE=1
+TESV_D3D9_TRACE=1
+TESV_D3D9_SM3_GATE_PROBE=1
+TESV_D3D9_CAPTURE_DRAWS=8
+TESV_D3D9_HDR_LDR_FALLBACK=1
+TESV_D3D9_BUDGET_MB=64
+N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+```
+
+Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_census.out`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_census.run.txt`
+
+The cube path is **not reached**:
+
+| Operation | Calls | Observed arguments / handles / HRESULT |
+|---|---:|---|
+| `IDirect3DDevice9::CreateCubeTexture` (slot 25) | 0 | none; no edge, levels, usage, format, pool, caller, HRESULT or handle |
+| `IDirect3DCubeTexture9::GetCubeMapSurface` (slot 18) | 0 | none; no face, level, surface handle or HRESULT |
+| `SetRenderTarget` with a cube surface | 0 | `SetRenderTarget` itself is not called |
+| `CreateDepthStencilSurface` (slot 29) | 0 | none |
+| `SetDepthStencilSurface` (slot 39) | 0 | none |
+| `CreateVertexShader` / `CreatePixelShader` | 0 / 0 | none |
+| `SetTexture` | 0 | none |
+| `DrawPrimitive` / `DrawIndexedPrimitive` | 0 / 0 | none |
+| `Present` | 0 | none |
+
+The first-draw capture has no records. The D3D trace through the fault is
+normalized-identical to the previous 64 MiB census (1245 lines, ignoring
+volatile argument-stack slots and the host backtrace), so the cube and bounded-RT
+merges do not change the observed route before the fault.
+
+The same nine 2D render-target textures are created successfully. Bounded native
+storage now caps each 1024x1024 logical target at 512x512:
+
+| Logical size | Requested format | Count | Native size | Texture / surface handles | Backend target IDs |
+|---|---|---:|---|---|---|
+| 1024x1024 | `0x72` R32F | 5 | 512x512 | `0x500021c0`/`0x500021d0`, `0x500021e0`/`0x500021f0`, `0x50002200`/`0x50002210`, `0x50002220`/`0x50002230`, `0x50002240`/`0x50002250` | `15`, `17`, `19`, `21`, `23` |
+| 512x512 | `0x15` A8R8G8B8 | 3 | 512x512 | `0x50002260`/`0x50002270`, `0x50002280`/`0x50002290`, `0x500022a0`/`0x500022b0` | `25`, `27`, `29` |
+| 512x512 | `0x71` A16B16G16R16F | 1 | 512x512 | `0x500022c0`/`0x500022d0` | `31` |
+
+All come from `caller=0x00ceca5e`, levels `1`, usage `1`, pool `0`, and return
+`S_OK`. For all nine, `QueryInterface`, `GetSurfaceLevel(0)` and `GetDesc` return
+`S_OK`; `AddRef` and `Release` return refcount `3`. The nine new native
+allocations consume **9,437,184 bytes (9 MiB)**; including the retained 512x256
+back buffer (524,288 bytes), the total is **9,961,472 bytes (9.5 MiB)**.
+
+The first failed HRESULT in the complete trace is the nonfatal device-enumeration
+call `IDirect3D9::CheckDeviceType` (slot 9), `caller=0x00ce58bf`, arguments
+`[0, 1, 0x16, 0x16, 0]`, returning `D3DERR_NOTAVAILABLE` (`0x8876086a`). No cube,
+depth or scene call fails because none is reached; all nine render-target
+creations succeed.
+
+The first fatal event remains a guest fault, immediately after the final
+target's `GetDesc`/`Release`:
+
+```text
+PC=00fb5bd0
+unmapped addr=0000000c bytes=4
+esp=1007f8f0
+stack=545b4c50 545b4c50 54114d58 00000002 00000002 00000002
+```
+
+Thus `0x00fb5bd0` is unchanged after the cube merge. The last successful D3D9
+call is `IDirect3DTexture9::Release` on `0x500022c0`, caller `0x00cecb99`,
+returning refcount `3`. The accessor at the fault is still:
+
+```asm
+mov eax,[ecx+0x40]
+mov eax,[eax+8]
+```
+
+Sampling of `0x72` or `0x71` is **not proven**: there is no `SetTexture`, no draw
+and no capture record to correlate with the handles. The next blocker is still
+the guest render-target-group / `NiRenderedCubeMap` face-table accessor state at
+`0x00fb5bd0`, after the 2D target allocations but before the guest issues any D3D9
+cube, depth or scene call. This is not evidence of a missing host cube API. The
+fallback, bounded native targets and 64 MiB budget remain measurement-only; no
+frame is claimed.
 
 ## Ordered next blockers
 
