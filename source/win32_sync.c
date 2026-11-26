@@ -136,6 +136,10 @@ static int new_object(unsigned kind, const char *name) {
         memset(o, 0, sizeof *o);
         o->kind = (uint8_t)kind;
         if (name) memcpy(o->name, name, strlen(name) + 1);
+        fprintf(stderr, "[sync] create h=%03x kind=%u name=\"%s\" obj=%p thread=%lu\n",
+                (unsigned)(WIN32_SYNC_HANDLE_BASE + i), kind,
+                name && name[0] ? name : "-", (void *)o,
+                (unsigned long)current_thread);
         return (int)i;
     }
     return -1;
@@ -228,6 +232,22 @@ static uint32_t wait_common(CPU *c, const uint32_t *h, unsigned n, int all,
         if (idx >= 0) return WAIT_OBJECT_0 + (uint32_t)idx;
         if (ms == 0) return WAIT_TIMEOUT;
         if (!blocker) return wait_unavailable(c, h[0], ms);
+        {
+            static unsigned block_logged;
+            if (block_logged < 400) {
+                ++block_logged;
+                fprintf(stderr, "[sync] block thread=%lu n=%u all=%d ms=%lu",
+                        (unsigned long)current_thread, n, all, (unsigned long)ms);
+                for (unsigned i = 0; i < n; ++i) {
+                    SyncObject *o = obj(h[i]);
+                    fprintf(stderr, " h=%03x%s", (unsigned)h[i],
+                            o ? (o->kind == OBJ_MUTEX ? "(mutex)" :
+                                 o->kind == OBJ_SEMAPHORE ? "(sem)" :
+                                 o->kind == OBJ_EVENT ? "(event)" : "(?)") : "(none)");
+                }
+                fputc('\n', stderr);
+            }
+        }
         int rc = blocker(h, n, all, ms);
         if (rc == 1) return WAIT_TIMEOUT;
         if (rc == 2) {
@@ -303,6 +323,8 @@ static void s_ReleaseSemaphore(CPU *c) {
     if (previous) M32(previous) = (uint32_t)o->count;
     int64_t next = (int64_t)o->count + release;
     o->count = next > (int64_t)o->maximum ? o->maximum : (int32_t)next; /* saturate, see header */
+    fprintf(stderr, "[sync] release h=%03x count=%ld thread=%lu\n",
+            (unsigned)A(0), (long)o->count, (unsigned long)current_thread);
     win32_sync_notify(A(0));
     RET(1, 3);
 }
@@ -333,6 +355,8 @@ static void s_SetEvent(CPU *c) {
     SyncObject *o = obj(A(0));
     if (!o || o->kind != OBJ_EVENT) FAIL(ERR_INVALID_HANDLE, 0, 1);
     o->signaled = 1;
+    fprintf(stderr, "[sync] set h=%03x thread=%lu\n", (unsigned)A(0),
+            (unsigned long)current_thread);
     win32_sync_notify(A(0));
     RET(1, 1);
 }
@@ -401,6 +425,10 @@ const FnEntry *win32_sync_lookup(uint32_t addr) {
 int win32_sync_close(uint32_t handle) {
     int i = obj_index(handle);
     if (i < 0 || objects[i].kind == OBJ_FREE) return 0;
+    fprintf(stderr, "[sync] close h=%03x kind=%u name=\"%s\" obj=%p thread=%lu\n",
+            (unsigned)handle, objects[i].kind,
+            objects[i].name[0] ? objects[i].name : "-", (void *)&objects[i],
+            (unsigned long)current_thread);
     /* A waiter blocked on a handle that is being closed must run again; the
      * wait loop then turns the missing object into ERROR_INVALID_HANDLE. */
     if (waker) waker(handle);

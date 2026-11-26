@@ -440,6 +440,9 @@ void win32_thread_wake(uint32_t handle) {
         hit[i]->wait_status = WAIT_SIGNALED;
         enqueue(hit[i]);
     }
+    if (n || handle == 0x537u || handle == 0x504u)
+        fprintf(stderr, "[wake] h=%03x waiters=%u thread=%lu\n", (unsigned)handle, n,
+                (unsigned long)(cur ? cur->id : 0));
 }
 
 void win32_thread_yield(void) {

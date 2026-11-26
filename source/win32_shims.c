@@ -1757,6 +1757,7 @@ static void s_WriteFile(CPU *c){
 }
 static void s_CloseHandle(CPU *c){
     uint32_t h=A(0);
+    fprintf(stderr,"[close] h=%03x thread=%u\n",(unsigned)h,win32_thread_current_id());
     if(win32_sync_close(h)){set_error(c,0);RET(1,1);}
     if(win32_thread_close(h)){set_error(c,0);RET(1,1);}
     if(mapping_close(h)){set_error(c,0);RET(1,1);}
