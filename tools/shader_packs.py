@@ -103,16 +103,34 @@ def _load_json(path: str):
 
 
 def _plan_index(path: str = PLANS_PATH) -> dict:
-    if not os.path.exists(path):
-        return {}
-    doc = _load_json(path)
+    """Runtime plans plus every pack-owned catalog.
+
+    A pack catalog (``source/shader_packs/<pack>/plans.json``) is where an
+    agent's translations live; only entries marked ``"runtime": 1`` are also
+    mirrored into the shared 16-entry runtime table.  Coverage must see the
+    whole catalog, otherwise honest translations would look like refusals.
+    """
+    documents = []
+    if os.path.exists(path):
+        documents.append((path, _load_json(path)))
+    if os.path.isdir(PACKS_DIR):
+        for name in sorted(os.listdir(PACKS_DIR)):
+            extra = os.path.join(PACKS_DIR, name, "plans.json")
+            if os.path.isfile(extra):
+                documents.append((extra, _load_json(extra)))
     out = {}
-    for entry in doc.get("entries", []):
-        status = ("draw-enabled" if entry.get("draw_enabled") == 1
-                  else "translated")
-        out[entry["sha256"]] = {"id": entry["id"], "status": status,
-                                "kind": entry["kind"],
-                                "family": entry.get("family", "")}
+    for origin, doc in documents:
+        for entry in doc.get("entries", []):
+            status = ("draw-enabled" if entry.get("draw_enabled") == 1
+                      else "translated")
+            row = {"id": entry["id"], "status": status,
+                   "kind": entry["kind"], "family": entry.get("family", "")}
+            seen = out.get(entry["sha256"])
+            if seen is None:
+                out[entry["sha256"]] = row
+            elif seen != row:
+                raise SystemExit("%s: plan %r disagrees with the catalog for %s"
+                                 % (origin, entry["id"], entry["sha256"][:16]))
     return out
 
 
@@ -330,7 +348,7 @@ def check() -> list:
 
 def coverage_report(built_or_none=None) -> dict:
     index = _load_json(INDEX_PATH)
-    plans_doc = _load_json(PLANS_PATH)
+    merged_plans = _plan_index()
     census = _load_json(CENSUS_PATH)
     rows = []
     total = Counter()
@@ -338,7 +356,7 @@ def coverage_report(built_or_none=None) -> dict:
         manifest = _load_json(os.path.join(PACKS_DIR, name, "manifest.json"))
         queues = Counter()
         for row in manifest["hashes"]:
-            if not plans_has(row[0], plans_doc):
+            if row[0] not in merged_plans:
                 queues[row[2] or "unclassified"] += 1
         row = {
             "pack": name,

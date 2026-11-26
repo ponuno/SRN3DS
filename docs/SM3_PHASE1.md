@@ -272,3 +272,38 @@ Rules that keep them from colliding: edit only your pack directory; add plan
 entries and pack rows, never rewrite another pack's; regenerate
 `docs/shader_coverage.json` with the tool, not by hand; and re-run
 `plan_verify.py --data` before claiming a plan is equivalent.
+
+### 9.1 Pack catalogs vs the runtime table
+
+A pack has two levels, because the runtime table is capped at
+`D9_SHADER_PLAN_MAX_ENTRIES == 16` (`source/d3d9_shader_plan.h`) while a pack
+catalog can honestly hold hundreds of entries:
+
+| file | role | limit |
+|---|---|---|
+| `source/shader_packs/<pack>/plans.json` | every plan the pack owns, schema-identical entries | none |
+| `source/shader_packs/<pack>/refusals.json` | named refusal class per hash | none |
+| `docs/shader_plans.json` | runtime lookup table (`d9_shader_plan_at`) | 16 |
+
+`fxp_compile.py manifest` discovers every pack `plans.json` and merges only the
+entries marked `"runtime": 1`; the rest stay catalog/coverage-only and never
+consume a runtime slot. The merge is append-only: a byte-identical duplicate is
+idempotent, a hash or id clash is a named error, and the command refuses to
+write more than 16 entries instead of silently overflowing the C table.
+
+```powershell
+python tools\fxp_compile.py manifest --data F:\Skyrim\Data `
+    --out docs\shader_plans.json
+python tools\fxp_compile.py emit-c
+python tools\shader_packs.py coverage --out docs\shader_coverage.json
+python tools\shader_packs.py check
+python tools\shaders\plan_verify.py --data F:\Skyrim\Data
+```
+
+`shader_packs.py` indexes the runtime file plus all pack catalogs, so a
+translated-but-not-runtime plan still counts as `translated` in coverage.
+`plan_verify.py` validates every catalog entry against
+`docs/shader_plan_schema.json` and merges only `runtime` entries into its
+symbolic regeneration, so the committed runtime table must still equal the
+generator's output exactly. Regenerating against the retail archive reproduces
+the committed 4-entry manifest byte-for-byte.

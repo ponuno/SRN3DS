@@ -204,15 +204,22 @@ def status_table(doc: dict) -> dict:
 # --------------------------------------------------------------------------
 # Symbolic equivalence against the retail archive.
 
-def verify_against_archive(doc: dict, data_dir: str) -> dict:
+def verify_against_archive(doc: dict, data_dir: str,
+                           extra_docs=()) -> dict:
     """Regenerate the manifest from bytecode and compare it to the commit."""
     try:
-        from fxp_compile import build_manifest  # host tool, same tree
+        from fxp_compile import (build_manifest, merge_extra_entries,
+                                 runtime_entries)
     except Exception as exc:  # pragma: no cover - import guard
         return {"status": "skipped", "reason": "fxp_compile unavailable: %s" % exc}
     if not data_dir or not os.path.isdir(data_dir):
         return {"status": "skipped", "reason": "retail data dir absent"}
     regenerated = build_manifest(data_dir, include_update=False)
+    runtime_docs = [(origin, {"entries": runtime_entries(doc)})
+                    for origin, doc in extra_docs]
+    runtime_docs = [(origin, doc) for origin, doc in runtime_docs if doc["entries"]]
+    if runtime_docs:
+        regenerated = merge_extra_entries(regenerated, runtime_docs)
     committed = {entry["sha256"]: entry for entry in doc.get("entries", [])}
     fresh = {entry["sha256"]: entry for entry in regenerated.get("entries", [])}
     problems = []
@@ -242,6 +249,8 @@ def main(argv=None) -> int:
     parser.add_argument("--plans", default=PLANS_PATH)
     parser.add_argument("--schema", default=SCHEMA_PATH)
     parser.add_argument("--data", default="")
+    parser.add_argument("--extra", action="append", default=[],
+                        help="pack-owned plan document merged by the generator")
     parser.add_argument("--json", default="", help="write the verdict here")
     args = parser.parse_args(argv)
 
@@ -249,16 +258,41 @@ def main(argv=None) -> int:
     with open(args.plans, encoding="utf-8") as handle:
         doc = json.load(handle)
 
+    extra_docs = []
+    paths = list(args.extra)
+    try:
+        from fxp_compile import pack_plan_paths  # host tool, same tree
+        paths = pack_plan_paths() + paths
+    except Exception:  # pragma: no cover - import guard
+        pass
+    for path in paths:
+        if path in [seen for seen, _ in extra_docs]:
+            continue
+        with open(path, encoding="utf-8") as handle:
+            extra_docs.append((path, json.load(handle)))
+
     errors = verify_document(doc, schema)
-    symbolic = verify_against_archive(doc, args.data)
+    pack_errors = []
+    pack_counts = {}
+    for origin, extra in extra_docs:
+        if not isinstance(extra, dict) or not isinstance(extra.get("entries"), list):
+            pack_errors.append("%s: not a plan document" % origin)
+            continue
+        pack_counts[origin] = len(extra["entries"])
+        for entry in extra["entries"]:
+            validate_entry(entry, pack_errors, origin)
+    symbolic = verify_against_archive(doc, args.data, extra_docs)
     verdict = {
         "plans": os.path.relpath(args.plans, REPO),
         "schema": os.path.relpath(args.schema, REPO),
         "entries": len(doc.get("entries", [])),
+        "pack_plans": pack_counts,
         "status": status_table(doc),
         "schema_errors": errors,
+        "pack_schema_errors": pack_errors,
         "symbolic": symbolic,
-        "ok": not errors and symbolic["status"] in ("pass", "skipped"),
+        "ok": (not errors and not pack_errors
+               and symbolic["status"] in ("pass", "skipped")),
     }
     if args.json:
         os.makedirs(os.path.dirname(args.json) or ".", exist_ok=True)

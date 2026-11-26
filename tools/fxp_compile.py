@@ -36,6 +36,7 @@ from skyrim.shaders import parse_package  # noqa: E402
 DEFAULT_DATA = [r"F:\Skyrim\Data",
                 r"E:\SteamLibrary\steamapps\common\Skyrim\Data"]
 ARCHIVE = "Skyrim - Shaders.bsa"
+RUNTIME_MAX_ENTRIES = 16  # keep in sync with source/d3d9_shader_plan.h
 LOGO_HASH = "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"
 COPY_HASH = "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de"
 
@@ -228,6 +229,89 @@ def read_manifest(path: str) -> dict:
         return json.load(handle)
 
 
+EXTRA_REQUIRED = ("id", "sha256", "kind", "stage")
+HEX = set("0123456789abcdef")
+PACKS_DIR = os.path.join(REPO, "source", "shader_packs")
+
+
+def pack_plan_paths() -> List[str]:
+    """Pack-owned plan documents, discovered by location.
+
+    Every ``source/shader_packs/<pack>/plans.json`` is merged into the shared
+    manifest, so regenerating ``docs/shader_plans.json`` cannot silently drop
+    an agent's plans.
+    """
+    if not os.path.isdir(PACKS_DIR):
+        return []
+    found = []
+    for name in sorted(os.listdir(PACKS_DIR)):
+        path = os.path.join(PACKS_DIR, name, "plans.json")
+        if os.path.isfile(path):
+            found.append(path)
+    return found
+
+
+def _check_extra_entry(entry: dict, origin: str) -> None:
+    missing = [key for key in EXTRA_REQUIRED if not entry.get(key)]
+    if missing:
+        raise SystemExit("%s: plan entry is missing %s" % (origin, missing))
+    sha = entry["sha256"]
+    if len(sha) != 64 or not set(sha) <= HEX:
+        raise SystemExit("%s: plan %r sha256 is not 64 lower-case hex digits"
+                         % (origin, entry.get("id")))
+    if entry["kind"] not in ("tev", "pica_vs"):
+        raise SystemExit("%s: plan %r has kind %r" % (origin, entry["id"],
+                                                     entry["kind"]))
+    if entry.get("draw_enabled") not in (0, 1):
+        raise SystemExit("%s: plan %r draw_enabled must be 0 or 1"
+                         % (origin, entry["id"]))
+
+
+def runtime_entries(doc: dict) -> List[dict]:
+    """Entries a pack explicitly marks for the runtime table."""
+    return [entry for entry in doc.get("entries", [])
+            if entry.get("runtime") == 1]
+
+
+def merge_extra_entries(manifest: dict, extra_docs: Sequence,
+                        runtime_only: bool = False) -> dict:
+    """Merge pack-owned plans into a generated manifest.
+
+    ``extra_docs`` is a sequence of ``(origin, document)`` pairs.  The
+    canonical entries win: an extra entry may only add a hash the generator
+    does not produce, and a byte-identical duplicate is idempotent.  Any
+    disagreement is a named error, never a silent overwrite, so a pack cannot
+    change a certified plan.  With ``runtime_only`` only entries carrying
+    ``"runtime": 1`` are merged; the rest stay in the pack catalog for
+    coverage and never claim a slot in the 16-entry runtime table.
+    """
+    entries = list(manifest.get("entries", []))
+    by_sha = {entry["sha256"]: entry for entry in entries}
+    by_id = {entry["id"]: entry["sha256"] for entry in entries}
+    for origin, doc in extra_docs:
+        if not isinstance(doc, dict) or not isinstance(doc.get("entries"), list):
+            raise SystemExit("%s: not a plan document" % origin)
+        chosen = runtime_entries(doc) if runtime_only else doc["entries"]
+        for entry in chosen:
+            _check_extra_entry(entry, origin)
+            sha = entry["sha256"]
+            if sha in by_sha:
+                if by_sha[sha] != entry:
+                    raise SystemExit("%s: plan %r conflicts with the committed "
+                                     "entry for %s" % (origin, entry["id"],
+                                                       sha[:16]))
+                continue
+            if entry["id"] in by_id:
+                raise SystemExit("%s: duplicate plan id %r (hash %s)"
+                                 % (origin, entry["id"], by_id[entry["id"]][:16]))
+            by_sha[sha] = entry
+            by_id[entry["id"]] = sha
+            entries.append(entry)
+    merged = dict(manifest)
+    merged["entries"] = entries
+    return merged
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -242,6 +326,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_manifest.add_argument("--data", default="")
     p_manifest.add_argument("--out", default=os.path.join(REPO, "docs", "shader_plans.json"))
     p_manifest.add_argument("--update", action="store_true")
+    p_manifest.add_argument("--extra", action="append", default=[],
+                            help="pack-owned plan document to merge (repeatable)")
 
     p_c = sub.add_parser("emit-c")
     p_c.add_argument("--manifest", default=os.path.join(REPO, "docs", "shader_plans.json"))
@@ -256,6 +342,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if args.cmd == "manifest":
         manifest = build_manifest(args.data, args.update)
+        extras = []
+        for path in pack_plan_paths() + list(args.extra):
+            if path not in [seen for seen, _ in extras]:
+                extras.append((path, read_manifest(path)))
+        if extras:
+            manifest = merge_extra_entries(manifest, extras, runtime_only=True)
+        if len(manifest["entries"]) > RUNTIME_MAX_ENTRIES:
+            raise SystemExit(
+                "runtime plan table cap: %d entries > %d; a pack plan must set "
+                "\"runtime\": 1 only for a draw-certified descriptor"
+                % (len(manifest["entries"]), RUNTIME_MAX_ENTRIES))
         write_manifest(args.out, manifest)
         print("wrote %s (%d entries)" % (args.out, len(manifest["entries"])))
         for entry in manifest["entries"]:
