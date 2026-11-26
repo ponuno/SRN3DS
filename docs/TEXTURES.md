@@ -23,6 +23,8 @@ labelled **Azahar**.
 | `tests/texture_residency_upload_smoke.c` | direct GPU-only add/remove, MANAGED eviction/reload, release failures, exact peaks |
 | `tests/texture_runtime_smoke.c` | pool-aware core/COM ownership, split accounting, direct SKTX, retry and D3D9 state defaults |
 | `tests/cube_volume_residency_smoke.c` | cube/volume D9TexCache accounting, rehydratable non-RT entries, RT-cube no-evict, retryable release/teardown, 2D/RT coexistence |
+| `tests/cube_volume_rehydration_smoke.c` | evicted cube/volume rehydration, RT-cube no-evict, failure injection and counters |
+| `tests/budget_trim_smoke.c` | automatic LRU trim under device-budget pressure, bound/locked/RT skips, named OOM, rebind rehydrate |
 | `tests/texture_container_smoke.c` | SKTX parser and every rejection branch |
 | `tests/isolated/texetc1/` | isolated ARM build; ETC1/ETC1A4 GPU init+upload, frame clear, residency contract |
 

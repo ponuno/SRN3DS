@@ -1147,6 +1147,54 @@ successfully.  A render-target cube remains resident across trim.
 Remaining: PICA `draw_cube` (hardware cube sampling), a visible frame, and a
 full TESV engine census that actually evicts/reloads these resources.
 
+## 5.7 Automatic budget trim (2026-11-26)
+
+Create paths now attempt automatic LRU eviction before returning
+`D3DERR_OUTOFVIDEOMEMORY`:
+
+- `budget_reserve()` runs for 2D texture, cube, volume, render-target and SKTX
+  creation.  It computes the shortfall from `d9_memory_used()` and the requested
+  cost, then tries to free the request plus a documented headroom of
+  `limit/64`, clamped to 512..65536 bytes.
+- Candidates are only non-render-target cube/volume entries that are resident,
+  rehydratable, have a CPU store, and are not bound to texture stage 0/1, not
+  the active render target, not locked/view-locked, not pinned, and not
+  `no_evict`.  Render-target cubes are skipped.  The LRU key is the texcache
+  `last_use` clock, updated on bind.
+- `d9_texcache_evict_gpu()` releases only the GPU copy of one entry, leaving its
+  guest store and rehydrate token.  The loop repeats until the request fits
+  (with headroom when possible) or no candidate remains.  A rebound resource is
+  rehydrated by the mechanism in section 5.6.
+- If the shortfall remains, creation returns `D3DERR_OUTOFVIDEOMEMORY` with a
+  named diagnostic containing need/used/limit, evicted bytes, candidates and
+  the remaining shortfall.  No native is allocated before the budget check, so
+  there is no partial native.
+- `D9TexCacheStats` reports `budget_trims`, `budget_trim_candidates`,
+  `budget_trim_evictions`, `budget_trim_evicted_bytes` and
+  `budget_trim_failures`; `evictions_gpu` remains the total CPU-independent
+  eviction count.
+
+`tests/budget_trim_smoke.c` uses a small device budget with a volume and three
+cubes, touches two cubes, and creates a fourth: the untouched volume and cubes
+are evicted in LRU order, the touched cube stays, and rebinding rehydrates and
+samples the evicted cube.  A second device binds one cube, locks another and
+keeps a render-target cube; the create then has no candidate and returns a named
+OOM with no partial native.  Unbinding/unlocking lets the LRU cube be evicted and
+the create succeeds.
+
+- Targeted `budget_trim,texture_residency,texture_residency_upload,
+  cube_volume_rehydration,cube_volume_residency,texture_runtime,com`: **17
+  passed, 0 failed**.
+- Full suite: **123 passed, 0 failed**.
+- ARM `-Mode com -Isolated budget_trim`: `.elf` 6,202,348 B SHA256
+  `1bb5e37450be223a597b0aabf251ccf87c9dde9e0c500e8087ffe1c6d97bba0a`;
+  `.3dsx` 920,204 B SHA256
+  `c0f23d78578d4e1d55499f3cfa30cc419bcb1ebeaef7f65922aa03f9a98feee2`;
+  `.text` 901,716 B.
+
+Remaining: PICA `draw_cube` (hardware cube sampling) and a visible frame.  The
+automatic trim is budget-driven; no engine census has yet exercised it.
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.

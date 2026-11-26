@@ -346,6 +346,7 @@ int d9_cube_face_level_info(D9Device *d,D9Handle h,unsigned face,unsigned level,
 int d9_cube_face_level_view(D9Device *d,D9Handle h,unsigned face,unsigned level,
                             void **pixels,unsigned *w,unsigned *height,
                             size_t *pitch,size_t *bytes);
+void d9_cube_face_view_locked(D9Device *d,D9Handle h,int locked);
 int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned level,
                               const void *src,size_t src_pitch,size_t src_bytes);
 /* Re-upload a face level after a GetCubeMapSurface view was written. */
@@ -384,6 +385,7 @@ int d9_volume_level_info(D9Device *d,D9Handle h,unsigned level,
 int d9_volume_level_view(D9Device *d,D9Handle h,unsigned level,void **pixels,
                          unsigned *w,unsigned *height,unsigned *depth,
                          size_t *pitch,size_t *plane_bytes,size_t *bytes);
+void d9_volume_level_view_locked(D9Device *d,D9Handle h,int locked);
 int d9_volume_upload_level(D9Device *d,D9Handle h,unsigned level,
                            const void *src,size_t src_pitch,size_t src_slice_pitch,
                            size_t src_bytes);

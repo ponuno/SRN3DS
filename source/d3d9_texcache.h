@@ -113,6 +113,11 @@ typedef struct {
     unsigned upload_failures;
     unsigned rehydrations;
     unsigned rehydrate_failures;
+    unsigned budget_trims;
+    unsigned budget_trim_candidates;
+    unsigned budget_trim_evictions;
+    size_t budget_trim_evicted_bytes;
+    unsigned budget_trim_failures;
     unsigned evictions_gpu;
     unsigned evictions_guest;
     unsigned guest_drops;
@@ -145,6 +150,11 @@ typedef struct {
     unsigned upload_failures;
     unsigned rehydrations;
     unsigned rehydrate_failures;
+    unsigned budget_trims;
+    unsigned budget_trim_candidates;
+    unsigned budget_trim_evictions;
+    size_t budget_trim_evicted_bytes;
+    unsigned budget_trim_failures;
     unsigned evictions_gpu;
     unsigned evictions_guest;
     unsigned guest_drops;
@@ -255,6 +265,18 @@ int d9_texcache_trim(D9TexCache *cache, size_t guest_target,
 
 /* Remove one entry entirely (both copies). */
 int d9_texcache_remove(D9TexCache *cache, uint64_t key);
+
+/* Evict only the GPU copy of one entry, leaving the guest copy and rehydrate
+ * token intact.  Pinned and no_evict entries are refused.  *freed receives the
+ * released GPU bytes on success.  This is the primitive used by the core's
+ * budget-pressure trim. */
+int d9_texcache_evict_gpu(D9TexCache *cache, uint64_t key, size_t *freed);
+
+/* Record an automatic budget-pressure trim attempt.  candidates is the number
+ * of eligible entries considered, evicted the number actually released. */
+void d9_texcache_note_budget_trim(D9TexCache *cache, unsigned candidates,
+                                  unsigned evicted, size_t bytes,
+                                  int success);
 
 /* Number of entries used within max_age ticks of the current clock. */
 unsigned d9_texcache_working_set(const D9TexCache *cache, uint64_t max_age);

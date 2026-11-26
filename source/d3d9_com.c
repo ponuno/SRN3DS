@@ -1372,9 +1372,8 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||
             trace_detail("CreateTexture: render-target creation rc=%d",rc);
             const char *why=d9_last_draw_diagnostic(g.device);
             if((rc==D9_UNSUPPORTED||rc==D9_BACKEND)&&why&&*why)d3d_fail("CreateTexture",why,UNAVAILABLE);
-            else d3d_log("CreateTexture",rc==D9_MEMORY?
-                "render-target texture memory budget exceeded":
-                "render-target texture creation failed");
+            else if(rc==D9_MEMORY)d3d_fail("CreateTexture",why&&*why?why:"render-target texture memory budget exceeded",OUTMEM);
+            else d3d_log("CreateTexture","render-target texture creation failed");
             RET(rc==D9_MEMORY?OUTMEM:UNAVAILABLE,9);
         }
         Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
@@ -1387,7 +1386,14 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||
     if(A(6)==2)d3d_log("CreateTexture","SYSTEMMEM is CPU-only and cannot be bound as a GPU texture");
     if(A(4)&USAGE_DYNAMIC)d3d_log("CreateTexture","DYNAMIC accepted; LockRect/UnlockRect re-upload the level like MANAGED");
     size_t pitch,bytes;if(d9_texture_layout(A(1),A(2),A(5),&pitch,&bytes))RET(INVALID,9);
-    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_texture_ex(g.device,A(1),A(2),A(5),A(3),A(6),A(4),0,&h);if(rc)RET(hr(rc),9);
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);D9Handle h;int rc=d9_create_texture_ex(g.device,A(1),A(2),A(5),A(3),A(6),A(4),0,&h);
+    if(rc){
+        if(rc==D9_MEMORY){
+            const char *why=d9_last_draw_diagnostic(g.device);
+            d3d_fail("CreateTexture",why&&*why?why:"texture memory budget exceeded",OUTMEM);
+        }
+        RET(hr(rc),9);
+    }
     Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
     o->handle=h;o->width=A(1);o->height=A(2);o->bytes=(unsigned)bytes;o->pitch=(unsigned)pitch;o->format=A(5);o->usage=A(4);o->pool=A(6);retain(g.dev);M32(out)=o->guest;RET(OK,9);}
 static uint32_t cube_create_obj(uint32_t device,unsigned edge,unsigned levels,unsigned usage,
@@ -1660,9 +1666,8 @@ static int lock_cube_rect(Obj *o,unsigned face,unsigned level,uint32_t locked,
                           uint32_t rect,unsigned flags){
     if(!o||o->kind!=CUBE||o->lock_guest||g.phase||!ptr(locked,8))return D9_INVALID;
     if(flags&~0xf810u||(rect&&(flags&0x2000)))return D9_INVALID;
-    unsigned edge;size_t pitch,bytes;void *pixels=NULL;
-    if(d9_cube_face_level_info(g.device,o->handle,face,level,NULL,NULL,&pitch,&bytes)||
-       d9_cube_face_level_view(g.device,o->handle,face,level,&pixels,&edge,NULL,NULL,NULL))
+    unsigned edge;size_t pitch,bytes;
+    if(d9_cube_face_level_info(g.device,o->handle,face,level,&edge,NULL,&pitch,&bytes))
         return D9_INVALID;
     int32_t r[4]={0,0,(int32_t)edge,(int32_t)edge};
     if(rect){if(!ptr(rect,16))return D9_INVALID;memcpy(r,ptr(rect,16),16);}
@@ -1683,6 +1688,11 @@ static int lock_cube_rect(Obj *o,unsigned face,unsigned level,uint32_t locked,
     size_t span=(rows-1)*pitch+row_bytes;
     if(offset>bytes||span>bytes-offset||span>LOCK_STRIDE)return D9_INVALID;
     uint32_t address=lock_addr(o);if(guest_map(g.mem,address,(uint32_t)span))return D9_MEMORY;
+    void *pixels=NULL;
+    if(d9_cube_face_level_view(g.device,o->handle,face,level,&pixels,NULL,NULL,NULL,NULL)){
+        guest_unmap(g.mem,address);return D9_INVALID;
+    }
+    d9_cube_face_view_locked(g.device,o->handle,1);
     uint8_t *src=(uint8_t *)pixels+offset,*dst=ptr(address,(uint32_t)span);
     if(!(flags&0x2000))
         for(size_t i=0;i<rows;++i)memcpy(dst+i*pitch,src+i*pitch,row_bytes);
@@ -1709,6 +1719,7 @@ static void cube_unlock(CPU *c){
     guest_unmap(g.mem,o->lock_guest);o->lock_guest=0;o->lock_host=NULL;
     o->lock_bytes=o->lock_rows=o->lock_pitch=o->lock_row_bytes=0;
     int rc=o->readonly?D9_OK:d9_cube_face_unlocked(g.device,o->handle,face,level);
+    if(o->readonly)d9_cube_face_view_locked(g.device,o->handle,0);
     RET(hr(rc),3);
 }
 static void cube_add_dirty_rect(CPU *c){
@@ -1742,9 +1753,9 @@ static void volume_get_level(CPU *c){
 static int lock_volume_box(Obj *o,unsigned level,uint32_t locked,uint32_t box,unsigned flags){
     if(!o||o->kind!=VOLUME||o->lock_guest||g.phase||!ptr(locked,12))return D9_INVALID;
     if(flags&~0xf810u||(box&&(flags&0x2000)))return D9_INVALID;
-    void *pixels=NULL;unsigned w=0,h=0,depth=0;size_t pitch=0,plane=0,bytes=0;
-    if(d9_volume_level_view(g.device,o->handle,level,&pixels,&w,&h,&depth,
-                            &pitch,&plane,&bytes))return D9_INVALID;
+    unsigned w=0,h=0,depth=0;size_t pitch=0,plane=0,bytes=0;
+    if(d9_volume_level_info(g.device,o->handle,level,&w,&h,&depth,&pitch,&plane,&bytes))
+        return D9_INVALID;
     int32_t b[6]={0,0,0,(int32_t)w,(int32_t)h,(int32_t)depth};
     if(box){
         const int32_t *p=ptr(box,24);if(!p)return D9_INVALID;memcpy(b,p,24);
@@ -1770,6 +1781,11 @@ static int lock_volume_box(Obj *o,unsigned level,uint32_t locked,uint32_t box,un
     if(offset>bytes||span>bytes-offset||span>LOCK_STRIDE)return D9_INVALID;
     uint32_t address=lock_addr(o);
     if(guest_map(g.mem,address,(uint32_t)span))return D9_MEMORY;
+    void *pixels=NULL;
+    if(d9_volume_level_view(g.device,o->handle,level,&pixels,NULL,NULL,NULL,NULL,NULL,NULL)){
+        guest_unmap(g.mem,address);return D9_INVALID;
+    }
+    d9_volume_level_view_locked(g.device,o->handle,1);
     const uint8_t *src=(const uint8_t *)pixels+offset;
     uint8_t *dst=ptr(address,(uint32_t)span);
     if(!(flags&0x2000))
@@ -1805,6 +1821,7 @@ static void volume_unlock_box(CPU *c){
     o->lock_bytes=o->lock_rows=o->lock_pitch=o->lock_row_bytes=0;
     o->lock_slices=o->lock_slice_pitch=o->lock_front=0;
     int rc=o->readonly?D9_OK:d9_volume_level_unlocked(g.device,o->handle,level);
+    if(o->readonly)d9_volume_level_view_locked(g.device,o->handle,0);
     RET(hr(rc),2);
 }
 static void volume_add_dirty_box(CPU *c){
@@ -1886,7 +1903,11 @@ static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
     if(rect){if(!ptr(rect,16))return D9_INVALID;memcpy(r,ptr(rect,16),16);}
     uint32_t address=0;unsigned pitch=0,rows=0;
     int rc=lock_surface_rect(o,r,flags,&pitch,&address,&rows);
-    if(!rc){M32(locked)=pitch;M32(locked+4)=address;}
+    if(!rc){
+        M32(locked)=pitch;M32(locked+4)=address;
+        if(o->view_cube&&o->view_parent)
+            d9_cube_face_view_locked(g.device,o->view_parent->handle,1);
+    }
     return rc;
 }
 static int unlock_surface(Obj *o){
@@ -1917,6 +1938,8 @@ static int unlock_surface(Obj *o){
         int rc2=d9_texture_surface_unlocked(g.device,view_texture,view_level);
         if(rc2)return rc2;
     }
+    if(is_cube_view&&view_parent)
+        d9_cube_face_view_locked(g.device,view_parent->handle,0);
     return D9_OK;
 }
 static void surface_lock(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);

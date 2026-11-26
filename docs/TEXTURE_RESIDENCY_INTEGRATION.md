@@ -42,6 +42,16 @@ flag is recorded but **does not drop the guest source yet**.
   `no_evict`; LRU reserve/trim skips them.  An explicit
   `d9_release_cube_texture()` / `d9_release_volume_texture()` still removes any
   entry and its native exactly once.
+* Create paths under device-budget pressure call `budget_reserve()`: it evicts
+  LRU rehydratable, non-render-target cube/volume GPU copies that are not
+  bound, locked, pinned or `no_evict`, targeting the shortfall plus a documented
+  headroom of `limit/64` clamped to 512..65536 bytes.  It repeats until the
+  request fits or no candidate remains, then returns a named
+  `D3DERR_OUTOFVIDEOMEMORY` with need/used/limit, evicted bytes, candidates and
+  remaining shortfall.  Rehydration itself also reserves its GPU bytes, so a
+  rebind can trigger the same trim.  `D9TexCacheStats` exposes
+  `budget_trims`, `budget_trim_candidates`, `budget_trim_evictions`,
+  `budget_trim_evicted_bytes` and `budget_trim_failures`.
 * `d9_destroy_device_ex()` reports the first release failure and preserves the
   device for retry. The legacy void wrapper remains best effort.
 * Backends may supply optional `texture_release`, `texture_create_encoded`, and

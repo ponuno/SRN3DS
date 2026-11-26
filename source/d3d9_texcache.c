@@ -550,6 +550,22 @@ int d9_texcache_remove(D9TexCache *cache, uint64_t key) {
     return D9TEXCACHE_OK;
 }
 
+int d9_texcache_evict_gpu(D9TexCache *cache, uint64_t key, size_t *freed) {
+    if (freed) *freed = 0;
+    if (!cache) return D9TEXCACHE_INVALID;
+    D9TexEntry *entry = d9_texcache_find(cache, key);
+    if (!entry || !entry->has_gpu) return D9TEXCACHE_NOT_FOUND;
+    if (entry->pins || entry->no_evict) return D9TEXCACHE_PINNED;
+    size_t bytes = entry->gpu_bytes;
+    int rc = clear_gpu(cache, entry);
+    if (rc != D9TEXCACHE_OK) return rc;
+    ++cache->evictions_gpu;
+    discard_dead_entry(cache, entry, 1);
+    update_peaks(cache);
+    if (freed) *freed = bytes;
+    return D9TEXCACHE_OK;
+}
+
 unsigned d9_texcache_working_set(const D9TexCache *cache, uint64_t max_age) {
     if (!cache) return 0;
     unsigned count = 0;
@@ -575,6 +591,11 @@ void d9_texcache_stats(const D9TexCache *cache, D9TexCacheStats *out) {
     out->upload_failures = cache->upload_failures;
     out->rehydrations = cache->rehydrations;
     out->rehydrate_failures = cache->rehydrate_failures;
+    out->budget_trims = cache->budget_trims;
+    out->budget_trim_candidates = cache->budget_trim_candidates;
+    out->budget_trim_evictions = cache->budget_trim_evictions;
+    out->budget_trim_evicted_bytes = cache->budget_trim_evicted_bytes;
+    out->budget_trim_failures = cache->budget_trim_failures;
     out->evictions_gpu = cache->evictions_gpu;
     out->evictions_guest = cache->evictions_guest;
     out->guest_drops = cache->guest_drops;
@@ -601,4 +622,15 @@ void d9_texcache_note_rehydrate(D9TexCache *cache, int success) {
     if (!cache) return;
     if (success) ++cache->rehydrations;
     else ++cache->rehydrate_failures;
+}
+
+void d9_texcache_note_budget_trim(D9TexCache *cache, unsigned candidates,
+                                  unsigned evicted, size_t bytes,
+                                  int success) {
+    if (!cache) return;
+    ++cache->budget_trims;
+    cache->budget_trim_candidates += candidates;
+    cache->budget_trim_evictions += evicted;
+    cache->budget_trim_evicted_bytes += bytes;
+    if (!success) ++cache->budget_trim_failures;
 }

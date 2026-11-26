@@ -53,7 +53,7 @@ typedef struct {
 } Texture;
 typedef struct {
     D9Handle id;unsigned edge,levels,format,pool,usage;
-    int cpu_only;
+    int cpu_only,locked;
     size_t cost,cpu_bytes,gpu_bytes,face_bytes;
     uint8_t *pixels; /* face-major: 6 * face_bytes */
     void *native;
@@ -65,7 +65,7 @@ typedef struct {
 typedef struct {unsigned w,h,depth;size_t pitch,plane_bytes,bytes,offset;int uploaded;} VolumeLevel;
 typedef struct {
     D9Handle id;unsigned w,h,depth,levels,format,pool,usage;
-    int cpu_only;
+    int cpu_only,locked;
     size_t cost,cpu_bytes,gpu_bytes;
     uint8_t *pixels; /* level-major: level[i].offset, each level has depth slices */
     void *native;
@@ -127,8 +127,85 @@ static int cache_release_cube_gpu(void *ctx,void *gpu,size_t bytes){
     return rc;
 }
 static size_t memory_sum(size_t a,size_t b){return b>SIZE_MAX-a?SIZE_MAX:a+b;}
+static void set_diagnosis(D9Device *d,const char *why);
 static int budget_has_room(const D9Device *d,size_t bytes){
     size_t used=d9_memory_used(d);return used>d->limit||bytes>d->limit-used?D9_MEMORY:D9_OK;
+}
+/* Automatic budget-pressure trim.  The documented headroom is 1/64 of the
+ * device limit, clamped to 512..65536 bytes.  Only rehydratable, non-render-
+ * target cube/volume GPU copies that are not bound, locked, pinned or no_evict
+ * are candidates.  LRU order is the cache's last_use clock. */
+#define D9_BUDGET_TRIM_HEADROOM_MIN 512u
+#define D9_BUDGET_TRIM_HEADROOM_MAX 65536u
+static size_t budget_trim_headroom(const D9Device *d){
+    size_t h=d->limit/64u;
+    if(h<D9_BUDGET_TRIM_HEADROOM_MIN)h=D9_BUDGET_TRIM_HEADROOM_MIN;
+    if(h>D9_BUDGET_TRIM_HEADROOM_MAX)h=D9_BUDGET_TRIM_HEADROOM_MAX;
+    return h;
+}
+static int key_is_bound(const D9Device *d,D9Handle h){
+    return d->texture==h||d->texture1==h||d->cube_texture==h||
+           d->cube_texture1==h||d->volume_texture==h||d->volume_texture1==h;
+}
+static D9TexEntry *budget_trim_candidate(D9Device *d,D9Handle *key,unsigned *count){
+    D9TexEntry *best=NULL;D9Handle best_key=0;unsigned seen=0;
+    for(unsigned i=0;i<MAX_CUBES;++i){
+        CubeTexture *c=&d->cubes[i];
+        if(!c->id||(c->usage&D9_USAGE_RENDERTARGET)||c->cpu_only||c->locked||
+           !c->pixels||!c->native||key_is_bound(d,c->id))continue;
+        D9TexEntry *e=d9_texcache_find(&d->tex_cache,c->id);
+        if(!e||!e->has_gpu||!e->gpu_ready||!e->has_guest||!e->has_rehydrate||
+           e->no_evict||e->pins)continue;
+        ++seen;
+        if(!best||e->last_use<best->last_use){best=e;best_key=c->id;}
+    }
+    for(unsigned i=0;i<MAX_VOLUMES;++i){
+        VolumeTexture *v=&d->volumes[i];
+        if(!v->id||v->cpu_only||v->locked||!v->pixels||!v->native||
+           key_is_bound(d,v->id))continue;
+        D9TexEntry *e=d9_texcache_find(&d->tex_cache,v->id);
+        if(!e||!e->has_gpu||!e->gpu_ready||!e->has_guest||!e->has_rehydrate||
+           e->no_evict||e->pins)continue;
+        ++seen;
+        if(!best||e->last_use<best->last_use){best=e;best_key=v->id;}
+    }
+    if(key)*key=best_key;
+    if(count)*count=seen;
+    return best;
+}
+static int budget_reserve(D9Device *d,size_t need){
+    if(!d)return D9_INVALID;
+    if(d->scene||d->teardown){
+        set_diagnosis(d,"budget trim is not allowed inside BeginScene/EndScene");
+        return D9_MEMORY;
+    }
+    size_t headroom=budget_trim_headroom(d);
+    unsigned candidates=0,evicted=0;size_t evicted_bytes=0;
+    for(;;){
+        size_t used=d9_memory_used(d);
+        int fits=used<=d->limit&&need<=d->limit-used;
+        int fits_headroom=fits&&need+headroom<=d->limit-used;
+        if(fits_headroom)break;
+        D9Handle key=0;unsigned seen=0;
+        D9TexEntry *best=budget_trim_candidate(d,&key,&seen);
+        candidates+=seen;
+        if(!best)break;
+        size_t freed=0;
+        if(d9_texcache_evict_gpu(&d->tex_cache,key,&freed)!=D9TEXCACHE_OK)break;
+        ++evicted;evicted_bytes+=freed;
+    }
+    size_t used=d9_memory_used(d);
+    int ok=used<=d->limit&&need<=d->limit-used;
+    d9_texcache_note_budget_trim(&d->tex_cache,candidates,evicted,evicted_bytes,ok);
+    if(!ok){
+        size_t avail=used<d->limit?d->limit-used:0;
+        size_t shortfall=need>avail?need-avail:0;
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "budget trim: need %zu bytes, used %zu/%zu after evicting %u of %u candidates (%zu bytes); still short %zu; no rehydratable candidates remain",
+                 need,used,d->limit,evicted,candidates,evicted_bytes,shortfall);
+        return D9_MEMORY;
+    }
+    return D9_OK;
 }
 void d9_matrix_identity(D9Matrix *m){memset(m,0,sizeof *m);for(unsigned i=0;i<4;++i)m->m[i][i]=1.0f;}
 void d9_matrix_multiply(D9Matrix *out,const D9Matrix *a,const D9Matrix *b){
@@ -208,6 +285,12 @@ D9Handle d9_texture_render_target(const D9Device *d,D9Handle h){
 }
 static CubeTexture *cube_texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id==id)return &d->cubes[i];return NULL;}
 static VolumeTexture *volume_texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_VOLUMES;++i)if(d->volumes[i].id==id)return &d->volumes[i];return NULL;}
+void d9_cube_face_view_locked(D9Device *d,D9Handle h,int locked){
+    CubeTexture *c=cube_texture(d,h);if(c)c->locked=locked?1:0;
+}
+void d9_volume_level_view_locked(D9Device *d,D9Handle h,int locked){
+    VolumeTexture *v=volume_texture(d,h);if(v)v->locked=locked?1:0;
+}
 /* Release one target slot.  A cube-face target owns only its backend view; the
  * cube texture keeps the colour storage and is released separately. */
 static void destroy_target_slot(D9Device *d,Target *t){
@@ -356,7 +439,7 @@ int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned
         cpu+=l->bytes;if((a>=8&&b>=8)||(padded&&i==0)){++t.gpu_levels;gpu+=(size_t)native_dim(a)*native_dim(b)*4;}if(a>1)a>>=1;if(b>1)b>>=1;}
     if(t.cpu_only)t.gpu_levels=0;
     t.cpu_bytes=cpu;t.gpu_bytes=t.cpu_only?0:gpu;t.cost=cpu+t.gpu_bytes;
-    if(budget_has_room(d,t.cost))return D9_MEMORY;
+    int br=budget_reserve(d,t.cost);if(br)return br;
     Texture *slot=NULL;for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
     if(!slot)return D9_MEMORY;
     t.pixels=calloc(1,cpu);if(!t.pixels)return D9_MEMORY;
@@ -404,7 +487,7 @@ int d9_create_texture_sktx(D9Device *d,const void *sktx_data,size_t bytes,
         if(sktx.level[i].width!=pw||sktx.level[i].height!=ph||pw<8||ph<8)return D9_INVALID;
         if(pw>1)pw>>=1;if(ph>1)ph>>=1;
     }
-    if(budget_has_room(d,sktx.data_bytes))return D9_MEMORY;
+    int br=budget_reserve(d,sktx.data_bytes);if(br)return br;
     Texture *slot=NULL;for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
     if(!slot)return D9_MEMORY;
     Texture t={.w=sktx.width,.h=sktx.height,.format=sktx.format,.levels=sktx.levels,
@@ -635,7 +718,7 @@ int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
     t.gpu_bytes=t.cpu_only?0:cube_gpu_bytes(edge,levels);
     if(t.cpu_bytes>SIZE_MAX-t.gpu_bytes)return D9_MEMORY;
     t.cost=t.cpu_bytes+t.gpu_bytes;
-    if(budget_has_room(d,t.cost))return D9_MEMORY;
+    int br=budget_reserve(d,t.cost);if(br)return br;
     CubeTexture *slot=NULL;
     for(unsigned i=0;i<MAX_CUBES;++i)if(!d->cubes[i].id){slot=&d->cubes[i];break;}
     if(!slot)return D9_MEMORY;
@@ -743,6 +826,7 @@ int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned leve
 int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level){
     CubeTexture *c=cube_texture(d,h);
     if(!c||face>=D9_CUBE_FACES||level>=c->levels)return D9_INVALID;
+    c->locked=0;
     CubeLevel *l=&c->level[level];
     if(!c->cpu_only){
         if(!c->native&&!(c->usage&D9_USAGE_RENDERTARGET)){
@@ -836,6 +920,8 @@ static int rehydrate_cube(D9Device *d,CubeTexture *c){
         d9_texcache_note_rehydrate(&d->tex_cache,0);
         return D9_UNSUPPORTED;
     }
+    int br=budget_reserve(d,c->gpu_bytes);
+    if(br){d9_texcache_note_rehydrate(&d->tex_cache,0);return br;}
     void *native=NULL;
     int rc=d->ops.texture_create_cube(d->ctx,c->edge,c->levels,c->format,&native);
     if(rc||!native){
@@ -977,7 +1063,7 @@ int d9_create_volume_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned depth
     t.gpu_bytes=t.cpu_only?0:volume_gpu_bytes(w,h,depth,levels);
     if(t.cpu_bytes>SIZE_MAX-t.gpu_bytes)return D9_MEMORY;
     t.cost=t.cpu_bytes+t.gpu_bytes;
-    if(budget_has_room(d,t.cost))return D9_MEMORY;
+    int br=budget_reserve(d,t.cost);if(br)return br;
     VolumeTexture *slot=NULL;
     for(unsigned i=0;i<MAX_VOLUMES;++i)if(!d->volumes[i].id){slot=&d->volumes[i];break;}
     if(!slot)return D9_MEMORY;
@@ -1061,6 +1147,7 @@ int d9_volume_upload_level(D9Device *d,D9Handle h,unsigned level,
 int d9_volume_level_unlocked(D9Device *d,D9Handle h,unsigned level){
     VolumeTexture *v=volume_texture(d,h);
     if(!v||level>=v->levels)return D9_INVALID;
+    v->locked=0;
     VolumeLevel *l=&v->level[level];
     if(!v->cpu_only){
         if(!v->native){
@@ -1140,6 +1227,8 @@ static int rehydrate_volume(D9Device *d,VolumeTexture *v){
         d9_texcache_note_rehydrate(&d->tex_cache,0);
         return D9_UNSUPPORTED;
     }
+    int br=budget_reserve(d,v->gpu_bytes);
+    if(br){d9_texcache_note_rehydrate(&d->tex_cache,0);return br;}
     void *native=NULL;
     int rc=d->ops.texture_create_volume(d->ctx,v->w,v->h,v->depth,v->levels,&native);
     if(rc||!native){
@@ -1253,7 +1342,7 @@ int d9_cube_face_target(D9Device *d,D9Handle h,unsigned face,unsigned level,
     }
     unsigned edge=c->level[level].w;
     size_t bytes=(size_t)edge*edge*4u; /* native depth attachment, not colour */
-    if(budget_has_room(d,bytes))return D9_MEMORY;
+    int br=budget_reserve(d,bytes);if(br)return br;
     Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
     if(!slot)return D9_MEMORY;
     void *native=NULL;
@@ -1315,7 +1404,7 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
         set_diagnosis(d,"CreateRenderTarget: scaled readback requires backend target_write");
         return D9_UNSUPPORTED;
     }
-    size_t bytes=(size_t)nw*nh*4;if(budget_has_room(d,bytes))return D9_MEMORY;
+    size_t bytes=(size_t)nw*nh*4;int br=budget_reserve(d,bytes);if(br)return br;
     Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
     if(!slot)return D9_MEMORY;void *native=NULL;
     if(d->ops.target_create(d->ctx,nw,nh,format,&native)||!native){
