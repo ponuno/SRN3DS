@@ -240,6 +240,116 @@ static MenuSwfStatus parse_frame_header(const uint8_t *body, size_t body_len,
     return MENU_SWF_OK;
 }
 
+MenuSwfStatus menu_swf_view_open(const uint8_t *data, size_t size,
+                                 MenuSwfView *view, char *reason,
+                                 size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!view) return MENU_SWF_ERR_ARGUMENT;
+    memset(view, 0, sizeof *view);
+    if (!data || !size || size > UINT32_MAX) {
+        set_reason(reason, reason_cap,
+                   "swf: view needs a non-empty 32-bit-sized buffer");
+        return MENU_SWF_ERR_ARGUMENT;
+    }
+
+    MenuSwfHeader header;
+    BsaStatus header_status = menu_swf_header_parse(
+        data, size, (uint32_t)size, &header, reason, reason_cap);
+    if (header_status != BSA_OK) {
+        MenuSwfStatus status = MENU_SWF_ERR_FORMAT;
+        switch (header_status) {
+        case BSA_ERR_ARGUMENT: status = MENU_SWF_ERR_ARGUMENT; break;
+        case BSA_ERR_TRUNCATED: status = MENU_SWF_ERR_TRUNCATED; break;
+        case BSA_ERR_DEFLATE: status = MENU_SWF_ERR_ZLIB; break;
+        case BSA_ERR_UNSUPPORTED:
+            if (header.format == MENU_SWF_ZWS) {
+                status = MENU_SWF_ERR_NOTIMPL;
+                set_reason(reason, reason_cap,
+                           "swf: ZWS (LZMA) decompression is E_NOTIMPL");
+            } else if (header.format == MENU_SWF_UNKNOWN) {
+                status = MENU_SWF_ERR_FORMAT;
+            } else {
+                status = MENU_SWF_ERR_VERSION;
+            }
+            break;
+        default: status = MENU_SWF_ERR_FORMAT; break;
+        }
+        return status;
+    }
+
+    if (header.declared_bytes > MENU_SWF_MAX_DECLARED) {
+        set_reason(reason, reason_cap,
+                   "swf: declared size %u exceeds the %u-byte cap",
+                   header.declared_bytes, MENU_SWF_MAX_DECLARED);
+        return MENU_SWF_ERR_BUDGET;
+    }
+    size_t body_len = (size_t)header.declared_bytes - 8u;
+    const uint8_t *body = NULL;
+    uint8_t *owned = NULL;
+
+    if (header.format == MENU_SWF_FWS) {
+        body = data + 8;
+    } else {
+        if (size < 14) {
+            set_reason(reason, reason_cap,
+                       "swf: CWS stream is shorter than a zlib header and trailer");
+            return MENU_SWF_ERR_TRUNCATED;
+        }
+        size_t compressed_len = size - 8u;
+        if (body_len) {
+            owned = (uint8_t *)malloc(body_len);
+            if (!owned) {
+                set_reason(reason, reason_cap,
+                           "swf: cannot allocate the %llu-byte body",
+                           (unsigned long long)body_len);
+                return MENU_SWF_ERR_BUDGET;
+            }
+        }
+        size_t produced = 0;
+        BsaStatus st = bsa_inflate_zlib_exact(data + 8, compressed_len, owned,
+                                              body_len, &produced,
+                                              reason, reason_cap);
+        if (st != BSA_OK) {
+            char inner[BSA_REASON_MAX];
+            snprintf(inner, sizeof inner, "%s",
+                     reason && reason[0] ? reason : bsa_status_name(st));
+            free(owned);
+            set_reason(reason, reason_cap, "swf: CWS inflate: %s", inner);
+            return st == BSA_ERR_BUDGET ? MENU_SWF_ERR_BUDGET
+                                        : MENU_SWF_ERR_ZLIB;
+        }
+        if (produced != body_len) {
+            free(owned);
+            set_reason(reason, reason_cap,
+                       "swf: CWS produced %llu bytes, declared body is %llu",
+                       (unsigned long long)produced,
+                       (unsigned long long)body_len);
+            return MENU_SWF_ERR_ZLIB;
+        }
+        body = owned;
+    }
+
+    size_t tag_offset = 0;
+    MenuSwfStatus st = parse_frame_header(body, body_len, &tag_offset, NULL,
+                                          reason, reason_cap);
+    if (st != MENU_SWF_OK) {
+        free(owned);
+        return st;
+    }
+    view->header = header;
+    view->body = body;
+    view->body_len = body_len;
+    view->tag_offset = tag_offset;
+    view->owned = owned;
+    return MENU_SWF_OK;
+}
+
+void menu_swf_view_close(MenuSwfView *view) {
+    if (!view) return;
+    free(view->owned);
+    memset(view, 0, sizeof *view);
+}
+
 static MenuSwfStatus parse_tag_stream(const uint8_t *body, size_t body_len,
                                       unsigned depth, int top_level,
                                       MenuSwfSummary *s, size_t *consumed,
@@ -415,116 +525,27 @@ MenuSwfStatus menu_swf_summary(const uint8_t *data, size_t size,
     if (reason && reason_cap) reason[0] = 0;
     if (!out) return MENU_SWF_ERR_ARGUMENT;
     summary_clear(out);
-    if (!data || !size || size > UINT32_MAX) {
-        set_reason(reason, reason_cap,
-                   "swf: summary needs a non-empty 32-bit-sized buffer");
-        return MENU_SWF_ERR_ARGUMENT;
-    }
 
-    MenuSwfHeader header;
-    BsaStatus header_status = menu_swf_header_parse(
-        data, size, (uint32_t)size, &header, reason, reason_cap);
-    if (header_status != BSA_OK) {
-        MenuSwfStatus status = MENU_SWF_ERR_FORMAT;
-        switch (header_status) {
-        case BSA_ERR_ARGUMENT: status = MENU_SWF_ERR_ARGUMENT; break;
-        case BSA_ERR_TRUNCATED: status = MENU_SWF_ERR_TRUNCATED; break;
-        case BSA_ERR_DEFLATE: status = MENU_SWF_ERR_ZLIB; break;
-        case BSA_ERR_UNSUPPORTED:
-            if (header.format == MENU_SWF_ZWS) {
-                status = MENU_SWF_ERR_NOTIMPL;
-                set_reason(reason, reason_cap,
-                           "swf: ZWS (LZMA) decompression is E_NOTIMPL");
-            } else if (header.format == MENU_SWF_UNKNOWN) {
-                status = MENU_SWF_ERR_FORMAT;
-            } else {
-                status = MENU_SWF_ERR_VERSION;
-            }
-            break;
-        default: status = MENU_SWF_ERR_FORMAT; break;
-        }
-        return status;
-    }
+    MenuSwfView view;
+    MenuSwfStatus st = menu_swf_view_open(data, size, &view, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
 
-    if (header.declared_bytes > MENU_SWF_MAX_DECLARED) {
-        set_reason(reason, reason_cap,
-                   "swf: declared size %u exceeds the %u-byte cap",
-                   header.declared_bytes, MENU_SWF_MAX_DECLARED);
-        return MENU_SWF_ERR_BUDGET;
-    }
-    size_t body_len = (size_t)header.declared_bytes - 8u;
-    const uint8_t *body = NULL;
-    uint8_t *owned = NULL;
-
-    if (header.format == MENU_SWF_FWS) {
-        body = data + 8;
-    } else {
-        if (size < 10) {
-            set_reason(reason, reason_cap, "swf: CWS body is missing");
-            return MENU_SWF_ERR_TRUNCATED;
-        }
-        if (size < 14) {
-            set_reason(reason, reason_cap,
-                       "swf: CWS stream is shorter than a zlib header and trailer");
-            return MENU_SWF_ERR_TRUNCATED;
-        }
-        size_t compressed_len = size - 8u;
-        if (body_len) {
-            owned = (uint8_t *)malloc(body_len);
-            if (!owned) {
-                set_reason(reason, reason_cap,
-                           "swf: cannot allocate the %llu-byte body",
-                           (unsigned long long)body_len);
-                return MENU_SWF_ERR_BUDGET;
-            }
-        }
-        size_t produced = 0;
-        BsaStatus st = bsa_inflate_zlib_exact(data + 8, compressed_len, owned,
-                                              body_len, &produced,
-                                              reason, reason_cap);
-        if (st != BSA_OK) {
-            char inner[BSA_REASON_MAX];
-            snprintf(inner, sizeof inner, "%s",
-                     reason && reason[0] ? reason : bsa_status_name(st));
-            free(owned);
-            set_reason(reason, reason_cap, "swf: CWS inflate: %s", inner);
-            return st == BSA_ERR_BUDGET ? MENU_SWF_ERR_BUDGET
-                                        : MENU_SWF_ERR_ZLIB;
-        }
-        if (produced != body_len) {
-            free(owned);
-            set_reason(reason, reason_cap,
-                       "swf: CWS produced %llu bytes, declared body is %llu",
-                       (unsigned long long)produced,
-                       (unsigned long long)body_len);
-            return MENU_SWF_ERR_ZLIB;
-        }
-        body = owned;
-    }
-
-    size_t tag_off = 0;
-    MenuSwfStatus st = parse_frame_header(body, body_len, &tag_off,
-                                          &out->frame_header_bytes,
-                                          reason, reason_cap);
-    if (st != MENU_SWF_OK) {
-        free(owned);
-        summary_clear(out);
-        return st;
-    }
-
-    out->header = header;
+    out->header = view.header;
+    out->frame_header_bytes = (uint32_t)view.tag_offset;
     size_t consumed = 0;
     int ended = 0;
-    st = parse_tag_stream(body + tag_off, body_len - tag_off, 0, 1, out,
+    st = parse_tag_stream(view.body + view.tag_offset,
+                          view.body_len - view.tag_offset, 0, 1, out,
                           &consumed, &ended, reason, reason_cap);
     if (st != MENU_SWF_OK) {
-        free(owned);
+        menu_swf_view_close(&view);
         summary_clear(out);
         return st;
     }
     out->tag_stream_bytes = consumed;
-    if (tag_off + consumed < body_len)
-        out->trailing_bytes = (uint32_t)(body_len - tag_off - consumed);
-    free(owned);
+    if (view.tag_offset + consumed < view.body_len)
+        out->trailing_bytes =
+            (uint32_t)(view.body_len - view.tag_offset - consumed);
+    menu_swf_view_close(&view);
     return MENU_SWF_OK;
 }

@@ -1,8 +1,9 @@
 # MENU_SWF — bounded StartMenu.swf summary
 
-Status: the SWF **container and tag stream** are parsed and summarized.  This is
-still not a menu: there is no display-list construction, AVM/AS2 execution,
-glyph decode, image decode or draw.
+Status: the SWF **container, tag stream, bounded display-state snapshots and
+DefineFont3 metrics** are parsed.  This is still not a menu: there is no
+renderable display list, AVM/AS2 execution, glyph rasterisation, image decode or
+draw.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -12,8 +13,10 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | File | Purpose |
 |---|---|
 | `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, tag walk (including DefineSprite nesting), bounded summary |
+| `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, DefineFont2/3 metrics |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`; `menu_bsa` now links `menu_swf.c` |
+| `tests/menu_swf_display_smoke.c` | Synthetic PlaceObject2/3, RemoveObject2, sprite, ShowFrame and DefineFont3 fixtures; optional real display/font summary |
+| `tools/run_host_tests.ps1` | Registers `menu_swf` and `menu_swf_display`; `menu_bsa` now links `menu_swf.c` |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -103,80 +106,144 @@ Interpretation:
 * the first top-level `ShowFrame` is tag 234; the top-level tag stream is
   144,607 bytes after a 13-byte frame header.
 
-## 5. Tests
+## 5. Display state and DefineFont3 metrics
+
+`menu_swf_display_summary()` walks the same container/tag stream and models the
+top-level display state:
+
+* `PlaceObject2` (26): flags, depth, character, MATRIX, CXFORMWITHALPHA, ratio,
+  name, clip depth; clip actions are recorded as an opaque byte count, not
+  executed.
+* `PlaceObject3` (70): the 16 flag bits, depth, class name, character, matrix,
+  colour, ratio, name, clip depth, blend mode, bitmap-cache flag, visible flag
+  and background.  A filter list is recorded as an opaque bounded byte span; if
+  filter data is followed by blend/cache/visible/clip-action fields the tag is a
+  named `E_NOTIMPL` because those fields cannot be located without decoding the
+  filters.
+* `RemoveObject` (5) and `RemoveObject2` (28) update the depth set.
+* `ShowFrame` snapshots the live objects in depth order.  Up to
+  `MENU_SWF_DISPLAY_MAX_FRAMES` = 8 frames and 12 objects per frame are stored;
+  total frame/object counts and truncation flags are still reported.
+* `DefineSprite` (39) is walked recursively for summaries (depth 16), and the
+  first sprite with placements is re-walked for its own frame snapshots.
+* `DefineFont2` (48) and `DefineFont3` (75) metrics: font id/name, flags,
+  EM square 1024, Font3 shape scale 20, glyph count, code table, shape-table
+  offsets, advance table, per-glyph bounds, ascent/descent/leading and kerning
+  count.  No glyph shape is rasterised and no atlas is built.
+* `DefineFont4` (91, CFF) and `DoABC` (82, AVM2) are named `E_NOTIMPL`.
+* Names/classes are capped at 48 bytes; glyphs at 256; sprites at 128; fonts at
+  2.  Truncation is explicit in the summary fields.
+
+Measured real display/font summary:
+
+```text
+real: Update.bsa StartMenu display: top frames=1 objects=1 max=1 sprites=71/71
+      selected=0 selected_frames=1 fonts=1/1
+real: top frame0 objects=1 [d=1 c=101 name='MenuHolder' tx=25600 ty=14400]
+real: selected sprite id=3 declared_frames=1 frames=1 placements=1 removals=0
+      max_objects=1 depth=0
+real: selected frame0 objects=1 [d=3 c=2 name='' sx=1.00 sy=1.00 tx=0 ty=0]
+real: font id=1 glyphs=243 stored=243 type=3 layout=1 scale=20 em=1024
+      ascent=20280 descent=5340 leading=5140 advance0=5020 code0=32 shape0=512
+      bounds0=0,0,0,0 kerning=94 trailing=0
+```
+
+The top-level menu is one `MenuHolder` instance at depth 1.  The first sprite
+with placements is id 3 (declared 1 frame); its first frame has one object at
+depth 3.  The local font has 243 glyphs, a full 16-bit code table, a 20x Font3
+shape scale, a 94-entry kerning table and no trailing bytes.  The retail
+`FontBoundsTable` parses but its RECT values are zero in this movie; the advance
+and kerning tables are populated.  Raw layout values are in Font3's 20x units
+(`ascent=20280` is about 1014 * 20); `em_square` stays 1024.
+
+## 6. Tests
 
 Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf,menu_bsa `
+  -Only menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: `menu_swf` **86 checks, 0 failures**; `menu_bsa` **277 checks,
-0 failures**.
+Result: `menu_swf_display` **38 checks, 0 failures**; `menu_swf` **86 checks,
+0 failures**; `menu_bsa` **277 checks, 0 failures**.
 
 Real read-only:
 
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf,menu_bsa `
+  -Only menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: `menu_swf` **102 checks, 0 failures**; `menu_bsa` **286 checks,
-0 failures**.
+Result: `menu_swf_display` **57 checks, 0 failures**; `menu_swf` **102 checks,
+0 failures**; `menu_bsa` **286 checks, 0 failures**.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
 long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
 ImportAssets2, DefineFontName, truncated tag/long header, tag length past the
 body, missing End, nonzero End, ZWS `E_NOTIMPL`, bad CWS zlib header, declared
 output mismatch, trailing compressed bytes, oversized declared size and null
-input.
+input.  The display test adds PlaceObject2 move/update, RemoveObject2,
+PlaceObject3 class name + opaque filter list, PlaceObject3 blend/cache/visible,
+clip-action presence, sprite frames, DefineFont3 codes/advances/bounds and the
+named DefineFont4/AVM2/filter-then-field refusals.
 
 Full host suite with the main-tree generated slice and IR container:
-**72 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf` contributes
-86 synthetic checks and no real-data checks in that run.
+**80 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_display`
+contributes 38 synthetic checks and `menu_swf` 86; no real-data checks are run
+in that suite.
 
-## 6. What remains
+## 7. What remains
 
-1. **Display list** — interpret `PlaceObject2/3`, sprite timelines, matrices,
-   colour transforms, clipping and `ShowFrame` ordering.
+1. **Renderable display list** — the bounded state model exists, but it is not
+   a GFx display list: sprite/movie-clip materialisation, nested transforms,
+   masks, clipping layers, button states and frame scripts remain.
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
-   the menu's script behaviour.  `DoAction` is currently only counted.
+   the menu's script behaviour.  `DoAction`/clip-action payloads are not
+   executed.
 3. **Fonts** — `fonts_en.swf`/`fonts_console.swf`, `FontConfig.txt`,
-   `DefineFont3` glyph extraction, layout/rasterisation and glyph atlas upload.
-   The summary reports font definitions and names, not glyphs.
+   `DefineFont3` glyph shape decoding, layout/rasterisation and glyph atlas
+   upload.  This module reports metrics and code/shape offsets, not rendered
+   glyphs.
 4. **Images/geometry** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
 5. **Draw path** — GFx batch contract, dynamic vertex buffer/FVF,
    `SetTextureStageState`, TEV/PICA submission and the first real frame.
 
-## 7. Integration
+## 8. Integration
 
 ```c
 /* r came from menu_bsa_resolve_startmenu(&heap, ...). */
 MenuSwfSummary summary;
+MenuSwfDisplaySummary display; /* ~53 KiB; caller-owned, can live on heap */
 char reason[BSA_REASON_MAX];
-MenuSwfStatus st = menu_swf_summary(
-    guest_ptr(heap.memory, r.guest_address, r.size), r.size,
-    &summary, reason, sizeof reason);
-
+const uint8_t *bytes = guest_ptr(heap.memory, r.guest_address, r.size);
+MenuSwfStatus st = menu_swf_summary(bytes, r.size, &summary, reason,
+                                    sizeof reason);
+if (st == MENU_SWF_OK)
+    st = menu_swf_display_summary(bytes, r.size, &display, reason,
+                                  sizeof reason);
 if (st == MENU_SWF_OK) {
-    /* Use summary.header, counts and names to gate the future GFx loader. */
+    /* Gate the future GFx loader with display.top frames, sprites[].frames and
+     * fonts[].glyphs.  Do not report this as a rendered movie. */
 }
 heap_free(&heap, r.guest_address);
 ```
 
-The summary is metadata only.  It must not be reported as a parsed movie,
-display list or frame.
+The summary/display structures are metadata only.  They must not be reported as
+a parsed movie, renderable display list or frame.
 
-## 8. Honest claim
+## 9. Honest claim
 
 * StartMenu.swf is validated as one CWS/zlib stream with the declared size,
   frame header and complete top-level tag stream through End.
 * The measured 1,186-tag total, 236 top-level / 950 nested split, export/font
   names and 144,607-byte top-level tag stream are reproducible.
-* No display list, AVM action, glyph, image, NIF, DDS or draw is produced.
-* No frame, pixel proof, Azahar run or hardware run is claimed.
+* The bounded display model reports one top-level `MenuHolder`, 71 sprites, a
+  selected sprite timeline, and the local 243-glyph DefineFont3 code/advance/
+  bounds/kerning data.
+* No AVM action is executed, no glyph is rasterised, no atlas or renderable
+  display list is built, and no frame/pixel/Azahar/hardware result is claimed.

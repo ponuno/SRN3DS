@@ -98,6 +98,14 @@ typedef struct {
     MenuSwfName names[MENU_SWF_MAX_NAMES];
 } MenuSwfSummary;
 
+typedef struct {
+    MenuSwfHeader header;
+    const uint8_t *body;  /* SWF body after the 8-byte file header */
+    size_t body_len;
+    size_t tag_offset;    /* offset of the first tag inside body */
+    uint8_t *owned;       /* non-NULL only for CWS */
+} MenuSwfView;
+
 const char *menu_swf_format_name(MenuSwfFormat format);
 const char *menu_swf_status_name(MenuSwfStatus status);
 
@@ -108,6 +116,15 @@ const char *menu_swf_status_name(MenuSwfStatus status);
 BsaStatus menu_swf_header_parse(const uint8_t *data, size_t available,
                                 uint32_t file_bytes, MenuSwfHeader *out,
                                 char *reason, size_t reason_cap);
+
+/* Open the container and validate the frame header.  FWS points into `data`;
+ * CWS owns a temporary expanded body that must be released with
+ * menu_swf_view_close().  `view->tag_offset` is the first tag inside
+ * `view->body`. */
+MenuSwfStatus menu_swf_view_open(const uint8_t *data, size_t size,
+                                 MenuSwfView *view, char *reason,
+                                 size_t reason_cap);
+void menu_swf_view_close(MenuSwfView *view);
 
 /* Validate the container and walk the top-level tag stream.  CWS is expanded
  * with a hard cap of `declared_bytes - 8`; the stream must be one complete zlib

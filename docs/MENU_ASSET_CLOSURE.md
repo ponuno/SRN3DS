@@ -128,5 +128,6 @@ Exact shim/renderer work:
 a bounded C BSA reader, the measured Interface-then-Update order,
 `Interface/StartMenu.swf` copied into guest memory within a byte budget, and
 SWF FWS/CWS/ZWS header checks.  `docs/MENU_SWF.md` adds a bounded CWS/tag/name
-summary (the CWS body is inflated only to walk tags).  Neither builds a display
-list, runs AVM, decodes glyphs or draws the menu.
+summary (the CWS body is inflated only to walk tags) plus bounded display-state
+snapshots and `DefineFont3` metrics.  None of this builds a renderable display
+list, runs AVM, rasterises glyphs or draws the menu.

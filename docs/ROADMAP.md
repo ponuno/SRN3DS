@@ -180,6 +180,12 @@ read stage without fake successes. *Not met.*
       `DefineSprite` walk, counts and bounded ExportAssets/ImportAssets/
       DefineFontName names; real movie reports 1,186 tags and 52 names. No
       display list, AVM or draw. See `docs/MENU_SWF.md`.
+- [x] Bounded SWF display-state snapshots and DefineFont3 metrics:
+      PlaceObject2/3, RemoveObject2, per-ShowFrame depth-ordered objects,
+      71 sprite summaries, one selected sprite timeline, and the 243-glyph
+      code/advance/bounds/kerning tables; malformed/AVM2/DefineFont4 paths refuse
+      by name. Still no renderable display list, AVM execution or draw.
+      See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer
