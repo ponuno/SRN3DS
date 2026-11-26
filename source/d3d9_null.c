@@ -64,7 +64,7 @@ static void null_texture_delete(void *ctx,void *native){
     if(!t){null_log("ReleaseTexture","null native handle");return;}
     free(t);++s->texture_deletes;
 }
-typedef struct {unsigned edge,levels,format,face_uploads;} NullCube;
+typedef struct {unsigned edge,levels,format,face_uploads;uint8_t *face_pixels[D9_CUBE_FACES];} NullCube;
 static int null_cube_create(void *ctx,unsigned edge,unsigned levels,unsigned format,void **native){
     D9NullStats *s=stats(ctx);
     if(!native||!pow2(edge)||edge<8||edge>1024||!levels||levels>11){
@@ -92,7 +92,7 @@ static int null_cube_delete(void *ctx,void *native){
 /* Cube-face render target recording.  The face view owns only a CPU colour
  * buffer sized to the level (enough for Clear/bind recording) and a marker;
  * the cube remains the owner of the six real face stores. */
-typedef struct {NullTarget base;unsigned face,level,depth_flags;} NullCubeFace;
+typedef struct {NullTarget base;unsigned face,level,depth_flags;NullCube *cube;} NullCubeFace;
 static int null_cube_face_create(void *ctx,void *native_cube,unsigned face,
                                  unsigned level,unsigned depth_flags,void **native){
     D9NullStats *s=stats(ctx);NullCube *c=native_cube;
@@ -105,13 +105,16 @@ static int null_cube_face_create(void *ctx,void *native_cube,unsigned face,
     f->base.w=f->base.h=edge;f->base.format=c->format;f->base.kind=1;
     f->base.pixels=calloc((size_t)edge*edge,4);
     if(!f->base.pixels){free(f);null_log("GetCubeMapSurface","out of memory");return -3;}
-    f->face=face;f->level=level;f->depth_flags=depth_flags;
+    f->face=face;f->level=level;f->depth_flags=depth_flags;f->cube=c;
+    if(level==0)c->face_pixels[face]=f->base.pixels;
     *native=f;++s->cube_face_creates;
     s->last_cube_face=face;s->last_cube_level=level;s->last_cube_depth_flags=depth_flags;
     return 0;
 }
 static void null_cube_face_delete(void *ctx,void *native){
     D9NullStats *s=stats(ctx);NullCubeFace *f=native;if(!f)return;
+    if(f->cube&&f->level==0&&f->cube->face_pixels[f->face]==f->base.pixels)
+        f->cube->face_pixels[f->face]=NULL;
     free(f->base.pixels);free(f);++s->cube_face_deletes;
 }
 typedef struct {unsigned w,h,depth,levels,uploads;} NullVolume;
@@ -205,27 +208,34 @@ static int cube_coord(int c,unsigned edge,unsigned address){
     int period=(int)edge*2;c%=period;if(c<0)c+=period; /* MIRROR */
     return c>=(int)edge?period-1-c:c;
 }
-static int null_cube_texel(const D9CubeView *cube,unsigned face,float u,float v,
-                           unsigned address_u,unsigned address_v,uint32_t *out){
-    if(!cube||!cube->pixels||face>=6u||!cube->edge||!cube->levels||!out)return -1;
-    int x=cube_coord((int)floorf(u*(float)cube->edge),(unsigned)cube->edge,address_u);
-    int y=cube_coord((int)floorf(v*(float)cube->edge),(unsigned)cube->edge,address_v);
-    const uint8_t *base=cube->pixels+(size_t)face*cube->face_bytes;
-    if(cube->format==D9_A8R8G8B8||cube->format==D9_X8R8G8B8){
-        const uint8_t *p=base+(size_t)y*cube->level_pitch[0]+(size_t)x*4u;
+static int null_cube_texel_raw(const uint8_t *base,unsigned edge,size_t pitch,
+                               unsigned format,float u,float v,
+                               unsigned address_u,unsigned address_v,uint32_t *out){
+    if(!base||!edge||!pitch||!out)return -1;
+    int x=cube_coord((int)floorf(u*(float)edge),(unsigned)edge,address_u);
+    int y=cube_coord((int)floorf(v*(float)edge),(unsigned)edge,address_v);
+    if(format==D9_A8R8G8B8||format==D9_X8R8G8B8){
+        const uint8_t *p=base+(size_t)y*pitch+(size_t)x*4u;
         *out=(uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|
-             ((uint32_t)(cube->format==D9_X8R8G8B8?255u:p[3])<<24);
+             ((uint32_t)(format==D9_X8R8G8B8?255u:p[3])<<24);
         return 0;
     }
-    unsigned block=cube->format==D9_DXT1?8u:
-                   (cube->format==D9_DXT3||cube->format==D9_DXT5)?16u:0u;
+    unsigned block=format==D9_DXT1?8u:
+                   (format==D9_DXT3||format==D9_DXT5)?16u:0u;
     if(!block)return -1;
-    const uint8_t *bp=base+(size_t)(y/4)*cube->level_pitch[0]+(size_t)(x/4)*block;
+    const uint8_t *bp=base+(size_t)(y/4)*pitch+(size_t)(x/4)*block;
     uint8_t rgba[64];
-    if(d9_bc_decode_block(cube->format,bp,block,rgba))return -1;
+    if(d9_bc_decode_block(format,bp,block,rgba))return -1;
     *out=(uint32_t)rgba[0]|((uint32_t)rgba[1]<<8)|((uint32_t)rgba[2]<<16)|
          ((uint32_t)rgba[3]<<24);
     return 0;
+}
+static int null_cube_texel(const D9CubeView *cube,unsigned face,float u,float v,
+                           unsigned address_u,unsigned address_v,uint32_t *out){
+    if(!cube||!cube->pixels||face>=6u||!cube->edge||!cube->levels||!out)return -1;
+    const uint8_t *base=cube->pixels+(size_t)face*cube->face_bytes;
+    return null_cube_texel_raw(base,cube->edge,cube->level_pitch[0],cube->format,
+                               u,v,address_u,address_v,out);
 }
 static int null_draw_cube(void *ctx,const D9ColorVertex *v,size_t n,
                           const unsigned *faces,const D9Matrix *clip,
@@ -243,10 +253,18 @@ static int null_draw_cube(void *ctx,const D9ColorVertex *v,size_t n,
         null_log("DrawPrimitive","null cube sampling supports A8/X8/DXT1/3/5 level 0");return -1;
     }
     uint32_t samples[3]={0};unsigned last_faces[3]={0};
+    NullCube *nc=(NullCube *)cube->native;
     for(size_t i=0;i<n;++i){
         if(faces[i]>=6u){null_log("DrawPrimitive","cube face index is outside 0..5");return -1;}
-        uint32_t texel=0;
-        if(null_cube_texel(cube,faces[i],v[i].u,v[i].v,st->address_u,st->address_v,&texel)){
+        uint32_t texel=0;int trc;
+        if(nc&&nc->face_pixels[faces[i]])
+            trc=null_cube_texel_raw(nc->face_pixels[faces[i]],nc->edge,
+                                    (size_t)nc->edge*4u,nc->format,
+                                    v[i].u,v[i].v,st->address_u,st->address_v,&texel);
+        else
+            trc=null_cube_texel(cube,faces[i],v[i].u,v[i].v,
+                                st->address_u,st->address_v,&texel);
+        if(trc){
             null_log("DrawPrimitive","cube face/texel sample failed");return -1;
         }
         if(i<3){samples[i]=texel;last_faces[i]=faces[i];}

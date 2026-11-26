@@ -38,6 +38,7 @@ typedef struct {
 typedef struct {
     D9Handle id;unsigned w,h,native_w,native_h,format,lockable;size_t bytes;void *native;
     int is_cube_face; /* native is a backend cube-face view, not a 2D target */
+    D9Handle cube;unsigned cube_face,cube_level;
 } Target;
 typedef struct {D9Handle id;unsigned w,h,format;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
@@ -220,6 +221,10 @@ static void release_cube_face_targets(D9Device *d,CubeTexture *c){
             destroy_target_slot(d,&d->targets[i]);break;
         }
     }
+    /* The face views carried the rendered contents.  If a release fails and the
+     * cube stays alive, it must not remain advertised as sample-ready. */
+    if(c->usage&D9_USAGE_RENDERTARGET)
+        for(unsigned level=0;level<c->levels;++level){c->level[level].face_mask=0;c->level[level].uploaded=0;}
 }
 int d9_destroy_device_ex(D9Device *d){
     if(!d)return D9_INVALID;d->teardown=1;
@@ -310,6 +315,21 @@ static int subtexture_commit_ready(D9Device *d,D9Handle h,void *native,size_t gp
     D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
     if(!e||!e->has_gpu||e->gpu_ready)return D9_OK;
     return d9_texcache_commit_upload(&d->tex_cache,h,native,gpu,0)==D9TEXCACHE_OK?D9_OK:D9_BACKEND;
+}
+/* A render-target cube face becomes sample-ready when the face target is
+ * selected (SetRenderTarget), cleared, or written.  There is no CPU upload in
+ * that path; marking the sixth level-0 face commits the same texcache native
+ * that a CPU upload would have committed. */
+static void cube_face_mark_ready(D9Device *d,D9Handle h,unsigned face,unsigned level){
+    CubeTexture *c=cube_texture(d,h);
+    if(!d||!c||face>=D9_CUBE_FACES||level>=c->levels)return;
+    if(!(c->usage&D9_USAGE_RENDERTARGET)||c->cpu_only)return;
+    if(!c->face_target[face][level])return;
+    CubeLevel *l=&c->level[level];
+    l->face_mask|=1u<<face;
+    l->uploaded=1;
+    if(level==0&&l->face_mask==((1u<<D9_CUBE_FACES)-1u)&&c->native)
+        (void)subtexture_commit_ready(d,h,c->native,c->gpu_bytes);
 }
 int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned levels,
                          unsigned pool,unsigned usage,int disposable,D9Handle *out){
@@ -767,11 +787,21 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
     }
     if(h){
         CubeTexture *c=cube_texture(d,h);
-        if(!c||c->cpu_only||!c->native||c->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u))
+        if(!c||c->cpu_only||!c->native){
+            set_diagnosis(d,"cube texture has no GPU native; CPU-only cubes cannot be sampled");
             return D9_INVALID;
+        }
+        if(c->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u)){
+            set_diagnosis(d,(c->usage&D9_USAGE_RENDERTARGET)?
+                "render-target cube is incomplete; render all six faces before binding":
+                "cube texture is incomplete; upload all six faces before binding");
+            return D9_INVALID;
+        }
         D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
         if(!e||!e->has_gpu||!e->gpu_ready){
-            set_diagnosis(d,"cube texture is not cache-resident; cube rehydration is not implemented");
+            set_diagnosis(d,(c->usage&D9_USAGE_RENDERTARGET)?
+                "render-target cube is not ready; face targets were not committed":
+                "cube texture is not cache-resident; cube rehydration is not implemented");
             return D9_INVALID;
         }
         d9_texcache_touch(&d->tex_cache,h);
@@ -1018,7 +1048,7 @@ int d9_cube_face_target(D9Device *d,D9Handle h,unsigned face,unsigned level,
         return D9_BACKEND;
     }
     D9Handle id=d->next++;
-    *slot=(Target){id,edge,edge,edge,edge,c->format,0,bytes,native,1};
+    *slot=(Target){id,edge,edge,edge,edge,c->format,0,bytes,native,1,h,face,level};
     d->target_used+=bytes;
     c->face_target[face][level]=id;
     *out=id;
@@ -1145,7 +1175,9 @@ int d9_set_render_target(D9Device *d,D9Handle h){
         int vrc=apply_target_viewport(d,t);
         if(vrc)return vrc;
     }
-    d->target=h;return D9_OK;
+    d->target=h;
+    if(t&&t->is_cube_face)cube_face_mark_ready(d,t->cube,t->cube_face,t->cube_level);
+    return D9_OK;
 }
 D9Handle d9_get_render_target(const D9Device *d){return d?d->target:0;}
 int d9_render_target_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height,
@@ -1257,7 +1289,9 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
         }
         int rc=d->ops.target_write(d->ctx,t->native,native,npitch,t->native_w,t->native_h);
         free(native);
-        return rc?D9_BACKEND:D9_OK;
+        if(rc)return D9_BACKEND;
+        if(t->is_cube_face)cube_face_mark_ready(d,t->cube,t->cube_face,t->cube_level);
+        return D9_OK;
     }
     if(!d->ops.target_read||!d->ops.target_write)return D9_BACKEND;
     if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||src_pitch<(size_t)w*4)return D9_INVALID;
@@ -1274,7 +1308,9 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
                (const uint8_t *)src+(size_t)yy*src_pitch,(size_t)w*4);
     int rc=d->ops.target_write(d->ctx,t->native,full,pitch,t->w,t->h);
     free(full);
-    return rc?D9_BACKEND:D9_OK;
+    if(rc)return D9_BACKEND;
+    if(t->is_cube_face)cube_face_mark_ready(d,t->cube,t->cube_face,t->cube_level);
+    return D9_OK;
 }
 int d9_release_render_target(D9Device *d,D9Handle h){Target *t=target(d,h);if(!t||!d||d->scene||d->teardown||h==d->back_target||t->is_cube_face)return D9_INVALID;
     destroy_target_slot(d,t);return D9_OK;}
@@ -1901,6 +1937,7 @@ int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
     if(t&&want_clear&&d->ops.target_clear(d->ctx,t->native,color)){
         d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
     }
+    if(t&&t->is_cube_face)cube_face_mark_ready(d,t->cube,t->cube_face,t->cube_level);
     return D9_OK;
 }
 int d9_begin_scene(D9Device *d,uint32_t argb){return d9_begin_scene_ex(d,argb,1);}

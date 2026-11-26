@@ -2296,7 +2296,11 @@ static uint32_t bind_texture_obj(unsigned stage,Obj *o){
     if(o&&o->kind==CUBE)rc=d9_bind_cube_texture(g.device,stage,o->handle);
     else if(o&&o->kind==VOLUME)rc=d9_bind_volume_texture(g.device,stage,o->handle);
     else rc=d9_bind_texture(g.device,stage,o?o->handle:0);
-    if(rc)return rc;
+    if(rc){
+        const char *why=d9_last_draw_diagnostic(g.device);
+        if(o&&o->kind==CUBE&&why&&*why)d3d_fail("SetTexture",why,hr(rc));
+        return rc;
+    }
     if(o&&o->kind==CUBE){
         bind(stage?&g.cube1:&g.cube,o);bind(stage?&g.tex1:&g.tex,NULL);bind(stage?&g.volume1:&g.volume,NULL);
     }else if(o&&o->kind==VOLUME){
@@ -2311,7 +2315,7 @@ static void texture(CPU *c){
     if(addr){o=obj(addr,TEX);if(!o)o=obj(addr,CUBE);if(!o)o=obj(addr,VOLUME);}
     if(!obj(A(0),DEVICE)||(addr&&!o)||g.phase==2)RET(INVALID,3);
     int rc=bind_texture_obj(A(1),o);
-    if(rc==D9_UNSUPPORTED)d3d_log("SetTexture","unsupported texture unit or non-2D sampling");
+    if(rc==D9_UNSUPPORTED&&!(o&&o->kind==CUBE))d3d_log("SetTexture","unsupported texture unit or non-2D sampling");
     RET(hr(rc),3);}
 static void get_texture(CPU *c){
     uint32_t out=A(2);

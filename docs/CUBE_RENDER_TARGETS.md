@@ -542,10 +542,60 @@ format/pool/usage refusals, and unchanged caps/SM3/T&L.
 
 ### Remaining
 
-- Cube sampling/draw: an RT cube is not yet marked sample-ready and
-  `draw_cube` is still NULL on the PICA backend. `SetTexture` with an RT cube
-  therefore remains a named refusal rather than a silent substitute.
+- Cube sampling/draw: RT-cube sampling readiness is implemented in section 14;
+  the PICA backend still has no `draw_cube`, so a draw with a bound RT cube is
+  a named `D3DERR_NOTAVAILABLE` refusal (never a face-0 substitute).
 - The full TESV engine path/census still has to reach `CreateCubeTexture` and
   the cube pass; no engine census was run for this layer.
 - No Azahar or hardware run was performed. No frame or pixel-equivalence claim
   is made.
+
+## 14. RT-cube sampling readiness (2026-11-26)
+
+Rendering into a cube face now makes that face sample-ready without a CPU
+upload:
+
+- `Target` records the owning cube, face and level for every cube-face view.
+- `SetRenderTarget(faceSurface)`, `BeginScene`/`Clear` on a face, and
+  `d9_render_target_write` call `cube_face_mark_ready()`. It sets that level's
+  `face_mask` bit and `uploaded` marker. Once all six level-0 faces are marked,
+  the same texcache native is committed `gpu_ready` that a CPU upload would
+  have committed. Higher levels are not required for binding; level 0 is the
+  sampling level.
+- `d9_bind_cube_texture()` accepts the complete RT cube without requiring
+  `texture_upload_cube`. A partial RT cube is a named
+  `"render-target cube is incomplete; render all six faces before binding"`
+  refusal. The COM `SetTexture` path copies that diagnosis into
+  `d9_com_last_diagnostic()`.
+- Face-view destruction clears the RT face mask, so a failed cube release
+  cannot leave a cube advertised as sample-ready without its targets.
+- The null backend keeps a level-0 pointer to each face target's colour buffer
+  in `NullCube.face_pixels[6]`. Its `draw_cube` samples those buffers when
+  present, falling back to the core CPU face store for uploaded non-RT cubes.
+  Face order remains +X,-X,+Y,-Y,+Z,-Z and the sampled ARGB is the value written
+  by `Clear`.
+- PICA still has no `draw_cube`. `SetTexture` accepts the complete RT cube, and
+  the draw is refused by name with the existing
+  `"cube-map sampling requires a backend draw_cube callback"` diagnosis. No
+  face 0 is substituted.
+
+New `tests/cube_rt_sampling_smoke.c` (registered as `cube_rt_sampling`) creates
+a 16x16 A8 RT cube, selects and clears each face to +X red, -X green, +Y blue,
+-Y yellow, +Z magenta and -Z cyan, verifies `SetTexture` is refused until all
+six faces are ready, then draws six triangles with axis normals through the
+null backend and checks every sampled ARGB. It also covers the PICA-shape
+backend (`draw_cube=NULL`): the complete RT cube binds, the draw is
+`D3DERR_NOTAVAILABLE`, and no cube draw is recorded.
+
+- Targeted `cube_rt_sampling,cube_rt,cube_sampling,cube_volume_residency,
+  pica_cube_texture,com,render_texture`: **17 passed, 0 failed**.
+- Full suite: **119 passed, 0 failed**.
+- ARM `-Mode com -Isolated rt_sampling`: `.elf` 6,164,376 B SHA256
+  `a0f7452405b2be146209f907cdb68712ee35d97b0b8e46be7163512590b09199`;
+  `.3dsx` 911,164 B SHA256
+  `5b63742d2a3620b5a9e7d6377f24370461bb33eefa70cc2f3de3365a1167d4ce`;
+  `.text` 892,692 B.
+
+Remaining: PICA `draw_cube` (hardware cube sampling), texcache rehydration for
+evicted cube natives, the full TESV engine path/census, and Azahar/hardware
+proof. No frame is claimed.
