@@ -58,7 +58,9 @@ void d9_citro_close(D9Citro *c){
 }
 typedef struct {C3D_Tex tex;unsigned levels,format;} NativeTex;
 typedef struct {C3D_Tex tex;C3D_TexCube cube;unsigned edge,levels,format;} NativeCube;
-typedef struct {C3D_Tex tex;C3D_RenderTarget *target;NativeTex sample;unsigned w,h,format;} NativeTarget;
+typedef struct {C3D_RenderTarget *target;unsigned w,h,format;} NativeTargetHead;
+typedef struct {NativeTargetHead head;C3D_Tex tex;NativeTex sample;} NativeTarget;
+typedef struct {NativeTargetHead head;NativeCube *cube;unsigned face,level;} NativeCubeFace;
 static int tex_create_format(void *ctx,unsigned w,unsigned h,unsigned levels,
                              unsigned format,void **handle){
     (void)ctx;GPU_TEXCOLOR pfmt;
@@ -360,8 +362,8 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
     /* The retained back buffer and every explicit LDR target need a real depth
      * attachment: SetDepthStencilSurface/Clear(Z) and depth-tested draws must
      * reach hardware, not a bookkeeping flag. */
-    t->target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,GPU_RB_DEPTH24_STENCIL8);
-    if(!t->target){
+    t->head.target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,GPU_RB_DEPTH24_STENCIL8);
+    if(!t->head.target){
         fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed\n",w,h);
         C3D_TexDelete(&t->tex);free(t);return -1;
     }
@@ -370,14 +372,14 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
      * against garbage.  This is a private frame: the target is not linked to
      * either LCD, so FrameEnd performs no display transfer. */
     if(C3D_FrameBegin(C3D_FRAME_SYNCDRAW)){
-        if(C3D_FrameDrawOn(t->target))
-            C3D_RenderTargetClear(t->target,C3D_CLEAR_DEPTH|C3D_CLEAR_COLOR,0,0);
+        if(C3D_FrameDrawOn(t->head.target))
+            C3D_RenderTargetClear(t->head.target,C3D_CLEAR_DEPTH|C3D_CLEAR_COLOR,0,0);
         C3D_FrameEnd(0);
     }
     /* Sampling view: same C3D_Tex data, separate filter/wrap state.  The
      * target's own C3D_Tex owns the storage; the view is never deleted. */
     t->sample.tex=t->tex;t->sample.levels=1;
-    t->w=w;t->h=h;t->format=format;*native=t;return 0;
+    t->head.w=w;t->head.h=h;t->head.format=format;*native=t;return 0;
 }
 static void *target_texture(void *ctx,void *native){
     (void)ctx;NativeTarget *t=native;if(!t)return NULL;
@@ -385,29 +387,64 @@ static void *target_texture(void *ctx,void *native){
 }
 static int target_bind(void *ctx,void *native){
     D9Citro *c=ctx;if(!c||!c->scene)return -1;
-    C3D_RenderTarget *target=native?((NativeTarget *)native)->target:c->target;
+    NativeTargetHead *h=native;
+    C3D_RenderTarget *target=h?h->target:c->target;
     if(!target||!C3D_FrameDrawOn(target))return -1;
     c->active_target=native;return 0;
 }
 static int target_clear(void *ctx,void *native,uint32_t argb){
-    D9Citro *c=ctx;NativeTarget *t=native;if(!c||!c->scene||!t)return -1;
+    D9Citro *c=ctx;NativeTargetHead *t=native;if(!c||!c->scene||!t)return -1;
     C3D_RenderTargetClear(t->target,C3D_CLEAR_COLOR,(argb<<8)|(argb>>24),0);return 0;
 }
 static int target_read(void *ctx,void *native,void *dst,size_t pitch,
                        unsigned x,unsigned y,unsigned w,unsigned h){
-    D9Citro *c=ctx;NativeTarget *t=native;if(!c||!t||!dst||c->scene||x>t->w||y>t->h||w>t->w-x||h>t->h-y)return -1;
-    size_t bytes=(size_t)t->w*t->h*4;if(bytes!=t->tex.size)return -1;
+    D9Citro *c=ctx;NativeTarget *t=native;if(!c||!t||!dst||c->scene||x>t->head.w||y>t->head.h||w>t->head.w-x||h>t->head.h-y)return -1;
+    size_t bytes=(size_t)t->head.w*t->head.h*4;if(bytes!=t->tex.size)return -1;
     C3D_FrameSync();uint8_t *tmp=linearAlloc(bytes);if(!tmp)return -1;
     C3D_SyncTextureCopy((u32 *)t->tex.data,0,(u32 *)tmp,0,(u32)bytes,8);
     GSPGPU_InvalidateDataCache(tmp,bytes);
-    int rc=d9_unswizzle_rgba8(dst,pitch,tmp,t->w,t->h,t->format,x,y,w,h);
+    int rc=d9_unswizzle_rgba8(dst,pitch,tmp,t->head.w,t->head.h,t->head.format,x,y,w,h);
     linearFree(tmp);return rc;
 }
 static void target_delete(void *ctx,void *native){
     D9Citro *c=ctx;NativeTarget *t=native;if(!t)return;
     if(c->active_target==native)c->active_target=NULL;
-    C3D_FrameSync();if(t->target)C3D_RenderTargetDelete(t->target);
+    C3D_FrameSync();if(t->head.target)C3D_RenderTargetDelete(t->head.target);
     C3D_TexDelete(&t->tex);free(t);
+}
+/* Cube-face render target: a C3D_RenderTarget view over one face/level of an
+ * existing NativeCube.  It owns the render-target and depth attachment only;
+ * the cube texture owns the colour storage and stays alive until cube delete.
+ * PICA's API always has a depth attachment, so the D3D depth policy is D24S8. */
+static int cube_face_create(void *ctx,void *native_cube,unsigned face,
+                            unsigned level,unsigned depth_flags,void **native){
+    (void)ctx;(void)depth_flags;NativeCube *cube=native_cube;
+    if(!native||!cube||face>=D9_CUBE_FACES||level>=cube->levels)return -2;
+    NativeCubeFace *f=calloc(1,sizeof *f);if(!f)return -3;
+    f->head.target=C3D_RenderTargetCreateFromTex(&cube->tex,(GPU_TEXFACE)face,
+                                                 (int)level,GPU_RB_DEPTH24_STENCIL8);
+    if(!f->head.target){
+        fprintf(stderr,"[d3d9-citro] GetCubeMapSurface: face %u level %u render-target allocation failed\n",
+                face,level);
+        free(f);return -3;
+    }
+    unsigned edge=cube->edge>>level;if(!edge)edge=1;
+    f->head.w=f->head.h=edge;f->head.format=cube->format;
+    f->cube=cube;f->face=face;f->level=level;
+    /* Prime the private depth/colour view, matching the 2D target_create path.
+     * The cube face is not linked to either LCD, so FrameEnd displays nothing. */
+    if(C3D_FrameBegin(C3D_FRAME_SYNCDRAW)){
+        if(C3D_FrameDrawOn(f->head.target))
+            C3D_RenderTargetClear(f->head.target,C3D_CLEAR_DEPTH|C3D_CLEAR_COLOR,0,0);
+        C3D_FrameEnd(0);
+    }
+    *native=f;return 0;
+}
+static void cube_face_delete(void *ctx,void *native){
+    D9Citro *c=ctx;NativeCubeFace *f=native;if(!f)return;
+    if(c&&c->active_target==native)c->active_target=NULL;
+    C3D_FrameSync();if(f->head.target)C3D_RenderTargetDelete(f->head.target);
+    free(f);
 }
 /* Whole-surface write-back for the lockable back buffer.  The source is
  * top-first BGRA; PICA RGBA8 storage is tiled with a bottom-left origin, so the
@@ -416,11 +453,11 @@ static void target_delete(void *ctx,void *native){
 static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
                         unsigned w,unsigned h){
     D9Citro *c=ctx;NativeTarget *t=native;
-    if(!c||!t||!bgra||c->scene||w!=t->w||h!=t->h||pitch<(size_t)w*4)return -1;
-    size_t bytes=(size_t)t->w*t->h*4;if(bytes!=t->tex.size)return -1;
+    if(!c||!t||!bgra||c->scene||w!=t->head.w||h!=t->head.h||pitch<(size_t)w*4)return -1;
+    size_t bytes=(size_t)t->head.w*t->head.h*4;if(bytes!=t->tex.size)return -1;
     C3D_FrameSync();
     uint8_t *tmp=linearAlloc(bytes);if(!tmp)return -1;
-    if(d9_swizzle_rgba8(tmp,bytes,bgra,pitch,w,h,t->format)){linearFree(tmp);return -1;}
+    if(d9_swizzle_rgba8(tmp,bytes,bgra,pitch,w,h,t->head.format)){linearFree(tmp);return -1;}
     t->tex.maxLevel=0;t->tex.minLevel=0;
     C3D_TexLoadImage(&t->tex,tmp,GPU_TEXFACE_2D,0);
     C3D_TexFlush(&t->tex);
@@ -432,7 +469,7 @@ static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
 static int depth_clear(void *ctx,unsigned flags,uint32_t depth_stencil){
     D9Citro *c=ctx;
     if(!c||!c->scene||!(flags&6u)||(flags&~7u))return -1;
-    C3D_RenderTarget *rt=c->active_target?((NativeTarget *)c->active_target)->target:c->target;
+    C3D_RenderTarget *rt=c->active_target?((NativeTargetHead *)c->active_target)->target:c->target;
     if(!rt)return -1;
     C3D_RenderTargetClear(rt,C3D_CLEAR_DEPTH,0,depth_stencil);
     return 0;
@@ -456,7 +493,7 @@ static int target_viewport_scaled(void *ctx,unsigned logical_w,unsigned logical_
     D9Citro *c=ctx;
     if(!c||!c->scene||!logical_w||!logical_h||!native_w||!native_h||
        native_w>logical_w||native_h>logical_h)return -1;
-    NativeTarget *t=c->active_target;
+    NativeTargetHead *t=c->active_target;
     if(!t||native_w>t->w||native_h>t->h)return -1;
     C3D_SetViewport(0,0,native_w,native_h);
     return 0;
@@ -478,7 +515,7 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     if(src->x+src->width>src->surface.width||src->y+src->height>src->surface.height||
        dst->x+dst->width>dst->surface.width||dst->y+dst->height>dst->surface.height)
         return D9_BLIT_RECT;
-    NativeTarget *native=dst->surface.native;
+    NativeTargetHead *native=dst->surface.native;
     C3D_RenderTarget *rt=native?native->target:c->target;
     C3D_Tex *stex=(C3D_Tex *)src->surface.native;
     if(!rt||!stex)return D9_BLIT_BACKEND;
@@ -557,7 +594,7 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     stex->param=saved_param;
     d9_pica_citro3d_restore_tev();
     if(own_frame){C3D_FrameEnd(0);return D9_BLIT_OK;}
-    C3D_RenderTarget *prev=c->active_target?((NativeTarget *)c->active_target)->target:c->target;
+    C3D_RenderTarget *prev=c->active_target?((NativeTargetHead *)c->active_target)->target:c->target;
     if(prev&&prev!=rt&&!C3D_FrameDrawOn(prev))return D9_BLIT_BACKEND;
     return D9_BLIT_OK;
 }
@@ -565,4 +602,4 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
     target_write,depth_clear,target_viewport,draw_menu,target_texture,
     cube_create,cube_upload,target_viewport_scaled,NULL,NULL,NULL,cube_delete,
-    tex_create_format,tex_upload_format};return &ops;}
+    cube_face_create,cube_face_delete,tex_create_format,tex_upload_format};return &ops;}

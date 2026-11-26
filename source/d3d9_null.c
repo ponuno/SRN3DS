@@ -6,7 +6,7 @@
 #include <string.h>
 
 typedef struct {unsigned w,h,levels,format;} NullTex;
-typedef struct {unsigned w,h,format;uint8_t *pixels;} NullTarget;
+typedef struct {unsigned w,h,format;uint8_t *pixels;unsigned kind;} NullTarget;
 static D9NullStats g;
 /* The null backend owns no LCD, but Present's screen blit has a destination.
  * Keeping it as real BGRA bytes lets host tests verify the retained-back-buffer
@@ -64,15 +64,16 @@ static void null_texture_delete(void *ctx,void *native){
     if(!t){null_log("ReleaseTexture","null native handle");return;}
     free(t);++s->texture_deletes;
 }
-typedef struct {unsigned edge,levels,face_uploads;} NullCube;
+typedef struct {unsigned edge,levels,format,face_uploads;} NullCube;
 static int null_cube_create(void *ctx,unsigned edge,unsigned levels,unsigned format,void **native){
-    D9NullStats *s=stats(ctx);(void)format;
+    D9NullStats *s=stats(ctx);
     if(!native||!pow2(edge)||edge<8||edge>1024||!levels||levels>11){
         null_log("CreateCubeTexture","only power-of-two 8..1024 cube edges with 1..11 levels are implemented");
         return -1;
     }
     NullCube *c=calloc(1,sizeof *c);if(!c)return -1;
-    c->edge=edge;c->levels=levels;*native=c;++s->cube_creates;return 0;
+    c->edge=edge;c->levels=levels;c->format=format;*native=c;++s->cube_creates;
+    s->last_cube_format=format;return 0;
 }
 static int null_cube_upload(void *ctx,void *native,unsigned face,unsigned level,
                             const void *data,size_t bytes){
@@ -87,6 +88,31 @@ static int null_cube_delete(void *ctx,void *native){
     D9NullStats *s=stats(ctx);NullCube *c=native;
     if(!c){null_log("ReleaseCubeTexture","null native handle");return 0;}
     free(c);++s->texture_deletes;return 0;
+}
+/* Cube-face render target recording.  The face view owns only a CPU colour
+ * buffer sized to the level (enough for Clear/bind recording) and a marker;
+ * the cube remains the owner of the six real face stores. */
+typedef struct {NullTarget base;unsigned face,level,depth_flags;} NullCubeFace;
+static int null_cube_face_create(void *ctx,void *native_cube,unsigned face,
+                                 unsigned level,unsigned depth_flags,void **native){
+    D9NullStats *s=stats(ctx);NullCube *c=native_cube;
+    if(!native||!c||face>=D9_CUBE_FACES||level>=c->levels){
+        null_log("GetCubeMapSurface","invalid cube, face or level");
+        return -2;
+    }
+    unsigned edge=c->edge>>level;if(!edge)edge=1;
+    NullCubeFace *f=calloc(1,sizeof *f);if(!f)return -3;
+    f->base.w=f->base.h=edge;f->base.format=c->format;f->base.kind=1;
+    f->base.pixels=calloc((size_t)edge*edge,4);
+    if(!f->base.pixels){free(f);null_log("GetCubeMapSurface","out of memory");return -3;}
+    f->face=face;f->level=level;f->depth_flags=depth_flags;
+    *native=f;++s->cube_face_creates;
+    s->last_cube_face=face;s->last_cube_level=level;s->last_cube_depth_flags=depth_flags;
+    return 0;
+}
+static void null_cube_face_delete(void *ctx,void *native){
+    D9NullStats *s=stats(ctx);NullCubeFace *f=native;if(!f)return;
+    free(f->base.pixels);free(f);++s->cube_face_deletes;
 }
 typedef struct {unsigned w,h,depth,levels,uploads;} NullVolume;
 static int null_volume_create(void *ctx,unsigned w,unsigned h,unsigned depth,
@@ -253,19 +279,23 @@ static int null_target_create(void *ctx,unsigned w,unsigned h,unsigned format,vo
     }
     NullTarget *t=calloc(1,sizeof *t);if(!t)return -1;
     t->pixels=calloc((size_t)w*h,4);if(!t->pixels){free(t);null_log("CreateRenderTarget","out of memory");return -1;}
-    t->w=w;t->h=h;t->format=format;*native=t;++s->target_creates;return 0;
+    t->w=w;t->h=h;t->format=format;t->kind=0;*native=t;++s->target_creates;return 0;
 }
 static void null_target_delete(void *ctx,void *native){
     D9NullStats *s=stats(ctx);NullTarget *t=native;if(!t)return;free(t->pixels);free(t);++s->target_deletes;
 }
 static int null_target_bind(void *ctx,void *native){
     D9NullStats *s=stats(ctx);if(!s->scene){null_log("SetRenderTarget","target bind requires an active scene");return -1;}
-    s->target_active=native!=NULL;++s->target_binds;return 0;
+    s->target_active=native!=NULL;++s->target_binds;
+    if(native&&((NullTarget *)native)->kind==1)++s->cube_face_binds;
+    return 0;
 }
 static int null_target_clear(void *ctx,void *native,uint32_t argb){
     D9NullStats *s=stats(ctx);NullTarget *t=native;if(!s->scene||!t)return -1;
     for(size_t i=0;i<(size_t)t->w*t->h;++i)((uint32_t *)t->pixels)[i]=argb;
-    s->last_clear_argb=argb;++s->target_clears;return 0;
+    s->last_clear_argb=argb;++s->target_clears;
+    if(t->kind==1)++s->cube_face_clears;
+    return 0;
 }
 static int null_target_read(void *ctx,void *native,void *dst,size_t pitch,
                             unsigned x,unsigned y,unsigned w,unsigned h){
@@ -464,6 +494,7 @@ static const D9Backend backend={null_texture_create,null_texture_upload,null_tex
     null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
     null_cube_create,null_cube_upload,null_target_viewport_scaled,
     null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete,
+    null_cube_face_create,null_cube_face_delete,
     null_texture_create_format,null_texture_upload_format};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}

@@ -844,6 +844,8 @@ static void stretch_rect(CPU *c){
     if(d!=g.back&&!d->handle)
         RET(stretch_reject(INVALID,"destination surface must be a render target or the back buffer"),6);
     if(s==d)RET(stretch_reject(INVALID,"source and destination must be different surfaces"),6);
+    if(s->view_cube||d->view_cube)
+        RET(stretch_reject(UNAVAILABLE,"cube-face render targets are supported by SetRenderTarget, not StretchRect"),6);
     if(s->lock_guest||d->lock_guest)
         RET(stretch_reject(INVALID,"a locked surface cannot participate in StretchRect"),6);
     if(s->format!=d->format){
@@ -1298,13 +1300,38 @@ static uint32_t cube_create_obj(uint32_t device,unsigned edge,unsigned levels,un
                                 unsigned format,unsigned pool,uint32_t *out){
     if(out)*out=0;
     if(!g.mem||!g.device||!out||g.phase||!obj(device,DEVICE))return INVALID;
-    if(usage&~0x00220200u){
+    if(usage&~0x00220201u){
         char why[96];snprintf(why,sizeof why,"unsupported cube texture usage 0x%x",usage);
         d3d_fail("CreateCubeTexture",why,UNAVAILABLE);return UNAVAILABLE;
     }
     if(pool>2)return UNAVAILABLE;
+    unsigned storage=format;
+    if(usage&D9_USAGE_RENDERTARGET){
+        if(usage!=D9_USAGE_RENDERTARGET){
+            d3d_fail("CreateCubeTexture","D3DUSAGE_RENDERTARGET cubes cannot be combined with other usage bits",UNAVAILABLE);
+            return UNAVAILABLE;
+        }
+        if(pool!=D9_POOL_DEFAULT){
+            d3d_fail("CreateCubeTexture","render-target cubes require D3DPOOL_DEFAULT",UNAVAILABLE);
+            return UNAVAILABLE;
+        }
+        if(format==0x71u||format==0x72u){ /* A16B16G16R16F / A32B32G32R32F */
+            if(!g.hdr_ldr_fallback){
+                d3d_fail("CreateCubeTexture","float/HDR cube render targets are not implemented; "
+                         "set TESV_D3D9_HDR_LDR_FALLBACK=1 for the measurement-only A8R8G8B8 fallback",UNAVAILABLE);
+                return UNAVAILABLE;
+            }
+            storage=D9_A8R8G8B8;
+            trace_detail("MEASUREMENT ONLY: HDR cube target edge %u format 0x%x stored as A8R8G8B8",
+                         edge,format);
+        }else if(format!=D9_A8R8G8B8&&format!=D9_X8R8G8B8){
+            d3d_fail("CreateCubeTexture","render-target cubes require A8R8G8B8/X8R8G8B8 or the "
+                     "measurement-only 0x71/0x72 LDR fallback",UNAVAILABLE);
+            return UNAVAILABLE;
+        }
+    }
     if(g.next>=MAX_OBJECTS)return OUTMEM;
-    D9Handle h=0;int rc=d9_create_cube_texture_ex(g.device,edge,levels,format,pool,usage,&h);
+    D9Handle h=0;int rc=d9_create_cube_texture_ex(g.device,edge,levels,storage,pool,usage,&h);
     if(rc){
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"CreateCubeTexture: %s",
                  d9_last_draw_diagnostic(g.device));
@@ -1493,6 +1520,33 @@ static void cube_get_surface(CPU *c){
     Obj *t=obj(A(0),CUBE);uint32_t face=A(1),level=A(2),out=A(3);
     if(!t||face>=D9_CUBE_FACES||!ptr(out,4))RET(INVALID,4);
     M32(out)=0;
+    if(t->usage&D9_USAGE_RENDERTARGET){
+        if(g.phase){
+            d3d_fail("GetCubeMapSurface","cube-face target creation inside BeginScene/EndScene is not implemented",UNAVAILABLE);
+            RET(UNAVAILABLE,4);
+        }
+        unsigned edge;size_t pitch=0,bytes=0;
+        if(d9_cube_level_info(g.device,t->handle,level,&edge,&pitch,&bytes)){
+            d3d_log("GetCubeMapSurface","invalid cube mip level");RET(INVALID,4);
+        }
+        if(g.next>=MAX_OBJECTS)RET(OUTMEM,4);
+        D9Handle target=0;
+        int rc=d9_cube_face_target(g.device,t->handle,face,level,&target);
+        if(rc){
+            const char *why=d9_last_draw_diagnostic(g.device);
+            d3d_fail("GetCubeMapSurface",why&&*why?why:"cube-face render target creation failed",hr(rc));
+            RET(hr(rc),4);
+        }
+        Obj *o=new_obj(SURFACE);if(!o)RET(OUTMEM,4);
+        o->width=o->height=edge;o->format=t->format;o->usage=t->usage;o->pool=t->pool;
+        o->pitch=edge*4u;o->bytes=edge*edge*4u;o->handle=target;
+        o->is_view=1;o->view_cube=1;o->view_parent=t;o->view_face=face;o->view_level=level;
+        retain(t);M32(out)=o->guest;
+        trace_detail("Cube RT surface=0x%08lx cube=0x%08lx face=%lu level=%lu target=%lu %lux%lu",
+            (unsigned long)o->guest,(unsigned long)t->guest,(unsigned long)face,
+            (unsigned long)level,(unsigned long)target,(unsigned long)edge,(unsigned long)edge);
+        RET(OK,4);
+    }
     void *pixels=NULL;unsigned w=0,h=0;size_t pitch=0,bytes=0;
     int rc=d9_cube_face_level_view(g.device,t->handle,face,level,&pixels,&w,&h,&pitch,&bytes);
     if(rc){d3d_log("GetCubeMapSurface","invalid cube face or mip level");RET(INVALID,4);}

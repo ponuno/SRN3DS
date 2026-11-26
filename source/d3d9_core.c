@@ -9,7 +9,7 @@
 
 enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_VOLUMES=8,
       MAX_TEX_ENTRIES=MAX_TEXTURES+MAX_CUBES+MAX_VOLUMES,
-      MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+      MAX_TARGETS=32,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
 /* Bounded native storage for explicit LDR render targets.  The default is 256
  * so the measured TESV set fits the N3DS 6 MiB VRAM budget:
  *   5x1024 + 4x512 logical targets -> nine 256x256 targets
@@ -37,6 +37,7 @@ typedef struct {
 } Stream;
 typedef struct {
     D9Handle id;unsigned w,h,native_w,native_h,format,lockable;size_t bytes;void *native;
+    int is_cube_face; /* native is a backend cube-face view, not a 2D target */
 } Target;
 typedef struct {D9Handle id;unsigned w,h,format;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
@@ -56,6 +57,9 @@ typedef struct {
     uint8_t *pixels; /* face-major: 6 * face_bytes */
     void *native;
     CubeLevel level[MAX_LEVELS];
+    /* D3DUSAGE_RENDERTARGET: lazily created face/level render-target views.
+     * They are owned by this cube and are never released independently. */
+    D9Handle face_target[D9_CUBE_FACES][MAX_LEVELS];
 } CubeTexture;
 typedef struct {unsigned w,h,depth;size_t pitch,plane_bytes,bytes,offset;int uploaded;} VolumeLevel;
 typedef struct {
@@ -193,18 +197,45 @@ D9Handle d9_texture_render_target(const D9Device *d,D9Handle h){
 }
 static CubeTexture *cube_texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id==id)return &d->cubes[i];return NULL;}
 static VolumeTexture *volume_texture(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_VOLUMES;++i)if(d->volumes[i].id==id)return &d->volumes[i];return NULL;}
+/* Release one target slot.  A cube-face target owns only its backend view; the
+ * cube texture keeps the colour storage and is released separately. */
+static void destroy_target_slot(D9Device *d,Target *t){
+    if(!d||!t||!t->id)return;
+    if(d->target==t->id)d->target=0;
+    if(t->is_cube_face){
+        if(d->ops.target_delete_cube_face)d->ops.target_delete_cube_face(d->ctx,t->native);
+    }else if(d->ops.target_delete){
+        d->ops.target_delete(d->ctx,t->native);
+    }
+    d->target_used-=t->bytes;
+    memset(t,0,sizeof *t);
+}
+static void release_cube_face_targets(D9Device *d,CubeTexture *c){
+    if(!d||!c)return;
+    for(unsigned face=0;face<D9_CUBE_FACES;++face)for(unsigned level=0;level<MAX_LEVELS;++level){
+        D9Handle h=c->face_target[face][level];
+        if(!h)continue;
+        c->face_target[face][level]=0;
+        for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h){
+            destroy_target_slot(d,&d->targets[i]);break;
+        }
+    }
+}
 int d9_destroy_device_ex(D9Device *d){
     if(!d)return D9_INVALID;d->teardown=1;
     if(d->scene){d->ops.end(d->ctx);d->scene=0;}
+    /* Face render targets reference the cube texture's colour storage, so
+     * release their views before the texture cache deletes the cube native. */
+    for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id)
+        release_cube_face_targets(d,&d->cubes[i]);
     int rc=d9_texcache_destroy_ex(&d->tex_cache);
     if(rc!=D9TEXCACHE_OK)return D9_RELEASE_FAILED;
     for(unsigned i=0;i<MAX_BUFFERS;++i)free(d->buffers[i].data);
     /* Cube and volume guest pixels and native handles are owned by the texture
      * cache (d9_texcache_destroy_ex above); freeing the slots here would double
      * free every one of them. */
-    for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id){
-        if(d->ops.target_delete)d->ops.target_delete(d->ctx,d->targets[i].native);
-    }
+    for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id)
+        destroy_target_slot(d,&d->targets[i]);
     d->target_used=0;
     free(d);return D9_OK;
 }
@@ -540,6 +571,17 @@ int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
                         "this backend has no cube-map texture API");
         return D9_UNSUPPORTED;
     }
+    if(usage&D9_USAGE_RENDERTARGET){
+        if(pool!=D9_POOL_DEFAULT){
+            set_diagnosis(d,"D3DUSAGE_RENDERTARGET cube textures require D3DPOOL_DEFAULT");
+            return D9_INVALID;
+        }
+        if(format!=D9_A8R8G8B8&&format!=D9_X8R8G8B8){
+            set_diagnosis(d,"float/HDR cube render targets are not implemented; "
+                            "only A8R8G8B8/X8R8G8B8 storage exists");
+            return D9_UNSUPPORTED;
+        }
+    }
     if(d9_bc_block_bytes(format)&&edge<8u){
         set_diagnosis(d,"compressed cube faces below 8x8 are not implemented");
         return D9_UNSUPPORTED;
@@ -684,6 +726,11 @@ int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level){
 int d9_release_cube_texture(D9Device *d,D9Handle h){
     CubeTexture *c=cube_texture(d,h);
     if(!c||d->scene||d->teardown)return D9_INVALID;
+    /* Face targets reference the cube's colour storage; destroy their views
+     * before the texture cache releases the cube native.  A failed cache
+     * release leaves the cube alive, but a later GetCubeMapSurface recreates
+     * any view it still needs. */
+    release_cube_face_targets(d,c);
     int rc=d9_texcache_remove(&d->tex_cache,h);
     if(rc!=D9TEXCACHE_OK){
         if(rc==D9TEXCACHE_RELEASE_FAILED){
@@ -916,6 +963,67 @@ int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
     return D9_OK;
 }
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
+int d9_cube_face_target(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                        D9Handle *out){
+    if(out)*out=0;
+    CubeTexture *c=cube_texture(d,h);
+    if(!c||face>=D9_CUBE_FACES||level>=c->levels)return D9_INVALID;
+    if(c->face_target[face][level]){
+        *out=c->face_target[face][level];return D9_OK;
+    }
+    if(!(c->usage&D9_USAGE_RENDERTARGET)){
+        set_diagnosis(d,"cube was not created with D3DUSAGE_RENDERTARGET");
+        return D9_INVALID;
+    }
+    if(c->cpu_only||!c->native){
+        set_diagnosis(d,"a system-memory cube face has no render-target storage");
+        return D9_UNSUPPORTED;
+    }
+    if(c->format!=D9_A8R8G8B8&&c->format!=D9_X8R8G8B8){
+        set_diagnosis(d,"float/HDR cube render targets are not implemented");
+        return D9_UNSUPPORTED;
+    }
+    if(d->scene||d->teardown||!d->next){
+        set_diagnosis(d,"cube-face target creation inside BeginScene/EndScene is not implemented");
+        return D9_INVALID;
+    }
+    if(!d->ops.target_create_cube_face||!d->ops.target_delete_cube_face||
+       !d->ops.target_bind||!d->ops.target_clear){
+        set_diagnosis(d,"backend has no cube-face render-target callbacks; "
+                        "cube face 0 is not substituted");
+        return D9_UNSUPPORTED;
+    }
+    unsigned edge=c->level[level].w;
+    size_t bytes=(size_t)edge*edge*4u; /* native depth attachment, not colour */
+    if(budget_has_room(d,bytes))return D9_MEMORY;
+    Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
+    if(!slot)return D9_MEMORY;
+    void *native=NULL;
+    int rc=d->ops.target_create_cube_face(d->ctx,c->native,face,level,
+                                          D9_CUBE_FACE_DEPTH24_STENCIL8,&native);
+    if(rc||!native){
+        if(native&&d->ops.target_delete_cube_face)d->ops.target_delete_cube_face(d->ctx,native);
+        if(rc==-2){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube-face render target is unsupported at face %u level %u",face,level);
+            return D9_UNSUPPORTED;
+        }
+        if(rc==-3){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube-face render target allocation failed at face %u level %u (VRAM)",face,level);
+            return D9_MEMORY;
+        }
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "cube-face render target creation failed at face %u level %u",face,level);
+        return D9_BACKEND;
+    }
+    D9Handle id=d->next++;
+    *slot=(Target){id,edge,edge,edge,edge,c->format,0,bytes,native,1};
+    d->target_used+=bytes;
+    c->face_target[face][level]=id;
+    *out=id;
+    return D9_OK;
+}
 static Depth *depth_slot(D9Device *d,D9Handle h);
 static unsigned bounded_native_dim(unsigned v,unsigned cap){
     return v>cap?cap:v;
@@ -1168,10 +1276,8 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
     free(full);
     return rc?D9_BACKEND:D9_OK;
 }
-int d9_release_render_target(D9Device *d,D9Handle h){Target *t=target(d,h);if(!t||!d||d->scene||d->teardown||h==d->back_target)return D9_INVALID;
-    if(d->target==h)d->target=0;
-    if(d->ops.target_delete)d->ops.target_delete(d->ctx,t->native);
-    d->target_used-=t->bytes;memset(t,0,sizeof *t);return D9_OK;}
+int d9_release_render_target(D9Device *d,D9Handle h){Target *t=target(d,h);if(!t||!d||d->scene||d->teardown||h==d->back_target||t->is_cube_face)return D9_INVALID;
+    destroy_target_slot(d,t);return D9_OK;}
 int d9_backend_supports_lockable_back_buffer(const D9Backend *ops){
     return ops&&ops->target_create&&ops->target_delete&&ops->target_bind&&
            ops->target_clear&&ops->target_read&&ops->target_write&&ops->target_blit&&

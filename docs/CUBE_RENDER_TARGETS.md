@@ -429,7 +429,8 @@ of the lifted slice explains the NULL.
   +0x554 = (0, 5) cube, +0x5AC = (1, 5) render-target cube.
   D3DRTYPE_TEXTURE is 3 and D3DRTYPE_CUBETEXTURE is 5, so +0x5AC is the
   table CreateSurf needs for the water-reflection cube target.
-- _CED3E0 passes enderer+0x5AC to _CE9A40. That helper looks up the
+- _CED3E0 passes 
+enderer+0x5AC to _CE9A40. That helper looks up the
   requested format/type pair in the table and returns a format-descriptor
   pointer, or NULL when the table has no entry. _CED3E0 then reads
   [descriptor+0x0C] (the D3DFORMAT) before checking the pointer.
@@ -456,3 +457,87 @@ container `0xfb6070`/`0xfb6090` for a valid `this`/slot and return NULL only
 for the `-1`/small-integer sentinel — or give the group a valid dummy
 `Ni2DBuffer` (width/height 0). The guest-byte-only paths cannot fix this
 because the getter is executed by the IR container. Do not fabricate a cube.
+
+## 13. Cube-face render targets (2026-11-26)
+
+The first half of the shippable cube render-target layer is implemented.
+
+### Backend contract
+
+`D9Backend` gains two append-only callbacks after `texture_delete_cube`:
+
+```c
+int  (*target_create_cube_face)(void *ctx, void *native_cube, unsigned face,
+                                unsigned level, unsigned depth_flags,
+                                void **native_target);
+void (*target_delete_cube_face)(void *ctx, void *native_target);
+```
+
+`face` is 0..5 in +X,-X,+Y,-Y,+Z,-Z order and `level` is the cube mip level.
+`depth_flags` is `D9_CUBE_FACE_DEPTH24_STENCIL8` (1) for the D3D depth policy.
+The callback returns 0 and a target view, `-2` for an unsupported
+face/level/format, `-3` for VRAM/allocation failure, or another negative value.
+The view owns only its render-target/depth attachment; the cube texture owns
+the colour storage. Missing callbacks are a named refusal and face 0 is never
+substituted.
+
+PICA implements this with `C3D_RenderTargetCreateFromTex(&cube->tex,
+(GPU_TEXFACE)face, level, GPU_RB_DEPTH24_STENCIL8)` and
+`C3D_RenderTargetDelete`. The cube's `C3D_Tex` is never deleted by the face
+view. The host null backend records the face/level/depth flags and keeps a
+small CPU colour buffer so bind/clear recording works.
+
+### Core and COM
+
+- `CreateCubeTexture(..., D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT)` creates a
+  real cube texture. Under `TESV_D3D9_HDR_LDR_FALLBACK=1`, formats `0x71`/`0x72`
+  become A8R8G8B8 storage (the same measurement-only downgrade as the 2D RT
+  path) while `GetLevelDesc` keeps the logical format. Without the fallback the
+  request is a named `D3DERR_NOTAVAILABLE`; DXT/other formats, MANAGED pools and
+  combined usage bits are also refused by name.
+- `GetCubeMapSurface(face, level)` lazily creates and caches one target per
+  face/level (`CubeTexture.face_target[6][11]`); repeated calls reuse the target
+  and return a new surface view. The target handle belongs to the cube and is
+  released by the cube, never by `Release` of the surface view. Lazy creation is
+  refused by name inside `BeginScene`/`EndScene`; call it during resource setup.
+- `SetRenderTarget(0, faceSurface)` binds the face target; `GetRenderTarget`
+  returns the same surface. The viewport is the face edge. A depth-stencil
+  surface of matching size can be bound; switching to a different-sized target
+  without unbinding it is a named `D3DERR_NOTAVAILABLE`.
+- Refusals: face/level out of range, a non-render-target cube view, a depth
+  surface used as a render target, float/HDR without the fallback, unsupported
+  formats/pools/usage, and a backend without face callbacks. The last one names
+  the missing callback rather than substituting face 0.
+- `Target` carries `is_cube_face`; device teardown and cube release destroy face
+  views before the cube native. `MAX_TARGETS` is 32 so six faces times two
+  levels fit alongside ordinary targets. The 2D target count test was updated
+  to fill the new table.
+
+### Host evidence
+
+New `tests/cube_rt_smoke.c` (registered as `cube_rt`) creates a 2-level
+`0x71` RT cube under the LDR fallback, checks all six faces at both levels,
+target reuse, `Set/GetRenderTarget`, `GetViewport`/`SetViewport`, depth binding
+and clear, surface/cube release ordering, face/level refusals, the no-callback
+refusal, the non-RT cube refusal, float-off refusal, unsupported
+format/pool/usage refusals, and unchanged caps/SM3/T&L.
+
+- Targeted `cube_rt,pica_cube_texture,cube_volume_residency,cube_sampling,com,
+  render_texture,device_extra_methods`: **17 passed, 0 failed**.
+- Full suite: **110 passed, 0 failed** (the full runner does not register
+  `tesv_slice` without `-TesvSliceGen`).
+- ARM `-Mode com -Isolated cube_rt`: `.elf` 5,986,328 B SHA256
+  `d2dc52ad7ac526190c465103f67c40fca1ddd58bc4ca088a9dd50ff04d204c68`;
+  `.3dsx` 881,952 B SHA256
+  `f8c612c0a339e5b0dd4a74f5eae7e5b1e4fe3c4cbbf05a9b0bfa2f9815dfb1ba`;
+  `.text` 864,020 B.
+
+### Remaining
+
+- Cube sampling/draw: an RT cube is not yet marked sample-ready and
+  `draw_cube` is still NULL on the PICA backend. `SetTexture` with an RT cube
+  therefore remains a named refusal rather than a silent substitute.
+- The full TESV engine path/census still has to reach `CreateCubeTexture` and
+  the cube pass; no engine census was run for this layer.
+- No Azahar or hardware run was performed. No frame or pixel-equivalence claim
+  is made.

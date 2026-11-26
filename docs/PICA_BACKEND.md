@@ -1002,6 +1002,50 @@ This is state-programming and host-logic evidence only.  No draw, pixel result,
 frame, or visual-equivalence claim is made.  Remaining integration dependencies
 are the viewport core/COM changes above and their recording/ARM regressions.
 
+## 5.5 Cube-face render targets (2026-11-26)
+
+The PICA backend now implements the append-only cube-face target callbacks:
+
+```c
+int  (*target_create_cube_face)(void *ctx, void *native_cube, unsigned face,
+                                unsigned level, unsigned depth_flags,
+                                void **native_target);
+void (*target_delete_cube_face)(void *ctx, void *native_target);
+```
+
+`NativeCube` is the existing `C3D_Tex` + `C3D_TexCube` pair. A face view is a
+`NativeCubeFace` containing a `NativeTargetHead` and a back-pointer to the cube:
+
+```c
+typedef struct {C3D_RenderTarget *target; unsigned w,h,format;} NativeTargetHead;
+typedef struct {NativeTargetHead head; C3D_Tex tex; NativeTex sample;} NativeTarget;
+typedef struct {NativeTargetHead head; NativeCube *cube; unsigned face,level;} NativeCubeFace;
+```
+
+`target_create_cube_face` validates the face/level and calls
+`C3D_RenderTargetCreateFromTex(&cube->tex, (GPU_TEXFACE)face, level,
+GPU_RB_DEPTH24_STENCIL8)`. `target_delete_cube_face` calls
+`C3D_RenderTargetDelete` and frees the view; it never calls `C3D_TexDelete` on
+the cube. The existing `target_bind`, `target_clear`, `depth_clear` and
+`target_viewport` callbacks use the common `NativeTargetHead`, so the same
+bind/clear/viewport path serves a 2D target and a cube face.
+
+PICA's render-target API always allocates a depth attachment; the cube face
+therefore has a per-face D24S8 depth, while the D3D depth-stencil surface
+remains the single shared descriptor checked by the core for size. No
+cross-face depth-content persistence is claimed. Allocation failure is `-3`
+(mapped to a named `D3DERR_OUTOFVIDEOMEMORY`/`D3DERR_NOTAVAILABLE` refusal),
+invalid face/level is `-2`, and other failures are named backend errors. A
+backend without these callbacks is a named `D3DERR_NOTAVAILABLE`; face 0 is
+never substituted.
+
+The ARM `-Mode com -Isolated cube_rt` build links this path: `.elf` 5,986,328 B
+SHA256 `d2dc52ad7ac526190c465103f67c40fca1ddd58bc4ca088a9dd50ff04d204c68`;
+`.3dsx` 881,952 B SHA256
+`f8c612c0a339e5b0dd4a74f5eae7e5b1e4fe3c4cbbf05a9b0bfa2f9815dfb1ba`;
+`.text` 864,020 B. No Azahar or hardware run was performed; cube sampling/draw
+and a visible frame remain open.
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.

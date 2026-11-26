@@ -111,6 +111,7 @@ enum {D9_CUBE_MAX_LEVELS=11};
 enum {D9_CUBE_FACE_POSITIVE_X=0,D9_CUBE_FACE_NEGATIVE_X=1,
       D9_CUBE_FACE_POSITIVE_Y=2,D9_CUBE_FACE_NEGATIVE_Y=3,
       D9_CUBE_FACE_POSITIVE_Z=4,D9_CUBE_FACE_NEGATIVE_Z=5};
+enum {D9_CUBE_FACE_DEPTH_NONE=0,D9_CUBE_FACE_DEPTH24_STENCIL8=1};
 typedef struct {
     void *native;
     unsigned edge,levels,format;
@@ -249,6 +250,20 @@ typedef struct {
      * native is still live and release stays retryable.  NULL falls back to the
      * generic release path. */
     int (*texture_delete_cube)(void *ctx,void *native);
+    /* Optional cube-face render target.  Appended after texture_delete_cube so
+     * existing positional D9Backend initializers keep their meaning.
+     * native_cube is the handle returned by texture_create_cube(); face is
+     * 0..5 in +X,-X,+Y,-Y,+Z,-Z order; level is 0..levels-1.  depth_flags is
+     * D9_CUBE_FACE_DEPTH24_STENCIL8 (1) for the shared D3D depth policy or 0.
+     * Return 0 and set *native_target, or -2 (unsupported face/level/format),
+     * -3 (VRAM/allocation) or another negative value.  The target owns only its
+     * render-target/depth view, never the cube texture; target_delete_cube_face
+     * releases exactly that view.  NULL means cube render targets are refused by
+     * name and face 0 is never substituted. */
+    int (*target_create_cube_face)(void *ctx,void *native_cube,unsigned face,
+                                   unsigned level,unsigned depth_flags,
+                                   void **native_target);
+    void (*target_delete_cube_face)(void *ctx,void *native_target);
     /* Optional format-aware 2D texture create/upload.  Appended last so all
      * existing positional initializers keep their meaning.  A8 textures use
      * this pair; a NULL pair refuses A8 by name instead of creating an RGBA
@@ -335,6 +350,15 @@ int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned leve
                               const void *src,size_t src_pitch,size_t src_bytes);
 /* Re-upload a face level after a GetCubeMapSurface view was written. */
 int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level);
+/* Lazily create/reuse the render target for one cube face and mip level.
+ * The cube must be a D3DPOOL_DEFAULT D3DUSAGE_RENDERTARGET A8R8G8B8/X8R8G8B8
+ * cube and the backend must provide target_create_cube_face and
+ * target_delete_cube_face.  The returned handle is owned by the cube; release
+ * it by releasing the cube or the surface view, never with
+ * d9_release_render_target() on a face handle.  A missing callback is a named
+ * D9_UNSUPPORTED refusal (face 0 is not substituted). */
+int d9_cube_face_target(D9Device *d,D9Handle h,unsigned face,unsigned level,
+                        D9Handle *out);
 /* Residency view of a cube: guest bytes are the six face stores plus mips,
  * gpu_bytes is the backend-native estimate.  Both live in the D9TexCache. */
 int d9_cube_resource_info(D9Device *d,D9Handle h,unsigned *levels,

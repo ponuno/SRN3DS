@@ -41,6 +41,12 @@ typedef struct {
     /* Cube-map creation/upload accounting.  The core owns the six face stores;
      * these counters prove the null backend accepted every face/level. */
     unsigned cube_creates,cube_uploads;
+    unsigned last_cube_format;
+    /* Cube-face render-target accounting.  A face view is a separate recording
+     * object; these counters prove lazy per-face/level target creation and that
+     * the cube owns the colour storage. */
+    unsigned cube_face_creates,cube_face_deletes,cube_face_binds,cube_face_clears;
+    unsigned last_cube_face,last_cube_level,last_cube_depth_flags;
     unsigned volume_creates,volume_uploads;
     /* Cube sampling: the last draw's selected faces and sampled ARGB texels.
      * cube_face_counts accumulates every sampled vertex by face. */
