@@ -471,8 +471,15 @@ MenuSwfStatus menu_swf_display_parse_edit_text(
 /* Display builder                                                     */
 /* ------------------------------------------------------------------ */
 
+/* DisplayBuilder is created per DefineSprite nesting level.  Keeping the whole
+ * 32-object live array inside every recursive frame overflowed the console's
+ * main-thread stack, so each depth gets a static slice instead. */
+#define MENU_SWF_DISPLAY_BUILDER_DEPTH 32u
+static MenuSwfDisplayObject
+    g_builder_live[MENU_SWF_DISPLAY_BUILDER_DEPTH][MENU_SWF_DISPLAY_MAX_LIVE];
+
 typedef struct {
-    MenuSwfDisplayObject live[MENU_SWF_DISPLAY_MAX_LIVE];
+    MenuSwfDisplayObject *live;
     uint32_t live_count;
     uint32_t frame_count;
     uint32_t placements;
@@ -1203,6 +1210,9 @@ static MenuSwfStatus parse_sprite_body(ParseContext *ctx, const uint8_t *p,
     }
     DisplayBuilder b;
     memset(&b, 0, sizeof b);
+    b.live = g_builder_live[(depth + 1u) < MENU_SWF_DISPLAY_BUILDER_DEPTH
+                                ? (depth + 1u)
+                                : (MENU_SWF_DISPLAY_BUILDER_DEPTH - 1u)];
     b.dest = dest;
     MenuSwfStatus st = parse_display_stream(
         ctx, p + 4, len - 4, depth + 1, &b, collect_sprites, collect_fonts,
@@ -1245,6 +1255,7 @@ MenuSwfStatus menu_swf_display_summary(const uint8_t *data, size_t size,
 
     DisplayBuilder top;
     memset(&top, 0, sizeof top);
+    top.live = g_builder_live[0];
     top.dest = &out->top;
     st = parse_display_stream(&ctx, view.body + view.tag_offset,
                               view.body_len - view.tag_offset, 0, &top, 1, 1,
@@ -1300,6 +1311,7 @@ MenuSwfStatus menu_swf_display_collect_edit_texts(
     ctx.edit_texts = list;
     DisplayBuilder top;
     memset(&top, 0, sizeof top);
+    top.live = g_builder_live[0];
     st = parse_display_stream(&ctx, view.body + view.tag_offset,
                               view.body_len - view.tag_offset, 0, &top, 0, 0,
                               reason, reason_cap);

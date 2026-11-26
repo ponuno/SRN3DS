@@ -30,6 +30,13 @@ typedef struct {
     MenuSwfDisplayListColor color;
 } LiveObject;
 
+/* flatten_timeline() is recursive over DefineSprite nesting and used to keep a
+ * 14 KiB LiveObject array on every frame.  The 3DS main-thread stack is far
+ * smaller than the host test stack, so that overflowed before the display list
+ * completed.  Give each nesting level its own static array instead. */
+static LiveObject g_live_levels[MENU_SWF_DISPLAY_LIST_MAX_DEPTH]
+                               [MENU_SWF_DISPLAY_LIST_MAX_LIVE];
+
 typedef struct {
     const uint8_t *body;
     size_t body_len;
@@ -330,7 +337,9 @@ static MenuSwfStatus flatten_timeline(Ctx *c, const uint8_t *tags, size_t len,
                                       uint32_t sprite_depth,
                                       uint16_t *stack, uint32_t stack_n,
                                       int top) {
-    LiveObject live[MENU_SWF_DISPLAY_LIST_MAX_LIVE];
+    LiveObject *live = g_live_levels[sprite_depth < MENU_SWF_DISPLAY_LIST_MAX_DEPTH
+                                         ? sprite_depth
+                                         : MENU_SWF_DISPLAY_LIST_MAX_DEPTH - 1];
     uint32_t live_count = 0;
     int saw_frame = 0;
     size_t off = 0;
