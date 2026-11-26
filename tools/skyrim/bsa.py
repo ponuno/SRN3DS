@@ -1,11 +1,12 @@
-"""Bethesda BSA archive reader (Skyrim v104, Skyrim SE v105).
+"""Bethesda BSA archive reader (Oblivion v103, Skyrim v104, SE v105).
 
 The implementation is deliberately read-only and does not trust the archive:
 every record offset/length is bounds-checked before use.  The on-disk layout
 below was verified against the shipped Skyrim Legendary Edition archives
 (``Skyrim - Textures.bsa``, ``Skyrim - Meshes.bsa``, the DLC archives, ...).
 
-Layout observed (all 11 local archives are version 104, header offset 36)
+Layout observed (all 11 local Skyrim archives are version 104; a real
+Oblivion v103 archive has the same 36-byte header and directory layout)
 -------------------------------------------------------------------------
 ::
 
@@ -64,7 +65,7 @@ from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
 MAGIC = b"BSA\x00"
 HEADER_SIZE = 36
-SUPPORTED_VERSIONS = (104, 105)
+SUPPORTED_VERSIONS = (103, 104, 105)
 
 FLAG_INCLUDE_DIRECTORY_NAMES = 0x001
 FLAG_INCLUDE_FILE_NAMES = 0x002
@@ -106,7 +107,9 @@ class BsaHeader:
 
     @property
     def embedded_names(self) -> bool:
-        return bool(self.archive_flags & FLAG_EMBED_FILE_NAMES)
+        # v103 archives in the wild set 0x100 but store no name prefix (the
+        # bit is part of the retain-flags group); only v104+ embeds names.
+        return self.version >= 104 and bool(self.archive_flags & FLAG_EMBED_FILE_NAMES)
 
     @property
     def has_directory_names(self) -> bool:
@@ -230,13 +233,16 @@ class BsaArchive:
                 "%s: unsupported BSA version %d (supported: %s)"
                 % (self.path, version, ", ".join(map(str, SUPPORTED_VERSIONS)))
             )
-        if offset < HEADER_SIZE or offset > self._file_size:
+        min_offset = 34 if version == 103 else HEADER_SIZE
+        if offset < min_offset or offset > self._file_size:
             raise BsaFormatError("%s: bad header offset %d" % (self.path, offset))
         if folders > _MAX_ARRAY or files > _MAX_ARRAY:
             raise BsaFormatError("%s: implausible counts %d/%d" % (self.path, folders, files))
         if flags & FLAG_XBOX360:
             raise BsaFormatError("%s: Xbox 360 archives are not supported" % self.path)
-        if flags & FLAG_XMEM_CODEC:
+        # v103 writers set bits 0x200/0x400 that v104 assigns to XMem/retain
+        # flags; the observed v103 archive uses them as ordinary metadata.
+        if version >= 104 and flags & FLAG_XMEM_CODEC:
             raise BsaFormatError("%s: XMem codec archives are not supported" % self.path)
         return BsaHeader(
             version=version,
@@ -382,7 +388,7 @@ class BsaArchive:
             if names_are_full_paths:
                 path = (folder + "\\" + base) if folder else base
             else:
-                path = (folder + "\\" + base) if base else folder
+                path = (folder + "\\" + base) if folder else base
             new_entry = BsaFileEntry(
                 path=path,
                 folder=folder,

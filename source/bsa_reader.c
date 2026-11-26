@@ -997,15 +997,22 @@ static BsaStatus archive_parse(BsaArchive *a, char *reason, size_t reason_cap) {
     a->header.total_folder_name_length = get_u32(raw + 24);
     a->header.total_file_name_length = get_u32(raw + 28);
     a->header.file_flags = get_u32(raw + 32);
-    if (a->header.version != 104 && a->header.version != 105) {
+    if (a->header.version != 103 && a->header.version != 104 &&
+        a->header.version != 105) {
         set_reason(reason, reason_cap,
-                   "unsupported BSA version %u (supported 104, 105)",
+                   "unsupported BSA version %u (supported 103, 104, 105)",
                    a->header.version);
         return BSA_ERR_VERSION;
     }
-    if (header_offset < 36 || (uint64_t)header_offset > a->size) {
-        set_reason(reason, reason_cap, "bad header offset %u", header_offset);
-        return BSA_ERR_BOUNDS;
+    {
+        /* A v103 header is documented as 34 bytes, but real Oblivion archives
+         * (and the Wrye Bash template) store a u32 file-flags field at 32 and
+         * a 36-byte header offset, exactly like v104. */
+        uint32_t min_offset = a->header.version == 103 ? 34u : 36u;
+        if (header_offset < min_offset || (uint64_t)header_offset > a->size) {
+            set_reason(reason, reason_cap, "bad header offset %u", header_offset);
+            return BSA_ERR_BOUNDS;
+        }
     }
     if (a->header.folder_count > a->opt.max_folders ||
         a->header.file_count > a->opt.max_files) {
@@ -1017,12 +1024,15 @@ static BsaStatus archive_parse(BsaArchive *a, char *reason, size_t reason_cap) {
         set_reason(reason, reason_cap, "Xbox 360 archives are unsupported");
         return BSA_ERR_UNSUPPORTED;
     }
-    if (a->header.archive_flags & 0x200u) {
+    if (a->header.version >= 104 && (a->header.archive_flags & 0x200u)) {
         set_reason(reason, reason_cap, "XMem codec archives are unsupported");
         return BSA_ERR_UNSUPPORTED;
     }
     a->header.compressed = (a->header.archive_flags & 0x004u) != 0;
-    a->header.embedded_names = (a->header.archive_flags & 0x100u) != 0;
+    /* v103 writers set 0x100 as part of the retain-flags group and store no
+     * embedded name prefix; only v104+ uses it for embedding. */
+    a->header.embedded_names =
+        a->header.version >= 104 && (a->header.archive_flags & 0x100u) != 0;
 
     if (a->header.total_folder_name_length > a->opt.max_name_bytes) {
         set_reason(reason, reason_cap, "folder-name block exceeds the name budget");
