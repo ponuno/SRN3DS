@@ -620,6 +620,13 @@ int d9_validate_device(D9Device *d,unsigned *passes);
 int d9_evict_managed_resources(D9Device *d);
 /* Read-only copy of the device's texture-cache counters (cube/volume included). */
 int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out);
+/* Diagnostic residency control: evict unpinned GPU/guest copies until the
+ * requested targets are met.  Cube/volume entries with a CPU store are
+ * rehydratable; render-target cubes are explicit-release-only and are skipped.
+ * Returns D9_OK, D9_INVALID outside a live idle device, or D9_UNSUPPORTED when
+ * pinned bytes prevent reaching the target. */
+int d9_texture_cache_trim(D9Device *d,size_t guest_target,size_t gpu_target,
+                          unsigned *evicted);
 int d9_texture_layout(unsigned w,unsigned h,unsigned format,size_t *pitch,size_t *bytes);
 /* Split texture residency accounting and pool/usage metadata. */
 int d9_texture_resource_info(D9Device *d,D9Handle h,unsigned *pool,

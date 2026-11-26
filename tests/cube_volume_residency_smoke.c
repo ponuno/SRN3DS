@@ -1,11 +1,12 @@
 /* Cube/volume residency and unified accounting regression.
  *
  * Both kinds keep their full CPU slice store as the D9TexCache guest copy and
- * register the backend native as the GPU copy.  The guest copy is never dropped
- * and the entries are explicit-release-only (no rehydration yet), so LRU
- * eviction must skip them.  The test also covers release-failure retry, exactly
- * one native delete on device teardown, the budget refusal path, and that 2D
- * textures / render targets keep their existing accounting. */
+ * register the backend native as the GPU copy.  Non-render-target cube/volume
+ * entries are evictable and rehydratable from that store; render-target cubes
+ * are explicit-release-only because rendered faces have no CPU copy.  The test
+ * covers release-failure retry, exactly one native delete on device teardown,
+ * the budget refusal path, and that 2D textures / render targets keep their
+ * existing accounting. */
 #include "d3d9_core.h"
 #include "d3d9_null.h"
 #include "d3d9_texcache.h"
@@ -121,7 +122,8 @@ int main(void) {
     assert(s.entries == base_stats.entries + 2);
     assert(s.guests == base_stats.guests + 2 && s.gpus == base_stats.gpus + 2);
     assert(s.pending_gpus == base_stats.pending_gpus);
-    assert(s.non_evictable == 2); /* cube + volume only */
+    assert(s.non_evictable == 0); /* non-RT cube/volume are rehydratable */
+    assert(s.rehydratable >= 2);
     assert(s.uploads == base_stats.uploads + 2);
     assert(d9_memory_used(dev) == 768 + 240 + 3072 + 144 + 768);
     assert(s.guest_bytes == 640 && s.gpu_bytes == 4096);

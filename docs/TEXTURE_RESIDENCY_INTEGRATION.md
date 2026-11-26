@@ -35,10 +35,13 @@ flag is recorded but **does not drop the guest source yet**.
   A backend release failure returns `D9_RELEASE_FAILED`; already-released copies
   are removed from accounting and the remaining copy can be retried without a
   double free.  Cube and volume objects follow the same contract.
-* Cube/volume entries set `no_evict`: LRU reserve/trim skips them and their guest
-  pixels are never dropped because native rehydration is not implemented.  An
-  explicit `d9_release_cube_texture()` / `d9_release_volume_texture()` still
-  removes them and their native exactly once.
+* Non-render-target cube/volume entries are evictable and rehydratable from
+  their CPU store; the cache key doubles as the durable rehydrate token.  A
+  bind/lock after eviction recreates the native and reloads every face/level or
+  slice.  Render-target cubes have no CPU copy of rendered faces and remain
+  `no_evict`; LRU reserve/trim skips them.  An explicit
+  `d9_release_cube_texture()` / `d9_release_volume_texture()` still removes any
+  entry and its native exactly once.
 * `d9_destroy_device_ex()` reports the first release failure and preserves the
   device for retry. The legacy void wrapper remains best effort.
 * Backends may supply optional `texture_release`, `texture_create_encoded`, and

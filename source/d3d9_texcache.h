@@ -111,6 +111,8 @@ typedef struct {
     unsigned pinned;
     unsigned uploads;
     unsigned upload_failures;
+    unsigned rehydrations;
+    unsigned rehydrate_failures;
     unsigned evictions_gpu;
     unsigned evictions_guest;
     unsigned guest_drops;
@@ -141,6 +143,8 @@ typedef struct {
     uint64_t clock;
     unsigned uploads;
     unsigned upload_failures;
+    unsigned rehydrations;
+    unsigned rehydrate_failures;
     unsigned evictions_gpu;
     unsigned evictions_guest;
     unsigned guest_drops;
@@ -168,8 +172,8 @@ int d9_texcache_set_limits(D9TexCache *cache, size_t guest_limit,
 
 /* Mark an entry as explicit-release-only.  LRU eviction (reserve/trim) skips
  * it, but d9_texcache_remove() still releases it.  Used for resources whose
- * native copy cannot be recreated from the guest source yet (cube/volume), so
- * an eviction could not be repaired.  Returns NOT_FOUND for an absent key. */
+ * native cannot be recreated from the guest source (render-target cube faces
+ * have no CPU copy).  Returns NOT_FOUND for an absent key. */
 int d9_texcache_set_no_evict(D9TexCache *cache, uint64_t key, int no_evict);
 
 /* Find an entry; NULL when absent.  Does not touch LRU order. */
@@ -256,6 +260,9 @@ int d9_texcache_remove(D9TexCache *cache, uint64_t key);
 unsigned d9_texcache_working_set(const D9TexCache *cache, uint64_t max_age);
 
 void d9_texcache_stats(const D9TexCache *cache, D9TexCacheStats *out);
+/* Record one core-driven rehydration attempt in the eviction/rehydration
+ * counters.  The cache itself never allocates cube/volume natives. */
+void d9_texcache_note_rehydrate(D9TexCache *cache,int success);
 
 #ifdef __cplusplus
 }

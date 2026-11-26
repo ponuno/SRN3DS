@@ -573,6 +573,8 @@ void d9_texcache_stats(const D9TexCache *cache, D9TexCacheStats *out) {
     out->peak_both = cache->peak_both;
     out->uploads = cache->uploads;
     out->upload_failures = cache->upload_failures;
+    out->rehydrations = cache->rehydrations;
+    out->rehydrate_failures = cache->rehydrate_failures;
     out->evictions_gpu = cache->evictions_gpu;
     out->evictions_guest = cache->evictions_guest;
     out->guest_drops = cache->guest_drops;
@@ -593,4 +595,10 @@ void d9_texcache_stats(const D9TexCache *cache, D9TexCacheStats *out) {
             out->both_bytes = add_size(out->both_bytes,
                                        add_size(entry->guest_bytes, entry->gpu_bytes));
     }
+}
+
+void d9_texcache_note_rehydrate(D9TexCache *cache, int success) {
+    if (!cache) return;
+    if (success) ++cache->rehydrations;
+    else ++cache->rehydrate_failures;
 }

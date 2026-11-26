@@ -104,17 +104,27 @@ struct D9Device {
     unsigned view_w,view_h;
     char diagnosis[224];
 };
+static int rehydrate_cube(D9Device *d,CubeTexture *c);
+static int rehydrate_volume(D9Device *d,VolumeTexture *v);
 static int cache_release_guest(void *ctx,void *guest,size_t bytes){(void)ctx;(void)bytes;free(guest);return 0;}
 static int cache_release_gpu(void *ctx,void *gpu,size_t bytes){
     D9Device *d=ctx;(void)bytes;
-    if(d->ops.texture_release)return d->ops.texture_release(d->ctx,gpu);
-    d->ops.texture_delete(d->ctx,gpu);return 0;
+    int rc;
+    if(d->ops.texture_release)rc=d->ops.texture_release(d->ctx,gpu);
+    else{d->ops.texture_delete(d->ctx,gpu);rc=0;}
+    if(!rc&&d)for(unsigned i=0;i<MAX_VOLUMES;++i)if(d->volumes[i].id&&d->volumes[i].native==gpu)
+        d->volumes[i].native=NULL;
+    return rc;
 }
 static int cache_release_cube_gpu(void *ctx,void *gpu,size_t bytes){
     D9Device *d=ctx;(void)bytes;
-    if(d->ops.texture_delete_cube)return d->ops.texture_delete_cube(d->ctx,gpu);
-    if(d->ops.texture_release)return d->ops.texture_release(d->ctx,gpu);
-    d->ops.texture_delete(d->ctx,gpu);return 0;
+    int rc;
+    if(d->ops.texture_delete_cube)rc=d->ops.texture_delete_cube(d->ctx,gpu);
+    else if(d->ops.texture_release)rc=d->ops.texture_release(d->ctx,gpu);
+    else{d->ops.texture_delete(d->ctx,gpu);rc=0;}
+    if(!rc&&d)for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id&&d->cubes[i].native==gpu)
+        d->cubes[i].native=NULL;
+    return rc;
 }
 static size_t memory_sum(size_t a,size_t b){return b>SIZE_MAX-a?SIZE_MAX:a+b;}
 static int budget_has_room(const D9Device *d,size_t bytes){
@@ -266,9 +276,9 @@ int d9_release_buffer(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(!b
 static void delete_unowned_native(D9Device *d,void *native){if(native)d->ops.texture_delete(d->ctx,native);}
 /* Cube/volume residency.  Both kinds keep their full CPU slice store as the
  * cache guest copy and register the backend-native object as the GPU copy.
- * The guest copy is never dropped and the entry is marked explicit-release-
- * only: cube/volume native rehydration is not implemented yet, so an LRU
- * eviction could not be repaired.  d9_texcache_remove() still releases them. */
+ * Non-render-target entries are evictable and rehydratable from that CPU store.
+ * A cube created with D3DUSAGE_RENDERTARGET has no CPU copy of its rendered
+ * faces, so it is marked explicit-release-only and is skipped by LRU trim. */
 static size_t cube_gpu_bytes(unsigned edge,unsigned levels){
     uint64_t total=0,dim=edge;
     for(unsigned i=0;i<levels;++i){
@@ -289,7 +299,8 @@ static size_t volume_gpu_bytes(unsigned w,unsigned h,unsigned depth,unsigned lev
     return total>SIZE_MAX?SIZE_MAX:(size_t)total;
 }
 /* Takes ownership of pixels and native on every path.  On success both are
- * owned by the cache and the entry is non-evictable. */
+ * owned by the cache and the entry is rehydratable from the CPU store; the
+ * cache key doubles as the durable token so an evicted entry stays findable. */
 static int register_subtexture(D9Device *d,D9Handle key,uint8_t *pixels,size_t cpu,
                                void *native,size_t gpu,int cpu_only,
                                D9TexGpuRelease release){
@@ -297,14 +308,13 @@ static int register_subtexture(D9Device *d,D9Handle key,uint8_t *pixels,size_t c
         delete_unowned_native(d,native);free(pixels);return D9_BACKEND;
     }
     if(!cpu_only){
-        D9TexGpuRegistration reg={native,gpu,1,release,d,D9TEXCACHE_NO_REHYDRATE_TOKEN};
+        D9TexGpuRegistration reg={native,gpu,1,release,d,(D9TexRehydrateToken)key};
         if(d9_texcache_attach_gpu(&d->tex_cache,key,&reg)!=D9TEXCACHE_OK){
             (void)d9_texcache_remove(&d->tex_cache,key);
             delete_unowned_native(d,native);
             return D9_BACKEND;
         }
     }
-    (void)d9_texcache_set_no_evict(&d->tex_cache,key,1);
     return D9_OK;
 }
 static int subtexture_has_gpu(D9Device *d,D9Handle h){
@@ -656,6 +666,10 @@ int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
     if(register_subtexture(d,key,t.pixels,t.cpu_bytes,t.native,t.gpu_bytes,t.cpu_only,
                            cache_release_cube_gpu))
         return D9_BACKEND;
+    /* Rendered faces have no CPU copy; they cannot be rehydrated.  Keep RT
+     * cubes explicit-release-only so LRU trim never discards their natives. */
+    if(usage&D9_USAGE_RENDERTARGET)
+        (void)d9_texcache_set_no_evict(&d->tex_cache,key,1);
     t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
 unsigned d9_cube_levels(D9Device *d,D9Handle h){CubeTexture *c=cube_texture(d,h);return c?c->levels:0;}
@@ -682,6 +696,9 @@ int d9_cube_face_level_view(D9Device *d,D9Handle h,unsigned face,unsigned level,
                             size_t *pitch,size_t *bytes){
     CubeTexture *c=cube_texture(d,h);
     if(!c||face>=D9_CUBE_FACES||level>=c->levels||!c->pixels)return D9_INVALID;
+    if(!c->cpu_only&&!c->native&&!(c->usage&D9_USAGE_RENDERTARGET)){
+        int rr=rehydrate_cube(d,c);if(rr)return rr;
+    }
     const CubeLevel *l=&c->level[level];
     if(pixels)*pixels=c->pixels+(size_t)face*c->face_bytes+l->offset;
     if(w)*w=l->w;if(height)*height=l->h;if(pitch)*pitch=l->pitch;if(bytes)*bytes=l->bytes;
@@ -703,9 +720,12 @@ int d9_cube_upload_face_level(D9Device *d,D9Handle h,unsigned face,unsigned leve
     for(size_t y=0;y<rows;++y)
         memcpy(dst+y*l->pitch,(const uint8_t *)src+y*src_pitch,row_bytes);
     if(!c->cpu_only){
+        if(!c->native&&!(c->usage&D9_USAGE_RENDERTARGET)){
+            int rr=rehydrate_cube(d,c);if(rr)return rr;
+        }
         if(!subtexture_has_gpu(d,h)){
             set_diagnosis(d,"cube texture native copy is not resident; CPU pixels are "
-                            "retained but cube rehydration is not implemented");
+                            "retained but rehydration failed");
             return D9_UNSUPPORTED;
         }
         if(d->ops.texture_upload_cube(d->ctx,c->native,face,level,dst,l->bytes)){
@@ -725,9 +745,12 @@ int d9_cube_face_unlocked(D9Device *d,D9Handle h,unsigned face,unsigned level){
     if(!c||face>=D9_CUBE_FACES||level>=c->levels)return D9_INVALID;
     CubeLevel *l=&c->level[level];
     if(!c->cpu_only){
+        if(!c->native&&!(c->usage&D9_USAGE_RENDERTARGET)){
+            int rr=rehydrate_cube(d,c);if(rr)return rr;
+        }
         if(!subtexture_has_gpu(d,h)){
             set_diagnosis(d,"cube texture native copy is not resident; CPU pixels are "
-                            "retained but cube rehydration is not implemented");
+                            "retained but rehydration failed");
             return D9_UNSUPPORTED;
         }
         uint8_t *src=c->pixels+(size_t)face*c->face_bytes+l->offset;
@@ -780,6 +803,99 @@ int d9_cube_resource_info(D9Device *d,D9Handle h,unsigned *levels,
     if(gpu_bytes)*gpu_bytes=e&&e->has_gpu?e->gpu_bytes:0;
     if(cpu_only)*cpu_only=c->cpu_only;return D9_OK;
 }
+static int rehydrate_cube(D9Device *d,CubeTexture *c){
+    if(!d||!c)return D9_INVALID;
+    if(c->cpu_only||!c->pixels){
+        set_diagnosis(d,"cube rehydration has no CPU face store");
+        return D9_UNSUPPORTED;
+    }
+    if(c->usage&D9_USAGE_RENDERTARGET){
+        set_diagnosis(d,"render-target cube faces have no CPU copy; cannot rehydrate");
+        return D9_UNSUPPORTED;
+    }
+    if(d->scene||d->teardown){
+        set_diagnosis(d,"cube rehydration inside BeginScene/EndScene is not implemented");
+        return D9_UNSUPPORTED;
+    }
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,c->id);
+    if(!e||!e->has_guest){
+        set_diagnosis(d,"cube rehydration source is not in the texture cache");
+        return D9_INVALID;
+    }
+    if(e->has_gpu){
+        if(!e->gpu_ready&&c->native&&e->gpu==c->native&&
+           subtexture_commit_ready(d,c->id,c->native,c->gpu_bytes)==D9_OK){
+            d9_texcache_note_rehydrate(&d->tex_cache,1);
+            return D9_OK;
+        }
+        set_diagnosis(d,"cube native is already resident");
+        return D9_INVALID;
+    }
+    if(!d->ops.texture_create_cube||!d->ops.texture_upload_cube){
+        set_diagnosis(d,"cube rehydration requires texture_create_cube/upload_cube");
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        return D9_UNSUPPORTED;
+    }
+    void *native=NULL;
+    int rc=d->ops.texture_create_cube(d->ctx,c->edge,c->levels,c->format,&native);
+    if(rc||!native){
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        if(rc==-2){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube rehydration is unsupported for format 0x%lx",
+                     (unsigned long)c->format);
+            return D9_UNSUPPORTED;
+        }
+        if(rc==-3){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube rehydration could not allocate edge %u levels %u (VRAM)",
+                     c->edge,c->levels);
+            return D9_MEMORY;
+        }
+        set_diagnosis(d,"cube rehydration native creation failed");
+        return D9_BACKEND;
+    }
+    for(unsigned face=0;face<D9_CUBE_FACES;++face)for(unsigned level=0;level<c->levels;++level){
+        if(d->ops.texture_upload_cube(d->ctx,native,face,level,
+                                      c->pixels+(size_t)face*c->face_bytes+c->level[level].offset,
+                                      c->level[level].bytes)){
+            (void)cache_release_cube_gpu(d,native,c->gpu_bytes);
+            d9_texcache_note_rehydrate(&d->tex_cache,0);
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "cube rehydration upload failed at face %u level %u",face,level);
+            return D9_BACKEND;
+        }
+    }
+    /* Upload the whole CPU store, but keep the readiness mask that existed
+     * before eviction: an incomplete cube must not become sample-ready just
+     * because every zero-filled face happened to be uploaded. */
+    uint32_t masks[MAX_LEVELS];uint8_t uploaded[MAX_LEVELS];
+    for(unsigned level=0;level<c->levels;++level){
+        masks[level]=c->level[level].face_mask;
+        uploaded[level]=(uint8_t)c->level[level].uploaded;
+    }
+    D9TexGpuRegistration reg={native,c->gpu_bytes,1,cache_release_cube_gpu,d,
+                              (D9TexRehydrateToken)c->id};
+    if(d9_texcache_attach_gpu(&d->tex_cache,c->id,&reg)!=D9TEXCACHE_OK){
+        (void)cache_release_cube_gpu(d,native,c->gpu_bytes);
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        set_diagnosis(d,"cube rehydration could not reserve GPU storage");
+        return D9_BACKEND;
+    }
+    c->native=native;
+    for(unsigned level=0;level<c->levels;++level){
+        c->level[level].face_mask=masks[level];
+        c->level[level].uploaded=uploaded[level];
+    }
+    if(c->level[0].face_mask==((1u<<D9_CUBE_FACES)-1u)&&
+       subtexture_commit_ready(d,c->id,native,c->gpu_bytes)){
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        set_diagnosis(d,"cube rehydration could not commit the native");
+        return D9_BACKEND;
+    }
+    d9_texcache_note_rehydrate(&d->tex_cache,1);
+    return D9_OK;
+}
 int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
     if(!d||stage>=d9_stage_count(d)){
         if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");
@@ -787,8 +903,21 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
     }
     if(h){
         CubeTexture *c=cube_texture(d,h);
-        if(!c||c->cpu_only||!c->native){
+        if(!c||c->cpu_only){
             set_diagnosis(d,"cube texture has no GPU native; CPU-only cubes cannot be sampled");
+            return D9_INVALID;
+        }
+        if(!c->native){
+            D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+            if(e&&!e->has_gpu&&!(c->usage&D9_USAGE_RENDERTARGET)){
+                int rr=rehydrate_cube(d,c);
+                if(rr)return rr;
+            }
+        }
+        if(!c->native){
+            set_diagnosis(d,(c->usage&D9_USAGE_RENDERTARGET)?
+                "render-target cube faces have no CPU copy; cannot rehydrate":
+                "cube texture native is missing and cannot be rehydrated");
             return D9_INVALID;
         }
         if(c->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u)){
@@ -801,7 +930,7 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
         if(!e||!e->has_gpu||!e->gpu_ready){
             set_diagnosis(d,(c->usage&D9_USAGE_RENDERTARGET)?
                 "render-target cube is not ready; face targets were not committed":
-                "cube texture is not cache-resident; cube rehydration is not implemented");
+                "cube texture is not cache-resident; cube rehydration did not commit");
             return D9_INVALID;
         }
         d9_texcache_touch(&d->tex_cache,h);
@@ -881,6 +1010,9 @@ int d9_volume_level_view(D9Device *d,D9Handle h,unsigned level,void **pixels,
                          size_t *pitch,size_t *plane_bytes,size_t *bytes){
     VolumeTexture *v=volume_texture(d,h);
     if(!v||level>=v->levels||!v->pixels)return D9_INVALID;
+    if(!v->cpu_only&&!v->native){
+        int rr=rehydrate_volume(d,v);if(rr)return rr;
+    }
     const VolumeLevel *l=&v->level[level];
     if(pixels)*pixels=v->pixels+l->offset;
     if(w)*w=l->w;if(height)*height=l->h;if(depth)*depth=l->depth;
@@ -910,9 +1042,12 @@ int d9_volume_upload_level(D9Device *d,D9Handle h,unsigned level,
             memcpy(dp+y*l->pitch,sp+y*src_pitch,row_bytes);
     }
     if(!v->cpu_only){
+        if(!v->native){
+            int rr=rehydrate_volume(d,v);if(rr)return rr;
+        }
         if(!subtexture_has_gpu(d,h)){
             set_diagnosis(d,"volume texture native copy is not resident; CPU pixels are "
-                            "retained but volume rehydration is not implemented");
+                            "retained but rehydration failed");
             return D9_UNSUPPORTED;
         }
         if(d->ops.texture_upload_volume(d->ctx,v->native,level,dst,l->bytes))
@@ -928,9 +1063,12 @@ int d9_volume_level_unlocked(D9Device *d,D9Handle h,unsigned level){
     if(!v||level>=v->levels)return D9_INVALID;
     VolumeLevel *l=&v->level[level];
     if(!v->cpu_only){
+        if(!v->native){
+            int rr=rehydrate_volume(d,v);if(rr)return rr;
+        }
         if(!subtexture_has_gpu(d,h)){
             set_diagnosis(d,"volume texture native copy is not resident; CPU pixels are "
-                            "retained but volume rehydration is not implemented");
+                            "retained but rehydration failed");
             return D9_UNSUPPORTED;
         }
         if(d->ops.texture_upload_volume(d->ctx,v->native,level,v->pixels+l->offset,l->bytes))
@@ -973,6 +1111,82 @@ int d9_volume_resource_info(D9Device *d,D9Handle h,unsigned *levels,
     if(gpu_bytes)*gpu_bytes=e&&e->has_gpu?e->gpu_bytes:0;
     if(cpu_only)*cpu_only=v->cpu_only;return D9_OK;
 }
+static int rehydrate_volume(D9Device *d,VolumeTexture *v){
+    if(!d||!v)return D9_INVALID;
+    if(v->cpu_only||!v->pixels){
+        set_diagnosis(d,"volume rehydration has no CPU slice store");
+        return D9_UNSUPPORTED;
+    }
+    if(d->scene||d->teardown){
+        set_diagnosis(d,"volume rehydration inside BeginScene/EndScene is not implemented");
+        return D9_UNSUPPORTED;
+    }
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,v->id);
+    if(!e||!e->has_guest){
+        set_diagnosis(d,"volume rehydration source is not in the texture cache");
+        return D9_INVALID;
+    }
+    if(e->has_gpu){
+        if(!e->gpu_ready&&v->native&&e->gpu==v->native&&
+           subtexture_commit_ready(d,v->id,v->native,v->gpu_bytes)==D9_OK){
+            d9_texcache_note_rehydrate(&d->tex_cache,1);
+            return D9_OK;
+        }
+        set_diagnosis(d,"volume native is already resident");
+        return D9_INVALID;
+    }
+    if(!d->ops.texture_create_volume||!d->ops.texture_upload_volume){
+        set_diagnosis(d,"volume rehydration requires texture_create_volume/upload_volume");
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        return D9_UNSUPPORTED;
+    }
+    void *native=NULL;
+    int rc=d->ops.texture_create_volume(d->ctx,v->w,v->h,v->depth,v->levels,&native);
+    if(rc||!native){
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        if(rc==-3){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "volume rehydration could not allocate %ux%ux%u (VRAM)",v->w,v->h,v->depth);
+            return D9_MEMORY;
+        }
+        if(rc==-2){
+            set_diagnosis(d,"volume rehydration is unsupported for this format");
+            return D9_UNSUPPORTED;
+        }
+        set_diagnosis(d,"volume rehydration native creation failed");
+        return D9_BACKEND;
+    }
+    for(unsigned level=0;level<v->levels;++level){
+        if(d->ops.texture_upload_volume(d->ctx,native,level,
+                                        v->pixels+v->level[level].offset,
+                                        v->level[level].bytes)){
+            (void)cache_release_gpu(d,native,v->gpu_bytes);
+            d9_texcache_note_rehydrate(&d->tex_cache,0);
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "volume rehydration upload failed at level %u",level);
+            return D9_BACKEND;
+        }
+    }
+    uint8_t uploaded[MAX_LEVELS];
+    for(unsigned level=0;level<v->levels;++level)uploaded[level]=(uint8_t)v->level[level].uploaded;
+    D9TexGpuRegistration reg={native,v->gpu_bytes,1,cache_release_gpu,d,
+                              (D9TexRehydrateToken)v->id};
+    if(d9_texcache_attach_gpu(&d->tex_cache,v->id,&reg)!=D9TEXCACHE_OK){
+        (void)cache_release_gpu(d,native,v->gpu_bytes);
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        set_diagnosis(d,"volume rehydration could not reserve GPU storage");
+        return D9_BACKEND;
+    }
+    v->native=native;
+    for(unsigned level=0;level<v->levels;++level)v->level[level].uploaded=uploaded[level];
+    if(v->level[0].uploaded&&subtexture_commit_ready(d,v->id,native,v->gpu_bytes)){
+        d9_texcache_note_rehydrate(&d->tex_cache,0);
+        set_diagnosis(d,"volume rehydration could not commit the native");
+        return D9_BACKEND;
+    }
+    d9_texcache_note_rehydrate(&d->tex_cache,1);
+    return D9_OK;
+}
 int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
     if(!d||stage>=d9_stage_count(d)){
         if(d)set_diagnosis(d,"SetTexture: unsupported texture unit");
@@ -980,10 +1194,24 @@ int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
     }
     if(h){
         VolumeTexture *v=volume_texture(d,h);
-        if(!v||v->cpu_only||!v->native||!v->level[0].uploaded)return D9_INVALID;
+        if(!v||v->cpu_only){
+            set_diagnosis(d,"volume texture has no GPU native; CPU-only volumes cannot be sampled");
+            return D9_INVALID;
+        }
+        if(!v->native){
+            D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
+            if(e&&!e->has_gpu){
+                int rr=rehydrate_volume(d,v);
+                if(rr)return rr;
+            }
+        }
+        if(!v->native||!v->level[0].uploaded){
+            set_diagnosis(d,"volume texture native is missing and cannot be rehydrated");
+            return D9_INVALID;
+        }
         D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
         if(!e||!e->has_gpu||!e->gpu_ready){
-            set_diagnosis(d,"volume texture is not cache-resident; volume rehydration is not implemented");
+            set_diagnosis(d,"volume texture is not cache-resident; volume rehydration did not commit");
             return D9_INVALID;
         }
         d9_texcache_touch(&d->tex_cache,h);
@@ -2535,6 +2763,15 @@ int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out){
     if(!d||!out)return D9_INVALID;
     d9_texcache_stats(&d->tex_cache,out);
     return D9_OK;
+}
+int d9_texture_cache_trim(D9Device *d,size_t guest_target,size_t gpu_target,
+                          unsigned *evicted){
+    if(evicted)*evicted=0;
+    if(!d||d->teardown||d->scene)return D9_INVALID;
+    int rc=d9_texcache_trim(&d->tex_cache,guest_target,gpu_target,evicted);
+    if(rc==D9TEXCACHE_OK)return D9_OK;
+    if(rc==D9TEXCACHE_INVALID)return D9_INVALID;
+    return D9_UNSUPPORTED;
 }
 int d9_get_draw_state(const D9Device *d,D9DrawState *out){
     if(!d||!out)return D9_INVALID;

@@ -202,11 +202,12 @@ therefore use one sum for 2D textures, cubes and volumes. LDR render-target
 textures still stay outside the cache and are counted as targets, so the
 `rt_target` path is unchanged.
 
-Cube/volume entries are explicit-release-only: `no_evict` entries are skipped by
-LRU reserve/trim and the guest pixels are never dropped, because native
-rehydration for these kinds is not implemented yet. An attempted eviction cannot
-silently free a native the core still points at. `d9_cube_resource_info()` and
-`d9_volume_resource_info()` expose the split guest/GPU bytes for diagnostics.
+Non-render-target cube/volume entries are evictable and carry a rehydrate token:
+after LRU trim the core can recreate the native from the retained CPU pixels and
+reload every face/level or slice. Render-target cubes have no CPU copy of their
+rendered faces, so they stay `no_evict` and are skipped by LRU reserve/trim. The
+guest pixels are retained for every rehydratable entry. `d9_cube_resource_info()`
+and `d9_volume_resource_info()` expose the split guest/GPU bytes for diagnostics.
 
 Release and device teardown go through the cache, so each native is deleted
 exactly once. A backend release failure returns `D9_RELEASE_FAILED` and leaves

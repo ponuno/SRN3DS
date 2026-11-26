@@ -1059,6 +1059,53 @@ SHA256 `d2dc52ad7ac526190c465103f67c40fca1ddd58bc4ca088a9dd50ff04d204c68`;
 `.text` 864,020 B. No Azahar or hardware run was performed; cube sampling/draw
 and a visible frame remain open.
 
+## 5.6 Cube/volume texcache rehydration (2026-11-26)
+
+Cube and volume natives now participate in LRU eviction and can be rebuilt:
+
+- `register_subtexture()` no longer sets `no_evict` for non-render-target
+  resources.  It registers the cache key as the durable rehydrate token, so the
+  guest store and the entry survive GPU eviction.
+- `d9_texture_cache_trim()` is a diagnostic residency control.  It can evict
+  unpinned GPU copies; cube/volume entries release their native through the
+  normal cache callbacks, which clear the slot's `native` pointer only after a
+  successful backend delete.
+- Binding, locking, uploading or unlocking an evicted cube/volume calls
+  `rehydrate_cube()` / `rehydrate_volume()`.  They recreate the native through
+  `texture_create_cube`/`texture_create_volume`, reload every face/level or
+  slice from the CPU store, attach the native as a texcache GPU copy, and commit
+  it ready.  The pre-eviction readiness mask is restored, so an incomplete cube
+  does not become bindable merely because zero-filled faces were uploaded.
+- Failure before/while uploading deletes the partially created native and
+  leaves the entry evicted with its CPU source intact.  `rehydrations` and
+  `rehydrate_failures` are reported in `D9TexCacheStats`.
+- A cube created with `D3DUSAGE_RENDERTARGET` has no CPU copy of its rendered
+  faces.  It remains `no_evict` and is skipped by LRU trim; trying to rehydrate
+  one is a named `"render-target cube faces have no CPU copy"` refusal.
+- Rehydration is refused inside `BeginScene`/`EndScene`, matching the PICA
+  texture-upload restriction.
+
+`tests/cube_volume_rehydration_smoke.c` creates an 8x8 two-level cube and a
+4x4x4 volume, uploads known colours, evicts both through
+`d9_texture_cache_trim()`, rebinds, samples all six cube faces through the null
+`draw_cube`, reads the volume level, and checks the pixels/bytes and counters.
+It also injects a failed `texture_create_cube`/`texture_create_volume` rehydrate
+and proves the entry stays evicted with no partial native, then retries
+successfully.  A render-target cube remains resident across trim.
+
+- Targeted `cube_volume_rehydration,cube_volume_residency,cube_sampling,
+  cube_rt_sampling,texture_residency,texture_residency_upload,com`: **17
+  passed, 0 failed**.
+- Full suite: **122 passed, 0 failed**.
+- ARM `-Mode com -Isolated rehyd`: `.elf` 6,190,052 B SHA256
+  `a68b1f16d1e23e1c58b2d7103fe8e09547334adc98cb9bc0e3cc928c1ba8bf82`;
+  `.3dsx` 917,556 B SHA256
+  `4235e3b613b5bcf5e4334fe38a9cdce163532f850d36f2e2c5d735272fd981eb`;
+  `.text` 899,068 B.
+
+Remaining: PICA `draw_cube` (hardware cube sampling), a visible frame, and a
+full TESV engine census that actually evicts/reloads these resources.
+
 ## 6. Deliberate non-goals
 
 - No external pixel-shader constant upload path.
