@@ -117,7 +117,7 @@ The shadow-map loop does not dereference those null slots. The renderer's
 blind dereference. That is why the five 0x72 refusals are **tolerated**: they
 are optional shadow-map slots, checked before use.
 
-### 3.2 The cube-map path (the fault)
+### 3.2 The cube-map object (the fault)
 
 `0x00c91540` has a second mode: when its flag word has bit `0x10`
 (`0x00c9163e: test dl,0x10`), it does not build a 2D texture. It calls
@@ -129,88 +129,87 @@ are optional shadow-map slots, checked before use.
 - creates six `Ni2DBuffer` faces with `0x00fb69d0(w,h)` and stores them at
   `+0x40..+0x54`;
 - registers the cube data through `0x00cd4e90` -> `0x00ced4b0` ->
-  `0x00ced3e0`, which calls device slot `0x64` (`CreateCubeTexture`) and then
-  `CreateCubeFace`; on failure it logs
-  `"NiDX9RenderedCubeMapData::Create> NiDX9TextureBufferData::CreateCubeFace - %s"`
-  (`0x0115a6f8`), destroys the data and returns 0;
+  `0x00ced3e0`; that function calls `CreateCubeTexture` (device slot 25,
+  `0x00ced472`) only after a first `GetWidth` call at `0x00ced404`;
 - on registration failure `0x00fb5c20` releases the cube map and returns 0
   (`0x00fb5d01..0x00fb5d15`).
 
-The fault is not a clean null from this path. `0x00fb5bd0` is
-`NiRenderedCubeMap` vtable `0x011b0064` slot 35 (offset `0x8c`):
+**Correction from the 64 MiB census:** no `CreateCubeTexture`,
+`GetCubeMapSurface`, `SetRenderTarget` or depth call occurs. The fault is
+**inside `0x00ced3e0` at `0x00ced404`**, before the D3D cube entry points. The
+stack `545b4c50 545b4c50 54114d58 2 2 2` matches that prologue: saved ebp and
+edi are the cube map `0x545b4c50`, saved esi is the data object `0x54114d58`.
+The receiver is therefore a guest `NiRenderedCubeMap` object, but **no
+`IDirect3DCubeTexture9` exists** in this run.
+
+`0x00fb5bd0` is `NiRenderedCubeMap` vtable `0x011b0064` slot 35 (offset `0x8c`):
 
 ```
-00fb5bd0: 8b 41 40   mov eax, [ecx+0x40]   ; first cube face (Ni2DBuffer*)
+00fb5bd0: 8b 41 40   mov eax, [ecx+0x40]   ; m_pkBuffer[0] / face 0
 00fb5bd3: 8b 40 08   mov eax, [eax+8]      ; face width
 00fb5bd6: c3         ret
 ```
 
-Slot 36 (`0x8c+4`) is the matching height getter at `0x00fb5be0`. The caller is
-the group builder at `0x00c91ba0`:
+Slot 36 (`0x8c+4`) is the height getter at `0x00fb5be0`. The field at `+0x40`
+is the first `Ni2DBuffer*`; the ctor zeroes it at `0x00fb5c00` and the face loop
+fills it at `0x00fb5cc1..0x00fb5cd9`. The fault address is `0xc`, not `0x8`:
+`[ecx+0x40]` is **4**, not a live buffer (a NULL would fault at `0x8`). The
+cube map was allocated by `0xfb5c20`, but its face-0 entry is not a valid
+`Ni2DBuffer*` when `CreateSurf` asks for the width.
 
-```
-00c91d5e: 8b 07        mov eax,[edi]          ; this->buffer array
-00c91d60: 8b 3c a8     mov edi,[eax+ebp*4]    ; buffer[i]
-00c91d63: 8b 37        mov esi,[edi]
-00c91d65: 8b 4e 30     mov ecx,[esi+0x30]     ; owning NiTexture
-00c91d68: 83 c6 30     add esi,0x30
-00c91d6b: 85 c9        test ecx,ecx
-00c91d6d: 74 7d        je 0xc91dec
-00c91d6f: 8b 11        mov edx,[ecx]          ; texture vtable
-00c91d71: 8b 82 8c000000 mov eax,[edx+0x8c]   ; virtual GetWidth
-00c91d77: ff d0        call eax               ; <- 0x00fb5bd0 for a cube map
-```
-
-There is **no check that the face table was populated** before this dispatch.
-For a `NiRenderedCubeMap` receiver whose `+0x40` is not a live `Ni2DBuffer`,
-the second load dereferences `[face+8]`.
-
-The recorded fault address is `0x0000000c`, not `0x00000008`. A plain NULL at
-`+0x40` would fault at `0x8`; `0xc` means either the first load had
-`ecx = 0xffffffcc` (32-bit wrap) or the second load had `[ecx+0x40] = 4`.
-Both mean the face entry is a stale/invalid small value, not a live buffer.
-This is consistent with a cube map that was constructed (or released and
-re-used) while its face registration had failed. The exact moment `+0x40`
-became invalid is the one thing the static text cannot pin down; see section 5.
+The group builder at `0x00c91ba0+0xd77` has the same `[group+0x30] -> vtable
+slot 0x8c` shape, and would fault the same way for a cube group, but it is not
+the caller in this census (the stack matches `0xced3e0`, not `0xc91ba0`). The
+full analysis, group fields and probe are in `docs/CUBE_RENDER_TARGETS.md`.
 
 ### 3.3 So why does 0x71 appear to be the fatal one?
 
-The 0x71 request is the **last 2D creation before the cube-map group build**.
-In the init sequence the 512 `A16B16G16R16F` group at `0x00c9263b` is followed
-by the group at `0x00c92676`, whose flag `0x70` has bit `0x10` set and therefore
-takes the cube-map path. The group builder for that cube-map group immediately
-runs the width query above. The five 0x72 shadow-map slots are checked and
-skipped; the 0x71 slot is the last successful-looking 2D step, and the very
-next step is the unguarded cube-map width query. The fatal receiver is a
-**cube map**, not the 0x71 texture itself. The format codes are how the init
-sequence is ordered, not two different error handlers.
+The 0x71 request is the **last 2D creation before the water-reflection cube
+group**. In the init sequence the 512 `A16B16G16R16F` target at `0x00c9263b`
+is followed by the group at `0x00c92676`, whose flag `0x70` has bit `0x10` set
+and therefore takes the cube path. The cube map is a 512x512
+`A16B16G16R16F` water-reflection target (`iWaterReflectWidth/Height` defaults
+at `0x012cf6e8`/`0x012cf6f4`); its guest object is built, then `CreateSurf`
+queries its face-0 width and faults. The five 0x72 shadow-map slots are checked
+and skipped; the 0x71 slot is the last successful-looking 2D step, and the very
+next step is the guest cube-data prologue. The fatal receiver is the **guest
+cube-map wrapper**, not the 0x71 texture itself.
 
-This also means the two "branches" are:
+The two "branches" are therefore:
 
 - **checked 2D branch** (`0x00cec960` -> `0x00cd4e00`, and the null-target
   diagnostic): 0x72 shadow maps survive a refusal;
-- **unchecked cube-map width branch** (`0x00c91ba0` -> `0x00fb5bd0`): any
-  invalid face table is fatal, regardless of which 2D target preceded it.
+- **guest cube-data prologue** (`0x00ced3e0` -> `0x00fb5bd0`): it reads the
+  face table without checking it, and it fails before `CreateCubeTexture` or
+  any port call. A checked NULL from `0xfb5c20` would skip the group instead.
 
 ## 4. Do these targets feed the first visible menu draw?
 
-**Not proven, and the available evidence says no.** The census never reached a
-draw or `Present`: after the last `CreateTexture` refusal it faulted in the
-cube-map width query. The objects are created in renderer init (`0x00c74710`
+**Not proven, and the available evidence says no.** The 64 MiB census reached
+no draw or `Present`: after the last `CreateTexture` success it faulted in the
+guest cube-data width query. The objects are created in renderer init (`0x00c74710`
 -> `0x00c92410`), not by the menu scene; no NIF in the archive declares them;
 and the first menu/logo assets (`meshes\interface\logo\logo.nif`,
 `meshes\interface\...`) carry only `BSFadeNode`, `BSLightingShaderProperty`,
 `BSShaderTextureSet`, `NiTriShape`/`NiTriShapeData`.
 
+The cube group at `0x00c92676` is a **water-reflection** set, not a menu
+target: its width/height are `iWaterReflectWidth`/`iWaterReflectHeight`
+(default 512, `0x012cf6e8`/`0x012cf6f4`), its format is `0x71`, and its flag
+has the cube bit. It is built at renderer init regardless of the menu. The
+first visible menu (GFx UI plus optional 3D background) uses the 2D/back-buffer
+path; nothing in the menu binds a water-reflection cube. See
+`docs/CUBE_RENDER_TARGETS.md` for the object/field and the one-run watchpoint.
+
 To prove binding and reads, the exact trace is:
 
 1. Instrument `CreateTexture` at caller `0x00ceca5e` to record the returned
    `IDirect3DTexture9*` handle per (size, format), and `CreateCubeTexture`
-   (device slot `0x64`) per size.
+   (device slot 25) per size.
 2. Record every `SetRenderTarget(slot, handle)` (device slot 37), every
-   `SetDepthStencilSurface`, every `SetTexture(stage, handle)` (slot 65) and
-   every `DrawPrimitive`/`DrawIndexedPrimitive` (slots 81/82) for the first
-   visible menu frame.
+   `SetDepthStencilSurface` (slot 39), every `SetTexture(stage, handle)`
+   (slot 65) and every `DrawPrimitive`/`DrawIndexedPrimitive` (slots
+   81/82) for the first visible menu frame.
 3. A target "feeds" the first menu draw only if its handle is the active
    render target (not the implicit back buffer) or is bound to a sampler used
    by the draw's pixel shader.
@@ -219,8 +218,8 @@ To prove binding and reads, the exact trace is:
    this, once the route reaches a draw.
 
 Until that trace exists, the honest statement is: these are renderer-init
-shadow/HDR working buffers, they are **not** shown to be read by the first menu
-draw, and the current route cannot reach a draw to test it.
+shadow/water/HDR working buffers, they are **not** shown to be read by the first
+menu draw, and the current route cannot reach a draw to test it.
 
 ## 5. Minimal honest PICA200 policy
 
@@ -262,10 +261,14 @@ naive "map float to RGBA8 at the same size" is therefore not viable.
   substitution is only allowed if the consuming pass is proven LDR-safe
   (clamped/bloom threshold reformulated, no HDR accumulation read back).
   Default: refuse by name, do not silently downcast.
-- **Cube maps:** no PICA cube texture. If a cube map is required, use six 2D
-  faces (6 x size^2 x 4) or a prefiltered 2D lookup; otherwise disable the
-  effect. Do not present a cube map object whose face table is not fully
-  populated.
+- **Water-reflection cube (`0x71` 512 faces):** no PICA cube render target.
+  A 512 cube at `A16B16G16R16F` is `6 * 512^2 * 8 = 12 MiB`; even an RGBA8
+  cube is `6 MiB`, the whole original-3DS VRAM, before colour targets, depth or
+  textures. Disable it for the menu. If a reflection is required later, use six
+  256x256 RGBA8 faces (1.5 MiB) or a prefiltered 2D lookup, with a shader-side
+  cube-to-2D mapping. Do not present a cube map object whose face table is not
+  fully populated, and do not bind a `GetCubeMapSurface` view as a render
+  target: the port's `d9_set_render_target` accepts only `Target` handles.
 
 ### 5.3 What must not be substituted
 
@@ -285,11 +288,15 @@ naive "map float to RGBA8 at the same size" is therefore not viable.
 
 ## 6. Open items (exact probes)
 
-1. Watch `0x00fb5bf0`, `0x00fb5c20`, `0x00cd4e90`, `0x00ced3e0` and the width
-   call at `0x00c91d77`; print `ecx`, `[ecx]`, `[ecx+0x40]`, the buffer at
-   `[edi]` and the group index. This decides whether `+0x40` is stale from a
-   released cube map or was never a face pointer.
-2. With the cube-map path disabled, re-run the post-SM3 census and capture the
-   first draw/Present: record target and sampler handles (section 4).
+1. The fault is at `0x00ced404` (guest `CreateSurf`), before
+   `CreateCubeTexture`. Watch `cube+0x40` (`0x545b4c90` in the 64 MiB census,
+   cube map `0x545b4c50`) with the existing `N3DS_WATCH_ADDR`/
+   `N3DS_WATCH_VALUE=4` watchpoint; the writer PC says whether the face loop
+   (`0xfb5cc1`) or another path wrote 4.
+   Dump `ecx`, `[ecx]`, `[ecx+0x40]`, `[ecx+0x3c]`, `[ecx+0x14]` and the caller
+   frame. Details: `docs/CUBE_RENDER_TARGETS.md`.
+2. Skip the water-reflection cube group for the menu (checked NULL or config
+   path), re-run the census and capture the first depth/`SetRenderTarget`/
+   draw/Present: record target and sampler handles (section 4).
 3. Measure the actual VRAM cost of the current LDR path (the 1024 `0x16`
    texture plus its depth attachment) before proposing any shadow-map size.
