@@ -6,6 +6,7 @@
 #include "d3d9_pica_tev.h"
 #include "d3d9_menu_closure.h"
 #include "d3d9_menu_shader_runtime.h"
+#include "d3d9_shader_plan.h"
 /* First-draw capture is an optional diagnostic.  It is compiled by default,
  * can be removed entirely with -DD9_CAPTURE_HOOK=0, and stays inert at run
  * time unless TESV_D3D9_CAPTURE_DRAWS requests one or more records. */
@@ -94,6 +95,10 @@ typedef struct Obj {
      * still subject to draw-time preconditions and a named backend gate. */
     D9MenuShaderMatch menu;int has_menu,has_menu_vs,menu_backend_ok;
     char menu_backend_why[D9_MENU_SHADER_REASON_MAX];
+    /* Exact-hash native planner descriptor (d3d9_shader_plan.h).  A plan
+     * object is created from the compiled descriptor and remains subject to
+     * the draw gate; it is not a D3D9 capability report. */
+    const D9ShaderPlan *plan;
     int probe_skip; /* TEST-ONLY shader-skip object: bytecode kept, no TEV/plan */
     D9Decl *declaration;
     D9ComStateBlock *state_block;
@@ -2811,6 +2816,17 @@ static void shader_map_debug(uint32_t address){
     }
     fprintf(stderr,"[shader-map] nearest %s distance=0x%x\n",bestwhat,best);
 }
+/* Lower-case hex SHA-256 of the exact token bytes through END.  The plan table
+ * is keyed by this value and by nothing else (no structural fallback). */
+static void shader_plan_sha256_hex(const uint32_t *code,size_t words,char out[65]){
+    uint8_t digest[D9_MENU_CLOSURE_SHA256_BYTES];
+    static const char h[]="0123456789abcdef";
+    d9_menu_closure_sha256(code,words*4,digest);
+    for(unsigned i=0;i<D9_MENU_CLOSURE_SHA256_BYTES;++i){
+        out[i*2]=h[digest[i]>>4];out[i*2+1]=h[digest[i]&15];
+    }
+    out[64]=0;
+}
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     if(!address||(address&3)||!ptr(out,4)||OBJ_LIMIT_HIT())return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
@@ -2881,9 +2897,41 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
      * family by its structural/declaration contract.  Anything outside stays
      * on the legacy path; a selected entry whose plan cannot be built is a
      * named failure before any object or partial plan exists. */
+    /* Vertex plans are exact-hash descriptors with no executable backend yet:
+     * select them before the structural menu-family matching so the object is
+     * marked for the named draw refusal.  The closure precreate above is still
+     * the authority while the menu contract is armed. */
+    const D9ShaderPlan *plan=NULL;int has_plan_ps=0,has_plan_vs=0;
+    if(kind==VS&&shape.saw_end&&stream_words){
+        char sha[65];shader_plan_sha256_hex(code,stream_words,sha);
+        const D9ShaderPlan *hit=NULL;char plan_why[160];
+        int found=d9_shader_plan_lookup(D9_SHADER_PLAN_STAGE_VS,sha,&hit,
+                                        plan_why,sizeof plan_why);
+        if(found<0){
+            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                     "shader plan: %s",plan_why);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+            free(code);return INVALID;
+        }
+        if(found==1){
+            if(hit->kind==D9_SHADER_PLAN_PICA_VS){plan=hit;has_plan_vs=1;}
+            else{
+                snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                         "shader plan %s: descriptor kind %u does not match the vertex stage",
+                         hit->id?hit->id:"(unnamed)",(unsigned)hit->kind);
+                fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+                d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+                free(code);return UNAVAILABLE;
+            }
+        }
+    }
     D9MenuShaderMatch menu;int has_menu=0,has_menu_vs=0;
     char menu_why[D9_MENU_SHADER_REASON_MAX];
-    if(kind==PS){
+    if(has_plan_vs){
+        /* Exact-hash descriptor already selected; the structural menu family
+         * is a different contract and must not reinterpret the object. */
+        has_menu=has_menu_vs=0;
+    }else if(kind==PS){
         int menu_result=d9_menu_shader_match_ps(code,count,&menu,
                                                 menu_why,sizeof menu_why);
         if(menu_result<0){
@@ -2910,7 +2958,35 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         }
         has_menu_vs=menu_result>0;
     }
-    if(!has_menu&&!has_menu_vs&&kind==PS&&count&&code[0]==0xFFFF0300u){
+    /* Exact-hash pixel plan.  The SHA-256 is taken over the validated token
+     * bytes through END; a hit selects the offline-compiled TEV descriptor
+     * instead of the generic translation.  Menu-matched PS entries keep their
+     * existing named path, and a miss keeps the generic behaviour below.
+     * Selection never changes a D3D9 capability field. */
+    if(!has_menu&&!has_menu_vs&&kind==PS&&shape.saw_end&&stream_words){
+        char sha[65];shader_plan_sha256_hex(code,stream_words,sha);
+        const D9ShaderPlan *hit=NULL;char plan_why[160];
+        int found=d9_shader_plan_lookup(D9_SHADER_PLAN_STAGE_PS,sha,&hit,
+                                        plan_why,sizeof plan_why);
+        if(found<0){
+            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                     "shader plan: %s",plan_why);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+            free(code);return INVALID;
+        }
+        if(found==1){
+            if(hit->kind==D9_SHADER_PLAN_TEV){plan=hit;has_plan_ps=1;}
+            else{
+                snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                         "shader plan %s: descriptor kind %u does not match the pixel stage",
+                         hit->id?hit->id:"(unnamed)",(unsigned)hit->kind);
+                fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+                d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+                free(code);return UNAVAILABLE;
+            }
+        }
+    }
+    if(!has_menu&&!has_menu_vs&&!has_plan_ps&&kind==PS&&count&&code[0]==0xFFFF0300u){
         D9PicaTevReject reason;char backend_why[256];
         if(d9_pica_tev_preflight_pixel(code,count,&reason,backend_why,sizeof backend_why)){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
@@ -2925,17 +3001,24 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             free(code);return UNAVAILABLE;}
     }
     D9ShaderInfo info;D9TevProgram tev;int result;
-    if(has_menu||has_menu_vs){
+    if(has_menu||has_menu_vs||has_plan_ps||has_plan_vs){
         memset(&info,0,sizeof info);
+        memset(&tev,0,sizeof tev);
         info.version=code[0];info.major=3;info.minor=0;
         info.stream=D9_SHADER_STREAM_VALID;info.saw_end=1;
-        info.words=(unsigned)closure.used_words;
-        info.instructions=closure.instructions;
+        if(has_menu||has_menu_vs){
+            info.words=(unsigned)closure.used_words;
+            info.instructions=closure.instructions;
+        }else{
+            info.words=shape.words;
+            info.instructions=shape.instructions;
+        }
         if(has_menu){
             info.kind=D9_SHADER_TEV;tev=menu.plan;result=D9_SHADER_TEV;
+        }else if(has_plan_ps){
+            info.kind=D9_SHADER_TEV;tev=plan->tev;result=D9_SHADER_TEV;
         }else{
-            info.kind=D9_SHADER_VS_MENU;memset(&tev,0,sizeof tev);
-            result=D9_SHADER_VS_MENU;
+            info.kind=D9_SHADER_VS_MENU;result=D9_SHADER_VS_MENU;
         }
     }else{
         result=d9_shader_analyze_tev(code,count,&info,&tev);
@@ -2958,7 +3041,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         snprintf(menu_backend_why,sizeof menu_backend_why,
                   "fixed PICA vertex shader provides position and texcoord0 only; color0/color1 varyings are not produced");
     }
-    if(kind==PS&&result==D9_SHADER_TEV){
+    if(kind==PS&&result==D9_SHADER_TEV&&!has_plan_ps){
         D9PicaTevReject reason;char backend_why[256];
         if(d9_pica_tev_validate(&tev,NULL,&reason,backend_why,sizeof backend_why)){
             if(has_menu){
@@ -2986,10 +3069,19 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         if(has_menu){
             o->menu=menu;o->has_menu=1;o->menu_backend_ok=menu_backend_ok;
             snprintf(o->menu_backend_why,sizeof o->menu_backend_why,"%s",menu_backend_why);
+        }else if(has_plan_ps){
+            /* Descriptor selected by exact hash; the draw gate still applies. */
+            o->plan=plan;
         }
     }else if(kind==VS&&result==D9_SHADER_VS_MENU){
-        o->menu=menu;o->has_menu_vs=1;o->menu_backend_ok=menu_backend_ok;
-        snprintf(o->menu_backend_why,sizeof o->menu_backend_why,"%s",menu_backend_why);
+        if(has_menu_vs){
+            o->menu=menu;o->has_menu_vs=1;o->menu_backend_ok=menu_backend_ok;
+            snprintf(o->menu_backend_why,sizeof o->menu_backend_why,"%s",menu_backend_why);
+        }else if(has_plan_vs){
+            /* PICA VS descriptor: recorded for diagnostics only.  No native
+             * code emitter exists, so the draw gate refuses by name. */
+            o->plan=plan;
+        }
     }
     retain(g.dev);M32(out)=o->guest;
     /* Observation, not a D3D9 capability: the closure becomes READY only when
@@ -3170,6 +3262,41 @@ static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2
     unsigned need=o->declaration->count+1,provided=M32(n);M32(n)=need;if(!p)RET(OK,3);
     if(provided<need||!ptr(p,(size_t)need*8))RET(INVALID,3);memcpy(ptr(p,(size_t)need*8),o->declaration->elements,(need-1)*8);
     D9VertexElement end={0xff,0,D9_DECL_UNUSED,0,0,0};memcpy(ptr(p+(need-1)*8,8),&end,8);RET(OK,3);}
+/* Exact-hash plan draw gate.  A selected plan must pass its own descriptor
+ * gate and have every texture stage it samples really bound.  Both are named
+ * refusals before the batch, never a partial submit. */
+static int plan_draw_state(void){
+    char why[192];
+    if(g.vs&&g.vs->plan){
+        if(d9_shader_plan_draw_allowed(g.vs->plan,why,sizeof why)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",why);
+            return D9_UNSUPPORTED;
+        }
+    }
+    if(g.ps&&g.ps->plan){
+        const D9ShaderPlan *plan=g.ps->plan;
+        if(d9_shader_plan_draw_allowed(plan,why,sizeof why)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",why);
+            return D9_UNSUPPORTED;
+        }
+        for(unsigned i=0;i<plan->tev.textures;++i){
+            Obj *tex=i==0?g.tex:i==1?g.tex1:NULL;
+            if(!tex){
+                snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                         "pixel plan %s: texture stage %u is not bound",
+                         plan->id?plan->id:"(unnamed)",i);
+                return D9_UNSUPPORTED;
+            }
+            if(!menu_texture_ldr(tex)){
+                snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                         "pixel plan %s: texture stage %u is not an LDR 2D texture",
+                         plan->id?plan->id:"(unnamed)",i);
+                return D9_UNSUPPORTED;
+            }
+        }
+    }
+    return 0;
+}
 static int shader_state(void){
     /* A code-less shader created by the measurement-only skip probe is never
      * executable: refuse the batch by name instead of drawing with no plan. */
@@ -3178,6 +3305,8 @@ static int shader_state(void){
                  "shader-skip probe: draw with a code-less shader is refused (measurement only)");
         return D9_UNSUPPORTED;
     }
+    int plan_state=plan_draw_state();
+    if(plan_state)return plan_state;
     /* A selected menu plan still needs its declaration/material preconditions
      * and a backend that can execute it.  Both are named refusals here, before
      * the draw, so the batch is never partially submitted. */

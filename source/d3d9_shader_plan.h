@@ -63,3 +63,11 @@ int d9_shader_plan_draw_allowed(const D9ShaderPlan *plan,
 
 /* Hex comparison that accepts upper/lower case.  1 equal, 0 different. */
 int d9_shader_plan_sha256_equal(const char *a, const char *b);
+
+#ifdef D9_SHADER_PLAN_TEST_HOOKS
+/* Test-only: route lookup at a caller-owned table so a host test can exercise
+ * the exact-hash create path without retail bytecode.  The generated table is
+ * unchanged and production builds never compile this seam.  Passing NULL/0
+ * restores the generated table. */
+int d9_shader_plan_test_set(const D9ShaderPlan *entries, unsigned count);
+#endif

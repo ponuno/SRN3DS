@@ -16,6 +16,33 @@ const D9ShaderPlan *d9_shader_plan_at(unsigned index) {
     return &d9_shader_plan_entries[index];
 }
 
+#ifdef D9_SHADER_PLAN_TEST_HOOKS
+static const D9ShaderPlan *d9_test_entries;
+static unsigned d9_test_count;
+
+int d9_shader_plan_test_set(const D9ShaderPlan *entries, unsigned count) {
+    if (!entries || !count) {
+        d9_test_entries = NULL;
+        d9_test_count = 0;
+        return 0;
+    }
+    d9_test_entries = entries;
+    d9_test_count = count;
+    return 0;
+}
+#endif
+
+static const D9ShaderPlan *lookup_entries(unsigned *count) {
+#ifdef D9_SHADER_PLAN_TEST_HOOKS
+    if (d9_test_entries) {
+        *count = d9_test_count;
+        return d9_test_entries;
+    }
+#endif
+    *count = (unsigned)D9_SHADER_PLAN_ENTRY_COUNT;
+    return d9_shader_plan_entries;
+}
+
 static char lower_hex(char c) {
     return (c >= 'A' && c <= 'F') ? (char)(c - 'A' + 'a') : c;
 }
@@ -38,8 +65,10 @@ int d9_shader_plan_lookup(unsigned stage, const char *sha256_hex,
         if (why && why_size) snprintf(why, why_size, "invalid SHA-256 argument");
         return -1;
     }
-    for (unsigned i = 0; i < D9_SHADER_PLAN_ENTRY_COUNT; ++i) {
-        const D9ShaderPlan *plan = &d9_shader_plan_entries[i];
+    unsigned count = 0;
+    const D9ShaderPlan *entries = lookup_entries(&count);
+    for (unsigned i = 0; i < count; ++i) {
+        const D9ShaderPlan *plan = &entries[i];
         if (plan->stage != stage) continue;
         if (!d9_shader_plan_sha256_equal(plan->sha256, sha256_hex)) continue;
         if (out) *out = plan;
