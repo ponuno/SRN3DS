@@ -9,6 +9,7 @@ landscape multitexture, LOD and world-map overlay
   `terrain/landscape`, no shipped `grass/trees` rows)
 * phase-2 coverage: **0 translated, 0 draw-enabled, 247 refused**
 * generated IR table: [`terrain_classes.json`](terrain_classes.json)
+* named refusals: [`refusals.json`](refusals.json)
 * plan catalogue: [`plans.json`](plans.json) (empty; no runtime entries)
 * reproducible classifier: [`classify.py`](classify.py)
 * pack-local tests: [`test_terrain_classes.py`](test_terrain_classes.py)
@@ -64,7 +65,8 @@ not automatically alpha-blended overlays.
 
 `terrain_classes.json` carries every SHA-256, chunk count, package/meta, opcode
 histogram, sampled units, exact `def` vectors, CTAB vocabulary, stage lower
-bound, blockers and named refusal.  It stores no retail bytecode.
+bound, blockers and named refusal.  `refusals.json` is the compact per-hash
+named-refusal catalogue.  Neither stores retail bytecode.
 
 ## `def` values and the schema request
 

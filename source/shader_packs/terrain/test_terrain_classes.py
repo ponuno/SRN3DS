@@ -2,6 +2,7 @@
 """Pack-local coverage and canonical-IR regression tests for terrain."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import unittest
@@ -96,6 +97,19 @@ class TerrainClassTest(unittest.TestCase):
         })
         self.assertTrue(all("not encoded in PS" in row["features"]["blend_evidence"]
                             for row in overlays))
+
+    def test_named_refusal_catalog(self):
+        refusals = load(PACK_DIR / "refusals.json")
+        self.assertEqual(refusals["counts"], {
+            "terrain.needs_multipass": 228, "terrain.stage_budget": 19,
+        })
+        self.assertEqual(refusals["source_table_sha256"],
+                         hashlib.sha256((PACK_DIR / "terrain_classes.json").read_bytes()).hexdigest())
+        self.assertEqual(len(refusals["hashes"]), 247)
+        for refusal, row in zip(refusals["hashes"], self.rows):
+            self.assertEqual(refusal["sha256"], row["sha256"])
+            self.assertEqual(refusal["name"], row["refusal"]["name"])
+            self.assertEqual(refusal["blockers"], row["blockers"])
 
     def test_canonical_ir_regeneration(self):
         corpus = Path(r"E:\host_sm3")

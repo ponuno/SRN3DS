@@ -346,21 +346,54 @@ def build_table(corpus_dir: Path, manifest_path: Path, data_dir: str = "") -> di
     }
 
 
+def build_refusals(table: dict) -> dict:
+    rows = []
+    for row in table["hashes"]:
+        refusal = row["refusal"]
+        rows.append({
+            "sha256": row["sha256"],
+            "chunks": row["chunks"],
+            "class": row["class"],
+            "name": refusal["name"],
+            "texture_layers": row["texture_layers"],
+            "minimum_passes": refusal.get("minimum_passes"),
+            "stage_demand_min": row["stage_demand_min"],
+            "blockers": row["blockers"],
+        })
+    return {
+        "schema": "terrain-refusals/1",
+        "pack": "terrain",
+        "append_only": True,
+        "source_table": "terrain_classes.json",
+        "counts": dict(sorted(collections.Counter(
+            row["name"] for row in rows).items())),
+        "hashes": rows,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, default=Path(r"E:\host_sm3"))
     parser.add_argument("--data", default="")
     parser.add_argument("--manifest", type=Path, default=PACK_DIR / "manifest.json")
     parser.add_argument("--out", type=Path, default=PACK_DIR / "terrain_classes.json")
+    parser.add_argument("--refusals", type=Path, default=PACK_DIR / "refusals.json")
     args = parser.parse_args(argv)
     table = build_table(args.corpus, args.manifest, args.data)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(table, handle, indent=2, sort_keys=False)
         handle.write("\n")
+    refusals = build_refusals(table)
+    refusals["source_table_sha256"] = _sha256(args.out)
+    args.refusals.parent.mkdir(parents=True, exist_ok=True)
+    with args.refusals.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(refusals, handle, indent=2, sort_keys=False)
+        handle.write("\n")
     print("wrote %s: %d hashes / %d chunks, simple subset %d" % (
         args.out, table["totals"]["hashes"], table["totals"]["chunks"],
         table["totals"]["simple_subset_hashes"]))
+    print("wrote %s: %s" % (args.refusals, refusals["counts"]))
     return 0
 
 
