@@ -129,6 +129,7 @@ static struct {
     int hdr_ldr_fallback; /* measurement-only: store 0x71/0x72 RTs as A8R8G8B8 */int tnl_proto;
     int depth_pair_probe;
     int shader_skip_probe,shader_probe_logged; /* host-slice measurement-only */
+    int shader_usage; /* TESV_D3D9_SHADER_USAGE: JSON line per Create*Shader */
 } g;
 static void upload_tev_constants(void);
 static uint32_t present_common(CPU *c);
@@ -3124,8 +3125,81 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     d9_menu_closure_commit(&closure);
     return OK;
 }
-static void create_vs(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(shader_new(VS,A(1),A(2)),3);}
-static void create_ps(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(shader_new(PS,A(1),A(2)),3);}
+/* Measurement-only shader-usage census.  Mirrors docs/shader_plans.json's four
+ * exact hashes so it needs no extra translation unit in every d3d9_com test.
+ * It changes no HRESULT, caps field or shader object. */
+typedef struct { const char *id; const char *sha; unsigned stage; } UsagePlan;
+static const UsagePlan usage_plans[] = {
+    {"menu.logo.ps",      "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9", 0},
+    {"menu.composite.ps", "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de", 0},
+    {"game.ps.f5239354",  "f5239354171a6bc8166e1bfc59a0f46b90a3f0bc37b936f0b33ff6b91e9cc9ce", 0},
+    {"game.vs.0ccc7542",  "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7", 1},
+};
+static const char *usage_plan_id(unsigned stage,const char *sha){
+    if(!sha||strlen(sha)!=64)return NULL;
+    for(size_t i=0;i<sizeof usage_plans/sizeof usage_plans[0];++i)
+        if(usage_plans[i].stage==stage&&!strcmp(usage_plans[i].sha,sha))
+            return usage_plans[i].id;
+    return NULL;
+}
+static void shader_usage_log(unsigned kind,uint32_t address,uint32_t hr,uint32_t caller){
+    if(!g.shader_usage||!g.mem)return;
+    size_t count=0;
+    for(size_t i=0;i<g.mem->count;++i){
+        GuestRegion *r=&g.mem->regions[i];
+        if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}
+    }
+    if(!count){GuestSlab *s=guest_slab_find(g.mem,address,4);if(s)count=(s->size-(address-s->base))/4;}
+    uint32_t *code=NULL;D9ShaderInfo shape;memset(&shape,0,sizeof shape);
+    size_t words=0;
+    if(count){
+        if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
+        code=malloc(count*4);
+        if(code){
+            for(size_t i=0;i<count;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
+            (void)d9_shader_analyze(code,count,&shape);
+            words=shape.saw_end&&shape.words?shape.words:count;
+        }
+    }
+    /* D3DX-compiled blobs in TESV's .rdata carry a CTAB block and put the code
+     * length in the high half of the second token (GFx's built-ins).  Raw FXP
+     * token streams (Shaders001/002) do not; the walker's END length is right
+     * for those and matches docs/shader_plans.json. */
+    size_t hash_words=words;
+    if(caller>=0x00f88000u&&caller<0x00f89000u&&code&&count>=3&&
+       code[2]==0x42415443u){
+        size_t n=(code[1]>>16)&0xffffu;
+        if(n>0&&n<=count)hash_words=n;
+    }
+    char sha[65];sha[0]='\0';
+    if(code&&hash_words){
+        uint8_t dig[D9_MENU_CLOSURE_SHA256_BYTES];
+        d9_menu_closure_sha256(code,hash_words*4,dig);
+        for(unsigned i=0;i<32u;++i)snprintf(sha+i*2,3,"%02x",dig[i]);
+    }
+    unsigned stage=kind==PS?0u:1u;
+    const char *plan=usage_plan_id(stage,sha);
+    fprintf(stderr,"[shader-usage] {\"stage\":\"%s\",\"sha256\":%s%s%s,\"bytes\":%zu,"
+                   "\"addr\":\"0x%08x\",\"caller\":\"0x%08x\",\"result\":\"0x%08x\","
+                   "\"plan\":%s%s%s,\"plan_hit\":%d}\n",
+            kind==PS?"ps":"vs",
+            sha[0]?"\"":"",sha[0]?sha:"null",sha[0]?"\"":"",
+            hash_words*4,(unsigned)address,(unsigned)caller,(unsigned)hr,
+            plan?"\"":"",plan?plan:"null",plan?"\"":"",plan?1:0);
+    free(code);
+}
+static void create_vs(CPU *c){
+    if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);
+    uint32_t hr=shader_new(VS,A(1),A(2));
+    shader_usage_log(VS,A(1),hr,M32(c->r[4]));
+    RET(hr,3);
+}
+static void create_ps(CPU *c){
+    if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);
+    uint32_t hr=shader_new(PS,A(1),A(2));
+    shader_usage_log(PS,A(1),hr,M32(c->r[4]));
+    RET(hr,3);
+}
 static void set_vs(CPU *c){Obj *o=obj(A(1),VS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     if(o&&o->has_menu_vs){
         D9Decl tmp;const D9Decl *decl=menu_current_decl(&tmp);char why[D9_MENU_SHADER_REASON_MAX];
@@ -3824,6 +3898,10 @@ static int d9_com_start(GuestMemory *m,D9Device *d,const D9Backend *ops,void *ct
     g.shader_probe_logged=0;
     if(g.shader_skip_probe)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: shader-skip probe active (host slice only); "
         "non-closure shaders become non-executable objects and their draws are refused\n");
+    const char *usage=getenv("TESV_D3D9_SHADER_USAGE");
+    g.shader_usage=usage&&usage[0]&&strcmp(usage,"0")?1:0;
+    if(g.shader_usage)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: shader-usage census active; "
+        "one JSON line per Create*Shader, no behaviour change\n");
     if(d)(void)d9_set_tnl_proto(d,g.tnl_proto);
     g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
     init_tables();win32_set_external_resolver(d9_com_resolve,NULL);

@@ -67,14 +67,51 @@ For the first displayed frame the engine must already have:
    `SetStreamSource`/`SetIndices`/`SetVertexDeclaration`/`DrawIndexedPrimitive`
    and finally `Present` on the menu's target.
 
-None of item 2-4 is measured yet. The census has **0 `CreatePixelShader`, 0
-`Draw*` and 0 `Present`**; the last run stops in NiDX9 renderer init, long before
-GFx creates a movie. Consequently the exact GFx shader count is still
-unmeasured and must come from a capture of the first `0xa60200`/`0xa60c80`
-window. The only shader set with a static census today is the **3D menu
-background** closure: `p1200005` (one `ps_3_0`, SHA-256 `8725393b...5ff9`) and
-the bounded 83-member `menu.generic.vs` family (28 distinct hashes), documented
-in `docs/MENU_SHADER_CLOSURE.md`; that is not yet proven to be the SWF overlay.
+### 3.1 Measured GFx shader set (2026-11-27)
+
+With the 160 MiB guest budget (see below) the run passes renderer init and
+reaches GFx's D3D9 renderer. The shader creation loop is
+`0xf88360..0xf8843b`:
+
+| Table | VA | Entries | Non-NULL | Role |
+|---|---|---:|---:|---|
+| `gfx.vs` | `0x12dfca8` | 6 | 5 | `CreateVertexShader` at `0xf8838c` |
+| `gfx.ps.level2` | `0x12dfcd8` | 45 | 40 | `CreatePixelShader` at `0xf883df` |
+| `gfx.ps.level3` | `0x12dfa80` | 25 | 24 | second PS loop, only when shader level `>= 3` |
+
+All blobs are `vs_3_0` / `ps_3_0`; the DWORD length is in the high half of the
+second token. Observe 5 VS + 40 PS created (all `S_OK` only because
+`TESV_D3D9_SHADER_SKIP_PROBE=1` makes them non-executable objects).
+
+Distinct `gfx.vs` hashes (3):
+
+| Bytes | SHA-256 | Entries |
+|---:|---|---:|
+| 172 | `77bc67a86e38ea6565c82f95313185a48420430c4f4c7afa6144d144ce075376` | 3 |
+| 128 | `4281bd82262c5a5a8d26588a60fea83d52a265f8ef08fcbf34ce2b0045eb826a` | 1 |
+| 172 | `ad97e55f922355acfd8f40e8d37f53ab122c8d3f7dbc5e2af1cc5e4adbe1f924` | 1 |
+
+Distinct `gfx.ps.level2` hashes (7, 40 objects):
+
+| Bytes | SHA-256 | Entries |
+|---:|---|---:|
+| 132 | `f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652` | 2 |
+| 160 | `01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b` | 6 |
+| 200 | `2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a` | 24 |
+| 220 | `8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d` | 2 |
+| 244 | `b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b` | 2 |
+| 288 | `1b279738cdd7559ca1bbd05e8b46c63d8f54f412f8bb8b45d2456278ab94f907` | 2 |
+| 332 | `cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918` | 2 |
+
+`gfx.ps.level3` (24 objects, 4 hashes, not created at the current honest level
+2): 404 B `a226495a...9c307`, 432 B `9742395e...b239d8`, 328 B
+`5d4ce7e4...6116c`, 272 B `159a088e...98b93`.
+
+`python tools/menu_harness.py --gfx-shaders` reproduces the full address/size/
+hash table. This is the real native shader requirement for the StartMenu
+overlay: **5 VS + 40 PS objects at level 2 (or +24 PS if level 3 is ever
+advertised), 3 + 7 distinct hashes**. The earlier `p1200005` / 83-VS closure is
+the 3D menu background, not these GFx blobs.
 
 ## 4. Layers that actually block, in order
 
@@ -83,9 +120,9 @@ in `docs/MENU_SHADER_CLOSURE.md`; that is not yet proven to be the SWF overlay.
 | 1 | SM3 word gate `0xc6e22d` | honest caps VS/PS 2.0 -> renderer failure | measurement-only byte-verified `TESV_D3D9_SM3_GATE_PROBE`; DevCaps stays `0x00082000` |
 | 2 | HW T&L gate `0xc6d8c6` | honest caps lack `HWTRANSFORMANDLIGHT` | measurement-only `TESV_D3D9_CAPS_PROBE` |
 | 3 | renderer-init targets/depth | 9 targets (5x1024 `0x72`, 3x512 `0x15`, 1x512 `0x71`), 512 cube, 4 depth surfaces; cube and D24S8 pass | LDR fallback + depth-pair probe, already measurement-only |
-| 4 | guest memory | 64 MiB census: `CreateVertexShader` 874/874 `S_OK`, declarations 368 (360 `S_OK`, 8 `INVALIDCALL`), `CreatePixelShader` 0, then `Guest fault at 549a9038: guest memory backing failed: out of memory` inside the 1024 shadow group | raise the *measurement* budget to the device-real 92 MiB (`TESV_D3D9_BUDGET_MB=92`) and stop retaining up to 4096 words per code-less shader; report the next call |
-| 5 | shader execution | `TESV_D3D9_SHADER_SKIP_PROBE` turns valid non-closure streams into non-executable objects; every draw is refused by name | a real bounded SM3 execution path (VS family + PS plans) or a GFx fixed-function contract; do not fake caps |
-| 6 | GFx init/first draw | never reached; `CreatePixelShader`/`CreateVertexBuffer`/`Draw*`/`Present` all 0 | after layer 4: count GFx's built-in shaders and buffers in the `0xa60200` window, then implement exactly those |
+| 4 | guest memory | 64 MiB guest budget: `549a9038` OOM inside the 1024 shadow group. **160 MiB (167772160) passes**; 92 MiB D3D budget is enough for all targets | use 160 MiB guest / 92 MiB D3D for the menu harness; 64 MiB is not enough for renderer init + shader preload |
+| 5 | shader execution | `TESV_D3D9_SHADER_SKIP_PROBE` turns valid SM3 streams into non-executable objects; GFx's 5 VS + 40 PS are created `S_OK` but cannot draw | a real bounded SM3 execution path for the 3 VS / 7 PS hashes above; do not fake caps |
+| 6 | GFx init/first draw | reached: `CreatePixelShader` 40/40, `CreateVertexBuffer` 2, `CreateIndexBuffer` 2, 2× `BeginScene`/`EndScene`/`Present`, but **0 `Draw*`**; 2e9 blocks end at `pilot basic-block budget exceeded` | raise the step budget (>2e9) and/or instrument the menu-open milestone; then capture the first `DrawIndexedPrimitive` |
 | 7 | Bink/video | `_BinkOpen` returns NULL; no frame; not fatal | empty `sIntroSequence` skips it entirely |
 | 8 | audio/input | not required for the first menu frame | input only for navigation (`TESV_INPUT_PROFILE=menu`; see `docs/MENU_INPUT.md`); audio failures are non-fatal |
 
@@ -103,6 +140,18 @@ Place it in the game root's `Skyrim.ini` (the path mapper accepts
 `C:\Skyrim\...` / `sdmc:/Skyrim\...`). `0x69dadf` then sets `0x1b3fced` and the
 `0xf500f0` Bink call at `0x69db7c` is skipped.
 
+Gotchas, both measured:
+
+* add **only** these two keys; a malformed `[Display] iSize W/H` block makes
+  the engine exit at `0x0069107d` with `Failed to initialize renderer.` before
+  D3D;
+* a custom game root must also contain the port profile files
+  `Documents\My Games\Skyrim\SkyrimPrefs.ini` and
+  `LocalAppData\Skyrim\Skyrim.ini` (copied from the Azahar seed). Without them
+  the engine falls back to PC display defaults and fails the same renderer
+  gate. The `F:\Skyrim` root already has both directories, which is why the
+  first 160 MiB census worked without extra setup.
+
 Measurement environment (host census or device flag set):
 
 ```text
@@ -114,9 +163,15 @@ TESV_D3D9_DEPTH_PAIR_PROBE=1
 TESV_D3D9_HDR_LDR_FALLBACK=1
 TESV_D3D9_SHADER_SKIP_PROBE=1
 TESV_D3D9_BUDGET_MB=92
+TESV_CECDC0_SOURCE_FILL=1
 N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
 TESV_INPUT_PROFILE=menu
 ```
+
+`TESV_CECDC0_SOURCE_FILL=1` is required to get past the cube/RT descriptor
+(`0xced041`); without it the run dies at `NiRenderedCubeMap` before GFx. The
+slice args are `F:\Skyrim\TESV.exe <root> 2000000000 167772160`; the 160 MiB
+guest budget is the one that reaches GFx (64 MiB stops at `549a9038`).
 
 Launch normally (no `-psave`/load): `0x6982c0` returns 1, WinMain calls
 `0x876f60(1)` at `0x69de08`, the factory `0x876fc0` runs, the ctor loads
@@ -127,18 +182,60 @@ Do **not** patch `0x69de08`/`0x876f60` to force the menu earlier: the menu
 object allocates through the engine allocator and needs `MenuManager`, GFx and a
 device that already exist. Patching only shifts the crash.
 
-## 6. Next concrete step
+## 6. Measured run (2026-11-27)
 
-Run the census with `TESV_D3D9_BUDGET_MB=92` (the real `.3dsx` application
-budget) and the same probe set, and stop at the first non-`S_OK` call. Expected
-outcomes:
+Host slice built from `E:\Skyrim_N3DS_build\analysis\growth_probe\gen01` with
+the D3DXMatrixMultiply pilot table, args
+`F:\Skyrim\TESV.exe F:\Skyrim 2000000000 167772160`, probes CAPS+SM3+DEPTH+
+HDR_LDR+SHADER_SKIP+TRACE, `BUDGET_MB=92`, `CECDC0_SOURCE_FILL=1`:
 
-* if the shadow group completes, the next lines should be `CreatePixelShader`
-  from `0xa60200`/GFx and then the first `CreateVertexBuffer`/`Draw*`; capture
-  those caller VAs;
-* if `549a9038` repeats, reduce the shader retention in
-  `shader_probe_object()` to a validation summary (no 4096-word copy) and log
-  the exact allocation request size before the fault;
-* then count the GFx built-in shaders exactly and add them, one hash at a time,
-  to the bounded runtime. No draw/frame claim until `Present` and a captured
-  non-empty draw are both in the log.
+| Event | Count / result |
+|---|---|
+| `CreateVertexShader` | 879 = 874 engine (`0xccbbc5`, addr `0x64550008`) + 5 GFx (`0xf8838c`) |
+| `CreatePixelShader` | 40/40 `S_OK`, all caller `0xf883df` |
+| `CreateVertexDeclaration` | 372/372 `S_OK` |
+| `CreateVertexBuffer` / `CreateIndexBuffer` | 2 / 2 `S_OK` (`0xf82667` 0xc0000 B; `0xceecee` 0x34f20 B) |
+| `BeginScene`/`EndScene`/`Present` | 2 / 2 / 2 `S_OK` (renderer-init cycles, caller `0xce7e03`) |
+| `DrawIndexedPrimitive` / `DrawPrimitive` / `*PrimitiveUP` | **0** |
+| first fault | `Guest fault at 00000000: pilot basic-block budget exceeded` after 2e9 blocks |
+
+Immediately before the budget fault GFx has bound a complete object state
+(declaration `0x50007340`, VS `0x50007380`, PS `0x50007510`, index buffer
+`0x50007660`, `SetStreamSourceFreq`, `SetIndices`) and then **unbinds** all
+three (`SetPixelShader(NULL)` at `0xf88be5`, `SetVertexShader(NULL)` at
+`0xf88bf8`, `SetTexture(NULL)` at `0xf88c0d`) before `EndScene`/`Present`.
+There is no `Draw*` between bind and unbind, so this is GFx's setup/clear
+cycle, not a menu primitive. Thread 11 then logs `Sleep 25 ms from 0x6f40cf`
+and thread 1 exhausts the budget — the run is in the main loop, not stuck in
+the menu object.
+
+For contrast, the same binary with the 64 MiB guest budget reaches 874/874 VS
+`S_OK`, **0 `CreatePixelShader`, 0 `Draw*`, 0 `Present`**, then faults at
+`549a9038` inside the 1024 shadow group. The 160 MiB budget is what unlocks the
+GFx phase; no shader-retention change was needed.
+
+The 2e9-block budget ends after the two init `Present` calls, before the menu
+draws. A 4e9 run with the same env/root (`Skyrim.ini: sIntroSequence=`,
+`bPreloadIntroSequence=0`) produced **identical counts** (40 PS, 2 VB, 2 IB,
+2 Present, 0 Draw) and the same `pilot basic-block budget exceeded`; raising the
+block count alone does not reach the menu.
+
+**IRC container matters, but did not remove this spin.** The
+`F:\Skyrim\ir\tesv.irc` used for the first runs is stale for `0x00f520f0`
+(24 blocks, no PREENTRY). The census agent's fresh
+`E:\census_ir2\ir_container\tesv.irc` (64,445,696 B, 90,900 functions / 90,027
+decoded, index CRC OK) has 25 blocks including `0x00f520e0` with PREENTRY. A
+4e9 run with the fresh container produced the **same** 40 PS / 2 VB / 2 IB /
+2 Present / 0 Draw and the same budget fault; thread 11 sleeps at `0x6f40cf`
+(19 ms), thread 10 at `0xb9ef30` (1 ms), and thread 1 burns the block budget.
+So the menu state transition is not fixed by the IRC alone; capture thread 1's
+guest stack/EIP next.
+
+`TESV_D3D9_SHADER_USAGE=1` (source/d3d9_com.c) emits one JSON line per
+Create VS/PS; `python tools/menu_shader_usage.py LOG --json OUT` builds the
+deduplicated set. See `docs/MENU_SHADERS.md` for the measured 3 GFx VS hashes
+and 7 GFx PS hashes (40 objects), and why the 874-VS Shaders001/002 preload is
+not the menu set.
+
+No frame is claimed: `Present` here is the engine's own init cycle, not a
+StartMenu frame.

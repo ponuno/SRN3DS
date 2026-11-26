@@ -66,11 +66,20 @@ def main():
         try:
             ok, rows = menu_harness.verify_pe(pe)
             iok, irows = menu_harness.verify_input_imports(pe)
+            # GFx's built-in tables are the measured native shader requirement.
+            gfx = menu_harness.gfx_shaders(pe)
         finally:
             pe.close()
         assert ok, [r for r in rows if not r[1]]
         assert iok, [r for r in irows if not r[1]]
         checks += 2
+        vs = [r for r in gfx if r[0] == "gfx.vs" and r[3]]
+        ps2 = [r for r in gfx if r[0] == "gfx.ps.level2" and r[3]]
+        ps3 = [r for r in gfx if r[0] == "gfx.ps.level3" and r[3]]
+        assert len(vs) == 5 and len({r[4] for r in vs}) == 3
+        assert len(ps2) == 40 and len({r[4] for r in ps2}) == 7
+        assert len(ps3) == 24 and len({r[4] for r in ps3}) == 4
+        checks += 1
     print("menu_harness_test: %d checks OK" % checks)
     return 0
 

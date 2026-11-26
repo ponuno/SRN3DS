@@ -14,6 +14,7 @@ mismatch.  The self-test uses a synthetic PE so it runs without game bytes.
 """
 
 import argparse
+import hashlib
 import json
 import struct
 import sys
@@ -110,6 +111,15 @@ STRINGS = [
 ]
 
 # Objects whose constructor/factory calls are the next observable milestones.
+# GFx's own D3D9 renderer creates its built-in shaders from three pointer
+# tables in .data (caller 0xf8838c VS / 0xf883df PS).  The first table is
+# always used; the third only when the device shader level is >= 3.
+GFX_SHADER_TABLES = [
+    ("gfx.vs", 0x12DFCA8, 6),
+    ("gfx.ps.level2", 0x12DFCD8, 45),
+    ("gfx.ps.level3", 0x12DFA80, 25),
+]
+
 MILESTONES = [
     ("main_menu_factory", 0x876FC0, "allocates 0x24 and calls the ctor"),
     ("main_menu_singleton", 0x1B3FC98, "non-NULL after 0x876f60(1)"),
@@ -232,6 +242,29 @@ class SparsePe:
         return raw.split(b"\0", 1)[0].decode("latin-1")
 
 
+def gfx_shaders(pe):
+    """Return the GFx built-in shader tables with real sizes and SHA-256.
+
+    The D3D9 blobs in this build carry the DWORD length in the high half of
+    their second token, not the first (first = version/type).
+    """
+    rows = []
+    for name, va, count in GFX_SHADER_TABLES:
+        for i in range(count):
+            ptr = struct.unpack("<I", pe.read_va(va + i * 4, 4))[0]
+            if ptr < 0x1000:
+                rows.append((name, i, ptr, 0, None))
+                continue
+            hdr = struct.unpack("<II", pe.read_va(ptr, 8))
+            words = (hdr[1] >> 16) & 0xFFFF
+            if 0 < words < 4096:
+                digest = hashlib.sha256(pe.read_va(ptr, words * 4)).hexdigest()
+            else:
+                words, digest = 0, None
+            rows.append((name, i, ptr, words * 4, digest))
+    return rows
+
+
 def self_test():
     """Feed every anchor through the verifier and require one corruption hit."""
     blocks = []
@@ -278,7 +311,9 @@ HARNESS = {
         "TESV_D3D9_DEPTH_PAIR_PROBE=1",
         "TESV_D3D9_HDR_LDR_FALLBACK=1",
         "TESV_D3D9_SHADER_SKIP_PROBE=1",
+        "TESV_D3D9_SHADER_USAGE=1",
         "TESV_D3D9_BUDGET_MB=92",
+        "TESV_CECDC0_SOURCE_FILL=1",
         "N3DS_IRC_PATH=F:\\Skyrim\\ir\\tesv.irc",
         "TESV_INPUT_PROFILE=menu",
     ],
@@ -303,6 +338,12 @@ HARNESS = {
         ],
         "not_claimed": "no menu frame was executed; mapping is host-tested only",
     },
+    "slice_args": [
+        "F:\\Skyrim\\TESV.exe", "<root>", "6000000000", "167772160",
+    ],
+    "note": "160 MiB guest budget is required for renderer init; 64 MiB OOMs "
+            "at 549a9038. 2e9 blocks stop before the menu draw; 6e9 is the "
+            "current run.",
     "not_needed": (
         "no world/load-game skip: WinMain calls 0x876f60(1) automatically when "
         "0x6982c0 returns \"no startup save\" (normal launch); no input is "
@@ -315,6 +356,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--exe", default=r"F:\Skyrim\TESV.exe")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--gfx-shaders", action="store_true",
+                    help="print GFx's built-in VS/PS tables with hashes")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
@@ -322,6 +365,17 @@ def main(argv=None):
         print("menu_harness self-test: %d checks PASS" % n)
         return 0
     pe = Pe(args.exe)
+    if args.gfx_shaders:
+        try:
+            for name, i, ptr, size, digest in gfx_shaders(pe):
+                if not size:
+                    print("%-14s %2d null/0x%08x" % (name, i, ptr))
+                else:
+                    print("%-14s %2d 0x%08x %4d B %s" %
+                          (name, i, ptr, size, digest))
+        finally:
+            pe.close()
+        return 0
     try:
         ok, rows = verify_pe(pe)
         iok, irows = verify_input_imports(pe)
@@ -353,6 +407,8 @@ def main(argv=None):
             print("  [General] %s=%s" % (k, v))
         for e in HARNESS["measurement_env"]:
             print("  " + e)
+        print("  slice: " + " ".join(HARNESS["slice_args"]))
+        print("  " + HARNESS["note"])
         print("  " + HARNESS["not_needed"])
         print("\ninput profile (%s):" % HARNESS["input"]["profile_env"])
         for k, v in HARNESS["input"]["mapping"].items():
