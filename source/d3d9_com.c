@@ -746,10 +746,10 @@ static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     unsigned pow2=A(1)>=8&&A(2)>=8&&A(1)<=1024&&A(2)<=1024&&
                   !(A(1)&(A(1)-1))&&!(A(2)&(A(2)-1));
     if(!back_size&&!pow2){
-        d3d_log("CreateDepthStencilSurface","only power-of-two 8..1024 or the exact back-buffer size is implemented");
+        d3d_fail("CreateDepthStencilSurface","only power-of-two 8..1024 or the exact back-buffer size is implemented",INVALID);
         RET(INVALID,9);}
     if(A(3)!=D9_D24S8&&A(3)!=D9_D24X8){
-        d3d_log("CreateDepthStencilSurface","only D3DFMT_D24S8/D24X8 (the PICA depth attachment) is implemented");
+        d3d_fail("CreateDepthStencilSurface","only D3DFMT_D24S8/D24X8 (the PICA depth attachment) is implemented",UNAVAILABLE);
         RET(UNAVAILABLE,9);}
     if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);
     D9Handle h=0;int rc=d9_create_depth_surface(g.device,A(1),A(2),A(3),A(4),A(5),A(6)!=0,&h);
@@ -1298,7 +1298,10 @@ static uint32_t cube_create_obj(uint32_t device,unsigned edge,unsigned levels,un
                                 unsigned format,unsigned pool,uint32_t *out){
     if(out)*out=0;
     if(!g.mem||!g.device||!out||g.phase||!obj(device,DEVICE))return INVALID;
-    if(usage&~0x00220200u)return UNAVAILABLE;
+    if(usage&~0x00220200u){
+        char why[96];snprintf(why,sizeof why,"unsupported cube texture usage 0x%x",usage);
+        d3d_fail("CreateCubeTexture",why,UNAVAILABLE);return UNAVAILABLE;
+    }
     if(pool>2)return UNAVAILABLE;
     if(g.next>=MAX_OBJECTS)return OUTMEM;
     D9Handle h=0;int rc=d9_create_cube_texture_ex(g.device,edge,levels,format,pool,usage,&h);
@@ -1852,7 +1855,8 @@ static void end_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1)RET(INVALID,1);g.
 /* Device and implicit-swap-chain Present share the exact same scene state
  * machine and presentation flags; only the COM `this` object differs. */
 static uint32_t present_common(CPU *c){
-    if(g.phase!=2||A(1)||A(2)||A(3)||A(4))return INVALID;
+    if(g.phase!=2){d3d_fail("Present","Present requires EndScene",INVALID);return INVALID;}
+    if(A(1)||A(2)||A(3)||A(4))return INVALID;
     int rc=d9_present(g.device);if(!rc){g.phase=0;
 #if D9_CAPTURE_HOOK
         g.capture_present=1;g.capture_present_flags=A(4);
