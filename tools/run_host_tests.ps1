@@ -55,6 +55,19 @@ if (-not $Python) {
     $Python = if (Test-Path $candidate) { $candidate } else { "python" }
 }
 
+# Shared object cache: every test compiles the same ~30 translation units, so
+# cache each (source content, flags, compiler) tuple once and link from it.
+# One warm cache serves all tests, all worktrees and all agents.  Delete the
+# directory (or set HOST_OBJ_CACHE to another path) to force a rebuild.
+$cacheRoot = $env:HOST_OBJ_CACHE
+if (-not $cacheRoot) {
+    $cacheRoot = if (Test-Path "E:\") { "E:\host_objcache" } else { Join-Path $root "build_host_objcache" }
+}
+$cacheRoot = [System.IO.Path]::GetFullPath($cacheRoot)
+New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+$script:objCache = $cacheRoot
+$script:clangId = "{0}|{1}|{2}" -f $clang, (Get-Item $clang).Length, (Get-Item $clang).LastWriteTimeUtc.Ticks
+
 $outDir = if ($OutDir) { $OutDir } else { Join-Path $root "build_host" }
 # TEMP/TMP must be absolute: relative paths break the CRT's tmpfile_s in the
 # steam/registry smokes. Resolve a relative -OutDir against the caller's cwd.
@@ -104,14 +117,30 @@ function Invoke-TestProcess([string]$file, [string[]]$argv, [string]$workDir, [i
     return @{ Code = $proc.ExitCode; Output = $lines; TimedOut = $false }
 }
 
+function Get-ObjectKey([string]$src, [string]$flagText, [string]$clangId) {
+    # The relative source path is part of the key: __FILE__ and debug info then
+    # match the caller even when the object comes from the shared cache.
+    $rel = ($src -replace '\\', '/')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $head = [System.Text.Encoding]::UTF8.GetBytes("$rel`n$flagText`n$clangId`n")
+        $body = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $src).Path)
+        $buf = New-Object byte[] ($head.Length + $body.Length)
+        [Array]::Copy($head, 0, $buf, 0, $head.Length)
+        [Array]::Copy($body, 0, $buf, $head.Length, $body.Length)
+        $hash = $sha.ComputeHash($buf)
+        return (-join ($hash | ForEach-Object { $_.ToString('x2') }))
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function Invoke-ClangParallel([string]$Clang, [string[]]$Flags, [string[]]$Sources, [string]$OutFile, [string]$WorkDir, [int]$Jobs) {
-    $objDir = Join-Path $WorkDir 'parobj'
-    Remove-Item -Recurse -Force $objDir -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path $objDir | Out-Null
     $compileFlags = @($Flags | Where-Object { $_ -notmatch '^-Wl,' })
     $flagText = ($compileFlags -join ' ')
     $active = New-Object System.Collections.Generic.List[object]
     $objs = New-Object System.Collections.Generic.List[string]
+    $pending = New-Object System.Collections.Generic.List[object]
     $allOut = New-Object System.Collections.Generic.List[string]
     $failed = $false
     $idx = 0
@@ -146,17 +175,48 @@ function Invoke-ClangParallel([string]$Clang, [string[]]$Flags, [string[]]$Sourc
     }
 
     foreach ($src in $Sources) {
-        while ($active.Count -ge $Jobs) {
-            $r = $active[0]; $active.RemoveAt(0); Collect-Clang $r ([ref]$failed)
-        }
-        $obj = Join-Path $objDir ("{0:D3}_{1}.o" -f $idx, ([IO.Path]::GetFileNameWithoutExtension($src)))
-        $argText = "$flagText `"$src`" -c -o `"$obj`""
-        $active.Add((Start-Clang $argText))
+        $key = Get-ObjectKey $src $flagText $script:clangId
+        $obj = Join-Path $script:objCache ($key + '.o')
         $objs.Add($obj)
+        if (-not (Test-Path -LiteralPath $obj)) {
+            $tmp = Join-Path $script:objCache ("$key.tmp.$PID.$($pending.Count)")
+            $pending.Add([pscustomobject]@{ Src = $src; Obj = $obj; Tmp = $tmp })
+        }
+    }
+    foreach ($item in $pending) {
+        while ($active.Count -ge $Jobs) {
+            $e = $active[0]; $active.RemoveAt(0)
+            Collect-Clang $e.R ([ref]$failed)
+            if ($e.R.Proc.ExitCode -eq 0) {
+                try { Move-Item -LiteralPath $e.Tmp -Destination $e.Obj -Force -ErrorAction Stop }
+                catch {
+                    if (-not (Test-Path -LiteralPath $e.Obj)) {
+                        $failed = $true
+                        $allOut.Add("OBJECT CACHE STORE FAILED: $($e.Obj)")
+                    }
+                }
+            } else {
+                Remove-Item -LiteralPath $e.Tmp -Force -ErrorAction SilentlyContinue
+            }
+        }
+        $argText = "$flagText `"$($item.Src)`" -c -o `"$($item.Tmp)`""
+        $active.Add([pscustomobject]@{ R = (Start-Clang $argText); Tmp = $item.Tmp; Obj = $item.Obj })
         ++$idx
     }
     while ($active.Count -gt 0) {
-        $r = $active[0]; $active.RemoveAt(0); Collect-Clang $r ([ref]$failed)
+        $e = $active[0]; $active.RemoveAt(0)
+        Collect-Clang $e.R ([ref]$failed)
+        if ($e.R.Proc.ExitCode -eq 0) {
+            try { Move-Item -LiteralPath $e.Tmp -Destination $e.Obj -Force -ErrorAction Stop }
+            catch {
+                if (-not (Test-Path -LiteralPath $e.Obj)) {
+                    $failed = $true
+                    $allOut.Add("OBJECT CACHE STORE FAILED: $($e.Obj)")
+                }
+            }
+        } else {
+            Remove-Item -LiteralPath $e.Tmp -Force -ErrorAction SilentlyContinue
+        }
     }
     if ($failed) { return @{ Code = 1; Output = @($allOut) } }
 
@@ -492,21 +552,12 @@ foreach ($name in $tests.Keys) {
         }
     }
     $compileLog = Join-Path $logDir "${runId}_$name.build.log"
-    $srcQuoted = $spec.Sources | ForEach-Object { "`"$_`"" }
-    $clangArgs = @($spec.Flags) + $srcQuoted + @("-o", "`"$exe`"")
-    $cmd = "call `"$vsVars`" >nul && `"$clang`" " + ($clangArgs -join " ")
     $jobs = if ($env:HOST_CLANG_JOBS) { [int]$env:HOST_CLANG_JOBS } else { 6 }
-    $useParallel = (($name -eq "tesv_slice") -or ($name -eq "tesv_slice_cube_probe")) -and (-not $Sanitize) -and ($jobs -gt 1) -and ($spec.Sources.Count -gt 2)
-    if ($useParallel) {
-        Write-Log "BUILD $name (parallel clang jobs=$jobs)"
-        $pb = Invoke-ClangParallel $clang $spec.Flags $spec.Sources $exe $runDir $jobs
-        $buildOut = @($pb.Output)
-        $buildCode = [int]$pb.Code
-    } else {
-        Write-Log "BUILD $name"
-        $buildOut = & C:\Windows\System32\cmd.exe /c $cmd 2>&1
-        $buildCode = [int]$LASTEXITCODE
-    }
+    if ($jobs -lt 1) { $jobs = 1 }
+    Write-Log "BUILD $name (clang jobs=$jobs, object cache $script:objCache)"
+    $pb = Invoke-ClangParallel $clang $spec.Flags $spec.Sources $exe $runDir $jobs
+    $buildOut = @($pb.Output)
+    $buildCode = [int]$pb.Code
     $buildOut | Out-File -FilePath $compileLog -Encoding utf8
     if ($buildCode -ne 0 -or -not (Test-Path $exe)) {
         Write-Log "COMPILE FAIL: $name (see $compileLog)"
