@@ -184,6 +184,10 @@ buffer and Present scales it to 400x240. With it, the host census now:
   merges (agent branches are often based on older mains).
 - Prefer Python script files over PowerShell inline `-c` strings for edits with
   quotes/backticks; the shell mangles them.
+- `staged/` and `pilot_out_mult/` are ignored local inputs, not worktree files.
+  Copy them from the main tree or pass `-PilotGen ...\D3DXMatrixMultiply\gen`;
+  otherwise the rebuilt slice resolves `D3DXMatrixMultiply` to its real body
+  `0x0802fa80` without linking the lifted body and faults there.
 - `source/tesv_slice_main.c` must include `<unistd.h>` only inside `#ifdef
   __3DS__` (Windows host clang has no such header).
 - `tools/run_host_tests.ps1` gates `tesv_slice`/`tesv_slice_cube_probe` sources on

@@ -73,6 +73,7 @@ enum {
     N3DS_IRC_FN_FORCED   = 1u << 2,  /* forced AOT (unsupported by v1/v2) */
     N3DS_IRC_FN_COMPLETE = 1u << 3,  /* every discovery leader decoded */
     N3DS_IRC_FN_INVALID  = 1u << 4,  /* explicit negative entry */
+    N3DS_IRC_FN_PREENTRY = 1u << 5,  /* record has a cold block before entry */
 };
 
 /* decode_status values. */
@@ -185,6 +186,7 @@ uint32_t n3ds_irc_data_crc32(const N3dsIrc *irc);
 /* Exact-entry lookup. Returns N3DS_IRC_OK and fills `out`, or
  * N3DS_IRC_ERR_NOT_FOUND / N3DS_IRC_ERR_ARG. */
 int n3ds_irc_lookup(const N3dsIrc *irc, uint32_t addr, N3dsIrcEntry *out);
+int n3ds_irc_has_preentry(const N3dsIrc *irc, uint32_t addr);
 int n3ds_irc_entry_at(const N3dsIrc *irc, unsigned ordinal, N3dsIrcEntry *out);
 
 /* --------------------------------------------------------------- cache */

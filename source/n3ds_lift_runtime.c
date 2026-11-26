@@ -234,6 +234,11 @@ static int container_dispatch(CPU *c, uint32_t addr) {
     }
 }
 
+static int container_has_preentry(uint32_t addr) {
+    if (!container_ensure(NULL, 0)) return 0;
+    return n3ds_irc_has_preentry(ir_container, addr);
+}
+
 int n3ds_lift_bind_modules(GuestMemory *m,const FnModule *list,unsigned n) {
     if(!m || (!list && n) || ever_bound)return -1;
     for(unsigned k=0;k<n;++k){
@@ -528,18 +533,20 @@ void n3ds_lift_thread_switch(N3dsThreadRtState *from, N3dsThreadRtState *to) {
     }
 }
 void rt_int3(CPU *c,uint32_t addr) {rt_unimpl(c,addr,"int3");}
-/* Resolve one call target across all tiers. AOT wins when an address is in
- * more than one table; the container is next; the generated slice IR table is
- * the final fallback. */
+/* Resolve one call target across all tiers. AOT wins. A container record that
+ * explicitly declares a pre-entry cold block must precede slice IR, whose
+ * frame starts at the exact entry and cannot execute that block. All other
+ * calls keep the verified slice IR before the all-functions container. */
 int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return 0;
     g_last_call=addr; g_last_cpu=c;
     const FnEntry *e=lookup(addr);
     if(e){e->fn(c);return 0;}
-    /* AOT first, then the generated slice IR, then the all-functions container.
-     * The slice IR is the verified/hot set; an invalid container entry must not
-     * shadow a function the slice already implements. */
-    if(n3ds_ir_has(addr)){n3ds_ir_call(c,addr);return 0;}
+    int slice = n3ds_ir_has(addr) != 0;
+    if (slice && container_has_preentry(addr)) {
+        if (!container_dispatch(c, addr)) return 0;
+    }
+    if (slice) { n3ds_ir_call(c,addr); return 0; }
     if(!container_dispatch(c,addr))return 0;
     return -1;
 }
@@ -580,7 +587,11 @@ void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
     g_last_call=addr; g_last_cpu=c;
     const FnEntry *e=lookup(addr);
     if(e){*cache=e;e->fn(c);return;}
-    if(n3ds_ir_has(addr)){
+    int slice = n3ds_ir_has(addr) != 0;
+    if (slice && container_has_preentry(addr)) {
+        if (!container_dispatch(c, addr)) { *cache=NULL; return; }
+    }
+    if(slice){
         /* The per-site cache holds FnEntry pointers only. Interpreter targets
          * are not cached; the generated code simply calls rt_call_ic again. */
         *cache=NULL;n3ds_ir_call(c,addr);return;

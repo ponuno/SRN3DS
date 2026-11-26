@@ -62,8 +62,8 @@ int n3ds_rt_dispatch(CPU *c, uint32_t addr) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s CONTAINER.IRC\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "usage: %s CONTAINER.IRC [preentry|missing]\n", argv[0]);
         return 2;
     }
     guest_init(&mem, 1u << 20);
@@ -84,6 +84,13 @@ int main(int argc, char **argv) {
     N3dsIrcEntry e;
     if (n3ds_irc_lookup(irc, COLD_BLOCK, &e) != N3DS_IRC_ERR_NOT_FOUND) {
         fprintf(stderr, "cold block was incorrectly exposed as a callable entry\n");
+        return 1;
+    }
+    int expect_preentry = argc < 3 || strcmp(argv[2], "missing") != 0;
+    int has_preentry = n3ds_irc_has_preentry(irc, ENTRY);
+    if (has_preentry != expect_preentry ||
+        n3ds_irc_has_preentry(irc, COLD_BLOCK)) {
+        fprintf(stderr, "pre-entry index flag does not match the fixture\n");
         return 1;
     }
 

@@ -36,6 +36,7 @@ enum {
     FN_FORCED = 1u << 2,
     FN_COMPLETE = 1u << 3,
     FN_INVALID = 1u << 4,
+    FN_PREENTRY = 1u << 5,
 };
 
 enum {
@@ -209,30 +210,29 @@ static void free_blocks(PackBlock *b, uint32_t n) {
     free(b);
 }
 
-/* Add a missing control-flow leader. The decoder stops at the terminator, so
- * the span may safely extend to the function's exclusive end. */
-static int add_closure_range(Fn *fn, uint32_t start) {
+/* Queue an already discovered cold leader after a conditional branch proves
+ * it is reachable. Do not invent missing ranges: jmp-root entries can share
+ * code with an enclosing function, and guessing their frame would change guest
+ * control flow. A genuinely absent target remains a named runtime refusal. */
+static int promote_closure_range(Fn *fn, uint32_t start) {
     if (start >= fn->end) return 0;
     for (uint32_t i = 0; i < fn->nranges; ++i) {
         if (fn->ranges[i].lo != start) continue;
         if (start >= fn->entry || fn->ranges[i].closure) return 0;
-        /* Keep scanning: a later closure copy may already be queued. */
+        /* The sorted pre-entry range was already skipped. Append a closure
+         * copy so the growing worklist decodes it after the branch is known. */
+        Range *grown = (Range *)realloc(fn->ranges, (fn->nranges + 1u) * sizeof *grown);
+        if (!grown) {
+            snprintf(fn->error, sizeof fn->error, "out of memory");
+            return -1;
+        }
+        fn->ranges = grown;
+        fn->ranges[fn->nranges] = fn->ranges[i];
+        fn->ranges[fn->nranges].closure = 1;
+        fn->nranges++;
+        return 1;
     }
-    if (fn->nranges >= 0xffffu) {
-        snprintf(fn->error, sizeof fn->error, "more than 65535 closure leaders");
-        return -1;
-    }
-    Range *grown = (Range *)realloc(fn->ranges, (fn->nranges + 1u) * sizeof *grown);
-    if (!grown) {
-        snprintf(fn->error, sizeof fn->error, "out of memory");
-        return -1;
-    }
-    fn->ranges = grown;
-    fn->ranges[fn->nranges].lo = start;
-    fn->ranges[fn->nranges].hi = fn->end;
-    fn->ranges[fn->nranges].closure = 1;
-    fn->nranges++;
-    return 1;
+    return 0;
 }
 
 /* Return the final instruction's signed direct-branch displacement. */
@@ -262,10 +262,10 @@ static int block_displacement(const PackBlock *b, int32_t *out) {
     return 0;
 }
 
-/* Discovery normally supplies every leader, but optimized CRT code can branch
- * backward to a cold exit block placed before the callable entry. Close that
- * gap from the real decoded terminator instead of treating the target as an
- * import. Unconditional jumps before the entry retain tail-call semantics. */
+/* Discovery normally supplies every leader, but optimized CRT code can list a
+ * backward cold exit block before the callable entry. Promote only such an
+ * already discovered leader when the real decoded terminator proves the edge;
+ * a missing target is not guessed into this frame. */
 static int add_closure_edges(Fn *fn, const PackBlock *b) {
     uint32_t op = b->term_op;
     int conditional = (op >= IR_OP_JCC_BASE && op < IR_OP_JCC_BASE + 16) ||
@@ -283,7 +283,7 @@ static int add_closure_edges(Fn *fn, const PackBlock *b) {
      * Only close the observed cold-block-before-entry gap; treating every
      * omitted edge as internal would swallow shared/tail-call code. */
     if (target >= fn->entry) return 0;
-    return add_closure_range(fn, target) < 0 ? -1 : 0;
+    return promote_closure_range(fn, target) < 0 ? -1 : 0;
 }
 
 /* Decode one function into a record. Returns 0 on success, -1 on decode
@@ -464,11 +464,13 @@ static int build_record(Fn *fn, uint8_t **out, size_t *out_size) {
         memcpy(rec + off, b->words, (size_t)b->nwords * 4);
         off += (size_t)b->nwords * 4;
     }
+    int preentry = nblocks && blocks[0].start < fn->entry;
     free_blocks(blocks, nblocks);
     *out = rec;
     *out_size = total;
     fn->status = DEC_OK;
     fn->flags = (fn->flags & (FN_AOT | FN_FORCED)) | FN_DECODED | FN_COMPLETE;
+    if (preentry) fn->flags |= FN_PREENTRY;
     fn->blocks = (uint16_t)nblocks;
     fn->insns = (uint32_t)insns;
     return 0;

@@ -22,18 +22,25 @@ container indexes every discovered function, loads one decoded function record
 from SD on demand, and executes that record without invoking the runtime
 decoder.
 
-AOT still wins. The container is a fallback tier *below* AOT, not a replacement:
-a measured hot/forced function stays AOT, and the dispatch rule is
+AOT still wins. The container is normally a fallback tier *below* slice IR,
+not a replacement: a measured hot/forced function stays AOT, and the default
+dispatch rule is
 
 ```
 AOT FnEntry -> slice IR table -> container record -> explicit unknown fault
 ```
 
 The slice IR table comes before the container because it is the verified/hot
-set that growth has explicitly lifted. Put the other way round, an **invalid**
-container entry would fault before the slice could serve an address that the
-slice already implements, which stalled growth. The container is therefore the
-last tier: it only executes addresses that the slice does not have.
+set that growth has explicitly lifted. An **invalid** container entry would
+fault before the slice could serve an address that the slice already
+implements, which stalled growth.
+
+There is one explicit exception: an index entry carrying
+`N3DS_IRC_FN_PREENTRY` has a decoded cold block before its callable entry.
+Slice IR starts its frame at the exact entry and cannot execute that block, so
+dispatch is `AOT -> pre-entry container record -> slice IR -> container` for
+those entries only. The flag is set by the packer only after a real decoded
+conditional branch proves an already discovered pre-entry leader reachable.
 
 The slice IR table stays as a fallback so a build/container failure cannot
 regress the current behaviour.
@@ -95,7 +102,7 @@ function the packer was given, not that every function decoded.
 |---:|---|---|
 | 0 | `u32` | `addr` exact callable entry |
 | 4 | `u32` | `end` exclusive extent (max discovery `hi`) |
-| 8 | `u32` | flags (`DECODED`, `AOT`, `FORCED`, `COMPLETE`, `INVALID`) |
+| 8 | `u32` | flags (`DECODED`, `AOT`, `FORCED`, `COMPLETE`, `INVALID`, `PREENTRY`) |
 | 12 | `u16` | decode status (`OK`, `UNSUPPORTED`, ...) |
 | 14 | `u16` | block_count |
 | 16 | `u32` | insn_count |
@@ -113,7 +120,9 @@ trusted.
 Every discovered function has an entry, including functions the decoder cannot
 decode. An invalid entry has `INVALID`, `decode_status != OK`, and
 `record_size == 0`. Executing it faults explicitly; it is never silently
-skipped or retried as if it were absent.
+skipped or retried as if it were absent. `PREENTRY` is valid only on decoded
+entries whose first sorted block starts below `addr`; it selects the
+container-aware frame instead of the exact-entry slice-IR frame.
 
 ### 1.3 Function record
 

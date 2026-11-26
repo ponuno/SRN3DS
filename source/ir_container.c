@@ -67,6 +67,8 @@ struct N3dsIrc {
     uint32_t data_offset;
     uint32_t data_bytes;
     N3dsIrcEntry *index;
+    uint32_t preentry_bloom[32];
+    uint32_t preentry_count;
 
     IrcSlot *slots;
     unsigned slot_cap;
@@ -212,6 +214,15 @@ int n3ds_irc_lookup(const N3dsIrc *irc, uint32_t addr, N3dsIrcEntry *out) {
     return N3DS_IRC_OK;
 }
 
+int n3ds_irc_has_preentry(const N3dsIrc *irc, uint32_t addr) {
+    if (!irc || !irc->preentry_count) return 0;
+    unsigned bit = (addr * 2654435761u) & 1023u;
+    if (!(irc->preentry_bloom[bit >> 5] & (1u << (bit & 31u)))) return 0;
+    N3dsIrcEntry e;
+    return n3ds_irc_lookup(irc, addr, &e) == N3DS_IRC_OK &&
+           (e.flags & N3DS_IRC_FN_PREENTRY) != 0;
+}
+
 int n3ds_irc_entry_at(const N3dsIrc *irc, unsigned ordinal, N3dsIrcEntry *out) {
     if (!irc || !irc->index || !out || ordinal >= irc->nfun) return N3DS_IRC_ERR_ARG;
     *out = irc->index[ordinal];
@@ -353,6 +364,14 @@ N3dsIrc *n3ds_irc_open_ex(const char *path, int *status) {
     free(index_raw);
     index_raw = NULL;
     if (st != N3DS_IRC_OK) { n3ds_irc_close(irc); irc = NULL; goto done; }
+    memset(irc->preentry_bloom, 0, sizeof irc->preentry_bloom);
+    irc->preentry_count = 0;
+    for (uint32_t i = 0; i < irc->nfun; ++i) {
+        if (!(irc->index[i].flags & N3DS_IRC_FN_PREENTRY)) continue;
+        unsigned bit = (irc->index[i].addr * 2654435761u) & 1023u;
+        irc->preentry_bloom[bit >> 5] |= 1u << (bit & 31u);
+        irc->preentry_count++;
+    }
     if (n3ds_irc_cache_init(irc, 0, 0) != N3DS_IRC_OK) {
         n3ds_irc_close(irc);
         irc = NULL;
@@ -489,6 +508,7 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
         return N3DS_IRC_ERR_RECORD_BAD;
 
     int saw_entry = 0;
+    int saw_preentry = 0;
     for (uint32_t i = 0; i < blocks; ++i) {
         const uint8_t *p = data + blocks_off + (size_t)i * N3DS_IRC_BLOCK_ENTRY;
         uint32_t start = irc_rd32(p + 0);
@@ -501,6 +521,7 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
         /* Cold blocks may precede the callable entry. The first sorted block
          * defines the frame's lower bound; the exact entry must still exist. */
         if (start == e->addr) saw_entry = 1;
+        if (start < e->addr) saw_preentry = 1;
         if (start >= e->end || !x86_len || !count || !words)
             return N3DS_IRC_ERR_RECORD_BAD;
         if ((uint64_t)start + x86_len > e->end) return N3DS_IRC_ERR_RECORD_BAD;
@@ -513,6 +534,8 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
          * exec_block() faults explicitly on a malformed instruction. */
     }
     if (!saw_entry) return N3DS_IRC_ERR_RECORD_BAD;
+    if (((e->flags & N3DS_IRC_FN_PREENTRY) != 0) != saw_preentry)
+        return N3DS_IRC_ERR_RECORD_BAD;
     return N3DS_IRC_OK;
 }
 

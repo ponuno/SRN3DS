@@ -138,7 +138,7 @@ def build_input(corpus_path, out_path):
     return len(funcs), payload, macros
 
 
-def build_preentry_input(out_path):
+def build_preentry_input(out_path, include_cold=True):
     """Discovery lists the cold range, but it lies before the callable entry."""
     base = 0x1000
     image = bytes([
@@ -149,9 +149,12 @@ def build_preentry_input(out_path):
     ])
     entry, end = 0x1010, 0x1015
     payload = struct.pack('<IIII', 0x49524d31, base, len(image), 1) + image
-    # The cold leader is present in discovery but precedes the callable entry;
-    # the old packer skipped it unconditionally.
-    payload += struct.pack('<IIIIIII', entry, end, 2, 0x1000, 0x1005, entry, end)
+    if include_cold:
+        # The cold leader is present in discovery but precedes the callable
+        # entry; the old packer skipped it unconditionally.
+        payload += struct.pack('<IIIIIII', entry, end, 2, 0x1000, 0x1005, entry, end)
+    else:
+        payload += struct.pack('<IIIII', entry, end, 1, entry, end)
     Path(out_path).write_bytes(payload)
     return len(payload)
 
@@ -265,6 +268,15 @@ def main():
                              ROOT / "source" / "guest.c",
                              ROOT / "staged" / "fpu.c"],
                      work / "ir_container_preentry.exe")
+    preentry_dispatch = build(clang, [ROOT / "tests" / "ir_container_preentry_dispatch.c",
+                                     ROOT / "source" / "guest.c",
+                                     ROOT / "source" / "ir_container.c",
+                                     ROOT / "source" / "ir_decode.c",
+                                     ROOT / "source" / "ir_exec.c",
+                                     ROOT / "source" / "ir_core.c",
+                                     ROOT / "source" / "n3ds_lift_runtime.c",
+                                     ROOT / "staged" / "fpu.c"],
+                              work / "ir_container_preentry_dispatch.exe")
     integration = build(clang, [ROOT / "tests" / "ir_container_integration.c",
                                 ROOT / "source" / "guest.c",
                                 ROOT / "source" / "ir_container.c",
@@ -299,11 +311,31 @@ def main():
     if p.returncode != 0:
         print(p.stderr)
         return 1
-    p = run([preentry, preentry_container])
+    p = run([preentry, preentry_container, "preentry"])
     print(p.stdout.rstrip())
     if p.returncode != 0 or "IR container pre-entry block PASS" not in p.stdout:
         print(p.stderr)
         return 1
+    p = run([preentry_dispatch, preentry_container])
+    print(p.stdout.rstrip())
+    if p.returncode != 0 or "IR container pre-entry dispatch PASS" not in p.stdout:
+        print(p.stderr)
+        return 1
+
+    missing_input = work / "preentry_missing_input.bin"
+    build_preentry_input(missing_input, include_cold=False)
+    missing_container = work / "preentry_missing.irc"
+    p = run([packer, missing_input, missing_container])
+    if p.returncode != 0:
+        print(p.stderr)
+        return 1
+    p = run([preentry, missing_container, "missing"])
+    if p.returncode == 0 or "Guest fault at 00001000: unknown function/import" not in p.stderr:
+        print("FAIL: an undiscovered pre-entry target was guessed into the frame")
+        print(p.stdout)
+        print(p.stderr)
+        return 1
+    print("missing pre-entry leader remains a named refusal PASS")
 
     print("== differential: AOT vs IR vs container ==")
     p = run([equiv, container])
