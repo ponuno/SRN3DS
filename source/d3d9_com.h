@@ -13,8 +13,10 @@
  * d9_com_set_backend(ops,ctx,limit): install the backend later (before the
  *   first successful CreateDevice) and is ignored once a device exists.
  * A non-zero limit is the d3d9_core resource budget for buffers and textures.
- * The COM surface subset is intentionally headless: one implicit back buffer
- * with no pixel access, plus CPU-backed SYSTEM/SCRATCH off-screen surfaces.
+ * The COM surface subset has one back buffer (the implicit screen, or a
+ * retained 512x256 lockable target when D3DPRESENTFLAG_LOCKABLE_BACKBUFFER is
+ * requested), explicit LDR render targets, D24S8/D24X8 depth-stencil surfaces
+ * and CPU-backed SYSTEM/SCRATCH off-screen surfaces.
  * Set TESV_D3D9_TRACE=1 before initialization to trace exports and COM slots. */
 int d9_com_init(GuestMemory *memory,D9Device *device);
 int d9_com_init_backend(GuestMemory *memory,const D9Backend *ops,void *ctx,size_t limit);
@@ -39,7 +41,7 @@ const char *d9_com_last_diagnostic(void);
 typedef struct {
     unsigned width, height, format;
     unsigned pool, usage, pitch;
-    int render_target; /* backend target; LockRect is read-back only */
+    int render_target; /* backend target; LockRect is readable, writable when lockable */
     int lockable;
 } D9ComSurfaceInfo;
 int d9_com_surface_info(uint32_t surface, D9ComSurfaceInfo *out);

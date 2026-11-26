@@ -3,6 +3,15 @@
 Date: 2026-11-25. Scope: one explicit LDR `D3DUSAGE_RENDERTARGET` /
 `D3DRTYPE_SURFACE`, not a Skyrim frame.
 
+> 2026-11-26 update: the lockable retained back buffer and explicit
+> depth-stencil surfaces are now implemented; see
+> `docs/BACK_BUFFER_LOCKABLE.md`. The statements below describe the earlier
+> explicit-target-only state and are kept as history. Current differences:
+> PICA targets carry `GPU_RB_DEPTH24_STENCIL8`; the null backend owns real BGRA
+> pixels and supports target read/write; a lockable target is writable; the
+> retained 512x256 back buffer can be a `StretchRect` source. The host suite
+> count and TESV route in this file predate the change.
+
 ## Implemented contract
 
 - Adapter: `Adapter=0`, `HAL`, adapter format `X8R8G8B8`, usage exactly `1`,
@@ -140,5 +149,11 @@ diagnostic exit. The earlier pre-UP binary produced the same 2B result.
 
 No physical New 3DS/CIA validation was performed for this change. Offscreen
 orientation/scale is not proven; the pixel proof uses a square target and a
-fullscreen triangle. Explicit targets have no depth. The host TESV route uses a
-measurement-only 512 MiB commit probe and is not a shippable memory claim.
+fullscreen triangle. The host TESV route uses a measurement-only 512 MiB commit
+probe and is not a shippable memory claim.
+
+The 2026-11-26 retained back buffer/depth change adds PICA evidence gaps: the
+Azahar pixel proof for the 512x256 retained target, the present blit and the
+depth clear is not done. Host evidence is pixel-complete through the null
+backend only. PICA depth and stencil share one 24+8 buffer, so a Z-only clear
+also writes the stencil byte (documented in `docs/BACK_BUFFER_LOCKABLE.md`).

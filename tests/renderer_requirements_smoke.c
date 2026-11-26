@@ -24,6 +24,9 @@ static D9ReqVerdict eval(const D9ReqRequest *request) {
 static void expect(const D9ReqRequest *request, uint32_t decision, uint32_t answer,
                    uint32_t requirement) {
     D9ReqVerdict verdict = eval(request);
+    if(verdict.decision!=decision||verdict.answer!=answer||verdict.requirement!=requirement)
+        fprintf(stderr,"expect mismatch: got decision=%u answer=0x%x req=%s (%s)\n",
+                verdict.decision,verdict.answer,d9_req_requirement_name(verdict.requirement),verdict.reason);
     assert(verdict.decision == decision);
     assert(verdict.answer == answer);
     assert(verdict.requirement == requirement);
@@ -240,8 +243,21 @@ static void rejected_hdr_and_formats(void) {
 
     q = d9_req_check_depth_stencil(D9REQ_FMT_X8R8G8B8, D9REQ_FMT_X8R8G8B8,
                                    D9REQ_FMT_D24S8);
+    expect(&q, D9REQ_SUPPORTED, D9REQ_ANSWER_OK, D9REQ_ID_DEPTH_STENCIL_SUPPORTED);
+    q = d9_req_check_depth_stencil(D9REQ_FMT_X8R8G8B8, D9REQ_FMT_A8R8G8B8,
+                                   D9REQ_FMT_D24X8);
+    expect(&q, D9REQ_SUPPORTED, D9REQ_ANSWER_OK, D9REQ_ID_DEPTH_STENCIL_SUPPORTED);
+    q = d9_req_check_depth_stencil(D9REQ_FMT_X8R8G8B8, D9REQ_FMT_X8R8G8B8,
+                                   D9REQ_FMT_D16);
     expect(&q, D9REQ_UNSUPPORTED, D9REQ_ANSWER_NOTAVAILABLE,
            D9REQ_ID_DEPTH_STENCIL_UNSUPPORTED);
+    q = d9_req_check_depth_stencil(D9REQ_FMT_A8R8G8B8, D9REQ_FMT_X8R8G8B8,
+                                   D9REQ_FMT_D24S8);
+    expect(&q, D9REQ_UNSUPPORTED, D9REQ_ANSWER_NOTAVAILABLE,
+           D9REQ_ID_DEPTH_STENCIL_UNSUPPORTED);
+    q = d9_req_check_device_format(D9REQ_FMT_X8R8G8B8, 0,
+                                   D9REQ_RESOURCE_SURFACE, D9REQ_FMT_D24S8);
+    expect(&q, D9REQ_SUPPORTED, D9REQ_ANSWER_OK, D9REQ_ID_FORMAT_DEPTH_SURFACE);
 
     /* The render-target surface rule is exact: one usage bit, an LDR surface,
      * the single adapter format and HAL.  Everything else keeps its old

@@ -51,7 +51,11 @@ typedef struct Obj {
     unsigned kind,refs,deferred;uint32_t guest;D9Handle handle;
     unsigned bytes,width,height,format,usage,pool,fvf,pitch,lockable;
     uint32_t lock_guest;unsigned lock_bytes,readonly,lock_level,lock_rows,lock_pitch,lock_row_bytes;void *lock_host;
+    unsigned lock_x,lock_y,lock_w,lock_h;
     uint8_t *pixels;
+    /* Explicit depth-stencil surface: a descriptor for the single PICA depth
+     * attachment, not an LDR colour surface. */
+    D9Handle depth;int is_depth;
     uint32_t *code;unsigned words;
     D9TevProgram tev;int has_tev;
     /* Exact first-menu selection (d3d9_menu_shader_runtime.h).  A menu plan is
@@ -65,8 +69,8 @@ typedef struct Obj {
 static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
     Obj o[MAX_OBJECTS];unsigned next;
-    Obj *factory,*dev,*back,*rt,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*vs,*ps,*declaration;
-    unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags;D9Handle clear_target;D9Matrix constants;
+    Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*vs,*ps,*declaration;
+    unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants;
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
     uint16_t gamma[3][256];size_t surface_bytes;
     unsigned frame_index,draw_index,capture_present;uint32_t capture_present_flags;
@@ -78,22 +82,6 @@ static struct {
 } g;
 static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
 #define A(n) arg(c,n)
-/* Measurement-only presentation probe.  It accepts LOCKABLE_BACKBUFFER and
- * gives the back buffer a zero-filled CPU shadow so the engine's post-device
- * call stream can be recorded.  It is not a rendering path: the pixels are
- * blank, so a frame produced under this probe is not evidence of rendering. */
-static int pp_state;
-static int pp_probe(void){
-    if(!pp_state){
-        const char *v=getenv("TESV_D3D9_PP_PROBE");
-        int on=v&&v[0]&&strcmp(v,"0");
-        pp_state=on?2:1;
-        if(on)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: accepting "
-            "D3DPRESENTFLAG_LOCKABLE_BACKBUFFER with a zero-filled shadow. "
-            "Blank pixels; not shippable.\n");
-    }
-    return pp_state==2;
-}
 static void trace_result(uint32_t value);
 static void trace_result_float(double value);
 static void capture_stop(void);
@@ -178,7 +166,12 @@ static void destroy_obj(Obj *o){
     else if(o->kind==VS||o->kind==PS){free(o->code);o->code=NULL;parent=g.dev;}
     else if(o->kind==DECL){free(o->declaration);o->declaration=NULL;parent=g.dev;}
     else if(o->kind==SURFACE){
-        if(o==g.back){g.back=NULL;g.rt=NULL;}
+        if(o->is_depth){
+            if(g.depth==o){g.depth=NULL;if(g.device)(void)d9_set_depth_surface(g.device,0);}
+            (void)d9_release_depth_surface(g.device,o->depth);
+            o->depth=0;o->is_depth=0;parent=g.dev;
+        }
+        else if(o==g.back){g.back=NULL;g.rt=NULL;}
         else if(o->is_view){
             /* A level view owns no pixels and no target; it only holds a
              * reference to its parent texture. */
@@ -446,7 +439,8 @@ static const char *presentation_reason(const uint32_t *pp){
      * does not select a display mode here, so accept and ignore it. */
     if(pp[9])return "automatic depth-stencil surfaces are not implemented";
     if(pp[11]&~1u)return "presentation flags other than LOCKABLE_BACKBUFFER are not implemented";
-    if((pp[11]&1u)&&!pp_probe())return "presentation flags other than none are not implemented";
+    if((pp[11]&1u)&&!d9_backend_supports_lockable_back_buffer(g.backend))
+        return "the backend cannot retain, read back, write back and present a lockable back buffer";
     if(pp[13]>1)return "only immediate or one-frame presentation intervals are implemented";
     return NULL;
 }
@@ -493,9 +487,15 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
         g.owns_device=1;
     }
     presentation_store(ptr(pp,56));
-    if(d9_set_back_buffer_info(g.device,g.pp[0],g.pp[1],g.pp[2])){
+    int bbrc=d9_set_back_buffer_info_ex(g.device,g.pp[0],g.pp[1],g.pp[2],g.pp[11]&1u);
+    if(bbrc){
         if(g.owns_device){d9_destroy_device(g.device);g.device=NULL;g.owns_device=0;}
-        d3d_log("CreateDevice","back-buffer presentation metadata was rejected");RET(UNAVAILABLE,7);
+        d3d_log("CreateDevice",bbrc==D9_MEMORY?
+            "the retained lockable back buffer does not fit the device memory budget":
+            bbrc==D9_UNSUPPORTED?
+            "the backend cannot allocate the retained lockable back buffer":
+            "back-buffer presentation metadata was rejected");
+        RET(bbrc==D9_MEMORY?OUTMEM:UNAVAILABLE,7);
     }
     g.dev=new_obj(DEVICE);
     if(!g.dev){
@@ -510,17 +510,12 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
         release(g.dev);d3d_log("CreateDevice","COM object table is full");RET(OUTMEM,7);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];g.back->usage=1;g.back->pool=0;
-    if(pp_probe()){
-        size_t shadow=(size_t)g.back->width*g.back->height*4;
-        g.back->pixels=calloc(1,shadow);
-        if(!g.back->pixels){
-            release(g.dev);d3d_log("CreateDevice","back-buffer shadow allocation failed");RET(OUTMEM,7);
-        }
-        g.back->pitch=g.back->width*4;g.back->bytes=(unsigned)shadow;g.back->lockable=1;
-        trace_detail("MEASUREMENT-ONLY back-buffer shadow %lux%lu pitch=%lu bytes=%lu",
-            (unsigned long)g.back->width,(unsigned long)g.back->height,
-            (unsigned long)g.back->pitch,(unsigned long)g.back->bytes);
-    }
+    g.back->handle=d9_back_buffer_target(g.device);
+    g.back->lockable=g.back->handle?1:0;
+    g.back->pitch=g.back->width*4;g.back->bytes=g.back->width*g.back->height*4;
+    if(g.back->handle)
+        trace_detail("lockable back buffer: retained target handle=%lu logical %lux%lu",
+            (unsigned long)g.back->handle,(unsigned long)g.back->width,(unsigned long)g.back->height);
     g.rt=g.back;g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;
     (void)d9_set_render_target(g.device,0);
     /* A new device starts with an unarmed, empty menu closure observation and
@@ -544,11 +539,19 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     if(!replacement){d3d_log("Reset","could not allocate replacement device state");RET(OUTMEM,2);}
     d9_destroy_device(g.device);g.device=replacement;
     presentation_store(ptr(pp,56));
-    if(d9_set_back_buffer_info(g.device,g.pp[0],g.pp[1],g.pp[2])){
-        d3d_log("Reset","back-buffer presentation metadata was rejected");RET(UNAVAILABLE,2);
+    int bbrc=d9_set_back_buffer_info_ex(g.device,g.pp[0],g.pp[1],g.pp[2],g.pp[11]&1u);
+    if(bbrc){
+        g.back->handle=0;g.back->lockable=0;
+        d3d_log("Reset",bbrc==D9_MEMORY?
+            "the retained lockable back buffer does not fit the device memory budget":
+            bbrc==D9_UNSUPPORTED?
+            "the backend cannot allocate the retained lockable back buffer":
+            "back-buffer presentation metadata was rejected");
+        RET(bbrc==D9_MEMORY?OUTMEM:UNAVAILABLE,2);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
-    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;memset(&g.constants,0,sizeof g.constants);
+    g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.back->handle?1:0;
+    g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);
     g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
     /* Reset also discards every closure observation and material evidence. */
     d9_menu_closure_reset();
@@ -591,8 +594,29 @@ static void create_render_target(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     RET(OK,9);
 }
 static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(INVALID,9);M32(out)=0;
-    if(!obj(A(0),DEVICE))RET(INVALID,9);
-    d3d_log("CreateDepthStencilSurface","depth-stencil surfaces are not implemented");RET(UNAVAILABLE,9);
+    if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,9);
+    if(A(8)){d3d_log("CreateDepthStencilSurface","shared handles are not supported");RET(INVALID,9);}
+    if(A(4)||A(5)){d3d_log("CreateDepthStencilSurface","only D3DMULTISAMPLE_NONE with quality zero is implemented");RET(UNAVAILABLE,9);}
+    if(A(6)){d3d_log("CreateDepthStencilSurface","lockable depth-stencil surfaces are not implemented");RET(UNAVAILABLE,9);}
+    if(A(1)!=g.pp[0]||A(2)!=g.pp[1]){
+        d3d_log("CreateDepthStencilSurface","only a depth-stencil matching the presentation back buffer is implemented");
+        RET(UNAVAILABLE,9);}
+    if(A(3)!=D9_D24S8&&A(3)!=D9_D24X8){
+        d3d_log("CreateDepthStencilSurface","only D3DFMT_D24S8/D24X8 (the PICA depth attachment) is implemented");
+        RET(UNAVAILABLE,9);}
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,9);
+    D9Handle h=0;int rc=d9_create_depth_surface(g.device,A(1),A(2),A(3),A(4),A(5),A(6)!=0,&h);
+    if(rc){
+        d3d_log("CreateDepthStencilSurface",rc==D9_MEMORY?"depth-stencil slot table is full":
+            rc==D9_UNSUPPORTED?"the backend has no depth attachment or depth clear":"invalid depth-stencil request");
+        RET(rc==D9_MEMORY?OUTMEM:UNAVAILABLE,9);
+    }
+    Obj *o=new_obj(SURFACE);if(!o){d9_release_depth_surface(g.device,h);RET(OUTMEM,9);}
+    o->depth=h;o->is_depth=1;o->width=A(1);o->height=A(2);o->format=A(3);o->usage=0;o->pool=0;
+    retain(g.dev);M32(out)=o->guest;
+    trace_detail("DepthStencil=0x%08lx %lux%lu Format=%lu (PICA depth attachment)",
+        (unsigned long)o->guest,(unsigned long)o->width,(unsigned long)o->height,(unsigned long)o->format);
+    RET(OK,9);
 }
 static void create_offscreen(CPU *c){uint32_t out=A(5);if(!ptr(out,4))RET(INVALID,7);M32(out)=0;
     if(!obj(A(0),DEVICE))RET(INVALID,7);
@@ -701,12 +725,20 @@ static void stretch_rect(CPU *c){
 }
 static void set_depth_stencil(CPU *c){
     if(!obj(A(0),DEVICE))RET(INVALID,2);
-    if(!A(1))RET(OK,2);
-    d3d_log("SetDepthStencilSurface","depth-stencil surfaces are not implemented");RET(INVALID,2);
+    if(!A(1)){
+        if(g.depth){if(g.device)(void)d9_set_depth_surface(g.device,0);bind(&g.depth,NULL);}
+        RET(OK,2);
+    }
+    Obj *o=obj(A(1),SURFACE);
+    if(!o||!o->is_depth||o->lock_guest){d3d_log("SetDepthStencilSurface","argument is not a depth-stencil surface");RET(INVALID,2);}
+    int rc=d9_set_depth_surface(g.device,o->depth);
+    if(rc){d3d_log("SetDepthStencilSurface","the depth-stencil surface was rejected by the device");RET(hr(rc),2);}
+    bind(&g.depth,o);RET(OK,2);
 }
 static void get_depth_stencil(CPU *c){uint32_t out=A(1);if(!ptr(out,4))RET(INVALID,2);M32(out)=0;
     if(!obj(A(0),DEVICE))RET(INVALID,2);
-    RET(NOTFOUND,2);
+    if(!g.depth)RET(NOTFOUND,2);
+    retain(g.depth);M32(out)=g.depth->guest;RET(OK,2);
 }
 static void set_viewport(CPU *c){uint32_t p=A(1);
     if(!obj(A(0),DEVICE)||!ptr(p,24))RET(INVALID,2);
@@ -915,9 +947,11 @@ static void surface_container(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(2)
 static int lock_surface_rect(Obj *o,const int32_t r[4],unsigned flags,
                              unsigned *pitch_out,uint32_t *address_out,unsigned *rows_out){
     if(!o||o->kind!=SURFACE||!g.mem||!r||!pitch_out||!address_out||!rows_out)return D9_INVALID;
-    if(o==g.back&&(!pp_probe()||!o->pixels))return D9_BACKEND;
+    if(o->is_depth)return D9_INVALID;
+    if(o==g.back&&!o->handle)return D9_BACKEND; /* no D3DPRESENTFLAG_LOCKABLE_BACKBUFFER */
     if(o->lock_guest||g.phase)return D9_INVALID;
-    if(o->handle&&(!o->lockable||!(flags&0x10u)||(flags&~0x8010u)))return D9_INVALID; /* explicit targets are read-only */
+    /* Explicit/retained targets are readable, and lockable ones are writable. */
+    if(o->handle&&(!o->lockable||(flags&~0x8010u)))return D9_INVALID;
     if(!o->handle&&(flags&~0xc810u))return D9_INVALID;
     if(r[0]<0||r[1]<0||r[2]<=r[0]||r[3]<=r[1]||(uint64_t)r[2]>o->width||(uint64_t)r[3]>o->height)return D9_INVALID;
     unsigned x=(unsigned)r[0],y=(unsigned)r[1],row_bytes=((unsigned)r[2]-x)*4,rows=(unsigned)r[3]-y;
@@ -935,6 +969,7 @@ static int lock_surface_rect(Obj *o,const int32_t r[4],unsigned flags,
     }
     o->lock_guest=address;o->lock_bytes=(unsigned)span;o->readonly=!!(flags&0x10);
     o->lock_rows=rows;o->lock_pitch=o->pitch;o->lock_row_bytes=row_bytes;
+    o->lock_x=x;o->lock_y=y;o->lock_w=(unsigned)r[2]-x;o->lock_h=rows;
     *pitch_out=o->pitch;*address_out=address;*rows_out=rows;return D9_OK;
 }
 static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
@@ -949,10 +984,22 @@ static int lock_surface(Obj *o,uint32_t locked,uint32_t rect,unsigned flags){
 }
 static int unlock_surface(Obj *o){
     if(!o||o->kind!=SURFACE||!o->lock_guest)return D9_INVALID;
-    if(!o->readonly){uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);
+    int write_back=!o->readonly&&o->handle&&!o->is_view;
+    if(!o->readonly&&!write_back){uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);
         for(unsigned i=0;i<o->lock_rows;++i)memcpy(host+(size_t)i*o->lock_pitch,src+(size_t)i*o->lock_pitch,o->lock_row_bytes);}
     int is_view=o->is_view;D9Handle view_texture=o->view_texture;unsigned view_level=o->view_level;int readonly=o->readonly;
+    int rc=D9_OK;
+    if(write_back)
+        rc=d9_render_target_write(g.device,o->handle,ptr(o->lock_guest,o->lock_bytes),o->lock_pitch,
+                                  o->lock_x,o->lock_y,o->lock_w,o->lock_h);
     guest_unmap(g.mem,o->lock_guest);o->lock_guest=0;o->lock_host=NULL;o->lock_bytes=0;o->lock_rows=0;o->lock_pitch=o->lock_row_bytes=0;
+    o->lock_x=o->lock_y=o->lock_w=o->lock_h=0;
+    if(rc){
+        d3d_log("UnlockRect",rc==D9_BACKEND?
+            "the backend cannot write the render-target pixels back":
+            "render-target write-back was rejected");
+        return rc;
+    }
     /* Writing a level view updates the parent texture's CPU store; the GPU copy
      * is re-uploaded here so a following SetTexture sees the new pixels. */
     if(is_view&&!readonly){
@@ -963,7 +1010,11 @@ static int unlock_surface(Obj *o){
 }
 static void surface_lock(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
     if(!o||!ptr(out,8))RET(INVALID,4);M32(out)=M32(out+4)=0;
-    int rc=lock_surface(o,out,A(2),A(3));if(rc==D9_BACKEND)d3d_log("LockRect",o->handle?"the backend has no readable render-target pixels":"the back buffer has no readable or writable pixels");
+    int rc=lock_surface(o,out,A(2),A(3));
+    if(rc==D9_BACKEND)d3d_log("LockRect",o->handle?
+        "the backend has no readable render-target pixels":
+        "the back buffer is not lockable; D3DPRESENTFLAG_LOCKABLE_BACKBUFFER was not requested");
+    else if(rc==D9_INVALID&&o->is_depth)d3d_log("LockRect","depth-stencil surfaces are not lockable here");
     RET(hr(rc),4);
 }
 static void surface_unlock(CPU *c){Obj *o=obj(A(0),SURFACE);if(!o)RET(INVALID,1);RET(hr(unlock_surface(o)),1);}
@@ -997,23 +1048,44 @@ static void surface_release_dc(CPU *c){if(!obj(A(0),SURFACE))RET(INVALID,2);RET(
 static void clear(CPU *c){if(!obj(A(0),DEVICE)||g.phase){d3d_log("Clear","Clear is only valid outside BeginScene/EndScene");RET(INVALID,7);}
     unsigned flags=A(3),count=A(1);uint32_t rects=A(2);
     if(!flags||flags&~7u){d3d_log("Clear","invalid clear flags");RET(INVALID,7);}
-    if(flags&6u){d3d_log("Clear","depth/stencil clear requested but no depth-stencil surface is attached");RET(INVALID,7);}
+    float z=0.0f;uint32_t zbits=A(5);memcpy(&z,&zbits,4);
+    if(flags&6u){
+        if(!g.depth||!g.depth->is_depth){
+            d3d_log("Clear","depth/stencil clear requested but no depth-stencil surface is attached");RET(INVALID,7);}
+        if(!isfinite(z)||z<0.0f||z>1.0f){d3d_log("Clear","z must be a finite value in [0,1]");RET(INVALID,7);}
+    }
     if((count==0)!=(rects==0)||(count&&(count>(UINT32_MAX-rects)/16||!ptr(rects,(size_t)count*16)))){
         d3d_log("Clear","invalid rectangle count or pointer");RET(INVALID,7);}
     if(count){d3d_log("Clear","rectangle clears are not implemented; use a full-target clear");RET(UNAVAILABLE,7);}
     if(g.clear_pending){d3d_log("Clear","multiple Clear calls before BeginScene are not implemented");RET(UNAVAILABLE,7);}
-    g.clear=A(4);g.clear_flags=flags;g.clear_pending=1;g.frame_clear=1;g.clear_target=d9_get_render_target(g.device);
+    g.clear=A(4);g.clear_flags=flags;g.clear_z=A(5);g.clear_stencil=A(6);g.clear_pending=1;g.frame_clear=1;g.clear_target=d9_get_render_target(g.device);
     if(g.backend==d9_null_backend())d9_null_note_clear(flags);
     trace_detail("Flags=0x%lx Color=0x%08lx Rects=%lu",(unsigned long)flags,(unsigned long)g.clear,(unsigned long)count);
     RET(OK,7);
 }
-static void begin_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,1);if(!g.clear_pending)g.frame_clear=0;int rc=d9_begin_scene_ex(g.device,g.clear,g.clear_pending);if(!rc){g.phase=1;g.clear_pending=0;g.clear_target=0;
+static void begin_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,1);
+    int queued=g.clear_pending;if(!queued)g.frame_clear=0;
+    int rc=d9_begin_scene_ex(g.device,g.clear,queued);
+    if(!rc&&queued&&(g.clear_flags&6u)){
+        float z;memcpy(&z,&g.clear_z,4);
+        rc=d9_clear_depth(g.device,g.clear_flags,z,g.clear_stencil);
+        if(rc)d3d_log("BeginScene",rc==D9_UNSUPPORTED?
+            "the bound depth-stencil surface does not match the active render target":
+            "the backend rejected the depth/stencil clear");
+    }
+    if(!rc){g.phase=1;g.clear_pending=0;g.clear_target=0;
 #if D9_CAPTURE_HOOK
         /* The Present latch survives BeginScene: the first captured draw of the
          * next frame reports the previous frame's Present, then clears it. */
         ++g.frame_index;g.draw_index=0;
 #endif
-    }RET(hr(rc),1);}
+    }else if(g.device&&g.phase==0){
+        /* A rejected depth clear happens after the backend frame started; end
+         * it so the BeginScene/EndScene state machine stays consistent. */
+        (void)d9_end_scene(g.device);
+        g.clear_pending=0;g.clear_target=0;
+    }
+    RET(hr(rc),1);}
 static void end_scene(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=1)RET(INVALID,1);g.phase=2;RET(OK,1);}
 static void present(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=2||A(1)||A(2)||A(3)||A(4))RET(INVALID,5);int rc=d9_present(g.device);if(!rc){g.phase=0;
 #if D9_CAPTURE_HOOK

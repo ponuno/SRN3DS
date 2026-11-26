@@ -159,8 +159,11 @@ int main(void){
     args[4]=0;args[0]=1;assert(call(&s,s.factory,11,args,6)==0x8876086cu);
 
     args[0]=0;args[1]=1;args[2]=D9_X8R8G8B8;args[3]=D9_X8R8G8B8;args[4]=75;
-    assert(call(&s,s.factory,12,args,5)==0x8876086au);
-    args[1]=2;assert(call(&s,s.factory,12,args,5)==0x8876086cu);
+    assert(call(&s,s.factory,12,args,5)==0); /* D24S8 for the 400x240 back buffer */
+    args[4]=77;assert(call(&s,s.factory,12,args,5)==0); /* D24X8, same attachment */
+    args[4]=80;assert(call(&s,s.factory,12,args,5)==0x8876086au); /* D16 */
+    args[4]=75;args[3]=D9_A8R8G8B8;assert(call(&s,s.factory,12,args,5)==0);
+    args[3]=D9_X8R8G8B8;args[1]=2;assert(call(&s,s.factory,12,args,5)==0x8876086cu);
 
     args[0]=0;args[1]=1;args[2]=D9_X8R8G8B8;args[3]=D9_DXT1;
     assert(call(&s,s.factory,13,args,4)==0x8876086au);

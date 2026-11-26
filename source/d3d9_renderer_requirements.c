@@ -26,6 +26,8 @@ typedef struct {
     unsigned resource_type_count;
     const uint32_t *formats;
     unsigned format_count;
+    const uint32_t *depth_stencil_formats;
+    unsigned depth_stencil_format_count;
     uint32_t caps;
     uint32_t value_min;
     uint32_t value_max;
@@ -60,6 +62,8 @@ static const uint32_t L_DEPTH[] = {
     D9REQ_FMT_D24X4S4, D9REQ_FMT_D24FS8, D9REQ_FMT_D32,
     D9REQ_FMT_D32F_LOCKABLE, D9REQ_FMT_D32_LOCKABLE, D9REQ_FMT_S8_LOCKABLE
 };
+/* The one PICA DEPTH24_STENCIL8 attachment, described as D24S8 or D24X8. */
+static const uint32_t L_DEPTH_SUPPORTED[] = { D9REQ_FMT_D24S8, D9REQ_FMT_D24X8 };
 
 /* The order is significant: specific measured probes first, LDR acceptance
  * next, then truthful catch-alls.  No rule with a non-supported decision is
@@ -187,12 +191,14 @@ static const D9ReqRule RULES[] = {
     {
         .id = D9REQ_ID_FORMAT_DEPTH,
         .kind = D9REQ_KIND_CHECK_DEVICE_FORMAT,
+        .resource_types = L_RESOURCE_TEXTURE,
+        .resource_type_count = COUNT(L_RESOURCE_TEXTURE),
         .formats = L_DEPTH,
         .format_count = COUNT(L_DEPTH),
         .decision = D9REQ_UNSUPPORTED,
         .answer = D9REQ_ANSWER_NOTAVAILABLE,
-        .reason = "D3D9 depth-stencil and depth-texture formats are not implemented",
-        .contract = "none; the PICA depth attachment is not exposed through the D3D9 bridge",
+        .reason = "depth-texture formats are not implemented; the PICA depth attachment is only exposed as a D24S8/D24X8 depth-stencil surface",
+        .contract = "create a D24S8/D24X8 depth-stencil surface for the 400x240 target",
     },
     {
         .id = D9REQ_ID_FORMAT_RENDER_TARGET_LDR,
@@ -227,6 +233,23 @@ static const D9ReqRule RULES[] = {
         .answer = D9REQ_ANSWER_OK,
         .reason = "plain X8R8G8B8/A8R8G8B8 off-screen surface with usage 0",
         .contract = "",
+    },
+    {
+        .id = D9REQ_ID_FORMAT_DEPTH_SURFACE,
+        .kind = D9REQ_KIND_CHECK_DEVICE_FORMAT,
+        .adapter_formats = L_ADAPTER_X8,
+        .adapter_format_count = COUNT(L_ADAPTER_X8),
+        .usage_check = 1,
+        .usage_required = 0,
+        .usage_allowed = 0,
+        .resource_types = L_RESOURCE_SURFACE,
+        .resource_type_count = COUNT(L_RESOURCE_SURFACE),
+        .formats = L_DEPTH_SUPPORTED,
+        .format_count = COUNT(L_DEPTH_SUPPORTED),
+        .decision = D9REQ_SUPPORTED,
+        .answer = D9REQ_ANSWER_OK,
+        .reason = "a D24S8/D24X8 surface with usage 0 describes the PICA depth attachment",
+        .contract = "depth surfaces have no colour/RENDERTARGET usage",
     },
     {
         .id = D9REQ_ID_FORMAT_TEXTURE_LDR,
@@ -276,14 +299,30 @@ static const D9ReqRule RULES[] = {
         .contract = "use a supported surface or texture capability query",
     },
 
-    /* CheckDepthStencilMatch. */
+    /* CheckDepthStencilMatch.  The bridge implements the exact 400x240 PICA
+     * DEPTH24_STENCIL8 attachment as D24S8/D24X8; every other depth format is
+     * still unavailable. */
+    {
+        .id = D9REQ_ID_DEPTH_STENCIL_SUPPORTED,
+        .kind = D9REQ_KIND_CHECK_DEPTH_STENCIL,
+        .display_formats = L_DISPLAY_X8,
+        .display_format_count = COUNT(L_DISPLAY_X8),
+        .backbuffer_formats = L_BACKBUFFER_LDR,
+        .backbuffer_format_count = COUNT(L_BACKBUFFER_LDR),
+        .depth_stencil_formats = L_DEPTH_SUPPORTED,
+        .depth_stencil_format_count = COUNT(L_DEPTH_SUPPORTED),
+        .decision = D9REQ_SUPPORTED,
+        .answer = D9REQ_ANSWER_OK,
+        .reason = "D24S8/D24X8 is the single PICA DEPTH24_STENCIL8 attachment of the 400x240 target",
+        .contract = "create the surface with CreateDepthStencilSurface and bind it with SetDepthStencilSurface; depth testing and Clear(Z|STENCIL) reach the hardware",
+    },
     {
         .id = D9REQ_ID_DEPTH_STENCIL_UNSUPPORTED,
         .kind = D9REQ_KIND_CHECK_DEPTH_STENCIL,
         .decision = D9REQ_UNSUPPORTED,
         .answer = D9REQ_ANSWER_NOTAVAILABLE,
-        .reason = "no D3D9 depth-stencil surfaces; CheckDepthStencilMatch cannot succeed",
-        .contract = "none; requires a native PICA depth attachment and a D3D9 surface object",
+        .reason = "only D24S8/D24X8 depth-stencil surfaces exist (the PICA depth attachment)",
+        .contract = "use D3DFMT_D24S8 or D3DFMT_D24X8 with the 400x240 back buffer",
     },
 
     /* GetDeviceCaps has no capability argument.  `value` is the requirement
@@ -515,6 +554,9 @@ static int rule_matches(const D9ReqRule *rule, const D9ReqRequest *request) {
         !list_has(rule->resource_types, rule->resource_type_count, request->resource_type)) return 0;
     if (rule->formats &&
         !list_has(rule->formats, rule->format_count, request->format)) return 0;
+    if (rule->depth_stencil_formats &&
+        !list_has(rule->depth_stencil_formats, rule->depth_stencil_format_count,
+                  request->depth_stencil_format)) return 0;
     if (rule->caps) {
         if (request->caps != rule->caps) return 0;
         if (request->value < rule->value_min || request->value > rule->value_max) return 0;
@@ -735,6 +777,8 @@ const char *d9_req_requirement_name(uint32_t requirement) {
     case D9REQ_ID_FORMAT_DEPTH: return "format.depth";
     case D9REQ_ID_FORMAT_SURFACE_LDR: return "format.surface_ldr";
     case D9REQ_ID_FORMAT_RENDER_TARGET_LDR: return "format.render_target_ldr";
+    case D9REQ_ID_DEPTH_STENCIL_SUPPORTED: return "depth_stencil.supported";
+    case D9REQ_ID_FORMAT_DEPTH_SURFACE: return "format.depth_surface";
     case D9REQ_ID_FORMAT_TEXTURE_LDR: return "format.texture_ldr";
     case D9REQ_ID_FORMAT_USAGE: return "format.usage";
     case D9REQ_ID_FORMAT_RESOURCE: return "format.resource";

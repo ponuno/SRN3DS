@@ -102,6 +102,13 @@ int main(void){
     pp[4]=0;pp[2]=23;guest_write(&h.memory,PP,pp,sizeof pp);
     assert(call(&h,h.factory,16,create,6)==0x8876086au); /* R5G6B5 */
     pp[2]=D9_X8R8G8B8;guest_write(&h.memory,PP,pp,sizeof pp);
+    /* A lockable back buffer is a real promise (retained target + read/write +
+     * Present blit); this six-callback backend cannot provide it. */
+    pp[11]=1;guest_write(&h.memory,PP,pp,sizeof pp);
+    assert(call(&h,h.factory,16,create,6)==0x8876086au);
+    pp[11]=2;guest_write(&h.memory,PP,pp,sizeof pp);
+    assert(call(&h,h.factory,16,create,6)==0x8876086au);
+    pp[11]=0;guest_write(&h.memory,PP,pp,sizeof pp);
 
     assert(call(&h,h.factory,16,create,6)==0);
     uint32_t device=0;assert(!guest_read32(&h.memory,OUT,&device)&&device);

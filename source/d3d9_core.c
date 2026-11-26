@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <math.h>
 
-enum {MAX_BUFFERS=32,MAX_TEXTURES=16,MAX_TARGETS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
+enum {MAX_BUFFERS=32,MAX_TEXTURES=16,MAX_TARGETS=4,MAX_DEPTHS=2,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
 typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
 typedef struct {
     D9Handle id;size_t offset,stride;
@@ -15,6 +15,7 @@ typedef struct {
 typedef struct {
     D9Handle id;unsigned w,h,format,lockable;size_t bytes;void *native;
 } Target;
+typedef struct {D9Handle id;unsigned w,h,format;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
 typedef struct {
     D9Handle id;unsigned w,h,format,levels,gpu_levels,locked,pool,usage;
@@ -25,6 +26,12 @@ struct D9Device {
     D9Backend ops;void *ctx;size_t used,limit;D9Handle next;int teardown;
     Buffer buffers[MAX_BUFFERS];Texture textures[MAX_TEXTURES];
     Target targets[MAX_TARGETS];D9Handle target;size_t target_used;
+    /* D3DPRESENTFLAG_LOCKABLE_BACKBUFFER: a retained offscreen colour target
+     * that lives as a normal Target slot.  back_tex_w/h are its native
+     * (power-of-two) storage dimensions; the logical surface stays back_w x
+     * back_h. */
+    D9Handle back_target;unsigned back_tex_w,back_tex_h;int back_lockable;
+    Depth depths[MAX_DEPTHS];D9Handle depth;
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEXTURES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
@@ -322,8 +329,18 @@ int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,in
 }
 int d9_set_render_target(D9Device *d,D9Handle h){
     if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
-    Target *t=target(d,h);void *native=t?t->native:NULL;
-    if(d->scene&&d->ops.target_bind(d->ctx,native))return D9_BACKEND;
+    /* Handle zero means the default back buffer: the retained target when
+     * D3DPRESENTFLAG_LOCKABLE_BACKBUFFER created one, otherwise the screen. */
+    Target *t=h?target(d,h):(d->back_target?target(d,d->back_target):NULL);
+    void *native=t?t->native:NULL;
+    if(d->scene){
+        if(d->ops.target_bind(d->ctx,native))return D9_BACKEND;
+        if(t&&d->ops.target_viewport){
+            unsigned w=t->id==d->back_target?d->back_w:t->w;
+            unsigned height=t->id==d->back_target?d->back_h:t->h;
+            if(d->ops.target_viewport(d->ctx,w,height))return D9_BACKEND;
+        }
+    }
     d->target=h;return D9_OK;
 }
 D9Handle d9_get_render_target(const D9Device *d){return d?d->target:0;}
@@ -340,13 +357,73 @@ int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
     if(x>t->w||y>t->h||w>t->w-x||height>t->h-y)return D9_INVALID;
     return d->ops.target_read(d->ctx,t->native,dst,dst_pitch,x,y,w,height)?D9_BACKEND:D9_OK;
 }
-int d9_release_render_target(D9Device *d,D9Handle h){Target *t=target(d,h);if(!t||!d||d->scene||d->teardown)return D9_INVALID;
+int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pitch,
+                           unsigned x,unsigned y,unsigned w,unsigned height){
+    Target *t=target(d,h);
+    if(!t||!d||!src||!src_pitch||d->scene||d->teardown)return D9_INVALID;
+    if(!d->ops.target_read||!d->ops.target_write)return D9_BACKEND;
+    if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||src_pitch<(size_t)w*4)return D9_INVALID;
+    size_t pitch=(size_t)t->w*4,bytes=pitch*t->h;
+    /* PICA targets are at most 1024x1024 RGBA8 (4 MiB); anything larger is a
+     * caller error rather than a silent allocation. */
+    if(bytes>4u<<20)return D9_MEMORY;
+    uint8_t *full=malloc(bytes);if(!full)return D9_MEMORY;
+    if(d->ops.target_read(d->ctx,t->native,full,pitch,0,0,t->w,t->h)){
+        free(full);return D9_BACKEND;
+    }
+    for(unsigned yy=0;yy<height;++yy)
+        memcpy(full+(size_t)(y+yy)*pitch+(size_t)x*4,
+               (const uint8_t *)src+(size_t)yy*src_pitch,(size_t)w*4);
+    int rc=d->ops.target_write(d->ctx,t->native,full,pitch,t->w,t->h);
+    free(full);
+    return rc?D9_BACKEND:D9_OK;
+}
+int d9_release_render_target(D9Device *d,D9Handle h){Target *t=target(d,h);if(!t||!d||d->scene||d->teardown||h==d->back_target)return D9_INVALID;
     if(d->target==h)d->target=0;
     if(d->ops.target_delete)d->ops.target_delete(d->ctx,t->native);
     d->target_used-=t->bytes;memset(t,0,sizeof *t);return D9_OK;}
-int d9_set_back_buffer_info(D9Device *d,unsigned w,unsigned h,unsigned format){
+int d9_backend_supports_lockable_back_buffer(const D9Backend *ops){
+    return ops&&ops->target_create&&ops->target_delete&&ops->target_bind&&
+           ops->target_clear&&ops->target_read&&ops->target_write&&ops->target_blit&&
+           ops->target_viewport;
+}
+static unsigned pow2_up(unsigned n){
+    unsigned p=8;while(p<n&&p<1024)p<<=1;return p>=n&&p<=1024?p:0;
+}
+int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable){
     if(!d||d->teardown||!w||!h||w>16384||h>16384||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))return D9_INVALID;
-    d->back_w=w;d->back_h=h;d->back_format=format;d->back_valid=1;return D9_OK;
+    if(d->scene)return D9_INVALID;
+    D9Handle fresh=0;unsigned tw=0,th=0;
+    if(lockable){
+        if(!d9_backend_supports_lockable_back_buffer(&d->ops))return D9_UNSUPPORTED;
+        tw=pow2_up(w);th=pow2_up(h);
+        if(!tw||!th)return D9_UNSUPPORTED;
+        /* Create the replacement first so a failed allocation leaves the old
+         * back buffer intact. */
+        int rc=d9_create_render_target(d,tw,th,format,1,&fresh);
+        if(rc)return rc;
+    }
+    if(d->back_target){
+        (void)d9_release_render_target(d,d->back_target);
+        d->back_target=0;d->back_tex_w=d->back_tex_h=0;
+    }
+    d->back_w=w;d->back_h=h;d->back_format=format;d->back_valid=1;
+    d->back_lockable=lockable?1:0;
+    if(lockable){d->back_target=fresh;d->back_tex_w=tw;d->back_tex_h=th;}
+    return D9_OK;
+}
+int d9_set_back_buffer_info(D9Device *d,unsigned w,unsigned h,unsigned format){
+    return d9_set_back_buffer_info_ex(d,w,h,format,0);
+}
+D9Handle d9_back_buffer_target(const D9Device *d){return d?d->back_target:0;}
+int d9_back_buffer_info_ex(const D9Device *d,unsigned *w,unsigned *h,
+                           unsigned *format,unsigned *tex_w,unsigned *tex_h,
+                           int *lockable){
+    if(!d||!d->back_valid)return D9_INVALID;
+    if(w)*w=d->back_w;if(h)*h=d->back_h;if(format)*format=d->back_format;
+    if(tex_w)*tex_w=d->back_tex_w;if(tex_h)*tex_h=d->back_tex_h;
+    if(lockable)*lockable=d->back_lockable;
+    return D9_OK;
 }
 int d9_get_back_buffer_info(const D9Device *d,unsigned *w,unsigned *h,unsigned *format){
     if(!d||!d->back_valid)return D9_INVALID;
@@ -366,19 +443,31 @@ int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
     if(!d){return D9_INVALID;}
     d->blit_error=D9_BLIT_ARGUMENT;
     if(d->teardown||filter>D9_FILTER_LINEAR)return D9_INVALID;
-    Target *st=target(d,src),*dt=target(d,dst);
+    /* Handle zero is the back buffer.  With D3DPRESENTFLAG_LOCKABLE_BACKBUFFER
+     * that is the retained offscreen target; otherwise it stays the implicit
+     * screen.  Present uses an explicit retained->screen region instead. */
+    Target *st=src?target(d,src):(d->back_target?target(d,d->back_target):NULL);
+    Target *dt=dst?target(d,dst):(d->back_target?target(d,d->back_target):NULL);
     if((src&&!st)||(dst&&!dt))return D9_INVALID;
-    if(src==dst){d->blit_error=D9_BLIT_SAME_SURFACE;return D9_INVALID;}
+    if(src==dst||(st&&st==dt)){d->blit_error=D9_BLIT_SAME_SURFACE;return D9_INVALID;}
     D9BlitRegion sreg={{0}},dreg={{0}};
-    if(src)sreg.surface=(D9BlitSurface){st->native,st->w,st->h,st->format};
-    else{
+    if(st){
+        int retained=st->id==d->back_target;
+        sreg.surface=(D9BlitSurface){st->native,
+            retained?d->back_w:st->w,retained?d->back_h:st->h,st->format,
+            retained?d->back_tex_w:0,retained?d->back_tex_h:0};
+    }else{
         if(!d->back_valid)return D9_INVALID;
-        sreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format};
+        sreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format,0,0};
     }
-    if(dst)dreg.surface=(D9BlitSurface){dt->native,dt->w,dt->h,dt->format};
-    else{
+    if(dt){
+        int retained=dt->id==d->back_target;
+        dreg.surface=(D9BlitSurface){dt->native,
+            retained?d->back_w:dt->w,retained?d->back_h:dt->h,dt->format,
+            retained?d->back_tex_w:0,retained?d->back_tex_h:0};
+    }else{
         if(!d->back_valid)return D9_INVALID;
-        dreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format};
+        dreg.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format,0,0};
     }
     if(sreg.surface.format!=dreg.surface.format){d->blit_error=D9_BLIT_FORMAT;return D9_INVALID;}
     if(blit_rect(src_rect,sreg.surface.width,sreg.surface.height,&sreg)||
@@ -391,8 +480,14 @@ int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
     /* The backend is allowed to switch its native target, and the caller's
      * selected target must survive even a rejected copy. */
     if(d->scene&&d->ops.target_bind){
-        Target *cur=d->target?target(d,d->target):NULL;
+        Target *cur=d->target?target(d,d->target):
+            (d->back_target?target(d,d->back_target):NULL);
         if(d->ops.target_bind(d->ctx,cur?cur->native:NULL)){d->blit_error=D9_BLIT_BACKEND;return D9_BACKEND;}
+        if(cur&&d->ops.target_viewport){
+            unsigned w=cur->id==d->back_target?d->back_w:cur->w;
+            unsigned height=cur->id==d->back_target?d->back_h:cur->h;
+            if(d->ops.target_viewport(d->ctx,w,height)){d->blit_error=D9_BLIT_BACKEND;return D9_BACKEND;}
+        }
     }
     return rc==D9_BLIT_OK?D9_OK:D9_BACKEND;
 }
@@ -485,11 +580,36 @@ int d9_get_sampler_state(D9Device *d,unsigned id,unsigned *v){return d9_get_unit
 int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *v){
     if(stage>=d9_stage_count(d))return D9_UNSUPPORTED;
     unsigned lo,hi,*p=d?sampler_slot(stage?&d->second:&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
-int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){if(!d||d->teardown||d->scene)return D9_INVALID;if(d->ops.begin(d->ctx,argb))return D9_BACKEND;d->scene=1;
-    Target *t=d->target?target(d,d->target):NULL;
-    if((d->target&&!t)||(d->ops.target_bind&&d->ops.target_bind(d->ctx,t?t->native:NULL))||
-       (t&&clear_target&&d->ops.target_clear(d->ctx,t->native,argb))){d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;}
-    return D9_OK;}
+int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
+    if(!d||d->teardown||d->scene)return D9_INVALID;
+    if(d->ops.begin(d->ctx,argb))return D9_BACKEND;
+    d->scene=1;
+    /* The default back buffer is the retained target when lockable. */
+    int on_back=!d->target&&d->back_target;
+    Target *t=d->target?target(d,d->target):
+        (d->back_target?target(d,d->back_target):NULL);
+    if(d->target&&!t){d->ops.end(d->ctx);d->scene=0;return D9_INVALID;}
+    /* D3DSWAPEFFECT_DISCARD: a new frame may not inherit the previous one.
+     * A retained back buffer is therefore cleared at every BeginScene (with the
+     * queued Clear colour when the guest asked for one, zero otherwise); an
+     * explicit render target keeps the caller's exact clear intent. */
+    int want_clear=clear_target||on_back;
+    uint32_t color=clear_target?argb:0u;
+    if(d->ops.target_bind&&d->ops.target_bind(d->ctx,t?t->native:NULL)){
+        d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
+    }
+    if(t&&d->ops.target_viewport){
+        unsigned w=t->id==d->back_target?d->back_w:t->w;
+        unsigned height=t->id==d->back_target?d->back_h:t->h;
+        if(d->ops.target_viewport(d->ctx,w,height)){
+            d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
+        }
+    }
+    if(t&&want_clear&&d->ops.target_clear(d->ctx,t->native,color)){
+        d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
+    }
+    return D9_OK;
+}
 int d9_begin_scene(D9Device *d,uint32_t argb){return d9_begin_scene_ex(d,argb,1);}
 typedef struct {const uint8_t *data;size_t stride,max_index;} DrawStream;
 /* Optional stream-zero/index override for D3D9 UP draws.  vertices/indices are
@@ -652,7 +772,96 @@ int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,u
     UpSource up={vertex_data,vertex_stride,(size_t)min_vertex+vertex_count,index_data,index_format==D9_INDEX32?4u:2u};
     return draw(d,type,0,0,primitives,1,1,min_vertex,vertex_count,&up);
 }
-int d9_present(D9Device *d){if(!d||d->teardown||!d->scene)return D9_INVALID;d->ops.end(d->ctx);d->scene=0;return D9_OK;}
+int d9_end_scene(D9Device *d){if(!d||d->teardown||!d->scene)return D9_INVALID;d->ops.end(d->ctx);d->scene=0;return D9_OK;}
+int d9_present(D9Device *d){
+    if(!d||d->teardown||!d->scene)return D9_INVALID;
+    if(d->back_target){
+        Target *bt=target(d,d->back_target);
+        if(!bt||!d->ops.target_blit||!d->ops.target_bind){d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;}
+        D9BlitRegion src,dst;
+        memset(&src,0,sizeof src);memset(&dst,0,sizeof dst);
+        src.surface=(D9BlitSurface){bt->native,d->back_w,d->back_h,bt->format,d->back_tex_w,d->back_tex_h};
+        src.width=d->back_w;src.height=d->back_h;
+        dst.surface=(D9BlitSurface){NULL,d->back_w,d->back_h,d->back_format,0,0};
+        dst.width=d->back_w;dst.height=d->back_h;
+        /* Present is the only operation that targets the LCD screen. */
+        if(d->ops.target_bind(d->ctx,NULL)){
+            d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
+        }
+        int rc=d->ops.target_blit(d->ctx,&dst,&src,D9_FILTER_POINT);
+        if(rc!=D9_BLIT_OK){
+            d->blit_error=rc<0?rc:D9_BLIT_BACKEND;
+            /* Leave the frame with the retained target selected and finish it,
+             * so a rejected Present cannot wedge the BeginScene state machine. */
+            (void)d->ops.target_bind(d->ctx,bt->native);
+            d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
+        }
+        /* D3DSWAPEFFECT_DISCARD: the retained pixels are not carried into the
+         * next frame.  The next BeginScene clears them (see begin_scene_ex),
+         * so the contents are guaranteed only from the last BeginScene/Clear
+         * or lock/unlock until this Present. */
+    }
+    d->ops.end(d->ctx);d->scene=0;return D9_OK;
+}
+/* --- depth-stencil surfaces ------------------------------------------------ */
+static Depth *depth_slot(D9Device *d,D9Handle h){
+    if(d&&h)for(unsigned i=0;i<MAX_DEPTHS;++i)if(d->depths[i].id==h)return &d->depths[i];
+    return NULL;
+}
+int d9_create_depth_surface(D9Device *d,unsigned w,unsigned h,unsigned format,
+                            unsigned multisample,unsigned quality,int lockable,
+                            D9Handle *out){
+    if(out)*out=0;
+    if(!d||d->teardown||d->scene||!out||!d->next||!d->back_valid||
+       (format!=D9_D24S8&&format!=D9_D24X8)||multisample||quality||lockable)return D9_INVALID;
+    if(!d->ops.depth_clear)return D9_UNSUPPORTED;
+    if(w!=d->back_w||h!=d->back_h)return D9_UNSUPPORTED;
+    Depth *slot=NULL;for(unsigned i=0;i<MAX_DEPTHS;++i)if(!d->depths[i].id){slot=&d->depths[i];break;}
+    if(!slot)return D9_MEMORY;
+    D9Handle id=d->next++;*slot=(Depth){id,w,h,format};*out=id;return D9_OK;
+}
+int d9_release_depth_surface(D9Device *d,D9Handle h){
+    Depth *s=depth_slot(d,h);
+    if(!s||!d||d->scene||d->teardown)return D9_INVALID;
+    if(d->depth==h)d->depth=0;
+    memset(s,0,sizeof *s);return D9_OK;
+}
+static int logical_dims(const D9Device *d,unsigned *w,unsigned *h){
+    D9Device *mutable_d=(D9Device *)d;
+    if(d->back_target&&(!d->target||d->target==d->back_target)){
+        *w=d->back_w;*h=d->back_h;return D9_OK;
+    }
+    Target *t=d->target?target(mutable_d,d->target):NULL;
+    if(t){*w=t->w;*h=t->h;return D9_OK;}
+    if(!d->back_valid)return D9_INVALID;
+    *w=d->back_w;*h=d->back_h;return D9_OK;
+}
+int d9_set_depth_surface(D9Device *d,D9Handle h){
+    if(!d||d->teardown)return D9_INVALID;
+    Depth *s=h?depth_slot(d,h):NULL;
+    if(h&&!s)return D9_INVALID;
+    /* Binding records the surface.  Size compatibility with whichever target
+     * is bound is checked when a depth clear actually reaches the attachment
+     * (D3D9 itself allows binding a depth surface outside any render pass). */
+    d->depth=h;return D9_OK;
+}
+D9Handle d9_get_depth_surface(const D9Device *d){return d?d->depth:0;}
+int d9_depth_surface_info(D9Device *d,D9Handle h,unsigned *width,unsigned *height,unsigned *format){
+    Depth *s=depth_slot(d,h);if(!s)return D9_INVALID;
+    if(width)*width=s->w;if(height)*height=s->h;if(format)*format=s->format;return D9_OK;
+}
+int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
+    if(!d||d->teardown||!d->scene||!d->depth||!d->ops.depth_clear)return D9_INVALID;
+    if(!(flags&6u)||(flags&~7u))return D9_INVALID;
+    if(!isfinite(z)||z<0.0f||z>1.0f)return D9_INVALID;
+    Depth *s=depth_slot(d,d->depth);
+    if(!s)return D9_INVALID;
+    unsigned w,h;if(logical_dims(d,&w,&h)||w!=s->w||h!=s->h)return D9_UNSUPPORTED;
+    uint32_t quant=(uint32_t)(z*16777215.0f+0.5f);
+    if(quant>0xffffffu)quant=0xffffffu;
+    uint32_t packed=quant|((stencil&0xffu)<<24);
+    return d->ops.depth_clear(d->ctx,flags,packed)?D9_BACKEND:D9_OK;
+}
 size_t d9_memory_used(const D9Device *d){if(!d)return 0;D9TexCacheStats st;d9_texcache_stats(&d->tex_cache,&st);
     return memory_sum(d->used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used)));}
 int d9_get_draw_state(const D9Device *d,D9DrawState *out){

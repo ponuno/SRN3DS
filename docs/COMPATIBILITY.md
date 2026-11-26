@@ -144,15 +144,19 @@ are selectable through the real renderer. A device may legitimately report PS
 3.0 while rejecting individual unsupported shaders; it must not claim coverage
 it has not tested.
 
-Not supported: universal SM3 translation, depth/stencil surfaces, fog,
-anisotropic filtering, multiple sampler stages, state blocks, automatic mip
-generation, instancing frequency >1, arbitrary FVF/declaration semantics
-(normals, skinning, colors are validated but unused), ProcessVertices,
-multisampling, queries, swap-chain control. Reset, back-buffer, CPU offscreen
-surface, one explicit LDR render-target and viewport methods work through COM.
+Not supported: universal SM3 translation, fog, anisotropic filtering, multiple
+sampler stages, state blocks, automatic mip generation, instancing frequency >1,
+arbitrary FVF/declaration semantics (normals, skinning, colors are validated but
+unused), ProcessVertices, multisampling, queries, swap-chain control. Reset,
+back-buffer, CPU offscreen surface, one explicit LDR render-target and viewport
+methods work through COM. `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER` is real: a
+retained 512x256 target for the 400x240 mode with a Present blit and
+LockRect/UnlockRect read/write. Explicit `D24S8`/`D24X8` depth-stencil surfaces
+attach to the target's PICA depth attachment and `Clear(Z|STENCIL)` reaches it.
 The PICA target path has synthetic Azahar pixel proof (two independent 64x64
-targets, readback and back-buffer restore); it is not yet a Skyrim frame. Explicit
-targets have no depth attachment, and texture RTs/MRT/resolve remain absent.
+targets, readback and back-buffer restore); it is not yet a Skyrim frame. The
+retained target and depth attachment are host-tested and compiled for ARM;
+their PICA pixel proof is pending. Texture RTs/MRT/resolve remain absent.
 
 ## 5. Recompiled-x86 subset (upstream lifter + our staging)
 

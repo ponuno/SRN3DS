@@ -115,7 +115,24 @@ static void configure_native_texture(void *texture,const D9DrawState *state){
     /* NONE disables interpolation between mip levels, not mip selection itself. */
     C3D_TexSetFilterMipmap(&t->tex,config.mip_filter==2?GPU_LINEAR:GPU_NEAREST);C3D_TexSetWrap(&t->tex,wrap(state->address_u),wrap(state->address_v));
 }
+/* The LCD framebuffer is stored rotated 240x400, so every clip matrix the core
+ * builds carries a screen rotation.  An offscreen colour target is a normal D3D
+ * surface: LockRect must return a D3D top-left image and Present samples it with
+ * direct UVs.  Post-multiplying the clip output by this permutation turns the
+ * screen conversion into the D3D/texture conversion:
+ *     clip'_x = -clip_y,  clip'_y = -clip_x
+ * (z/w untouched).  This is applied only while an explicit or retained target is
+ * bound; the screen path is unchanged. */
+static void orient_clip(D9Citro *c,D9Matrix *m){
+    if(!c->active_target)return;
+    float r0[4],r1[4];
+    for(unsigned i=0;i<4;++i){r0[i]=-m->m[1][i];r1[i]=-m->m[0][i];}
+    for(unsigned i=0;i<4;++i){m->m[0][i]=r0[i];m->m[1][i]=r1[i];}
+}
 static void apply_state(const D9DrawState *s,int has_depth){
+    /* Every colour target (screen and retained offscreen) carries the single
+     * PICA DEPTH24_STENCIL8 attachment, so depth test/write state always has a
+     * real attachment behind it. */
     GPU_WRITEMASK mask=(GPU_WRITEMASK)(s->color_write|((has_depth&&s->z_enable&&s->z_write)?GPU_WRITE_DEPTH:0));
     C3D_DepthTest(has_depth&&s->z_enable,compare(s->z_func,1),mask);
     C3D_CullFace(s->cull==2?GPU_CULL_BACK_CCW:s->cull==3?GPU_CULL_FRONT_CCW:GPU_CULL_NONE);
@@ -127,9 +144,10 @@ static void apply_state(const D9DrawState *s,int has_depth){
 static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *texture,const D9DrawState *state){
     D9Citro *c=ctx;if(!c->scene||n>FRAME_VERTICES-c->cursor)return -1;
     memcpy(c->arena+c->cursor,v,n*sizeof *v);GSPGPU_FlushDataCache(c->arena+c->cursor,n*sizeof *v);
-    C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(clip->m[i][0],clip->m[i][1],clip->m[i][2],clip->m[i][3]);
+    D9Matrix mtx=*clip;orient_clip(c,&mtx);
+    C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform,&m);
-    apply_state(state,!c->active_target);
+    apply_state(state,1);
     if(texture)configure_native_texture(texture,state);
     if(state->pixel_shader){
         NativeTex *native=texture;
@@ -195,9 +213,10 @@ static int draw_color_stages(void *ctx,const D9ColorVertex *v,size_t n,const D9M
     memcpy(c->arena_color+c->cursor_color,v,n*sizeof *v);
     GSPGPU_FlushDataCache(c->arena_color+c->cursor_color,n*sizeof *v);
     prepare_draw_color(c);
-    C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(clip->m[i][0],clip->m[i][1],clip->m[i][2],clip->m[i][3]);
+    D9Matrix mtx=*clip;orient_clip(c,&mtx);
+    C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_color,&m);
-    apply_state(state,!c->active_target);
+    apply_state(state,1);
     if(texture)configure_native_texture(texture,state);
     d9_pica_citro3d_restore_tev();
     if(texture){NativeTex *native=texture;C3D_TexBind(0,&native->tex);}
@@ -237,10 +256,22 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
     }
     C3D_TexSetFilter(&t->tex,GPU_NEAREST,GPU_NEAREST);
     C3D_TexSetWrap(&t->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
-    t->target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,-1);
+    /* The retained back buffer and every explicit LDR target need a real depth
+     * attachment: SetDepthStencilSurface/Clear(Z) and depth-tested draws must
+     * reach hardware, not a bookkeeping flag. */
+    t->target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,GPU_RB_DEPTH24_STENCIL8);
     if(!t->target){
         fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed\n",w,h);
         C3D_TexDelete(&t->tex);free(t);return -1;
+    }
+    /* VRAM starts with arbitrary bytes.  PICA depth 0 is "far" and the draws
+     * use GPU_GEQUAL, so a prime clear avoids depth-testing a fresh target
+     * against garbage.  This is a private frame: the target is not linked to
+     * either LCD, so FrameEnd performs no display transfer. */
+    if(C3D_FrameBegin(C3D_FRAME_SYNCDRAW)){
+        if(C3D_FrameDrawOn(t->target))
+            C3D_RenderTargetClear(t->target,C3D_CLEAR_DEPTH|C3D_CLEAR_COLOR,0,0);
+        C3D_FrameEnd(0);
     }
     t->w=w;t->h=h;t->format=format;*native=t;return 0;
 }
@@ -270,6 +301,44 @@ static void target_delete(void *ctx,void *native){
     C3D_FrameSync();if(t->target)C3D_RenderTargetDelete(t->target);
     C3D_TexDelete(&t->tex);free(t);
 }
+/* Whole-surface write-back for the lockable back buffer.  The source is
+ * top-first BGRA; PICA RGBA8 storage is tiled with a bottom-left origin, so the
+ * existing swizzle produces the exact texel layout and C3D_TexLoadImage replaces
+ * level 0.  This is a real upload, not a shadow copy. */
+static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
+                        unsigned w,unsigned h){
+    D9Citro *c=ctx;NativeTarget *t=native;
+    if(!c||!t||!bgra||c->scene||w!=t->w||h!=t->h||pitch<(size_t)w*4)return -1;
+    size_t bytes=(size_t)t->w*t->h*4;if(bytes!=t->tex.size)return -1;
+    C3D_FrameSync();
+    uint8_t *tmp=linearAlloc(bytes);if(!tmp)return -1;
+    if(d9_swizzle_rgba8(tmp,bytes,bgra,pitch,w,h,t->format)){linearFree(tmp);return -1;}
+    t->tex.maxLevel=0;t->tex.minLevel=0;
+    C3D_TexLoadImage(&t->tex,tmp,GPU_TEXFACE_2D,0);
+    C3D_TexFlush(&t->tex);
+    linearFree(tmp);return 0;
+}
+/* Clear the depth attachment of the currently bound colour target.  PICA stores
+ * depth and stencil in one DEPTH24_STENCIL8 buffer, so a depth clear writes the
+ * packed word (and, with it, the stencil byte). */
+static int depth_clear(void *ctx,unsigned flags,uint32_t depth_stencil){
+    D9Citro *c=ctx;
+    if(!c||!c->scene||!(flags&6u)||(flags&~7u))return -1;
+    C3D_RenderTarget *rt=c->active_target?((NativeTarget *)c->active_target)->target:c->target;
+    if(!rt)return -1;
+    C3D_RenderTargetClear(rt,C3D_CLEAR_DEPTH,0,depth_stencil);
+    return 0;
+}
+/* Logical viewport for the current offscreen target.  C3D_FrameDrawOn sets the
+ * viewport to the target storage size, but the retained back buffer is 512x256
+ * while the D3D surface is 400x240; rasterising into the padded storage would
+ * stretch the frame and make the present blit sample the wrong region. */
+static int target_viewport(void *ctx,unsigned w,unsigned h){
+    D9Citro *c=ctx;
+    if(!c||!c->scene||!w||!h||w>4096||h>4096)return -1;
+    C3D_SetViewport(0,0,w,h);
+    return 0;
+}
 /* StretchRect-class blit.  Only explicit render-target textures can be
  * sampled: the implicit 240x400 screen framebuffer is not a PICA texture, so a
  * back-buffer source is rejected explicitly (D9_BLIT_BACK_BUFFER_SRC) instead
@@ -288,8 +357,12 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     C3D_RenderTarget *rt=native?native->target:c->target;
     C3D_Tex *stex=(C3D_Tex *)src->surface.native;
     if(!rt||!stex)return D9_BLIT_BACKEND;
-    if(stex->width!=src->surface.width||stex->height!=src->surface.height)return D9_BLIT_UNSUPPORTED;
-    if(dst->surface.native&&(native->w!=dst->surface.width||native->h!=dst->surface.height))return D9_BLIT_UNSUPPORTED;
+    unsigned sw=src->surface.storage_width?src->surface.storage_width:src->surface.width;
+    unsigned shgt=src->surface.storage_height?src->surface.storage_height:src->surface.height;
+    unsigned dw=dst->surface.storage_width?dst->surface.storage_width:dst->surface.width;
+    unsigned dh=dst->surface.storage_height?dst->surface.storage_height:dst->surface.height;
+    if(stex->width!=sw||stex->height!=shgt)return D9_BLIT_UNSUPPORTED;
+    if(dst->surface.native&&(native->w!=dw||native->h!=dh))return D9_BLIT_UNSUPPORTED;
     if(c->cursor+6>FRAME_VERTICES)return D9_BLIT_BACKEND;
     int own_frame=!c->scene;
     if(own_frame){
@@ -306,6 +379,13 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     m.r[1]=FVec4_New(-2.0f/w,0.0f,0.0f,1.0f);
     m.r[2]=FVec4_New(0.0f,0.0f,0.0f,0.0f);
     m.r[3]=FVec4_New(0.0f,0.0f,0.0f,1.0f);
+    if(dst->surface.native){
+        /* Offscreen destination: the same orient_clip() permutation, written
+         * out explicitly (row0 = -screen row1, row1 = -screen row0), so a
+         * texture-to-texture copy is not rotated. */
+        m.r[0]=FVec4_New(2.0f/w,0.0f,0.0f,-1.0f);
+        m.r[1]=FVec4_New(0.0f,2.0f/h,0.0f,-1.0f);
+    }
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform,&m);
     C3D_DepthTest(false,GPU_ALWAYS,GPU_WRITE_COLOR);
     C3D_CullFace(GPU_CULL_NONE);
@@ -323,10 +403,10 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     C3D_TexEnvFunc(env,C3D_Both,GPU_REPLACE);
     float x0=(float)dst->x,y0=(float)dst->y;
     float x1=(float)(dst->x+dst->width),y1=(float)(dst->y+dst->height);
-    float u0=(float)src->x/(float)src->surface.width;
-    float v0=(float)src->y/(float)src->surface.height;
-    float u1=(float)(src->x+src->width)/(float)src->surface.width;
-    float v1=(float)(src->y+src->height)/(float)src->surface.height;
+    float u0=(float)src->x/(float)sw;
+    float v0=(float)src->y/(float)shgt;
+    float u1=(float)(src->x+src->width)/(float)sw;
+    float v1=(float)(src->y+src->height)/(float)shgt;
     D9Vertex *v=c->arena+c->cursor;
     v[0]=(D9Vertex){x0,y0,0.0f,u0,v0};v[1]=(D9Vertex){x1,y0,0.0f,u1,v0};v[2]=(D9Vertex){x1,y1,0.0f,u1,v1};
     v[3]=v[0];v[4]=v[2];v[5]=(D9Vertex){x0,y1,0.0f,u0,v1};
@@ -341,4 +421,5 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
     return D9_BLIT_OK;
 }
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
-    target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages};return &ops;}
+    target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
+    target_write,depth_clear,target_viewport};return &ops;}

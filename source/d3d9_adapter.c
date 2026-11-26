@@ -160,6 +160,7 @@ int d9_adapter_check_device_format(unsigned adapter,unsigned device_type,unsigne
     if(adapter_format!=D9_X8R8G8B8)return D9_ADAPTER_UNAVAILABLE;
     if(resource_type==RTYPE_SURFACE){
         if(usage!=0&&usage!=USAGE_RENDERTARGET)return D9_ADAPTER_UNAVAILABLE;
+        if(format==D9_D24S8||format==D9_D24X8)return usage==0?D9_ADAPTER_OK:D9_ADAPTER_UNAVAILABLE;
         return format==D9_X8R8G8B8||format==D9_A8R8G8B8?D9_ADAPTER_OK:D9_ADAPTER_UNAVAILABLE;
     }
     if(resource_type!=RTYPE_TEXTURE)return D9_ADAPTER_UNAVAILABLE;
@@ -174,9 +175,11 @@ int d9_adapter_check_multisample(unsigned adapter,unsigned device_type,unsigned 
     return surface_format==D9_X8R8G8B8||surface_format==D9_A8R8G8B8?D9_ADAPTER_OK:D9_ADAPTER_UNAVAILABLE;
 }
 int d9_adapter_check_depth_stencil(unsigned adapter,unsigned device_type,unsigned display_format_value,unsigned backbuffer_format,unsigned depth_stencil_format){
-    (void)display_format_value;(void)backbuffer_format;(void)depth_stencil_format;
     if(adapter>=D9_ADAPTER_COUNT||device_type!=DEVTYPE_HAL)return D9_ADAPTER_INVALID;
-    return D9_ADAPTER_UNAVAILABLE; /* no D3D9 depth-stencil surfaces */
+    if(display_format_value!=D9_X8R8G8B8)return D9_ADAPTER_UNAVAILABLE;
+    if(backbuffer_format!=D9_X8R8G8B8&&backbuffer_format!=D9_A8R8G8B8)return D9_ADAPTER_UNAVAILABLE;
+    /* The single PICA DEPTH24_STENCIL8 attachment backs both formats. */
+    return depth_stencil_format==D9_D24S8||depth_stencil_format==D9_D24X8?D9_ADAPTER_OK:D9_ADAPTER_UNAVAILABLE;
 }
 int d9_adapter_check_format_conversion(unsigned adapter,unsigned device_type,unsigned source_format,unsigned target_format){
     (void)source_format;(void)target_format;

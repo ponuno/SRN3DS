@@ -115,11 +115,13 @@ matrix is authoritative for exact matching order.
 | `format.srgb_write` | `QUERY_SRGBWRITE` (0x40000) | No framebuffer sRGB encode | unsupported | NOTAVAILABLE |
 | `format.atoc` | `D3DFMT_ATOC` (`'ATOC'`) | Binary PICA alpha test; no coverage mask | fallback | NOTAVAILABLE |
 | `format.resz` | `D3DFMT_RESZ` (`'RESZ'`) | No depth resolve/texture path | unsupported | NOTAVAILABLE |
-| `format.depth` | D16/D24S8/D24X8/D32/... | No D3D9 depth-stencil surfaces | unsupported | NOTAVAILABLE |
+| `format.depth` | D16/D24S8/D24X8/D32/... as a **texture** | No depth-texture path; the depth attachment is exposed as a depth-stencil surface instead | unsupported | NOTAVAILABLE |
+| `format.depth_surface` | D24S8/D24X8 surface, usage 0 | The single PICA `DEPTH24_STENCIL8` attachment | supported | OK |
 | `format.usage` | any other usage on a known LDR format, combined bits, or a texture render target | No texture render target, combined usage, MSAA, depth, auto-mip, dynamic or sRGB write | unsupported | NOTAVAILABLE |
 | `format.resource` | resource type not SURFACE/TEXTURE | No other resource class | unsupported | NOTAVAILABLE |
 | `format.unknown` | unrecognised numeric format | No PICA bridge format | unsupported | NOTAVAILABLE |
-| `depth_stencil.unsupported` | `CheckDepthStencilMatch` | No depth-stencil surface object | unsupported | NOTAVAILABLE |
+| `depth_stencil.supported` | `CheckDepthStencilMatch` D24S8/D24X8 with the 400x240 mode | The PICA depth attachment is a real D3D9 surface now | supported | OK |
+| `depth_stencil.unsupported` | any other depth format | Only D24S8/D24X8 exist | unsupported | NOTAVAILABLE |
 | `caps.sm2_templates` | shader-model request 2.0 | Two exact SM2 templates | supported | OK |
 | `caps.sm3_family_only` | shader-model request 3.x | Specialized TEV/menu-light replacement only; not advertised | fallback | NOTAVAILABLE |
 | `caps.shader_other` | SM1 or >SM3 | No path | unsupported | NOTAVAILABLE |
@@ -233,48 +235,42 @@ be revalidated rather than assumed.
   preconditions. If they do not match, the correct result is `UNSUPPORTED`, not
   an attempt at generic translation.
 
-### 4.6 Depth-stencil: what native support would be required
+### 4.6 Depth-stencil: implemented contract
 
-The current answer is `UNSUPPORTED` for `CheckDepthStencilMatch` and for every
-depth format. The PICA backend already creates a private
-`GPU_RB_DEPTH24_STENCIL8` attachment on its render target
-(`C3D_RenderTargetCreate(..., GPU_RB_DEPTH24_STENCIL8)` in
-`source/d3d9_citro3d.c`), but that is a backend-owned attachment, not a D3D9
-depth-stencil surface. That is why `caps.depth_test_supported` and
-`depth_stencil.unsupported` are both true: z-testing works, the D3D9 surface API
-does not. This is consistent with the current COM surface:
+Status changed on 2026-11-26: `CheckDepthStencilMatch` accepts
+`D24S8`/`D24X8` for the 400x240 `X8R8G8B8`/`A8R8G8B8` back buffer, and the COM
+depth-stencil surface API is implemented. The single PICA
+`GPU_RB_DEPTH24_STENCIL8` attachment is now the D3D9 surface:
 
-- `CreateDepthStencilSurface`, `SetDepthStencilSurface` and
-  `GetDepthStencilSurface` return failure with a named reason.
-- `CheckDepthStencilMatch` always returns `D3DERR_NOTAVAILABLE`.
-- `Clear` rejects depth/stencil flags because no surface is attached.
-- `CreateDevice` rejects automatic depth-stencil surfaces.
+- `CreateDepthStencilSurface` accepts exactly `400x240`, `D3DFMT_D24S8` or
+  `D3DFMT_D24X8`, `D3DMULTISAMPLE_NONE`, quality 0, `Lockable=FALSE`, no shared
+  handle. Other sizes/formats/MSAA/lockable return a named
+  `D3DERR_NOTAVAILABLE`/`D3DERR_INVALIDCALL`.
+- `SetDepthStencilSurface`/`GetDepthStencilSurface` bind and report the surface;
+  `NULL` detaches and `GetDepthStencilSurface` then returns
+  `D3DERR_NOTFOUND`.
+- `Clear` with `D3DCLEAR_ZBUFFER`/`D3DCLEAR_STENCIL` is queued and applied at
+  `BeginScene` through the backend `depth_clear`; `z` must be finite and in
+  `[0,1]`. Clearing without a bound depth surface stays `D3DERR_INVALIDCALL`.
+- The PICA backend creates every colour target with
+  `C3D_RenderTargetCreateFromTex(..., GPU_RB_DEPTH24_STENCIL8)`, enables depth
+  testing for offscreen targets too, and clears through
+  `C3D_RenderTargetClear(target, C3D_CLEAR_DEPTH, 0, packed)`.
+- The packed clear value is `depth24 | (stencil << 24)`. **PICA limitation,
+  documented rather than hidden:** depth and stencil share one buffer, so a
+  Z-only clear also writes the stencil byte (0 unless supplied). There is no
+  separate stencil attachment format.
+- `CreateDevice` still rejects `EnableAutoDepthStencil`; TESV measured that it
+  creates the surface explicitly.
 
-To make a truthful `SUPPORTED` later, all of this is needed, not just a depth
-test:
+Still unsupported: depth textures (sampling depth), `RESZ`/depth resolve, MSAA,
+stencil-only preservation with Z-only clears, and more than one simultaneous
+depth surface (PICA has one attachment per target).
 
-1. **Native attachment**: a citro3d/PICA render target with a depth buffer
-   (`GPU_DEPTHBUF`/depth attachment, 24-bit depth and stencil as available) and
-   correct memory accounting.
-2. **D3D9 object model**: a real depth-stencil surface object with format,
-   dimensions, multisample type/quality, lock rules and lifetime; creation,
-   set/get, and reset behaviour.
-3. **Format queries**: `CheckDeviceFormat` with `D3DUSAGE_DEPTHSTENCIL` and
-   `CheckDepthStencilMatch` must reflect the same native formats.
-4. **Clear**: `D3DCLEAR_ZBUFFER`/`D3DCLEAR_STENCIL` must map to the native depth
-   and stencil clear values.
-5. **State mapping**: D3D9 depth func/write and stencil func/ops must map to PICA
-   state. The existing reverse-depth mapping for draws is necessary but not
-   sufficient; it currently operates without a D3D9 depth surface contract.
-6. **Depth reads/resolve**: depth-texture sampling and `RESZ` need a separate
-   path; a depth attachment alone does not provide it. Without that, keep
-   `RESZ` explicitly unsupported.
-7. **MSAA**: ATOC/RESZ/depth resolve require multisampling; the bridge currently
-   supports only `D3DMULTISAMPLE_NONE`.
-
-The matrix intentionally separates `caps.depth_test_supported` (z-test on the
-attached buffer) from `depth_stencil.unsupported` (D3D9 surface API). Do not use
-the first to answer the second.
+Evidence: `tests/back_buffer_lockable_smoke.c` (host pixel/state),
+`tests/adapter_smoke.c` and `tests/renderer_requirements_smoke.c` (format
+matrix), ARM `com`/`tesv` links. Azahar pixel proof for the depth clear is not
+done yet.
 
 ### 4.7 Single LDR render-target surface
 

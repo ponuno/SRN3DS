@@ -348,6 +348,21 @@ modules (max 3), not call sites.
    and no loader/libctru crash. Large AOT CIAs still fail in the system loader,
    compressed or not. No physical D3D9/PICA draw or Skyrim frame exists yet.
 
+## 6a. Renderer milestone (2026-11-26)
+
+The measured TESV `CreateDevice` set is now accepted end to end:
+`400x240 X8R8G8B8`, one back buffer, `DISCARD`, no MSAA, windowed, interval
+ONE, `Flags=0x1` (`D3DPRESENTFLAG_LOCKABLE_BACKBUFFER`) and
+`EnableAutoDepthStencil=0`. The lockable flag is backed by a retained 512x256
+RGBA8 target with a real `Present` blit, `LockRect` read/write and
+`StretchRect` sampling; explicit `D24S8`/`D24X8` depth-stencil surfaces attach
+to the PICA depth attachment and `Clear(Z|STENCIL)` reaches hardware. The ARM
+`com` and `tesv` targets link the new backend code. Host evidence is pixel-level
+through the null backend only; Azahar pixel proof for the retained target,
+present orientation and depth clear is still open. Details and the remaining
+steps: `docs/BACK_BUFFER_LOCKABLE.md`. The HW T&L caps bit is still **not**
+claimed; scope and the A/B decision inputs: `docs/HWTL_IMPLEMENTATION.md`.
+
 ## 7. Next concrete tasks
 
 1. Container landed: runtime tier, bounded lazy cache, packer call-split fix and

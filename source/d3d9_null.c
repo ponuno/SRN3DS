@@ -5,13 +5,21 @@
 #include <string.h>
 
 typedef struct {unsigned w,h,levels;} NullTex;
-typedef struct {unsigned w,h,format;} NullTarget;
+typedef struct {unsigned w,h,format;uint8_t *pixels;} NullTarget;
 static D9NullStats g;
+/* The null backend owns no LCD, but Present's screen blit has a destination.
+ * Keeping it as real BGRA bytes lets host tests verify the retained-back-buffer
+ * presentation path pixel by pixel instead of only counting calls.  The buffer
+ * lives outside D9NullStats so copying the stats struct stays cheap. */
+enum {NULL_PRESENT_W=400,NULL_PRESENT_H=240};
+static uint8_t g_present[NULL_PRESENT_W*NULL_PRESENT_H*4];
 
 static D9NullStats *stats(void *ctx){return ctx?(D9NullStats *)ctx:&g;}
 static int pow2(unsigned n){return n&&n<=1024&&!(n&(n-1));}
 static unsigned level_dim(unsigned n,unsigned level){n>>=level;return n?n:1;}
 static void null_log(const char *op,const char *why){fprintf(stderr,"[d3d9-null] %s: %s\n",op,why);}
+/* A D3DCOLOR 0xAARRGGBB has the little-endian byte order B,G,R,A, which is
+ * exactly the top-first BGRA layout target_read returns. */
 
 static int null_texture_create(void *ctx,unsigned w,unsigned h,unsigned levels,void **native){
     D9NullStats *s=stats(ctx);
@@ -113,22 +121,46 @@ static int null_target_create(void *ctx,unsigned w,unsigned h,unsigned format,vo
         null_log("CreateRenderTarget","only power-of-two 8..1024 X8R8G8B8/A8R8G8B8 targets are implemented");return -1;
     }
     NullTarget *t=calloc(1,sizeof *t);if(!t)return -1;
+    t->pixels=calloc((size_t)w*h,4);if(!t->pixels){free(t);null_log("CreateRenderTarget","out of memory");return -1;}
     t->w=w;t->h=h;t->format=format;*native=t;++s->target_creates;return 0;
 }
 static void null_target_delete(void *ctx,void *native){
-    D9NullStats *s=stats(ctx);free(native);++s->target_deletes;
+    D9NullStats *s=stats(ctx);NullTarget *t=native;if(!t)return;free(t->pixels);free(t);++s->target_deletes;
 }
 static int null_target_bind(void *ctx,void *native){
     D9NullStats *s=stats(ctx);if(!s->scene){null_log("SetRenderTarget","target bind requires an active scene");return -1;}
     s->target_active=native!=NULL;++s->target_binds;return 0;
 }
 static int null_target_clear(void *ctx,void *native,uint32_t argb){
-    D9NullStats *s=stats(ctx);if(!s->scene||!native)return -1;
+    D9NullStats *s=stats(ctx);NullTarget *t=native;if(!s->scene||!t)return -1;
+    for(size_t i=0;i<(size_t)t->w*t->h;++i)((uint32_t *)t->pixels)[i]=argb;
     s->last_clear_argb=argb;++s->target_clears;return 0;
 }
-/* The null backend validates and counts a StretchRect but owns no pixels.  A
- * successful result means "the call stream was accepted", never "the image was
- * copied". */
+static int null_target_read(void *ctx,void *native,void *dst,size_t pitch,
+                            unsigned x,unsigned y,unsigned w,unsigned h){
+    D9NullStats *s=stats(ctx);NullTarget *t=native;
+    if(!t||!dst||!pitch||!w||!h||x>t->w||y>t->h||w>t->w-x||h>t->h-y||pitch<(size_t)w*4)return -1;
+    for(unsigned yy=0;yy<h;++yy)
+        memcpy((uint8_t *)dst+(size_t)yy*pitch,t->pixels+((size_t)(y+yy)*t->w+x)*4,(size_t)w*4);
+    ++s->target_reads;return 0;
+}
+static int null_target_write(void *ctx,void *native,const void *bgra,size_t pitch,
+                             unsigned w,unsigned h){
+    D9NullStats *s=stats(ctx);NullTarget *t=native;
+    if(!t||!bgra||w!=t->w||h!=t->h||pitch<(size_t)w*4||s->scene)return -1;
+    for(unsigned yy=0;yy<h;++yy)
+        memcpy(t->pixels+(size_t)yy*w*4,(const uint8_t *)bgra+(size_t)yy*pitch,(size_t)w*4);
+    ++s->target_writes;return 0;
+}
+static uint8_t *blit_pixels(const D9BlitSurface *surface,unsigned *w,unsigned *h){
+    if(surface->native){
+        NullTarget *t=surface->native;*w=t->w;*h=t->h;return t->pixels;
+    }
+    *w=NULL_PRESENT_W;*h=NULL_PRESENT_H;return g_present;
+}
+/* The null backend validates, counts and really copies a StretchRect.  The
+ * implicit destination is a private 400x240 BGRA image, which is what the host
+ * pixel tests read back through d9_null_present_pixels(). */
 static int null_target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src,unsigned filter){
     D9NullStats *s=stats(ctx);
     if(!dst||!src||!dst->width||!dst->height||!src->width||!src->height||filter>D9_FILTER_LINEAR){
@@ -140,13 +172,38 @@ static int null_target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion
     if(src->surface.format!=dst->surface.format){
         null_log("StretchRect","source and destination formats differ");return D9_BLIT_FORMAT;
     }
+    unsigned sw=0,sh=0,dw=0,dh=0;
+    uint8_t *sp=blit_pixels(&src->surface,&sw,&sh);
+    uint8_t *dp=blit_pixels(&dst->surface,&dw,&dh);
+    if(!sp||!dp||src->x>sw||src->y>sh||src->width>sw-src->x||src->height>sh-src->y||
+       dst->x>dw||dst->y>dh||dst->width>dw-dst->x||dst->height>dh-dst->y)
+        return D9_BLIT_RECT;
+    for(unsigned y=0;y<dst->height;++y){
+        unsigned sy=src->y+(unsigned)((uint64_t)y*src->height/dst->height);
+        for(unsigned x=0;x<dst->width;++x){
+            unsigned sx=src->x+(unsigned)((uint64_t)x*src->width/dst->width);
+            memcpy(dp+((size_t)(dst->y+y)*dw+dst->x+x)*4,sp+((size_t)sy*sw+sx)*4,4);
+        }
+    }
     ++s->blits;s->blit_pixels+=(unsigned long long)dst->width*dst->height;
     if(dst->width!=src->width||dst->height!=src->height)++s->blit_stretched;
     if(filter==D9_FILTER_LINEAR)++s->blit_linear;
     s->last_blit_filter=filter;
     s->last_blit_src_back=src->surface.native==NULL;
     s->last_blit_dst_back=dst->surface.native==NULL;
+    if(!dst->surface.native){s->present_valid=1;s->present_w=dw;s->present_h=dh;}
     return D9_BLIT_OK;
+}
+static int null_depth_clear(void *ctx,unsigned flags,uint32_t depth_stencil){
+    D9NullStats *s=stats(ctx);
+    if(!s->scene||!(flags&6u)||(flags&~7u)){null_log("Clear","depth clear requires an active scene and Z/STENCIL flags");return -1;}
+    ++s->depth_clears;s->last_depth_flags=flags;s->last_depth_clear=depth_stencil;
+    return 0;
+}
+static int null_target_viewport(void *ctx,unsigned w,unsigned h){
+    D9NullStats *s=stats(ctx);
+    if(!s->scene||!w||!h||w>4096||h>4096){null_log("SetViewport","target viewport requires an active scene and plausible dimensions");return -1;}
+    s->viewport_w=w;s->viewport_h=h;++s->viewport_calls;return 0;
 }
 static int null_draw_two(void *ctx,const D9ColorVertex *vertices,size_t count,
                          const D9Matrix *clip,void *tex0,const D9DrawState *stage0,
@@ -157,9 +214,15 @@ static int null_draw_two(void *ctx,const D9ColorVertex *vertices,size_t count,
     return null_draw_colored(ctx,vertices,count,clip,tex0,stage0);
 }
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
-    NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,NULL,null_target_blit,null_draw_colored,null_draw_two};
+    NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
+    null_target_write,null_depth_clear,null_target_viewport};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}
+const void *d9_null_present_pixels(unsigned *w,unsigned *h){
+    if(w)*w=g.present_valid?g.present_w:0;
+    if(h)*h=g.present_valid?g.present_h:0;
+    return g.present_valid?g_present:NULL;
+}
 void d9_null_note_clear(unsigned flags){++g.clears;g.last_clear_flags=flags;if(flags&1u)++g.clear_targets;}
-void d9_null_reset(void){memset(&g,0,sizeof g);}
+void d9_null_reset(void){memset(&g,0,sizeof g);memset(g_present,0,sizeof g_present);}

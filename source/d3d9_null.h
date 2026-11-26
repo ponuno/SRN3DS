@@ -2,15 +2,21 @@
 #include "d3d9_core.h"
 
 /* Headless backend for the d3d9_core call stream. It validates every call,
- * records counters and produces no pixels. It advertises SM2 templates, one
- * active LDR render target (implicit or explicit), no depth-stencil surface
- * formats, and a validated no-pixel StretchRect sink. */
+ * keeps real BGRA pixels for every render target and for the private 400x240
+ * "presented screen" image, and records counters.  This makes lockable
+ * back-buffer read/write and the Present blit host-testable pixel by pixel.
+ * It advertises SM2 templates, one active LDR render target (implicit or
+ * explicit), D24S8 depth clears and a validated StretchRect copy. */
 #define D9_NULL_RESOURCE_LIMIT (4u<<20)
 
 typedef struct {
     unsigned begins,ends,draws,triangles,clears,clear_targets,presents;
     unsigned texture_creates,texture_uploads,texture_deletes;
     unsigned target_creates,target_deletes,target_binds,target_clears,target_draws;
+    unsigned target_reads,target_writes;
+    unsigned depth_clears;
+    uint32_t last_depth_clear,last_depth_flags;
+    unsigned viewport_calls,viewport_w,viewport_h;
     unsigned blits,blit_stretched,blit_linear;
     unsigned long long blit_pixels;
     uint32_t last_blit_filter;
@@ -19,8 +25,12 @@ typedef struct {
     unsigned long long vertices;
     uint32_t last_clear_argb,last_clear_flags;
     int scene;
-    /* Colour-capable draw recording.  The null backend owns no pixels; these
-     * fields prove which RGBA the core handed it, never that a pixel changed. */
+    /* Screen image written by the last blit whose destination was the implicit
+     * back buffer (Present).  present_valid is the only claim that it exists. */
+    int present_valid;
+    unsigned present_w,present_h;
+    /* Colour-capable draw recording.  These fields prove which RGBA the core
+     * handed it, never that a pixel changed. */
     unsigned color_draws,color_vertices;
     D9ColorVertex last_color_vertices[3];
     unsigned last_color_count;
@@ -31,8 +41,11 @@ const D9Backend *d9_null_backend(void);
 void *d9_null_context(void);
 const D9NullStats *d9_null_stats(void);
 void d9_null_reset(void);
-/* Count an explicit, validated IDirect3DDevice9::Clear. The backend has no
- * pixels; this records intent without claiming that a framebuffer changed. */
+/* Top-first BGRA bytes of the last Present blit (400x240), or NULL before the
+ * first one.  The bytes are a host-side copy, not a hardware framebuffer. */
+const void *d9_null_present_pixels(unsigned *w,unsigned *h);
+/* Count an explicit, validated IDirect3DDevice9::Clear. This records intent for
+ * the colour target; the private present image is only written by a blit. */
 void d9_null_note_clear(unsigned flags);
 
 /* Install the null backend into the current d3d9_com session. Call after

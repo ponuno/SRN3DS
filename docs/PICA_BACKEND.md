@@ -614,7 +614,8 @@ The production backend now implements one explicit `D3DUSAGE_RENDERTARGET`
   restore), `GetRenderTarget`, surface description/container and read-only
   `LockRect`;
 - PICA allocates a power-of-two 8..1024 `GPU_RGBA8` texture in VRAM and wraps it
-  with `C3D_RenderTargetCreateFromTex(..., -1)`, so explicit targets have no depth
+  with `C3D_RenderTargetCreateFromTex(..., GPU_RB_DEPTH24_STENCIL8)`, so every
+  explicit target (and the retained lockable back buffer) has a real depth
   attachment;
 - `BeginScene` binds the selected target and applies the queued colour clear
   only when the guest actually called `Clear`; mid-scene `SetRenderTarget`
@@ -627,13 +628,21 @@ The production backend now implements one explicit `D3DUSAGE_RENDERTARGET`
 - target release is forbidden while a scene is active. Deleting the selected
   target restores core target zero; the next frame binds the screen target.
 
-Only `D3DMULTISAMPLE_NONE`, quality zero, no shared handle and no depth/stencil
-are accepted. A lockable target requires a backend readback callback; the null
-backend omits that callback, creates only non-lockable targets, and never invents
-pixels. Texture render targets, MRT, resolve, `ColorFill`, sampling an RT as a
-texture and writable RT locks remain unsupported. `StretchRect` is implemented
-for explicit-target source/destination copies through the optional backend
-`target_blit`; the implicit back buffer cannot be sampled as a source, and
+Only `D3DMULTISAMPLE_NONE`, quality zero and no shared handle are accepted.
+`D3DPRESENTFLAG_LOCKABLE_BACKBUFFER` is a real feature: core creates a retained
+512x256 RGBA8 target for the 400x240 mode, `BeginScene` binds it, `Present` blits
+it to the screen, `LockRect`/`UnlockRect` read/write it through
+`C3D_SyncTextureCopy`/`C3D_TexLoadImage`, and `StretchRect` can now sample it.
+Explicit `D24S8`/`D24X8` depth-stencil surfaces are supported for the 400x240
+back buffer (`CreateDepthStencilSurface`, `SetDepthStencilSurface`,
+`Clear(Z|STENCIL)`); the depth attachment is the target's PICA
+`DEPTH24_STENCIL8` buffer. A lockable target requires both a readback and a
+write-back callback; the null backend keeps real BGRA pixels (including a
+private 400x240 presented image) and implements both, so the host tests verify
+the pixels instead of only the call stream. Texture render targets, MRT,
+resolve, `ColorFill` and sampling a non-lockable implicit back buffer remain
+unsupported. `StretchRect` is implemented for explicit-target and retained-back
+buffer source/destination copies through the optional backend `target_blit`;
 format conversion is rejected. The existing screen-oriented clip transform is
 reused, so arbitrary offscreen orientation/scale is not claimed. The pixel proof
 uses a square target and an oversized fullscreen triangle, where rotation cannot

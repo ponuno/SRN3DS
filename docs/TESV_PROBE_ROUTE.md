@@ -9,7 +9,7 @@ the probes are measurement-only and must never become shipping defaults.
 | Variable | Effect | Shipping |
 |---|---|---|
 | `TESV_D3D9_CAPS_PROBE=1` | `GetDeviceCaps` adds `D3DDEVCAPS_HWTRANSFORMANDLIGHT` | never |
-| `TESV_D3D9_PP_PROBE=1` | accepts `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER`, gives the back buffer a zero-filled shadow | never |
+| `TESV_D3D9_PP_PROBE=1` | **removed** (obsolete); `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER` is a real retained-target feature now | n/a |
 
 A third probe, `TESV_D3D9_STAGE_PROBE=1`, reported `MaxTextureBlendStages =
 MaxSimultaneousTextures = 2` before those were implemented. It is obsolete: the
@@ -24,7 +24,8 @@ Each prints a one-shot `MEASUREMENT ONLY ... not shippable` line.
 3. `CreateDevice` (factory slot 16, caller `0x00cd8b74`) -> **`S_OK`** with
    `400x240 X8R8G8B8`, `DISCARD`, 1 back buffer, no MSAA, windowed,
    `EnableAutoDepthStencil=0`, `AutoDepthStencilFormat=75`, `interval=ONE`,
-   `Flags=0x1` (`LOCKABLE_BACKBUFFER`, PP probe).
+   `Flags=0x1` (`LOCKABLE_BACKBUFFER`; with the retained back buffer this is now
+   accepted without the removed PP probe and the pixels are real).
 4. `IDirect3DDevice9::GetDeviceCaps` (caller `0x00cd2d32`).
 5. Renderer checks caps at `0x00cd2d67` / `0x00cd2d73`:
    `[esi+0xd0] >= 2 && [esi+0xd4] >= 2`, where the caps copy starts at

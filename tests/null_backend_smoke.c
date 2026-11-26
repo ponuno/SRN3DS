@@ -134,7 +134,10 @@ int main(int argc,char **argv){
     fmt[3]=1;assert(call(&h,h.factory,10,fmt,6)==0); /* one LDR render-target surface */
     fmt[4]=3;assert(call(&h,h.factory,10,fmt,6)==0x8876086au); /* no render-target texture */
     fmt[4]=1;fmt[3]=0x00020001u;assert(call(&h,h.factory,10,fmt,6)==0x8876086au);
-    fmt[3]=0;fmt[5]=75;assert(call(&h,h.factory,10,fmt,6)==0x8876086au);
+    fmt[3]=0;fmt[5]=75;assert(call(&h,h.factory,10,fmt,6)==0); /* D24S8 depth surface */
+    fmt[5]=77;assert(call(&h,h.factory,10,fmt,6)==0); /* D24X8, same attachment */
+    fmt[5]=80;assert(call(&h,h.factory,10,fmt,6)==0x8876086au); /* D16 */
+    fmt[5]=75;fmt[3]=1;assert(call(&h,h.factory,10,fmt,6)==0x8876086au); /* depth is not a colour RT */
     uint32_t check_type[]={0,1,D9_X8R8G8B8,D9_X8R8G8B8,1};
     assert(call(&h,h.factory,9,check_type,5)==0);
 
@@ -255,8 +258,7 @@ int main(int argc,char **argv){
     assert(unref(&h,surface)==0&&refs(&h,device)==1);
 
     /* One explicit non-lockable LDR target has a real core/native lifetime and
-     * a device-side binding reference. The null backend cannot provide pixels,
-     * so it must not accept Lockable=TRUE. */
+     * a device-side binding reference. */
     d9_null_reset();
     uint32_t rt_args[]={16,16,D9_A8R8G8B8,0,0,0,OUT2,0};
     assert(call(&h,device,28,rt_args,8)==0);uint32_t rt=rd(&h,OUT2);assert(rt&&refs(&h,rt)==1&&refs(&h,device)==2);
@@ -302,7 +304,21 @@ int main(int argc,char **argv){
     assert(targets.last_clear_argb==0xff112233u&&!targets.scene);
     d9_null_reset();
 
-    rt_args[5]=1;assert(call(&h,device,28,rt_args,8)==0x8876086au&&rd(&h,OUT2)==0); /* no readback backend */
+    /* The null backend keeps real pixels, so a lockable target is admissible.
+     * Lock/read/write go through the same core path the retained back buffer
+     * uses. */
+    rt_args[5]=1;assert(call(&h,device,28,rt_args,8)==0&&rd(&h,OUT2)!=0);
+    uint32_t lockable_rt=rd(&h,OUT2);
+    assert(call(&h,lockable_rt,13,lock,3)==0); /* full read */
+    uint32_t lockable_pixels=rd(&h,OUT2+4);assert(lockable_pixels&&rd(&h,lockable_pixels)==0);
+    assert(call(&h,lockable_rt,14,NULL,0)==0);
+    lock[2]=0;assert(call(&h,lockable_rt,13,lock,3)==0); /* write */
+    assert(!guest_write32(&h.memory,rd(&h,OUT2+4)+4*3,0xff556677u));
+    assert(call(&h,lockable_rt,14,NULL,0)==0);
+    lock[2]=0x10;assert(call(&h,lockable_rt,13,lock,3)==0); /* read back */
+    assert(rd(&h,rd(&h,OUT2+4)+4*3)==0xff556677u);
+    assert(call(&h,lockable_rt,14,NULL,0)==0);
+    assert(unref(&h,lockable_rt)==0);
     rt_args[5]=0;
 
     rt_args[3]=2;assert(call(&h,device,28,rt_args,8)==0x8876086au&&rd(&h,OUT2)==0);
@@ -426,7 +442,9 @@ int main(int argc,char **argv){
     memcpy(bad_pp,good_pp,sizeof bad_pp);bad_pp[4]=2;present_params(&h,bad_pp);assert(call(&h,device,16,reset,1)==0x8876086au);
     memcpy(bad_pp,good_pp,sizeof bad_pp);bad_pp[6]=2;present_params(&h,bad_pp);assert(call(&h,device,16,reset,1)==0x8876086au);
     memcpy(bad_pp,good_pp,sizeof bad_pp);bad_pp[9]=1;present_params(&h,bad_pp);assert(call(&h,device,16,reset,1)==0x8876086au);
-    memcpy(bad_pp,good_pp,sizeof bad_pp);bad_pp[11]=1;present_params(&h,bad_pp);assert(call(&h,device,16,reset,1)==0x8876086au);
+    memcpy(bad_pp,good_pp,sizeof bad_pp);bad_pp[11]=1;present_params(&h,bad_pp);
+    assert(call(&h,device,16,reset,1)==0); /* LOCKABLE_BACKBUFFER is real for the null backend */
+    present_params(&h,good_pp);
     memcpy(bad_pp,good_pp,sizeof bad_pp);bad_pp[3]=2;present_params(&h,bad_pp);assert(call(&h,device,16,reset,1)==0x8876086au);
     fvf=0x102;assert(call(&h,device,89,&fvf,1)==0);
     uint32_t zero_dimensions[14]={0,0,0,0,0,0,1,0,1,0,0,0,0,1};present_params(&h,zero_dimensions);

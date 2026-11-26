@@ -101,10 +101,18 @@ renderer." This is the current shipping behaviour.
 ## 5. Position
 
 - Shipping caps stay `0x00082000`; the probe is measurement-only.
-- Continue behind the probe to build the renderer features the engine has
-  already told us it needs: a **lockable retained back buffer** (offscreen
-  RGBA8 target plus a present blit and readback) and **depth-stencil
-  surfaces**. Both are real features that A and B need.
-- Re-run the census once `CreateDevice` succeeds and record whether any
-  fixed-function lighting/material call occurs.
-- Do not decide A vs B before that census.
+- The renderer features both A and B need are now implemented:
+  a **lockable retained back buffer** (offscreen RGBA8 target plus a present
+  blit and real LockRect read/write) and **explicit depth-stencil surfaces**.
+  See `docs/BACK_BUFFER_LOCKABLE.md`.
+- `docs/HWTL_IMPLEMENTATION.md` records the minimum honest Option A scope
+  (~4,000-6,000 LOC plus a pixel-proof campaign and DX7 `DRAWPRIMITIVES2EX`
+  conformance). It does not fit the current pass, so it is not implemented.
+- The 2026-11-26 census reached `CreateDevice` `S_OK` but the engine aborts at
+  the SM3 gate `0x00c6e22d` before any render pass, depth surface, Clear or
+  fixed-function lighting call. The A/B census is therefore still empty; SM3 is
+  the next renderer blocker. Details: `docs/HWTL_IMPLEMENTATION.md` section 5.
+- Do not decide A vs B before that census. If the engine issues no FFP lighting
+  calls, Option B (a byte-verified engine adaptation) is preferred over a
+  hardware-T&L claim. A software T&L implementation must keep the caps bit
+  clear, because the bit means hardware T&L.

@@ -180,6 +180,8 @@ enum {
     D9REQ_ID_UNMATCHED,
     /* Appended after the original ids so their numeric values stay stable. */
     D9REQ_ID_FORMAT_RENDER_TARGET_LDR,
+    D9REQ_ID_DEPTH_STENCIL_SUPPORTED,
+    D9REQ_ID_FORMAT_DEPTH_SURFACE,
     D9REQ_ID_COUNT
 };
 

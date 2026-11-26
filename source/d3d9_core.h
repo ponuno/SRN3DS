@@ -13,7 +13,8 @@ typedef struct {float x,y,z,u,v;} D9Vertex; /* D3DFVF_XYZ | D3DFVF_TEX1 */
  * no tint is ever dropped on the floor. */
 typedef struct {float x,y,z,u,v;float r,g,b,a;} D9ColorVertex;
 typedef struct {float m[4][4];} D9Matrix; /* D3D row-vector convention */
-enum {D9_TRIANGLELIST=4,D9_TRIANGLESTRIP=5,D9_TRIANGLEFAN=6,D9_A8R8G8B8=21,D9_X8R8G8B8=22,D9_INDEX16=101,D9_INDEX32=102};
+enum {D9_TRIANGLELIST=4,D9_TRIANGLESTRIP=5,D9_TRIANGLEFAN=6,D9_A8R8G8B8=21,D9_X8R8G8B8=22,
+      D9_D24S8=75,D9_D24X8=77,D9_INDEX16=101,D9_INDEX32=102};
 enum {D9_DXT1=0x31545844u,D9_DXT3=0x33545844u,D9_DXT5=0x35545844u};
 enum {D9_POOL_DEFAULT=0,D9_POOL_MANAGED=1,D9_POOL_SYSTEMMEM=2};
 enum {D9_TEX_ETC1=0,D9_TEX_ETC1A4=1};
@@ -41,12 +42,15 @@ typedef struct {
 } D9DrawState;
 
 /* Backend description of one LDR surface participating in a blit.  native ==
- * NULL selects the implicit back buffer.  width/height are the D3D surface
- * dimensions, which are not necessarily the native storage dimensions (the
- * 3DS top screen is stored rotated in a 240x400 framebuffer). */
+ * NULL selects the implicit back buffer.  width/height are the logical D3D
+ * surface dimensions (the 400x240 presentation size for the back buffer);
+ * storage_width/storage_height are the native texture dimensions when they
+ * differ, e.g. 512x256 for the retained lockable back buffer.  Zero means the
+ * logical dimensions. */
 typedef struct {
     void *native;
     unsigned width,height,format;
+    unsigned storage_width,storage_height;
 } D9BlitSurface;
 
 typedef struct {
@@ -109,6 +113,23 @@ typedef struct {
     int (*draw_two)(void *ctx,const D9ColorVertex *vertices,size_t count,
                     const D9Matrix *clip,void *tex0,const D9DrawState *stage0,
                     void *tex1,const D9DrawState *stage1);
+    /* Optional whole-surface BGRA8 write-back for a retained render target.
+     * bgra is top-first, pitch bytes per row; the backend must copy every pixel
+     * of the w x h surface.  Used by the lockable back buffer's UnlockRect.  A
+     * backend that cannot write a target must not advertise it. */
+    int (*target_write)(void *ctx,void *native,const void *bgra,size_t pitch,unsigned w,unsigned h);
+    /* Optional clear of the depth attachment of the currently bound target.
+     * flags are D3DCLEAR_ZBUFFER (2) / D3DCLEAR_STENCIL (4); depth_stencil is
+     * the packed value (24-bit depth in bits 0..23, stencil in bits 24..31).
+     * A backend must fail (not ignore) a clear it cannot perform. */
+    int (*depth_clear)(void *ctx,unsigned flags,uint32_t depth_stencil);
+    /* Optional logical viewport for the currently bound target.  The core calls
+     * it after every offscreen target bind with the D3D surface dimensions, so
+     * a retained power-of-two target (512x256 for 400x240) is rasterised with
+     * the logical viewport instead of the padded storage size.  The implicit
+     * screen is never passed here: its native rotated size is what the screen
+     * clip mapping expects. */
+    int (*target_viewport)(void *ctx,unsigned w,unsigned h);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -163,16 +184,63 @@ int d9_release_render_target(D9Device *d,D9Handle h);
  * this from CreateDevice and Reset; a device without it rejects blits that
  * involve the back buffer instead of guessing dimensions. */
 int d9_set_back_buffer_info(D9Device *d,unsigned w,unsigned h,unsigned format);
+/* Presentation metadata plus the D3DPRESENTFLAG_LOCKABLE_BACKBUFFER promise.
+ * lockable != 0 creates a retained offscreen colour target (next power of two
+ * at or above w x h, RGBA8) that BeginScene binds, Present blits to the screen
+ * and LockRect can read/write.  The backend must provide target_create,
+ * target_delete, target_bind, target_clear, target_read, target_write,
+ * target_blit and target_viewport; otherwise D9_UNSUPPORTED is returned and no
+ * promise is made.  A non-lockable back buffer keeps the previous
+ * implicit-screen behaviour. */
+int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable);
+/* Retained back-buffer render-target handle, or 0 when the back buffer is the
+ * implicit screen.  The handle is owned by the device and must not be released
+ * by the caller. */
+D9Handle d9_back_buffer_target(const D9Device *d);
+/* True when the backend can implement D3DPRESENTFLAG_LOCKABLE_BACKBUFFER. */
+int d9_backend_supports_lockable_back_buffer(const D9Backend *ops);
+/* Evidence that the retained back buffer exists (it is a real offscreen
+ * target) and that LockRect/Present can do what the flag promises. */
+int d9_back_buffer_info_ex(const D9Device *d,unsigned *w,unsigned *h,
+                           unsigned *format,unsigned *tex_w,unsigned *tex_h,
+                           int *lockable);
 int d9_get_back_buffer_info(const D9Device *d,unsigned *w,unsigned *h,
                             unsigned *format);
+/* Write a rectangle of a render target from top-first BGRA rows.  This is a
+ * real read-modify-write of the backend surface; it fails when the backend has
+ * no target_write or no target_read. */
+int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pitch,
+                           unsigned x,unsigned y,unsigned w,unsigned height);
+/* --- explicit depth-stencil surfaces -------------------------------------
+ * PICA has exactly one depth attachment, attached to the render target.  A
+ * depth surface therefore describes that attachment: creation validates the
+ * format/size against the back buffer, binding selects it, clearing reaches the
+ * GPU attachment of the currently bound target, and NULL restores "no surface
+ * bound" (depth testing may still use the attachment, but Clear(Z) is then
+ * rejected).  D24S8 is the measured TESV request; D24X8 is accepted because it
+ * is the same 32-bit attachment. */
+int d9_create_depth_surface(D9Device *d,unsigned w,unsigned h,unsigned format,
+                            unsigned multisample,unsigned quality,int lockable,
+                            D9Handle *out);
+int d9_release_depth_surface(D9Device *d,D9Handle h);
+int d9_set_depth_surface(D9Device *d,D9Handle h);
+D9Handle d9_get_depth_surface(const D9Device *d);
+int d9_depth_surface_info(D9Device *d,D9Handle h,unsigned *width,unsigned *height,
+                          unsigned *format);
+/* Clear the bound depth surface's attachment.  Requires an active scene, a
+ * bound depth surface whose size matches the active target, and a backend
+ * depth_clear.  flags may be D3DCLEAR_ZBUFFER (2), D3DCLEAR_STENCIL (4) or
+ * both. */
+int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil);
 /* StretchRect-class GPU copy between LDR surfaces.  dst/src are render-target
- * handles (zero = implicit back buffer); either rect may be NULL for the whole
- * surface.  The source and destination must be different, must have the same
- * format, and must stay inside their surfaces.  CPU-only surfaces are not part
- * of this API.  Returns D9_OK, D9_INVALID for caller errors, D9_MEMORY, or
- * D9_BACKEND when the backend rejects/fails the copy; d9_blit_last_error()
- * then returns the D9_BLIT_* reason.  The selected render target is re-bound
- * after every call, including failures. */
+ * handles (zero = the back buffer: the retained target when lockable, the
+ * implicit screen otherwise); either rect may be NULL for the whole surface.
+ * The source and destination must be different, must have the same format, and
+ * must stay inside their surfaces.  CPU-only surfaces are not part of this
+ * API.  Returns D9_OK, D9_INVALID for caller errors, D9_MEMORY, or D9_BACKEND
+ * when the backend rejects/fails the copy; d9_blit_last_error() then returns
+ * the D9_BLIT_* reason.  The selected render target is re-bound after every
+ * call, including failures. */
 int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
             D9Handle src,const D9Rect *src_rect,unsigned filter);
 int d9_blit_last_error(const D9Device *d);
@@ -226,6 +294,7 @@ int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,
                                  unsigned vertex_count,unsigned primitives,
                                  const void *index_data,unsigned index_format,
                                  const void *vertex_data,unsigned vertex_stride);
+int d9_end_scene(D9Device *d);
 int d9_present(D9Device *d);
 size_t d9_memory_used(const D9Device *d);
 int d9_texture_layout(unsigned w,unsigned h,unsigned format,size_t *pitch,size_t *bytes);
