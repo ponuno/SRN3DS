@@ -45,8 +45,21 @@ static void capture_present_event(void);
 #define USAGE_DYNAMIC 0x0200u
 #define USAGE_VB_MASK (USAGE_WRITEONLY|USAGE_DYNAMIC)
 #define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
-enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,QUERY,KIND_COUNT};
+enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,QUERY,STATEBLOCK,KIND_COUNT};
 typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
+struct Obj;
+typedef struct {
+    unsigned type,captured;
+    unsigned rs_count;uint32_t rs_ids[32],rs_values[32];
+    unsigned sampler_count;uint8_t sampler_stage[16],sampler_id[16];uint32_t sampler_values[16];
+    unsigned tss_count;uint8_t tss_stage[16],tss_id[16];uint32_t tss_values[16];
+    struct Obj *tex[2];
+    unsigned fvf;struct Obj *decl;
+    struct Obj *streams[D9_MAX_STREAMS];uint32_t offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS];
+    struct Obj *ib;
+    D9Matrix transforms[3];uint32_t viewport[6];
+    D9TnlState tnl;uint32_t scissor[4];
+} D9ComStateBlock;
 typedef struct Obj {
     unsigned kind,refs,deferred;uint32_t guest;D9Handle handle;
     unsigned bytes,width,height,format,usage,pool,fvf,pitch,lockable;
@@ -70,13 +83,14 @@ typedef struct Obj {
     char menu_backend_why[D9_MENU_SHADER_REASON_MAX];
     int probe_skip; /* TEST-ONLY shader-skip object: bytecode kept, no TEV/plan */
     D9Decl *declaration;
+    D9ComStateBlock *state_block;
     /* Level surface view: pixels point into the parent texture's CPU store. */
     struct Obj *view_parent;D9Handle view_texture;unsigned view_level,view_face;int is_view,view_cube;
 } Obj;
 static struct {
     GuestMemory *mem;D9Device *device;const D9Backend *backend;void *backend_ctx;size_t backend_limit;int owns_device;
     Obj o[MAX_OBJECTS];unsigned next;
-    Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*volume,*volume1,*vs,*ps,*declaration;
+    Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*volume,*volume1,*vs,*ps,*declaration,*recording_block;
     unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;float constants_c8[4];
     uint32_t clip_status_union,clip_status_intersection;
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
@@ -151,7 +165,7 @@ static const char *interface_name(unsigned kind){
     static const char *names[]={"unknown object","IDirect3D9","IDirect3DDevice9","IDirect3DVertexBuffer9",
         "IDirect3DIndexBuffer9","IDirect3DTexture9","IDirect3DVertexShader9","IDirect3DPixelShader9",
         "IDirect3DVertexDeclaration9","IDirect3DSurface9","IDirect3DCubeTexture9",
-        "IDirect3DVolumeTexture9","IDirect3DQuery9"};
+        "IDirect3DVolumeTexture9","IDirect3DQuery9","IDirect3DStateBlock9"};
     return kind<sizeof names/sizeof *names?names[kind]:"D3D9 object";
 }
 static Obj *obj(uint32_t addr,unsigned kind){
@@ -206,6 +220,17 @@ static void destroy_obj(Obj *o){
             (void)d9_release_render_target(g.device,o->handle);
             parent=g.dev;
         }else{free(o->pixels);o->pixels=NULL;g.surface_bytes-=o->bytes;parent=g.dev;}
+    }
+    else if(o->kind==STATEBLOCK){
+        D9ComStateBlock *sb=o->state_block;
+        if(g.recording_block==o)g.recording_block=NULL;
+        if(sb){
+            for(unsigned i=0;i<2;++i)release(sb->tex[i]);
+            release(sb->decl);release(sb->ib);
+            for(unsigned i=0;i<D9_MAX_STREAMS;++i)release(sb->streams[i]);
+            free(sb);o->state_block=NULL;
+        }
+        parent=g.dev;
     }
     else if(o->kind==DEVICE){
         capture_stop();
@@ -309,10 +334,11 @@ static const uint8_t guids[][16]={
     {0x7e,0xa8,0x0c,0x58,0x3c,0x1d,0x54,0x4d,0x99,0x1d,0xb7,0xd3,0xe3,0xc2,0x98,0xce},
     {0x81,0x2f,0xf3,0xff,0x53,0xd9,0x3a,0x47,0x92,0x23,0x93,0xd6,0x52,0xab,0xa9,0x3f},
     {0x6c,0x52,0x18,0x25,0x89,0xe7,0x11,0x41,0xa7,0xb9,0x47,0xef,0x32,0x8d,0x13,0xe6},
-    {0x60,0x14,0x77,0xd9,0x95,0xa6,0x26,0x4f,0xbb,0xd3,0x27,0xb8,0x40,0xb5,0x41,0xcc}};
+    {0x60,0x14,0x77,0xd9,0x95,0xa6,0x26,0x4f,0xbb,0xd3,0x27,0xb8,0x40,0xb5,0x41,0xcc},
+    {0xe5,0x4f,0x7c,0xb0,0x0d,0x31,0xa8,0x4b,0xa2,0x3c,0x4f,0x0f,0x20,0x6f,0x21,0x8b}};
 static void query(CPU *c){Obj *o=obj(A(0),0);const void *iid=ptr(A(1),16);uint32_t out=A(2);if(!o||!iid||!ptr(out,4))RET(INVALID,3);
     const uint8_t *concrete=o->kind==CUBE?guids[12]:o->kind==VOLUME?guids[13]:
-        o->kind==QUERY?guids[14]:guids[o->kind];
+        o->kind==QUERY?guids[14]:o->kind==STATEBLOCK?guids[15]:guids[o->kind];
     M32(out)=0;if(memcmp(iid,guids[0],16)&&memcmp(iid,concrete,16)&&
         !((o->kind>=VB&&o->kind<=TEX||o->kind==SURFACE||o->kind==CUBE||o->kind==VOLUME)&&!memcmp(iid,guids[10],16))&&
         !((o->kind==TEX||o->kind==CUBE||o->kind==VOLUME)&&!memcmp(iid,guids[11],16)))RET(NOINTERFACE,3);
@@ -1962,30 +1988,27 @@ static void get_stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||
 static void indices(CPU *c){Obj *o=obj(A(1),IB);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     int rc=d9_set_indices(g.device,o?o->handle:0);if(!rc)bind(&g.ib,o);RET(hr(rc),2);}
 static void get_indices(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ib);M32(A(1))=g.ib?g.ib->guest:0;RET(OK,2);}
+static uint32_t bind_texture_obj(unsigned stage,Obj *o){
+    int rc;
+    if(o&&o->kind==CUBE)rc=d9_bind_cube_texture(g.device,stage,o->handle);
+    else if(o&&o->kind==VOLUME)rc=d9_bind_volume_texture(g.device,stage,o->handle);
+    else rc=d9_bind_texture(g.device,stage,o?o->handle:0);
+    if(rc)return rc;
+    if(o&&o->kind==CUBE){
+        bind(stage?&g.cube1:&g.cube,o);bind(stage?&g.tex1:&g.tex,NULL);bind(stage?&g.volume1:&g.volume,NULL);
+    }else if(o&&o->kind==VOLUME){
+        bind(stage?&g.volume1:&g.volume,o);bind(stage?&g.tex1:&g.tex,NULL);bind(stage?&g.cube1:&g.cube,NULL);
+    }else{
+        bind(stage?&g.tex1:&g.tex,o);bind(stage?&g.cube1:&g.cube,NULL);bind(stage?&g.volume1:&g.volume,NULL);
+    }
+    return D9_OK;
+}
 static void texture(CPU *c){
     uint32_t addr=A(2);Obj *o=NULL;
     if(addr){o=obj(addr,TEX);if(!o)o=obj(addr,CUBE);if(!o)o=obj(addr,VOLUME);}
     if(!obj(A(0),DEVICE)||(addr&&!o)||g.phase==2)RET(INVALID,3);
-    int rc;
-    if(o&&o->kind==CUBE)rc=d9_bind_cube_texture(g.device,A(1),o->handle);
-    else if(o&&o->kind==VOLUME)rc=d9_bind_volume_texture(g.device,A(1),o->handle);
-    else rc=d9_bind_texture(g.device,A(1),o?o->handle:0);
+    int rc=bind_texture_obj(A(1),o);
     if(rc==D9_UNSUPPORTED)d3d_log("SetTexture","unsupported texture unit or non-2D sampling");
-    if(!rc){
-        if(o&&o->kind==CUBE){
-            bind(A(1)?&g.cube1:&g.cube,o);
-            bind(A(1)?&g.tex1:&g.tex,NULL);
-            bind(A(1)?&g.volume1:&g.volume,NULL);
-        }else if(o&&o->kind==VOLUME){
-            bind(A(1)?&g.volume1:&g.volume,o);
-            bind(A(1)?&g.tex1:&g.tex,NULL);
-            bind(A(1)?&g.cube1:&g.cube,NULL);
-        }else{
-            bind(A(1)?&g.tex1:&g.tex,o);
-            bind(A(1)?&g.cube1:&g.cube,NULL);
-            bind(A(1)?&g.volume1:&g.volume,NULL);
-        }
-    }
     RET(hr(rc),3);}
 static void get_texture(CPU *c){
     uint32_t out=A(2);
@@ -1994,6 +2017,261 @@ static void get_texture(CPU *c){
     if(!o)o=A(1)?g.cube1:g.cube;
     if(!o)o=A(1)?g.volume1:g.volume;
     retain(o);M32(out)=o?o->guest:0;RET(OK,3);
+}
+/* ---- bounded state blocks --------------------------------------------------
+ * The block stores only state the bridge really exposes.  Shaders, shader
+ * constants, render/depth targets, clip planes/status, gamma, NPatch and
+ * palettes are deliberately outside this subset and are not half-captured. */
+enum {SB_PIXEL=1u,SB_VERTEX=2u};
+static unsigned state_block_mask(unsigned type){
+    return type==1?SB_PIXEL|SB_VERTEX:type==2?SB_PIXEL:type==3?SB_VERTEX:0;
+}
+static void state_block_release_refs(D9ComStateBlock *sb){
+    if(!sb)return;
+    for(unsigned i=0;i<2;++i)release(sb->tex[i]);
+    release(sb->decl);release(sb->ib);
+    for(unsigned i=0;i<D9_MAX_STREAMS;++i)release(sb->streams[i]);
+    memset(sb,0,sizeof *sb);
+}
+static int state_block_same_obj(Obj *o,unsigned kind){
+    return !o||obj(o->guest,kind)==o;
+}
+static uint32_t state_block_capture(Obj *block){
+    if(!block||block->kind!=STATEBLOCK||!block->state_block||!g.device||g.phase==2)
+        return INVALID;
+    D9ComStateBlock tmp={0};tmp.type=block->state_block->type;
+    unsigned mask=state_block_mask(tmp.type);
+    if(!mask)return UNAVAILABLE;
+    if(mask&SB_PIXEL){
+        static const unsigned ids[]={7,14,15,27,19,20,22,23,24,25,168,171};
+        for(unsigned i=0;i<sizeof ids/sizeof *ids;++i){
+            unsigned v;
+            if(d9_get_render_state(g.device,ids[i],&v)){
+                d3d_fail("Capture","a supported render state could not be read",UNAVAILABLE);
+                return UNAVAILABLE;
+            }
+            tmp.rs_ids[tmp.rs_count]=ids[i];tmp.rs_values[tmp.rs_count++]=v;
+        }
+        static const unsigned sampler_ids[]={1,2,5,6,7,9};
+        static const unsigned tss_ids[]={D9_TSS_COLOROP,D9_TSS_COLORARG1,D9_TSS_COLORARG2,
+            D9_TSS_ALPHAOP,D9_TSS_ALPHAARG1,D9_TSS_ALPHAARG2,D9_TSS_TEXCOORDINDEX};
+        unsigned stages=d9_stage_count(g.device);
+        for(unsigned s=0;s<stages;++s){
+            for(unsigned i=0;i<sizeof sampler_ids/sizeof *sampler_ids;++i){
+                unsigned v;
+                if(d9_get_unit_sampler(g.device,s,sampler_ids[i],&v)){
+                    d3d_fail("Capture","a supported sampler state could not be read",UNAVAILABLE);
+                    return UNAVAILABLE;
+                }
+                tmp.sampler_stage[tmp.sampler_count]=(uint8_t)s;
+                tmp.sampler_id[tmp.sampler_count]=(uint8_t)sampler_ids[i];
+                tmp.sampler_values[tmp.sampler_count++]=v;
+            }
+            for(unsigned i=0;i<sizeof tss_ids/sizeof *tss_ids;++i){
+                unsigned v;
+                if(d9_get_texture_stage_state(g.device,s,tss_ids[i],&v)){
+                    d3d_fail("Capture","a supported texture-stage state could not be read",UNAVAILABLE);
+                    return UNAVAILABLE;
+                }
+                tmp.tss_stage[tmp.tss_count]=(uint8_t)s;
+                tmp.tss_id[tmp.tss_count]=(uint8_t)tss_ids[i];
+                tmp.tss_values[tmp.tss_count++]=v;
+            }
+        }
+        for(unsigned s=0;s<2;++s){
+            Obj *o=s?g.tex1:g.tex;
+            if(!o)o=s?g.cube1:g.cube;
+            if(!o)o=s?g.volume1:g.volume;
+            unsigned kinds=(s?g.tex1!=NULL:g.tex!=NULL)+(s?g.cube1!=NULL:g.cube!=NULL)+
+                           (s?g.volume1!=NULL:g.volume!=NULL);
+            if(kinds>1){d3d_fail("Capture","multiple texture bindings exist for one stage",UNAVAILABLE);return UNAVAILABLE;}
+            tmp.tex[s]=o;
+        }
+    }
+    if(mask&SB_VERTEX){
+        tmp.fvf=g.fvf;tmp.decl=g.declaration;
+        for(unsigned i=0;i<D9_MAX_STREAMS;++i){
+            D9Handle h=0;size_t offset=0,stride=0;
+            if(d9_get_stream_info(g.device,i,&h,&offset,&stride)||
+               h!=(g.streams[i]?g.streams[i]->handle:0)||offset!=g.offsets[i]||stride!=g.strides[i]){
+                d3d_fail("Capture","stream source state is inconsistent",UNAVAILABLE);return UNAVAILABLE;
+            }
+            tmp.streams[i]=g.streams[i];tmp.offsets[i]=g.offsets[i];tmp.strides[i]=g.strides[i];
+        }
+        D9Handle ib=0;unsigned format=0;
+        if(d9_get_index_info(g.device,&ib,&format)||ib!=(g.ib?g.ib->handle:0)){
+            d3d_fail("Capture","index-buffer state is inconsistent",UNAVAILABLE);return UNAVAILABLE;
+        }
+        tmp.ib=g.ib;
+        for(unsigned i=0;i<3;++i)if(d9_get_transform(g.device,i,&tmp.transforms[i])){
+            d3d_fail("Capture","a supported transform could not be read",UNAVAILABLE);return UNAVAILABLE;
+        }
+        memcpy(tmp.viewport,g.viewport,sizeof tmp.viewport);
+        if(d9_get_tnl_state(g.device,&tmp.tnl)){
+            d3d_fail("Capture","fixed-function state could not be read",UNAVAILABLE);return UNAVAILABLE;
+        }
+        memcpy(tmp.scissor,g.scissor,sizeof tmp.scissor);
+    }
+    for(unsigned i=0;i<2;++i){
+        if(tmp.tex[i]&&(!state_block_same_obj(tmp.tex[i],tmp.tex[i]->kind)||tmp.tex[i]->lock_guest)){
+            d3d_fail("Capture","a bound texture is invalid or locked",UNAVAILABLE);return UNAVAILABLE;
+        }
+    }
+    if(tmp.decl&&!state_block_same_obj(tmp.decl,DECL)){
+        d3d_fail("Capture","the vertex declaration is invalid",UNAVAILABLE);return UNAVAILABLE;
+    }
+    if(tmp.ib&&(!state_block_same_obj(tmp.ib,IB)||tmp.ib->lock_guest)){
+        d3d_fail("Capture","the index buffer is invalid or locked",UNAVAILABLE);return UNAVAILABLE;
+    }
+    for(unsigned i=0;i<D9_MAX_STREAMS;++i){
+        if(tmp.streams[i]&&(!state_block_same_obj(tmp.streams[i],VB)||tmp.streams[i]->lock_guest)){
+            d3d_fail("Capture","a stream buffer is invalid or locked",UNAVAILABLE);return UNAVAILABLE;
+        }
+    }
+    for(unsigned i=0;i<2;++i)retain(tmp.tex[i]);
+    retain(tmp.decl);retain(tmp.ib);
+    for(unsigned i=0;i<D9_MAX_STREAMS;++i)retain(tmp.streams[i]);
+    state_block_release_refs(block->state_block);
+    *block->state_block=tmp;block->state_block->captured=1;
+    g.last_diagnostic[0]=0;return OK;
+}
+static uint32_t state_block_new(unsigned type,int capture,Obj **out){
+    if(out)*out=NULL;
+    if(!g.device||g.phase==2)return INVALID;
+    if(!state_block_mask(type)){
+        d3d_fail("CreateStateBlock","unsupported D3DSTATEBLOCKTYPE",UNAVAILABLE);return UNAVAILABLE;
+    }
+    if(g.next>=MAX_OBJECTS)return OUTMEM;
+    Obj *o=new_obj(STATEBLOCK);if(!o)return OUTMEM;
+    o->state_block=calloc(1,sizeof *o->state_block);if(!o->state_block){release(o);return OUTMEM;}
+    o->state_block->type=type;retain(g.dev);
+    if(capture){
+        uint32_t rc=state_block_capture(o);
+        if(rc){release(o);return rc;}
+    }
+    *out=o;return OK;
+}
+static uint32_t state_block_apply(Obj *block){
+    if(!block||block->kind!=STATEBLOCK||!block->state_block||!block->state_block->captured||
+       !g.device||g.phase==2)return INVALID;
+    const D9ComStateBlock *sb=block->state_block;unsigned mask=state_block_mask(sb->type);
+    for(unsigned i=0;i<2;++i){
+        if(sb->tex[i]&&(!state_block_same_obj(sb->tex[i],sb->tex[i]->kind)||sb->tex[i]->lock_guest)){
+            d3d_fail("Apply","a captured texture is invalid or locked",UNAVAILABLE);return UNAVAILABLE;
+        }
+        if(sb->tex[i]&&i>=d9_stage_count(g.device)){
+            d3d_fail("Apply","the captured texture stage is unavailable",UNAVAILABLE);return UNAVAILABLE;
+        }
+    }
+    if(sb->decl&&!state_block_same_obj(sb->decl,DECL)){
+        d3d_fail("Apply","the captured declaration is invalid",UNAVAILABLE);return UNAVAILABLE;
+    }
+    if(sb->ib&&(!state_block_same_obj(sb->ib,IB)||sb->ib->lock_guest)){
+        d3d_fail("Apply","the captured index buffer is invalid or locked",UNAVAILABLE);return UNAVAILABLE;
+    }
+    for(unsigned i=0;i<D9_MAX_STREAMS;++i){
+        if(sb->streams[i]&&(!state_block_same_obj(sb->streams[i],VB)||sb->streams[i]->lock_guest)){
+            d3d_fail("Apply","a captured stream buffer is invalid or locked",UNAVAILABLE);return UNAVAILABLE;
+        }
+    }
+    if(mask&SB_VERTEX){
+        unsigned w=g.rt?g.rt->width:g.pp[0],h=g.rt?g.rt->height:g.pp[1];
+        if(sb->viewport[0]||sb->viewport[1]||sb->viewport[2]!=w||sb->viewport[3]!=h||
+           sb->scissor[0]>=sb->scissor[2]||sb->scissor[1]>=sb->scissor[3]||
+           sb->scissor[2]>w||sb->scissor[3]>h){
+            d3d_fail("Apply","captured viewport/scissor does not fit the current render target",UNAVAILABLE);
+            return UNAVAILABLE;
+        }
+        if(!sb->decl&&sb->fvf){
+            D9Decl decl;const char *why=NULL;
+            if(d9_decl_from_fvf(sb->fvf,g.tnl_proto,&decl,&why)){
+                d3d_fail("Apply",why?why:"captured FVF is no longer supported",UNAVAILABLE);return UNAVAILABLE;
+            }
+        }
+    }
+    if(mask&SB_PIXEL){
+        for(unsigned i=0;i<sb->rs_count;++i){
+            int rc=d9_set_render_state(g.device,sb->rs_ids[i],sb->rs_values[i]);
+            if(rc){d3d_fail("Apply","render-state restore failed",hr(rc));return hr(rc);}
+        }
+        for(unsigned i=0;i<sb->sampler_count;++i){
+            int rc=d9_set_unit_sampler(g.device,sb->sampler_stage[i],sb->sampler_id[i],sb->sampler_values[i]);
+            if(rc){d3d_fail("Apply","sampler-state restore failed",hr(rc));return hr(rc);}
+        }
+        for(unsigned i=0;i<sb->tss_count;++i){
+            int rc=d9_set_texture_stage_state(g.device,sb->tss_stage[i],sb->tss_id[i],sb->tss_values[i]);
+            if(rc){d3d_fail("Apply","texture-stage-state restore failed",hr(rc));return hr(rc);}
+        }
+        for(unsigned s=0;s<2;++s){
+            Obj *o=sb->tex[s];int rc=bind_texture_obj(s,o);
+            if(rc){d3d_fail("Apply","texture-binding restore failed",hr(rc));return hr(rc);}
+        }
+    }
+    if(mask&SB_VERTEX){
+        if(sb->decl){
+            if(d9_set_vertex_declaration(g.device,sb->decl->declaration)){
+                d3d_fail("Apply","declaration restore failed",INVALID);return INVALID;
+            }
+            bind(&g.declaration,sb->decl);g.fvf=0;
+        }else if(sb->fvf){
+            D9Decl decl;const char *why=NULL;
+            if(d9_decl_from_fvf(sb->fvf,g.tnl_proto,&decl,&why)||d9_set_vertex_declaration(g.device,&decl)){
+                d3d_fail("Apply","FVF restore failed",UNAVAILABLE);return UNAVAILABLE;
+            }
+            bind(&g.declaration,NULL);g.fvf=sb->fvf;
+        }else{
+            (void)d9_set_vertex_declaration(g.device,NULL);bind(&g.declaration,NULL);g.fvf=0;
+        }
+        for(unsigned i=0;i<D9_MAX_STREAMS;++i){
+            int rc=d9_set_stream(g.device,i,sb->streams[i]?sb->streams[i]->handle:0,sb->offsets[i],sb->strides[i]);
+            if(rc){d3d_fail("Apply","stream-source restore failed",hr(rc));return hr(rc);}
+            bind(&g.streams[i],sb->streams[i]);g.offsets[i]=sb->offsets[i];g.strides[i]=sb->strides[i];
+        }
+        if(d9_set_indices(g.device,sb->ib?sb->ib->handle:0)){
+            d3d_fail("Apply","index-buffer restore failed",INVALID);return INVALID;
+        }
+        bind(&g.ib,sb->ib);
+        for(unsigned i=0;i<3;++i){
+            if(d9_set_transform(g.device,i,&sb->transforms[i])){
+                d3d_fail("Apply","transform restore failed",INVALID);return INVALID;
+            }
+        }
+        memcpy(g.viewport,sb->viewport,sizeof g.viewport);
+        if(d9_set_viewport_size(g.device,sb->viewport[2],sb->viewport[3])){
+            d3d_fail("Apply","viewport restore failed",INVALID);return INVALID;
+        }
+        if(d9_set_tnl_state(g.device,&sb->tnl)){
+            d3d_fail("Apply","fixed-function state restore failed",INVALID);return INVALID;
+        }
+        memcpy(g.scissor,sb->scissor,sizeof g.scissor);
+    }
+    g.last_diagnostic[0]=0;return OK;
+}
+static void create_state_block(CPU *c){
+    uint32_t out=A(2);if(!obj(A(0),DEVICE)||!ptr(out,4))RET(INVALID,3);M32(out)=0;
+    Obj *block=NULL;uint32_t rc=state_block_new(A(1),1,&block);
+    if(!rc)M32(out)=block->guest;RET(rc,3);
+}
+static void begin_state_block(CPU *c){
+    if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,1);
+    if(g.recording_block){d3d_fail("BeginStateBlock","a state block is already being recorded",INVALID);RET(INVALID,1);}
+    Obj *block=NULL;uint32_t rc=state_block_new(1,0,&block);
+    if(!rc)g.recording_block=block;RET(rc,1);
+}
+static void end_state_block(CPU *c){
+    uint32_t out=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(out,4))RET(INVALID,2);
+    M32(out)=0;
+    if(!g.recording_block){d3d_fail("EndStateBlock","no state block is being recorded",INVALID);RET(INVALID,2);}
+    uint32_t rc=state_block_capture(g.recording_block);
+    if(rc){Obj *record=g.recording_block;g.recording_block=NULL;release(record);RET(rc,2);}
+    M32(out)=g.recording_block->guest;g.recording_block=NULL;RET(OK,2);
+}
+static void state_block_capture_com(CPU *c){
+    Obj *o=obj(A(0),STATEBLOCK);if(!o||g.phase==2)RET(INVALID,1);RET(state_block_capture(o),1);
+}
+static void state_block_apply_com(CPU *c){
+    Obj *o=obj(A(0),STATEBLOCK);if(!o||g.phase==2)RET(INVALID,1);RET(state_block_apply(o),1);
 }
 /* ---- menu VS / material evidence ---------------------------------------- */
 /* The menu path does not guess normal/tangent availability.  It derives only
@@ -2681,7 +2959,8 @@ static void draw_indexed_up(CPU *c){
  X(set_scissor_rect) X(get_scissor_rect) X(set_gamma_ramp) X(get_gamma_ramp) X(set_npatch_mode) X(get_npatch_mode) \
  X(surface_desc) X(surface_container) X(surface_lock) X(surface_unlock) X(surface_dc) X(surface_release_dc) \
  X(cube_level_count) X(cube_desc) X(cube_get_surface) X(cube_lock) X(cube_unlock) X(cube_add_dirty_rect) \
- X(volume_level_count) X(volume_desc) X(volume_get_level) X(volume_lock_box) X(volume_unlock_box) X(volume_add_dirty_box)
+ X(volume_level_count) X(volume_desc) X(volume_get_level) X(volume_lock_box) X(volume_unlock_box) X(volume_add_dirty_box) \
+ X(create_state_block) X(begin_state_block) X(end_state_block) X(state_block_capture_com) X(state_block_apply_com)
 #define ENUM(f) I_##f,
 enum {FUNCTIONS(ENUM) I_COUNT};
 #undef ENUM
@@ -2737,7 +3016,8 @@ static const char *const slot_names[KIND_COUNT][MAX_SLOTS]={
         "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
         "GetPriority","PreLoad","GetType","SetLOD","GetLOD","GetLevelCount","SetAutoGenFilterType","GetAutoGenFilterType",
         "GenerateMipSubLevels","GetLevelDesc","GetVolumeLevel","LockBox","UnlockBox","AddDirtyBox"},
-    [QUERY]={"QueryInterface","AddRef","Release","GetDevice","GetType","GetDataSize","Issue","GetData"}
+    [QUERY]={"QueryInterface","AddRef","Release","GetDevice","GetType","GetDataSize","Issue","GetData"},
+    [STATEBLOCK]={"QueryInterface","AddRef","Release","GetDevice","Capture","Apply"}
 };
 static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
     const char *name=slot_names[kind][slot];if(!name)name="Unimplemented";
@@ -2780,7 +3060,8 @@ static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
  X(VOLUME,0) X(VOLUME,1) X(VOLUME,2) X(VOLUME,3) X(VOLUME,4) X(VOLUME,5) X(VOLUME,6) X(VOLUME,7) \
  X(VOLUME,8) X(VOLUME,9) X(VOLUME,10) X(VOLUME,11) X(VOLUME,12) X(VOLUME,13) X(VOLUME,14) X(VOLUME,15) \
  X(VOLUME,16) X(VOLUME,17) X(VOLUME,18) X(VOLUME,19) X(VOLUME,20) X(VOLUME,21) \
- X(QUERY,0) X(QUERY,1) X(QUERY,2) X(QUERY,3) X(QUERY,4) X(QUERY,5) X(QUERY,6) X(QUERY,7)
+ X(QUERY,0) X(QUERY,1) X(QUERY,2) X(QUERY,3) X(QUERY,4) X(QUERY,5) X(QUERY,6) X(QUERY,7) \
+ X(STATEBLOCK,0) X(STATEBLOCK,1) X(STATEBLOCK,2) X(STATEBLOCK,3) X(STATEBLOCK,4) X(STATEBLOCK,5)
 #define COM_ENUM(k,s) I_com_##k##_##s,
 #define COM_ENTRY(k,s) {THUNK+(I_COUNT+I_com_##k##_##s)*4,com_##k##_##s},
 #define COM_WRAP(k,s) static void com_##k##_##s(CPU *c){com_dispatch(k,s,c);}
@@ -2796,10 +3077,10 @@ static const FnEntry all_entries[]={FUNCTIONS(ENTRY) COM_SLOTS(COM_ENTRY)};
 #undef ENTRY
 #undef COM_ENTRY
 #undef COM_SLOTS
-static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201,218,240,262};
+static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201,218,240,262,270};
 #define SLOT(k,s,f) do{g.handlers[k][s]=(f);uint32_t target=g.trace?THUNK+(I_COUNT+com_offsets[k]+(s))*4:THUNK+I_##f*4;guest_write32(g.mem,table_addr(k)+(s)*4,target);}while(0)
 static void init_tables(void){
-    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17,22,22,8};
+    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17,22,22,8,6};
     for(unsigned k=1;k<KIND_COUNT;++k){for(unsigned i=0;i<counts[k];++i)SLOT(k,i,unsupported);SLOT(k,0,query);SLOT(k,1,addref);SLOT(k,2,release_fn);}
     SLOT(FACTORY,3,register_software);SLOT(FACTORY,4,adapter_count);SLOT(FACTORY,5,adapter_identifier);
     SLOT(FACTORY,6,adapter_mode_count);SLOT(FACTORY,7,enum_modes);SLOT(FACTORY,8,display_mode);
@@ -2829,6 +3110,8 @@ static void init_tables(void){
     SLOT(DEVICE,57,set_render);SLOT(DEVICE,58,get_render);SLOT(DEVICE,66,get_texture_stage_state);SLOT(DEVICE,67,set_texture_stage_state);SLOT(DEVICE,68,get_sampler);SLOT(DEVICE,69,set_sampler);
     SLOT(DEVICE,81,draw_primitive);SLOT(DEVICE,82,draw_indexed);SLOT(DEVICE,83,draw_primitive_up);SLOT(DEVICE,84,draw_indexed_up);SLOT(DEVICE,89,set_fvf);SLOT(DEVICE,90,get_fvf);SLOT(DEVICE,100,stream);SLOT(DEVICE,104,indices);
     SLOT(DEVICE,86,create_decl);SLOT(DEVICE,87,set_decl);SLOT(DEVICE,88,get_decl);SLOT(DEVICE,101,get_stream);SLOT(DEVICE,102,stream_freq);SLOT(DEVICE,103,get_stream_freq);SLOT(DEVICE,105,get_indices);
+    SLOT(DEVICE,59,create_state_block);SLOT(DEVICE,60,begin_state_block);SLOT(DEVICE,61,end_state_block);
+    SLOT(STATEBLOCK,3,resource_device);SLOT(STATEBLOCK,4,state_block_capture_com);SLOT(STATEBLOCK,5,state_block_apply_com);
     SLOT(DEVICE,91,create_vs);SLOT(DEVICE,92,set_vs);SLOT(DEVICE,93,get_vs);SLOT(DEVICE,94,set_vs_const);SLOT(DEVICE,95,get_vs_const);
     SLOT(DEVICE,96,set_vs_const_i);SLOT(DEVICE,97,get_vs_const_i);
     SLOT(DEVICE,98,set_vs_const_b);SLOT(DEVICE,99,get_vs_const_b);

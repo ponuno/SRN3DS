@@ -532,6 +532,10 @@ int d9_set_light_enable(D9Device *d,unsigned index,int enable);
 int d9_get_light_enable(const D9Device *d,unsigned index,int *enable);
 int d9_set_material(D9Device *d,const D9MaterialState *m);
 int d9_get_material(const D9Device *d,D9MaterialState *m);
+/* Complete stored fixed-function T&L state for state-block capture/apply.  This
+ * does not enable the prototype and does not change DevCaps. */
+int d9_get_tnl_state(const D9Device *d,D9TnlState *out);
+int d9_set_tnl_state(D9Device *d,const D9TnlState *state);
 int d9_multiply_transform(D9Device *d,unsigned which,const D9Matrix *m);
 /* Shader constants c0..c3 as four D3D column-vector clip rows, or NULL for fixed transforms. */
 int d9_set_shader_clip(D9Device *d,const D9Matrix *rows);

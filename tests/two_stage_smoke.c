@@ -79,8 +79,9 @@ int main(void){
     assert(!d9_set_texture_stage_state(d,1,D9_TSS_ALPHAOP,D9_TOP_SELECTARG2));
     D9Vertex v[3]={{0,0,0,0,0},{1,0,0,1,0},{0,1,0,0,1}};
     assert(!d9_begin_scene(d,0));
+    assert(!d9_set_texture_stage_state(d,0,D9_TSS_TEXCOORDINDEX,1));
     assert(d9_draw_primitive_up(d,D9_TRIANGLELIST,1,v,sizeof v[0])==D9_UNSUPPORTED);
-    assert(!d9_set_texture_stage_state(d,1,D9_TSS_TEXCOORDINDEX,0));
+    assert(!d9_set_texture_stage_state(d,0,D9_TSS_TEXCOORDINDEX,0));
     assert(!d9_draw_primitive_up(d,D9_TRIANGLELIST,1,v,sizeof v[0]));
     assert(!d9_set_unit_sampler(d,1,5,2));
     assert(d9_draw_primitive_up(d,D9_TRIANGLELIST,1,v,sizeof v[0])==D9_UNSUPPORTED);

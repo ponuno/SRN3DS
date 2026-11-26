@@ -179,7 +179,7 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
         .stage_texcoordindex=0};
     d->second=d->state;
     d->second.stage_colorop=d->second.stage_alphaop=D9_TOP_DISABLE;
-    d->second.stage_texcoordindex=1;
+    d->second.stage_texcoordindex=0;
     d9_tnl_defaults(&d->tnl);
     for(unsigned i=0;i<3;++i)d9_matrix_identity(&d->transforms[i]);return d;
 }
@@ -1546,6 +1546,29 @@ int d9_set_material(D9Device *d,const D9MaterialState *m){
 int d9_get_material(const D9Device *d,D9MaterialState *m){
     if(!d||!d->tnl_proto||!m)return D9_INVALID;
     *m=d->tnl.material;return D9_OK;
+}
+int d9_get_tnl_state(const D9Device *d,D9TnlState *out){
+    if(!d||!out)return D9_INVALID;
+    *out=d->tnl;return D9_OK;
+}
+int d9_set_tnl_state(D9Device *d,const D9TnlState *state){
+    if(!d||!state)return D9_INVALID;
+    if(state->enabled&~((1u<<D9_TNL_MAX_LIGHTS)-1u)||
+       state->lighting>1u||state->color_vertex>1u||state->normalize_normals>1u||
+       state->local_viewer>1u||state->specular_enable>1u||
+       state->diffuse_source>D9_MCS_COLOR2||state->ambient_source>D9_MCS_COLOR2||
+       state->specular_source>D9_MCS_COLOR2||state->emissive_source>D9_MCS_COLOR2)
+        return D9_INVALID;
+    for(unsigned i=0;i<4;++i)
+        if(!isfinite(state->material.diffuse[i])||!isfinite(state->material.ambient[i])||
+           !isfinite(state->material.specular[i])||!isfinite(state->material.emissive[i]))
+            return D9_INVALID;
+    if(!isfinite(state->material.power)||state->material.power<0.0f)return D9_INVALID;
+    for(unsigned i=0;i<D9_TNL_MAX_LIGHTS;++i){
+        int ok=light_type_ok(state->lights[i].type);
+        if(ok!=1||!light_values_finite(&state->lights[i]))return D9_INVALID;
+    }
+    d->tnl=*state;return D9_OK;
 }
 int d9_multiply_transform(D9Device *d,unsigned which,const D9Matrix *m){
     if(!d||!d->tnl_proto||!m||which>2)return D9_INVALID;
