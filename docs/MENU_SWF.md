@@ -1093,9 +1093,10 @@ Verification:
   `.3dsx` 936,180 B, SHA256
   `ca08df4e5ca93a48c17b0ccf78b85f23284627117128357b443ebaad8b297bd1`;
   compile/link only, no hardware or frame claim;
-* ARM compile-only (`arm-none-eabi-gcc`, no link/run): all **5/5** changed C
-  `menu_swf_display_list.c.o` text 6,189 B.  No ARM binary/hardware/frame claim;
-  `menu_swf_shape.o` 15,764 B, `menu_swf_tess.o` 10,176 B;
+* ARM compile-only (`arm-none-eabi-gcc`, no link/run): 5/5 changed TUs;
+  `menu_swf_font.o` 6,572 B, `menu_swf_display.o` 19,900 B,
+  `menu_swf_shape.o` 15,796 B, `menu_swf_tess.o` 10,192 B,
+  `menu_swf_text.o` 22,996 B;
 * targeted
   `menu_font_resolve,menu_swf_text,menu_swf_atlas,menu_swf_glyph,menu_pipeline_e2e`
   with real data: **15 passed, 0 diagnostic, 0 failed**; check counts 31, 93,
