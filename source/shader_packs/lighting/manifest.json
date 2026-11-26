@@ -15,9 +15,9 @@
   "vs": 385
  },
  "coverage": {
-  "translated": 2,
+  "translated": 4,
   "draw-enabled": 0,
-  "refused": 4989,
+  "refused": 4987,
   "contract_only": 130
  },
  "refusal_classes": {
@@ -38,11 +38,25 @@
  ],
  "plans": [
   {
+   "id": "lighting.base_lit.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1"
+  },
+  {
    "id": "menu.logo.ps",
    "status": "translated",
    "kind": "tev",
    "family": "menu_light",
    "sha256": "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"
+  },
+  {
+   "id": "lighting.base_lit_shadow.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642"
   },
   {
    "id": "game.ps.f5239354",

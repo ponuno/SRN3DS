@@ -1,0 +1,268 @@
+{
+ "schema": "lighting-coverage/1",
+ "pack": "lighting",
+ "source": "E:\\host_sm3",
+ "chunks": 7459,
+ "unique_hashes": 4991,
+ "ps_hashes": 4839,
+ "vs_hashes": 152,
+ "forms": [
+  {
+   "form": "lit_subsurface",
+   "hashes": 1320,
+   "chunks": 1920,
+   "refusal_classes": {
+    "def_literal_out_of_range": 1320
+   },
+   "examples": [
+    "4c76ec2f5acd378714dfdb8fb79fae5783d0fb26841a7d59ef7ca711ce4c10f7",
+    "7f21b430afffa40a204e09c2b38b4dde76f7aa673f17d5a04dff24cb4b6000e0",
+    "1023bf3b1745c00466e2e50ed2f5ef3eace957b0660b31c54cd9df825622f473",
+    "d112d6975b903efc3b9ba318f483dee744bd5f251d1dd6736a2c0180a50bdb70",
+    "058f73c305122f1670263e6afdbdefbb305fa221e56208834f4a416f110bcd5b",
+    "0ea60b02b2d055efc41690f02d5a8f8df123ecdde706a8c3e6769dac1cbfadf6"
+   ]
+  },
+  {
+   "form": "lit_backlight",
+   "hashes": 720,
+   "chunks": 1120,
+   "refusal_classes": {
+    "def_literal_out_of_range": 720
+   },
+   "examples": [
+    "d4c0a89628120881628bceaac4fa3345916e601e1cca9f7e6e09d06ab8afd47a",
+    "e8d565588df8f976facb6f542ab0e4847c69f08a270bee972c93c2e70a5e6fbb",
+    "567d730c589bc349b3c5928302fdc01b54681a09b62d14b8b05b312134072075",
+    "6a2b325d19219584f2066fef1c6648b7d2eb167d25525ab1a823c0dcaf6701bb",
+    "42b128c2421555f5bc2e962455c7d94ccea10970b0bb1dcb38fd879cff320025",
+    "de2f538a447687e7e9128ff0fc07241a1709fd7498e1fe7c08648a1ad335df5f"
+   ]
+  },
+  {
+   "form": "lit_projected",
+   "hashes": 662,
+   "chunks": 962,
+   "refusal_classes": {
+    "def_literal_out_of_range": 662
+   },
+   "examples": [
+    "6bcece954377d7680066048d8dd77fcab22688c425bfd622d1ff5d2d225527a8",
+    "02d99fe918b4926566dfd9d56bee076a1e25d783ef8aaffed5471664dbfe2fdd",
+    "5e97e7f9e91adfe7a999fadfb70f584171cc7d152c5a8d110b2d9d0813026b16",
+    "928a5f5077736d3bc402a9b9c909e717ccd872a3085c8cd90be0133e4036d4d2",
+    "37c50294955256009bb7afb5d204c5b3d1b75233d3d466b29487b8dcb2dfce9c",
+    "7e433f7f1db28647b96204356b025c107a53ee86306f069aff355ce0d87c401c"
+   ]
+  },
+  {
+   "form": "lit_glow_sparkle",
+   "hashes": 720,
+   "chunks": 960,
+   "refusal_classes": {
+    "def_literal_out_of_range": 720
+   },
+   "examples": [
+    "d3a5cc6eb1f8ba8898574e2cf584ade0422459e8ffd7504703133c94c9930959",
+    "8ba062aec52e50a2f6772588390e8a7ccacb5c58b8d3dc3900e17d538ba88846",
+    "fbd79af5357b05826b91d5b1c3eb939dae3d0c51dc7cc1be0c4cbb553e38a33a",
+    "809055f0323daf9b286b0ac10c3307f5e5e8772113e43c35f77eeff5ba379b73",
+    "a973a7e2b2bf8c3773b57557a0221c4eb13b8bd9c142c1b62825750a7702aab1",
+    "a09556a8ee5386ec6d9559cb52ab73ce742d86e65614d95aac9ed243971b0c15"
+   ]
+  },
+  {
+   "form": "lit_parallax",
+   "hashes": 600,
+   "chunks": 800,
+   "refusal_classes": {
+    "def_literal_out_of_range": 600
+   },
+   "examples": [
+    "858b70ee2785ba183bd1f7abe350cf9b6b33e4098f14d20a4145f5db63b3291f",
+    "c3901e1c97867e6851e39dbe1bcf27738767ecf0f2b83c9749e7e7fd17533858",
+    "42091079a9a1bd5958d97c9aa942d29b9d575446dd57fb0a0be43bf24d2c0f17",
+    "c49c0aa68b05fc07d866a71eb7329bc16c21e602a6381e3336a94a7903098277",
+    "c356fa650a9d0fec35c6d63f6b1cc0d8e1928104d8f08ef227d4ee09673044bd",
+    "1b024a87dda984e862fbf6b19944f9b443141266ebf17aa5462c2696a6816dea"
+   ]
+  },
+  {
+   "form": "lit_pointlight",
+   "hashes": 262,
+   "chunks": 448,
+   "refusal_classes": {
+    "def_literal_out_of_range": 233,
+    "unsupported_opcode": 29
+   },
+   "examples": [
+    "f4e7bd47cbd7cd5d8709e2ba55fb94f1c89c501fd824e17b381775aaa921b102",
+    "7d48367c98a1996b3971513cb540e9880e08f574f24557392729cd3c6796612e",
+    "b2b38f89d62f1e210dcd87dec2530336e2638fd0f5c4123b2d521e4e57aca431",
+    "ecb12ad8bdec308f4b9306862e9c4f11e895e61e3e839b0f2d8e2741be4d1a98",
+    "96adcd3ba3c414951dd238429925568f91be995a90eae2264c6746b904c98368",
+    "3402ee96110be2a285f64b6e47b67572f1ce6aa94f4378de53ddb07e1d212d30"
+   ]
+  },
+  {
+   "form": "lit_envmap",
+   "hashes": 240,
+   "chunks": 400,
+   "refusal_classes": {
+    "def_literal_out_of_range": 240
+   },
+   "examples": [
+    "a28c1351f73253138ed7bd40754b28efb990d0b8eac2d59681842d94c4997ee7",
+    "7d289b1fa02b48f0c6b97fb383f13a21f67f414a512be3b05785228faf7ae8c0",
+    "4ae6ed2fa5cce819bb8b930187b2eb82bf87ff8fd5be90efd9e4b8aa93807f39",
+    "e39b9297194f5315e2ccba939988fc93a01afacec709b949877d3605c06ab3d6",
+    "354de54d9ddfe538d231171e326643cbd6026a54effce2e3e24a3f5a03548943",
+    "752da37a25449f2a6d3ac9a24db70ac27ac6ce9694d8d753a6944cd5d0d17a59"
+   ]
+  },
+  {
+   "form": "lit_specular",
+   "hashes": 300,
+   "chunks": 400,
+   "refusal_classes": {
+    "def_literal_out_of_range": 300
+   },
+   "examples": [
+    "413662202621a173d78929085e5191231b0fd0adf8a40a9c6d01e361d755ea85",
+    "49bc505a41d00c6854e42292c3965a5d4f43f9044d9fa21b3de37c5d71692f10",
+    "cbdd89b815f9757317f8625d2373c3ef65dcfe527fc6c1e18ddafe081caa62f7",
+    "0c2186dd5a213dd704bc5cfa4373330b0595270edaca39170aaa2d8b5038e9f8",
+    "695a4ed9b08101a874ef73e9951da5d8765ab187114fe32cb943e5405762b85f",
+    "372046862b28ce550edc401da74892a75d2bbe1e4f8d2e21659206f758bbd99b"
+   ]
+  },
+  {
+   "form": "vs_pica_contract",
+   "hashes": 130,
+   "chunks": 333,
+   "refusal_classes": {
+    "pica_vs": 130
+   },
+   "examples": [
+    "2b6fc858a3425079497bd71bb59c4a4b61ee38d1a3ed5bfef44984e08e8ed916",
+    "d526784f308405def5459f50b3ff5f1d64cd40a02f4786b4cdd10d712668b26d",
+    "5102e34f155b4540a001f1217e0fac29216fdffcc8c3585cf757ae324677cd34",
+    "5b644ad269588d8c13d79f96d9fe895fff581fd7b595aed739b5260c2b8056b0",
+    "0c1d7df008b311289b96b319070a30d8469d3d795aa0c6c6fe637be57234ec84",
+    "de0f8a34715902caa47a7e5a2775fed3b7dcb60b3cdce6325599df8e322b56ce"
+   ]
+  },
+  {
+   "form": "vs_too_many_varyings",
+   "hashes": 22,
+   "chunks": 52,
+   "refusal_classes": {
+    "too_many_vs_varyings (8 > 7)": 17,
+    "too_many_vs_varyings (9 > 7)": 5
+   },
+   "examples": [
+    "45bf9ff297657ef1433bedffc8dc34958071a245b9d454721dfe84c4203aae1b",
+    "e235095a7fe55dde977464aa087cbd77a8b2a9dfbc21c1a1cd2cdc839379388f",
+    "d9bf57d4b9ca99c5825d108352db3f07bc2098d263901601c021603e5ecb54d7",
+    "a33e3e3bcc30069a965353ae4ca02f9d46eecd7211a58226dda40e616d243fab",
+    "90b8fb2ce08463c7592097bb2ccf6bc8bcf054307a8ab8b5923cf686c690623d",
+    "d121e3a51c049ec09cd9f65c8f6c66a30ea1d4ba3b5c39ca21db2338e01e6449"
+   ]
+  },
+  {
+   "form": "lit_other",
+   "hashes": 9,
+   "chunks": 33,
+   "refusal_classes": {
+    "def_literal_out_of_range": 4,
+    "dataflow": 2,
+    "unsupported_opcode": 2,
+    "tev_direct": 1
+   },
+   "examples": [
+    "bf65fd8352df70dae80f43ab7882640c350f6b33bf46cd4ef996d0c430a56d5f",
+    "f7f7e89ff89550378d850448730a93d12f9bdac28218af873216f43b8d36f0ee",
+    "22b65c0c6c932bac929e356d1c5a364824f1792d4302b7546f2cf844fd8b4558",
+    "11262b7b9cf522ff2f44b239812c24470dc2a6a9215746efe255b19a6f592c6e",
+    "ac840a9590b54ae0524ed2df6aa09e156e3b1f606d92647a0ecf7e1b4a41900d",
+    "af168684c0686084f40bc69f8816fda0e610792cdde3a6da5f0720a427f4c105"
+   ]
+  },
+  {
+   "form": "lit_shadow",
+   "hashes": 3,
+   "chunks": 20,
+   "refusal_classes": {
+    "def_literal_out_of_range": 3
+   },
+   "examples": [
+    "d8a0ed61a53d04be8a5103ea94c3de8bb429de58e19bdbe00e8cc13cde1592fc",
+    "731a22944ded397834fa5df16566dddfde7e4f15f8076aa0153206ecb91ada3f",
+    "91f039b23eb114a9067dc6c342d7441436c898bd76966af6a48d1887b4c7d672"
+   ]
+  },
+  {
+   "form": "base_lit",
+   "hashes": 2,
+   "chunks": 6,
+   "refusal_classes": {
+    "tev_menu_light": 1,
+    "def_literal_out_of_range": 1
+   },
+   "examples": [
+    "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9",
+    "8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1"
+   ]
+  },
+  {
+   "form": "base_lit_shadow",
+   "hashes": 1,
+   "chunks": 5,
+   "refusal_classes": {
+    "def_literal_out_of_range": 1
+   },
+   "examples": [
+    "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642"
+   ]
+  }
+ ],
+ "features": {
+  "shadow": {
+   "hashes": 4160,
+   "chunks": 5916
+  },
+  "envmap": {
+   "hashes": 1740,
+   "chunks": 2480
+  },
+  "specular": {
+   "hashes": 2580,
+   "chunks": 3440
+  },
+  "subsurface": {
+   "hashes": 2700,
+   "chunks": 4000
+  },
+  "backlight": {
+   "hashes": 1200,
+   "chunks": 1760
+  },
+  "parallax": {
+   "hashes": 600,
+   "chunks": 800
+  },
+  "projected": {
+   "hashes": 902,
+   "chunks": 1282
+  },
+  "glow": {
+   "hashes": 720,
+   "chunks": 960
+  },
+  "point": {
+   "hashes": 4640,
+   "chunks": 6090
+  }
+ },
+ "note": "Form labels are pack-local derived metadata.  The census class column is the phase-1 planner's first refusal, not a shape."
+}

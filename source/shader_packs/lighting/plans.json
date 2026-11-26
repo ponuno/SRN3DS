@@ -1,0 +1,488 @@
+{
+ "schema": "d9-shader-plan-v1",
+ "archive": "Skyrim - Shaders.bsa",
+ "pack": "lighting",
+ "note": "Pack-owned TEV recipes, merged by tools/fxp_compile.py.  None is draw-certified: draw_enabled is 0, no runtime slot is claimed, and every row lists its material contract.",
+ "entries": [
+  {
+   "id": "lighting.base_lit.ps",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "base_lit",
+   "stage": "ps_3_0",
+   "sha256": "8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1",
+   "sha1": "585feb16c65cdfe470cca31fa26c14a8d7eefe58",
+   "version": "0xffff0300",
+   "instructions": 24,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 7,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 1,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 2,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    7
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "note": "six-stage base-lit TEV recipe; draw needs prebaked normal/basis and ambient+emissive in v2"
+  },
+  {
+   "id": "lighting.base_lit_shadow.ps",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "base_lit_shadow",
+   "stage": "ps_3_0",
+   "sha256": "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642",
+   "sha1": "d3277ba0730c3e63e89aa9b161824e0aff1e16f4",
+   "version": "0xffff0300",
+   "instructions": 29,
+   "draw_enabled": 0,
+   "stages": 5,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      5,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 4,
+     "sampler_reg": 2,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 1,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 2,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "shadow_uv_projected",
+    "shadow_mask_2d",
+    "fog_off_secondary_zero",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "note": "five-stage base-lit+shadow recipe under a fog-off contract; exact shadow+fog needs 7 TEV stages"
+  }
+ ],
+ "summary": {
+  "recipes": 2,
+  "chunks": 10,
+  "hashes": 2,
+  "runtime": 0
+ },
+ "report": [
+  {
+   "sha256": "8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1",
+   "chunks": 5,
+   "recipe": "base_lit",
+   "stages": 6,
+   "verify": {
+    "samples": 256,
+    "max_abs_error": 1.1102230246251565e-16,
+    "ok": true,
+    "model": "ldr_quality; no intermediate clamp divergence"
+   }
+  },
+  {
+   "sha256": "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642",
+   "chunks": 5,
+   "recipe": "base_lit_shadow",
+   "stages": 5,
+   "verify": {
+    "samples": 256,
+    "max_abs_error": 1.1102230246251565e-16,
+    "ok": true,
+    "model": "ldr_quality; no intermediate clamp divergence"
+   }
+  }
+ ]
+}
