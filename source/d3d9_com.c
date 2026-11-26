@@ -45,6 +45,8 @@ static void capture_present_event(void);
 #define USAGE_DYNAMIC 0x0200u
 #define USAGE_VB_MASK (USAGE_WRITEONLY|USAGE_DYNAMIC)
 #define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
+#define MAX_PALETTES 256u
+#define PALETTE_BYTES 1024u /* 256 PALETTEENTRY (RGBA bytes) */
 enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,QUERY,STATEBLOCK,SWAPCHAIN,KIND_COUNT};
 typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
 struct Obj;
@@ -93,6 +95,9 @@ static struct {
     Obj *factory,*dev,*back,*rt,*depth,*streams[D9_MAX_STREAMS],*ib,*tex,*tex1,*cube,*cube1,*volume,*volume1,*vs,*ps,*declaration,*recording_block,*swapchain;
     unsigned offsets[D9_MAX_STREAMS],strides[D9_MAX_STREAMS],phase,fvf,constants_mask,clear_pending,frame_clear;uint32_t clear,clear_flags,clear_z,clear_stencil;D9Handle clear_target;D9Matrix constants,constants_hi;float constants_c8[4];
     uint32_t clip_status_union,clip_status_intersection;
+    int32_t cursor_hotspot_x,cursor_hotspot_y,cursor_x,cursor_y;
+    uint32_t cursor_surface;unsigned cursor_shown;
+    unsigned current_palette;uint8_t *palettes[MAX_PALETTES];
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
     uint16_t gamma[3][256];size_t surface_bytes;
     unsigned frame_index,draw_index,capture_present;uint32_t capture_present_flags;
@@ -510,6 +515,9 @@ static void presentation_store(const uint32_t *pp){
     if(!g.pp[2])g.pp[2]=D9_X8R8G8B8;
     if(!g.pp[3])g.pp[3]=1;
 }
+static void free_palettes(void){
+    for(unsigned i=0;i<MAX_PALETTES;++i){free(g.palettes[i]);g.palettes[i]=NULL;}
+}
 static void default_gamma(void){
     /* D3DGAMMARAMP is 3 x 256 WORD; i * 0x0101 is the identity ramp. */
     for(unsigned c=0;c<3;++c)for(unsigned i=0;i<256;++i)
@@ -613,6 +621,8 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     }
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
     g.back->handle=d9_back_buffer_target(g.device);g.back->lockable=g.back->handle?1:0;
+    free_palettes();g.current_palette=0;
+    g.cursor_hotspot_x=g.cursor_hotspot_y=g.cursor_x=g.cursor_y=0;g.cursor_surface=0;g.cursor_shown=0;
     g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;g.depth=NULL;memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);memset(&g.constants_c8,0,sizeof g.constants_c8);g.clip_status_union=g.clip_status_intersection=0;
     g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
     /* Reset also discards every closure observation and material evidence. */
@@ -2026,6 +2036,73 @@ static void get_software_vp(CPU *c){
     if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);
     M32(A(1))=0;RET(OK,2); /* the bridge always advertises hardware processing */
 }
+/* ---- cursor and legacy palettes ---------------------------------------- */
+static void set_cursor_properties(CPU *c){
+    uint32_t surface_address=A(3);
+    if(!obj(A(0),DEVICE)||!surface_address){
+        d3d_fail("SetCursorProperties","invalid device or NULL cursor surface",INVALID);RET(INVALID,4);
+    }
+    Obj *s=obj(surface_address,SURFACE);
+    if(!s){d3d_fail("SetCursorProperties","cursor surface is not a surface object",INVALID);RET(INVALID,4);}
+    if(s->is_depth||s->handle||!s->pixels){
+        d3d_fail("SetCursorProperties","cursor surface must be CPU-backed, not a render target or depth surface",UNAVAILABLE);
+        RET(UNAVAILABLE,4);
+    }
+    if(A(1)>=s->width||A(2)>=s->height){
+        d3d_fail("SetCursorProperties","hotspot is outside the cursor surface",INVALID);RET(INVALID,4);
+    }
+    g.cursor_hotspot_x=(int32_t)A(1);g.cursor_hotspot_y=(int32_t)A(2);
+    g.cursor_surface=surface_address; /* no ownership: the cursor is not drawn */
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void set_cursor_position(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,4);
+    if(A(3)&~1u){
+        d3d_fail("SetCursorPosition","only D3DCURSOR_IMMEDIATE_UPDATE is recognized",INVALID);RET(INVALID,4);
+    }
+    g.cursor_x=(int32_t)A(1);g.cursor_y=(int32_t)A(2);
+    g.last_diagnostic[0]=0;RET(OK,4);
+}
+static void show_cursor(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,2);
+    unsigned previous=g.cursor_shown;
+    g.cursor_shown=A(1)?1u:0u;
+    RET(previous,2);
+}
+static void set_palette_entries(CPU *c){
+    unsigned number=A(1);uint32_t entries=A(2);
+    if(!obj(A(0),DEVICE)||number>=MAX_PALETTES||!ptr(entries,PALETTE_BYTES)){
+        d3d_fail("SetPaletteEntries","palette number 0..255 and a 256-entry pointer are required",INVALID);
+        RET(INVALID,3);
+    }
+    if(!g.palettes[number]){
+        g.palettes[number]=malloc(PALETTE_BYTES);
+        if(!g.palettes[number])RET(OUTMEM,3);
+    }
+    memcpy(g.palettes[number],ptr(entries,PALETTE_BYTES),PALETTE_BYTES);
+    g.last_diagnostic[0]=0;RET(OK,3);
+}
+static void get_palette_entries(CPU *c){
+    unsigned number=A(1);uint32_t entries=A(2);
+    if(!obj(A(0),DEVICE)||number>=MAX_PALETTES||!ptr(entries,PALETTE_BYTES)){
+        d3d_fail("GetPaletteEntries","palette number 0..255 and a 256-entry pointer are required",INVALID);
+        RET(INVALID,3);
+    }
+    if(g.palettes[number])memcpy(ptr(entries,PALETTE_BYTES),g.palettes[number],PALETTE_BYTES);
+    else memset(ptr(entries,PALETTE_BYTES),0,PALETTE_BYTES);
+    RET(OK,3);
+}
+static void set_current_palette(CPU *c){
+    unsigned number=A(1);
+    if(!obj(A(0),DEVICE)||number>=MAX_PALETTES){
+        d3d_fail("SetCurrentTexturePalette","palette number must be in 0..255",INVALID);RET(INVALID,2);
+    }
+    g.current_palette=number;RET(OK,2);
+}
+static void get_current_palette(CPU *c){
+    if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);
+    M32(A(1))=g.current_palette;RET(OK,2);
+}
 static void set_fvf(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,2);
     unsigned fvf=A(1);const char *why=NULL;D9Decl decl;
     if(d9_decl_from_fvf(fvf,g.tnl_proto,&decl,&why)){
@@ -3025,6 +3102,8 @@ static void draw_indexed_up(CPU *c){
  X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) \
  X(set_vs_const_i) X(get_vs_const_i) X(set_vs_const_b) X(get_vs_const_b) \
  X(set_clip_plane) X(get_clip_plane) X(set_clip_status) X(get_clip_status) X(set_software_vp) X(get_software_vp) \
+ X(set_cursor_properties) X(set_cursor_position) X(show_cursor) X(set_palette_entries) X(get_palette_entries) \
+ X(set_current_palette) X(get_current_palette) \
  X(create_additional_swap_chain) X(get_swap_chain) X(swapchain_present) X(swapchain_get_back_buffer) \
  X(swapchain_raster_status) X(swapchain_display_mode) X(swapchain_get_device) X(swapchain_present_parameters) \
  X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(create_query) \
@@ -3168,9 +3247,12 @@ static void init_tables(void){
     SLOT(FACTORY,12,check_depth_stencil);SLOT(FACTORY,13,check_format_conversion);SLOT(FACTORY,14,factory_caps);
     SLOT(FACTORY,15,adapter_monitor);SLOT(FACTORY,16,create_device);
     SLOT(DEVICE,3,cooperative);SLOT(DEVICE,6,direct3d);SLOT(DEVICE,7,device_caps);SLOT(DEVICE,8,device_display_mode);
+    SLOT(DEVICE,10,set_cursor_properties);SLOT(DEVICE,11,set_cursor_position);SLOT(DEVICE,12,show_cursor);
     SLOT(DEVICE,4,available_texture_mem);SLOT(DEVICE,5,evict_managed);
     SLOT(DEVICE,19,raster_status);SLOT(DEVICE,20,dialog_box_mode);
     SLOT(DEVICE,70,validate_device);
+    SLOT(DEVICE,71,set_palette_entries);SLOT(DEVICE,72,get_palette_entries);
+    SLOT(DEVICE,73,set_current_palette);SLOT(DEVICE,74,get_current_palette);
     SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,13,create_additional_swap_chain);SLOT(DEVICE,14,get_swap_chain);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
     SLOT(DEVICE,23,create_tex);SLOT(DEVICE,24,create_volume_tex);SLOT(DEVICE,25,create_cube_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
     SLOT(DEVICE,30,update_surface);SLOT(DEVICE,31,update_texture);SLOT(DEVICE,35,color_fill);
@@ -3265,6 +3347,7 @@ int d9_null_register(void){
     return d9_com_set_backend(d9_null_backend(),d9_null_context(),limit)?0:-1;
 }
 void d9_com_shutdown(void){if(!g.mem)return;capture_stop();win32_set_external_resolver(NULL,NULL);
+    free_palettes();
     if(g.phase)d9_present(g.device);g.phase=0;
     if(g.device)d9_set_pixel_shader(g.device,NULL);
     for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->lock_guest){
