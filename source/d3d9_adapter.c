@@ -79,8 +79,8 @@ static int hdr_format_probe_enabled(void){
     if(on&&!hdr_format_probe_logged){
         hdr_format_probe_logged=1;
         fprintf(stderr,"[d3d9] MEASUREMENT ONLY: CheckDeviceFormat accepts "
-            "0x71/0x72 RENDERTARGET SURFACE/TEXTURE/CUBETEXTURE as LDR fallback; "
-            "not shippable\n");
+            "0x71/0x72 RENDERTARGET SURFACE/TEXTURE/CUBETEXTURE and usage-0 "
+            "CUBETEXTURE descriptors as LDR fallback; not shippable\n");
     }
     return on;
 }
@@ -175,6 +175,9 @@ int d9_adapter_check_device_format(unsigned adapter,unsigned device_type,unsigne
     if(adapter_format!=D9_X8R8G8B8)return D9_ADAPTER_UNAVAILABLE;
     if((resource_type==RTYPE_SURFACE||resource_type==RTYPE_TEXTURE||resource_type==RTYPE_CUBETEXTURE)&&
        usage==USAGE_RENDERTARGET&&(format==0x71u||format==0x72u)&&hdr_format_probe_enabled())
+        return D9_ADAPTER_OK;
+    if(resource_type==RTYPE_CUBETEXTURE&&usage==0&&
+       (format==0x71u||format==0x72u)&&hdr_format_probe_enabled())
         return D9_ADAPTER_OK;
     if(resource_type==RTYPE_SURFACE){
         if(usage!=0&&usage!=USAGE_RENDERTARGET)return D9_ADAPTER_UNAVAILABLE;

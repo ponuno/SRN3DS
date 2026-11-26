@@ -635,6 +635,77 @@ would have to admit that descriptor query (or implement a real cube descriptor)
 before the cube create/surface/depth path can be measured. This env is not
 shippable; no cube or frame is claimed.
 
+### Usage-0 cube descriptor fallback census (2026-11-26)
+
+Base: `main` at `4204b1a`. Under `TESV_D3D9_HDR_LDR_FALLBACK=1`,
+`d9_adapter_check_device_format` now also accepts `usage=0`,
+`D3DRTYPE_CUBETEXTURE`, formats `0x71`/`0x72`. This is the exact descriptor
+query used by the retail cube path. Default-off refusals remain unchanged;
+`D9Caps9`, SM2/SM3 words and T&L bits are not modified. The adapter smoke test
+covers env-on/off descriptor checks, negative format/type/usage cases and the
+byte-for-byte caps comparison. Targeted `adapter,render_texture,render_texture_hdr`
+reported **13 passed, 0 failed** with `-TestTimeoutSec 300`.
+
+A fresh slice was built from `growth_probe/gen01` with six clang jobs and the
+generated D3DX table. As before, the temporary host build linked the required
+`source/tesv_cube_probe_slice.c` for the already-instrumented generated calls.
+The build/test script took **164.2214211 s** and reported **10 passed, 1 expected
+diagnostic, 0 failed**. The census took **95.9922741 s**, exit `1`, with a
+2,000,000,000-step budget:
+
+```text
+TESV_MEMPROBE=1
+TESV_D3D9_CAPS_PROBE=1
+TESV_D3D9_TRACE=1
+TESV_D3D9_SM3_GATE_PROBE=1
+TESV_D3D9_CAPTURE_DRAWS=8
+TESV_D3D9_HDR_LDR_FALLBACK=1
+TESV_D3D9_BUDGET_MB=64
+TESV_FAULT_REGS=1
+N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+```
+
+Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_desc_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_desc_census.out`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_cube_desc_census.run.txt`
+
+The measured cube descriptor queries now succeed:
+
+```text
+CheckDeviceFormat(0,1,0x16,usage=0,type=CUBETEXTURE,format=0x71) -> S_OK
+CheckDeviceFormat(0,1,0x16,usage=0,type=CUBETEXTURE,format=0x72) -> S_OK
+caller=0x00cd5542
+```
+
+The old `0x00ced444` NULL dereference is gone. However, no
+`CreateCubeTexture(512,1,1,0x71,0)` is issued, so the conditional CPU-backed
+cube-create fallback was not added. `GetCubeMapSurface`, `SetRenderTarget`,
+`CreateDepthStencilSurface`, `SetDepthStencilSurface`, `CreateVertexShader`,
+`CreatePixelShader`, `SetTexture`, draw and `Present` all remain at zero.
+
+The first fatal event is now a guest NULL source in `f_CECDC0`:
+
+```text
+last_call=004b7a20
+eax=00000001 ebx=54115280 ecx=00000011 edx=408486b0
+esi=00000000 edi=54515a14 ebp=54515a00 esp=1007fab0
+unmapped addr=00000000 bytes=68
+```
+
+The symbolized backtrace is `f_CECDC0 -> f_CD4E40 -> f_AE7CD0 -> f_C739B0 ->
+f_C74710`. The actual fault is **`0x00ced19d rep movsd`**, count `0x11` dwords
+(68 bytes), with `ESI=0` and destination `[EBP+0x14]`. The zero source slot is
+loaded at `0x00ced170` (`mov eax,[ecx+eax*4]`) and moved to `[esp+0x14]` at
+`0x00ced176`; `0x00ced18b` then copies it to `ESI`.
+
+Thus the next blocker is guest format/buffer-table bookkeeping in
+`NiDX9TextureBufferData` (`f_CECDC0`): after the usage-0 cube descriptor is
+admitted, a later 68-byte descriptor copy reads a NULL table slot. It is not a
+`CreateCubeTexture` HRESULT and not a PICA cube-callback refusal. The env remains
+measurement-only and not shippable; no cube or frame is claimed.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
