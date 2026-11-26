@@ -379,11 +379,16 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
             stats->tess_vertices += mesh.vertex_count;
             stats->tess_triangles += mesh.triangle_count;
             stats->strokes += mesh.line_count;
+            fprintf(stderr, "APPEND %u begin\n", record->character_id);
+            fflush(stderr);
             if (append_shape(record, &mesh, &vertex_count, &index_count,
                              stats, reason, reason_cap)) {
                 fprintf(stderr, "shape %u batch: %s\n", record->character_id, reason);
                 free(shapes); free(display); return -1;
             }
+            fprintf(stderr, "APPEND %u done total=%u/%u\n", record->character_id,
+                    vertex_count, index_count);
+            fflush(stderr);
         } else if (menu_swf_display_find_edit_text(&edits, record->character_id)) {
             ++stats->text_records;
             const MenuSwfEditText *edit = menu_swf_display_find_edit_text(&edits,
