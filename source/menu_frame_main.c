@@ -570,11 +570,15 @@ static int set_menu_transforms(D9Device *device) {
     d9_matrix_identity(&world);
     d9_matrix_identity(&view);
     d9_matrix_identity(&projection);
+    /* D9Matrix is row-vector (point * matrix), so the translation lives in
+     * row 3, not column 3.  Putting it in m[0][3]/m[1][3] made w=-x+y+1 and
+     * clipped nearly every vertex. */
     projection.m[0][0] = 2.0f / stage_w;
-    projection.m[0][3] = -1.0f;
     projection.m[1][1] = -2.0f / stage_h;
-    projection.m[1][3] = 1.0f;
     projection.m[2][2] = 1.0f;
+    projection.m[3][0] = -1.0f;
+    projection.m[3][1] = 1.0f;
+    projection.m[3][3] = 1.0f;
     return d9_set_transform(device, D9_WORLD, &world) ||
            d9_set_transform(device, D9_VIEW, &view) ||
            d9_set_transform(device, D9_PROJECTION, &projection);
