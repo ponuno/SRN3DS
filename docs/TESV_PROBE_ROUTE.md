@@ -212,6 +212,82 @@ format rejection. A larger measurement-only budget (or an env-gated budget
 probe) is required before depth/scene/shader/draw sampling can be measured. The
 fallback remains measurement-only and this is not a rendered-frame claim.
 
+### 64 MiB budget census (2026-11-26)
+
+Base: `main` at `7537db0` (budget override `949701b`). A fresh slice was built
+from `E:\Skyrim_N3DS_build\analysis\growth_probe\gen01` in **149.8346974 s**.
+The census used a 2,000,000,000-step budget and ran for **92.5110594 s**, exit `1`.
+The binary was
+`C:\Users\vasya\AppData\Local\Temp\opencode\sm3-gate-probe-budget64-census\run_tesv_slice_31548\tesv_slice.exe`;
+arguments were `F:\Skyrim\TESV.exe F:\Skyrim 2000000000 167772160`:
+
+```text
+TESV_MEMPROBE=1
+TESV_D3D9_CAPS_PROBE=1
+TESV_D3D9_TRACE=1
+TESV_D3D9_SM3_GATE_PROBE=1
+TESV_D3D9_CAPTURE_DRAWS=8
+TESV_D3D9_HDR_LDR_FALLBACK=1
+TESV_D3D9_BUDGET_MB=64
+N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+```
+
+Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_budget64_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_budget64_census.out`
+
+All measured render-target creations now succeed:
+
+| Size | Format | Count | HRESULT | Texture / surface handles | Backend target IDs |
+|---|---|---:|---|---|---|
+| 1024x1024 | `0x72` A32B32G32R32F | 5 | `S_OK` | `0x500021c0`/`0x500021d0`, `0x500021e0`/`0x500021f0`, `0x50002200`/`0x50002210`, `0x50002220`/`0x50002230`, `0x50002240`/`0x50002250` | `15`, `17`, `19`, `21`, `23` |
+| 512x512 | `0x15` A8R8G8B8 | 3 | `S_OK` | `0x50002260`/`0x50002270`, `0x50002280`/`0x50002290`, `0x500022a0`/`0x500022b0` | `25`, `27`, `29` |
+| 512x512 | `0x71` A16B16G16R16F | 1 | `S_OK` | `0x500022c0`/`0x500022d0` | `31` |
+
+All come from `caller=0x00ceca5e`, levels `1`, usage `1`, pool `0`. For all
+nine, `QueryInterface` (`0x00cecb44`), `GetSurfaceLevel(0)` (`0x00ce88fd`) and
+`GetDesc` (`0x00ce893f`) return `S_OK`; `AddRef` (`0x00ce88c3`) and `Release`
+(`0x00cecb99`) return refcount `3`. No 256x256 render-target request occurs.
+The nine new allocations consume 25,165,824 bytes (24 MiB); including the
+retained 512x256 back buffer (524,288 bytes), the total is 25,690,112 bytes
+(24.5 MiB).
+
+Despite successful allocation, renderer initialization still stops before any
+scene state. Not reached: `CreateDepthStencilSurface`,
+`SetDepthStencilSurface`, `SetRenderTarget`, `Clear`, `BeginScene`,
+`CreateVertexShader`, `CreatePixelShader`, `SetTexture`, any draw, `Present`,
+`ValidateDevice`, `SetMaterial` or `SetLight`. No FXP is opened and the
+first-draw capture has no records.
+
+The first fatal event is therefore **not a failed D3D9 call**. Immediately after
+the final target's `GetDesc`/`Release`, the guest faults at PC `0x00fb5bd0` on
+address `0x0000000c`. At and immediately after that PC, the accessor is:
+
+```asm
+mov eax,[ecx+0x40]
+mov eax,[eax+8]
+```
+
+The log has no register dump, so it cannot prove which load faulted. The fault
+address is consistent with `[ecx+0x40]` yielding `4` and the second load reading
+`[4+8]`. Guest stack:
+
+```text
+esp=1007f8f0
+stack=545b4c50 545b4c50 54114d58 00000002 00000002 00000002
+```
+
+The last successful D3D9 call is `IDirect3DTexture9::Release` on `0x500022c0`,
+caller `0x00cecb99`, returning refcount `3`; the last successful creation is the
+512x512 `0x71` target.
+
+Sampling of `0x72` or `0x71` is **not proven**: no `SetTexture` and no draw
+occurred, so there are no capture entries to correlate with the new handles.
+The next concrete blocker is the guest render-target-group/accessor state at
+`0x00fb5bd0`, after target allocation and before depth/scene setup. The fallback
+and 64 MiB budget remain measurement-only; no frame is claimed.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
