@@ -2826,6 +2826,60 @@ static void s_RtlUnwind(CPU *c){
     rt_unimpl(c,A(0),"RtlUnwind: SEH unwinding is not implemented");
 }
 
+/* ---- Bink video / sound middleware -----------------------------------------
+ * binkw32.dll is mapped at 0x09000000 and its exports are real x86 bodies, but
+ * it is not lifted or predecoded: a call into 0x0900d630 (_BinkSetSoundSystem)
+ * was the first post-thread blocker.  Bink video has no 3DS implementation, so
+ * the open/sound entry points return a documented NULL instead of executing
+ * unlifted code; frame/close operations on a handle that BinkOpen never
+ * produced are explicit named refusals.  This is middleware skipping, not a
+ * faked render: nothing is decoded, copied or presented. */
+static int bink_logged;
+static void bink_skip(const char *what){
+    if(bink_logged)return;
+    bink_logged=1;
+    fprintf(stderr,"[bink] %s: Bink video/sound is not implemented; returning NULL "
+                   "(middleware skipped, no frame decoded)\n",what);
+}
+static void s_BinkOpen(CPU *c){
+    bink_skip("_BinkOpen@8");
+    RET(0,2);
+}
+static void s_BinkOpenDirectSound(CPU *c){
+    bink_skip("_BinkOpenDirectSound@4");
+    RET(0,1);
+}
+static void s_BinkSetSoundSystem(CPU *c){
+    bink_skip("_BinkSetSoundSystem@8");
+    RET(0,2); /* no previous sound system */
+}
+static void s_BinkClose(CPU *c){
+    if(A(0))rt_unimpl(c,A(0),"_BinkClose@4: Bink video is not implemented (no Bink handle exists)");
+    RET(0,1);
+}
+static void s_BinkDoFrame(CPU *c){
+    rt_unimpl(c,A(0),"_BinkDoFrame@4: Bink video is not implemented (no Bink handle exists)");
+}
+static void s_BinkNextFrame(CPU *c){
+    rt_unimpl(c,A(0),"_BinkNextFrame@4: Bink video is not implemented (no Bink handle exists)");
+}
+static void s_BinkWait(CPU *c){
+    rt_unimpl(c,A(0),"_BinkWait@4: Bink video is not implemented (no Bink handle exists)");
+}
+static void s_BinkPause(CPU *c){
+    rt_unimpl(c,A(0),"_BinkPause@8: Bink video is not implemented (no Bink handle exists)");
+}
+static void s_BinkCopyToBufferRect(CPU *c){
+    rt_unimpl(c,A(0),"_BinkCopyToBufferRect@44: Bink video is not implemented (no Bink handle exists)");
+}
+
+#define BINK(X) \
+ X("binkw32.dll","_BinkOpen@8",BinkOpen) X("binkw32.dll","_BinkOpenDirectSound@4",BinkOpenDirectSound) \
+ X("binkw32.dll","_BinkSetSoundSystem@8",BinkSetSoundSystem) X("binkw32.dll","_BinkClose@4",BinkClose) \
+ X("binkw32.dll","_BinkDoFrame@4",BinkDoFrame) X("binkw32.dll","_BinkNextFrame@4",BinkNextFrame) \
+ X("binkw32.dll","_BinkWait@4",BinkWait) X("binkw32.dll","_BinkPause@8",BinkPause) \
+ X("binkw32.dll","_BinkCopyToBufferRect@44",BinkCopyToBufferRect)
+
 #define K(X) \
  X("kernel32.dll","GetLastError",GetLastError) X("kernel32.dll","SetLastError",SetLastError) \
  X("kernel32.dll","GetProcessHeap",GetProcessHeap) X("kernel32.dll","HeapAlloc",HeapAlloc) \
@@ -2922,7 +2976,7 @@ static void s_RtlUnwind(CPU *c){
  X("msvcrt.dll","strlen",strlen) X("msvcrt.dll","strcmp",strcmp) X("msvcrt.dll","_stricmp",stricmp) \
  X("msvcrt.dll","strcpy",strcpy) X("msvcrt.dll","_strdup",strdup)
 #define DEF(d,n,f) {d,n,s_##f},
-static const struct {const char *dll,*name;GuestFn fn;} defs[]={K(DEF) C(DEF)};
+static const struct {const char *dll,*name;GuestFn fn;} defs[]={K(DEF) C(DEF) BINK(DEF)};
 #undef DEF
 #define NDEFS (sizeof defs/sizeof defs[0])
 static FnEntry entries[NDEFS];

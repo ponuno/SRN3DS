@@ -42,11 +42,16 @@ int n3ds_lift_self_test(void);
  * a fault must longjmp into the *running* thread's frame, never into a
  * suspended thread's frame on another host stack. `irc_base` is the IR
  * container frame depth at the thread root, so a fault unwinds only the frames
- * that thread pushed. win32_thread.c owns one N3dsThreadRtState per thread and
- * calls n3ds_lift_thread_switch() around every host context switch. */
+ * that thread pushed. The executor frame stack itself is global, so it is
+ * snapshotted here on every host context switch: a thread that blocks inside a
+ * container call resumes with its own pinned frames. win32_thread.c owns one
+ * N3dsThreadRtState per thread and calls n3ds_lift_thread_switch() around
+ * every host context switch. */
 typedef struct {
     void *active;
     uint32_t irc_base;
+    uint32_t irc_depth;
+    unsigned char irc_frames[N3DS_IRC_FRAME_SNAPSHOT_BYTES];
     char fault[256];
 } N3dsThreadRtState;
 void n3ds_lift_thread_state_init(N3dsThreadRtState *s);

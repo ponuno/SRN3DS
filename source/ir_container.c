@@ -86,6 +86,10 @@ struct N3dsIrc {
 static IrcExecFrame g_irc_frames[N3DS_IRC_MAX_EXEC_DEPTH];
 static unsigned g_irc_frame_count;
 
+uint32_t n3ds_irc_last_function;
+uint32_t n3ds_irc_last_block;
+CPU *n3ds_irc_current_cpu;
+
 /* ---------------------------------------------------------------- bytes */
 
 static uint16_t irc_rd16(const uint8_t *p) {
@@ -686,6 +690,9 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
     uint32_t ip = addr;
     for (;;) {
         IrExecBlock b;
+        n3ds_irc_last_function = addr;
+        n3ds_irc_last_block = ip;
+        n3ds_irc_current_cpu = c;
         if (irc_fetch_block(c, ip, func_end, &b)) {
             char what[128];
             snprintf(what, sizeof what,
@@ -779,6 +786,22 @@ void n3ds_irc_recover(N3dsIrc *irc) {
 uint32_t n3ds_irc_depth(const N3dsIrc *irc) {
     (void)irc;
     return g_irc_frame_count;
+}
+
+uint32_t n3ds_irc_frames_save(void *dst) {
+    if (!dst) return 0;
+    memcpy(dst, g_irc_frames, (size_t)g_irc_frame_count * sizeof g_irc_frames[0]);
+    return g_irc_frame_count;
+}
+
+void n3ds_irc_frames_load(const void *src, uint32_t count) {
+    if (count > N3DS_IRC_MAX_EXEC_DEPTH) count = N3DS_IRC_MAX_EXEC_DEPTH;
+    if (!src || !count) {
+        g_irc_frame_count = 0;
+        return;
+    }
+    memcpy(g_irc_frames, src, (size_t)count * sizeof g_irc_frames[0]);
+    g_irc_frame_count = count;
 }
 
 void n3ds_irc_recover_to(N3dsIrc *irc, uint32_t depth) {

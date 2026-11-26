@@ -51,6 +51,13 @@ extern "C" {
 #define N3DS_IRC_DEFAULT_CACHE_RECORDS 64u
 #define N3DS_IRC_MAX_EXEC_DEPTH        256u
 
+/* One executor frame is {N3dsIrc *, IrcSlot *}. Cooperative guest threads keep
+ * their own copy of the running frame stack: a thread that blocks (Sleep) deep
+ * inside a container call must resume with its own pinned frames, not the
+ * frames of whichever thread ran in between. */
+#define N3DS_IRC_FRAME_SNAPSHOT_BYTES \
+    (N3DS_IRC_MAX_EXEC_DEPTH * 2u * sizeof(void *))
+
 /* File header flags (IrcFileHeader.flags). */
 enum {
     N3DS_IRC_FILE_HAS_AOT    = 1u << 0,
@@ -198,6 +205,17 @@ void n3ds_irc_recover(N3dsIrc *irc);
  * the pins of thread A, which may be suspended deep inside a container call. */
 uint32_t n3ds_irc_depth(const N3dsIrc *irc);
 void n3ds_irc_recover_to(N3dsIrc *irc, uint32_t depth);
+/* Save/restore the running thread's executor frame stack across a cooperative
+ * host context switch. `dst` holds at least N3DS_IRC_FRAME_SNAPSHOT_BYTES.
+ * n3ds_irc_frames_save() returns the saved depth; n3ds_irc_frames_load()
+ * installs a depth of zero when count is 0 (a fresh thread). */
+uint32_t n3ds_irc_frames_save(void *dst);
+void n3ds_irc_frames_load(const void *src, uint32_t count);
+/* Diagnostic: the container function/block currently executing. Updated on
+ * every prefetch; useful when a host-side guest-memory access faults. */
+extern uint32_t n3ds_irc_last_function;
+extern uint32_t n3ds_irc_last_block;
+extern CPU *n3ds_irc_current_cpu;
 
 void n3ds_irc_stats(const N3dsIrc *irc, N3dsIrcStats *out);
 void n3ds_irc_stats_reset(N3dsIrc *irc);

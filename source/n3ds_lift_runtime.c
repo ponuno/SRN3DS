@@ -284,14 +284,18 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
         static unsigned logged;
         if(logged<8u){
             ++logged;
-            fprintf(stderr,"[guest] unmapped addr=%08x bytes=%lu last_call=%08x\n",
-                    addr,(unsigned long)bytes,g_last_call);
-            if(g_last_cpu){
-                CPU *c=g_last_cpu;
-                uint32_t esp=c->r[4];
+            fprintf(stderr,"[guest] unmapped addr=%08x bytes=%lu last_call=%08x "
+                    "irc_fn=%08x irc_block=%08x\n",
+                    addr,(unsigned long)bytes,g_last_call,
+                    (unsigned)n3ds_irc_last_function,(unsigned)n3ds_irc_last_block);
+            CPU *log_cpu = g_last_cpu ? g_last_cpu : n3ds_irc_current_cpu;
+            if(log_cpu){
+                CPU *c=log_cpu;
+                uint32_t esp=c->r[4], st[6]={0};
+                for(unsigned k=0;k<6;++k)(void)guest_read32(memory,esp+4*k,&st[k]);
                 fprintf(stderr,"[guest] esp=%08x stack=%08x %08x %08x %08x %08x %08x\n",
-                        esp,(unsigned)M32(esp),(unsigned)M32(esp+4),(unsigned)M32(esp+8),
-                        (unsigned)M32(esp+12),(unsigned)M32(esp+16),(unsigned)M32(esp+20));
+                        esp,(unsigned)st[0],(unsigned)st[1],(unsigned)st[2],
+                        (unsigned)st[3],(unsigned)st[4],(unsigned)st[5]);
                 if(env_flag("TESV_FAULT_REGS",0)){
                     uint32_t ecx=c->r[1];
                     /* CPU has no architectural EIP.  Report the last dispatched
@@ -449,12 +453,19 @@ void n3ds_lift_thread_state_init(N3dsThreadRtState *s) {
     if (!s) return;
     s->active = NULL;
     s->irc_base = 0;
+    s->irc_depth = 0;
+    memset(s->irc_frames, 0, sizeof s->irc_frames);
     s->fault[0] = 0;
 }
 void n3ds_lift_thread_begin(N3dsThreadRtState *s) {
     if (!s) return;
     s->active = NULL;
-    s->irc_base = n3ds_irc_depth(ir_container);
+    /* A guest thread roots its own executor frame stack; the container depth of
+     * the thread that created it is irrelevant (that stack is suspended). */
+    s->irc_base = 0;
+    s->irc_depth = 0;
+    memset(s->irc_frames, 0, sizeof s->irc_frames);
+    n3ds_irc_frames_load(NULL, 0);
     s->fault[0] = 0;
     thread_rt = s;
     thread_irc_base = s->irc_base;
@@ -464,12 +475,14 @@ void n3ds_lift_thread_begin(N3dsThreadRtState *s) {
 void n3ds_lift_thread_switch(N3dsThreadRtState *from, N3dsThreadRtState *to) {
     if (from) {
         from->active = active;
+        from->irc_depth = n3ds_irc_frames_save(from->irc_frames);
         memcpy(from->fault, fault, sizeof fault);
         if (thread_rt == from) thread_rt = NULL;
     }
     if (to) {
         active = (InvokeFrame *)to->active;
         memcpy(fault, to->fault, sizeof fault);
+        n3ds_irc_frames_load(to->irc_frames, to->irc_depth);
         thread_irc_base = to->irc_base;
         thread_rt = to;
     }
@@ -506,7 +519,7 @@ static void trace_indirect_fault(CPU *c,uint32_t target){
             fprintf(stderr,"[indirect] N3DS_INDIRECT_TRACE=1: reporting rejected indirect targets only\n");
     }
     if(trace_state!=2)return;
-    uint32_t caller=c?M32(c->r[4]):0;
+    uint32_t caller=0; if(c)(void)guest_read32(memory,c->r[4],&caller);
     fprintf(stderr,"[indirect] target=%08lx caller=%08lx esp=%08lx eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx esi=%08lx edi=%08lx ebp=%08lx\n",
         (unsigned long)target,(unsigned long)caller,
         c?(unsigned long)c->r[4]:0,(unsigned long)(c?c->r[0]:0),(unsigned long)(c?c->r[3]:0),
