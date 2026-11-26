@@ -113,8 +113,9 @@ Static post-gate chain (read-only analysis):
 
 Census result (104 s, exit 1, `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_census_final2.*`):
 
-- The gate is passed and the SM3 message disappears; VS/PS stay 2.0 and guest
-  `[0x01ba749c]` stays `7`.
+- The gate is passed and the SM3 message disappears; VS/PS stay 2.0 and the
+  guest data word `[0x01ba749c]` remains `2`; the predecoded compare reads the
+  probe's private shadow value `7`.
 - **No shader is created.** `CreateVertexShader`/`CreatePixelShader` are not
   reached after the gate.
 - The first post-gate D3D9 activity is the nonfatal `CheckDeviceFormat` probe
@@ -133,6 +134,75 @@ real Target-backed textures, `GetSurfaceLevel(0)` returns the target and
 `SetTexture` samples the same colour buffer. Float/HDR render targets stay
 named refusals. Re-running the census with this layer is the next measurement;
 no shader or frame claim follows from the old trace.
+
+### HDR fallback census (2026-11-26)
+
+Base: `main` at `5e15944` (HDR fallback `ab4ec06`, size-checked depth descriptors
+`5e15944`). No rebuild was performed for this run; the supplied binary was
+`C:\Skyrim_N3DS_build\host_slice_hdrfb\run_tesv_slice_35040\tesv_slice.exe`
+(480,013,824 bytes, built 05:49). The census used a 2,000,000,000-step budget and
+ran for **92.56 s**, exit `1`:
+
+```text
+TESV_MEMPROBE=1
+TESV_D3D9_CAPS_PROBE=1
+TESV_D3D9_TRACE=1
+TESV_D3D9_SM3_GATE_PROBE=1
+TESV_D3D9_CAPTURE_DRAWS=8
+TESV_D3D9_HDR_LDR_FALLBACK=1
+N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+```
+
+Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_hdrfb_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_hdrfb_census.out`
+
+The SM3 gate is passed and the fallback is active. Render-target requests from
+`caller=0x00ceca5e`, all levels `1`, usage `1`, pool `0`:
+
+| Size | Format | Count | HRESULT |
+|---|---|---:|---|
+| 1024x1024 | `0x72` A32B32G32R32F | 5 | `D3DERR_OUTOFVIDEOMEMORY` (`0x8876017c`) |
+| 512x512 | `0x15` A8R8G8B8 | 3 | `S_OK` |
+| 512x512 | `0x71` A16B16G16R16F | 1 | `D3DERR_OUTOFVIDEOMEMORY` (`0x8876017c`) |
+
+The HDR fallback logs confirm that `0x72` and `0x71` were accepted as formats and
+rewritten to A8R8G8B8 storage; creation then failed in the resource-budget layer.
+The host null backend limit is 4 MiB (`source/d3d9_null.h:10`). The retained
+400x240 back buffer occupies a 512x256 target (524,288 bytes). Three 512x512 LDR
+targets add 3,145,728 bytes, leaving 524,288 bytes; the final 512x512 HDR target
+needs 1,048,576 bytes. A 1024x1024 target needs 4,194,304 bytes and also cannot
+fit alongside the retained back buffer.
+
+The three successful LDR textures are `0x500021c0`, `0x500021e0`, `0x50002200`.
+For each, `QueryInterface` (`caller 0x00cecb44`), `AddRef` (`0x00ce88c3`),
+`GetSurfaceLevel(0)` (`0x00ce88fd`) and `GetDesc` (`0x00ce893f`) return `S_OK`;
+the target handles are `15`, `17` and `19`, each 512x512.
+
+Renderer initialization does **not** get past the final 512x512 `0x71` request.
+Not reached: `CreateDepthStencilSurface`, `SetDepthStencilSurface`,
+`SetRenderTarget`, `Clear`, `BeginScene`, `CreateVertexShader`,
+`CreatePixelShader`, `SetTexture`, any draw, `Present`, `ValidateDevice`,
+`SetMaterial` or `SetLight`. No FXP is opened and the first-draw capture contains
+no records.
+
+Consequently, sampling of the fallback textures is **not proven**: the `0x72`
+requests never produced texture handles, the `0x71` request never produced a
+handle, and no draw occurred. There are no `SetTexture` handles or draw-capture
+entries to correlate.
+
+The first failed call is the first 1024x1024 `0x72` creation (`OUTOFVIDEOMEMORY`),
+which the engine tolerates while falling back. The fatal sequence is the final
+512x512 `0x71` `OUTOFVIDEOMEMORY`, followed by a guest fault at PC `0x00fb5bd0`
+on address `0x0000000c`. The last successful D3D9 call is
+`IDirect3DTexture9::Release` on `0x50002200`, caller `0x00cecb99`, returning
+refcount `3`; the last successful creation is the third 512x512 `0x15` target.
+
+The next concrete blocker is the census backend's 4 MiB target budget, not HDR
+format rejection. A larger measurement-only budget (or an env-gated budget
+probe) is required before depth/scene/shader/draw sampling can be measured. The
+fallback remains measurement-only and this is not a rendered-frame claim.
 
 ## Ordered next blockers
 
