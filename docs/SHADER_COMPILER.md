@@ -228,9 +228,11 @@ Host, Python (`tests/fxp_compile_test.py`, 13 tests):
   committed `.inc` equals regenerated output, census hashes and coverage
   lower bounds.
 
-Host, C (`tests/shader_plan_table_smoke.c`, 47 checks):
+Host, C (`tests/shader_plan_table_smoke.c`, 53 checks):
 
 * exact-hash hit for logo and copy, upper-case equivalence;
+* the copy entry's used stage fields equal the descriptor built by
+  `d9_tev_translate_pixel` from the same three-instruction stream;
 * foreign hash -> named miss; wrong stage -> named miss; short/NULL hash ->
   invalid;
 * logo draw refused by preconditions, copy draw allowed, pilot PS/VS draw
