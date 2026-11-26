@@ -197,6 +197,7 @@ Add-Test "host" $common @("source/probe.c", "source/guest.c", "source/pe_image.c
 Add-Test "tesv_tls_policy" $common @("tests/tesv_tls_policy.c") @()
 Add-Test "tesv_sm3_probe" $common @("source/guest.c", "source/tesv_sm3_probe.c", "tests/tesv_sm3_probe_smoke.c") @()
 Add-Test "tesv_cube_probe" $common @("source/guest.c", "source/tesv_cube_probe.c", "tests/tesv_cube_probe_smoke.c") @()
+Add-Test "tesv_fault_regs" $liftCommon ($legacySources + @("tests/tesv_fault_regs_smoke.c")) @()
 Add-Test "pe_imports" $common @("source/guest.c", "source/pe_image.c", "source/pe_imports.c", "tests/pe_imports_smoke.c") @()
 Add-Test "lift" $liftCommon ($legacySources + @("tests/lift_smoke.c", "tests/win32_smoke.c")) @()
 Add-Test "boot" $liftCommon ($comSources + @("tests/boot_smoke.c", "tests/win32_smoke.c")) @()

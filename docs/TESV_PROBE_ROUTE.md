@@ -400,7 +400,7 @@ A fresh slice was built from `main` at `bc23f42`
 keys were not touched, and the INI was restored byte-for-byte afterwards
 (SHA-256 `C0768CCC...D938CD`).
 
-Result: **the fault is identical** — `last_call=00fb5bd0`, address
+Result: **the fault is identical** тАФ `last_call=00fb5bd0`, address
 `0000000c`, stack `545b4c50 545b4c50 54114d58 2 2 2`, last D3D call
 `Release(0x500022c0)` refcount 3. `CreateCubeTexture`, `GetCubeMapSurface`,
 `SetRenderTarget`, `CreateDepthStencilSurface`, `SetDepthStencilSurface`,
@@ -474,6 +474,88 @@ Next layer: make the skipped group's buffer array a real zeroed checked NULL
 (or skip the `0xc92676` group build and its slot bookkeeping) so the
 `GetBufferData` query at `0xfb6090` sees NULL and returns 0; then re-run the
 census for depth/shaders/draw.
+
+### Fault-register / face-writer probe (2026-11-26)
+
+Base: `main` at `ca60984` (default native render-target cap 256). Added the
+measurement-only `TESV_FAULT_REGS=1` diagnostic in
+`source/n3ds_lift_runtime.c` and the registered host smoke test
+`tests/tesv_fault_regs_smoke.c`. The test checks the unchanged default output,
+the enabled register/object dump, and an unreadable `ECX`; the targeted run
+reported **11 passed, 0 diagnostic, 0 failed** with `-TestTimeoutSec 300`.
+
+A fresh slice was built from `growth_probe/gen01` with the generated D3DX table,
+six clang jobs, `N3DS_WATCH_STORE_CHECKS=1`, and a temporary PC-aware diagnostic
+copy (1,582,082 block labels). The final build/test script took
+**130.2141012 s** and reported **10 passed, 1 expected diagnostic, 0 failed**.
+The census took **91.3600875 s**, exit `1`, with a 2,000,000,000-step budget:
+
+```text
+TESV_MEMPROBE=1
+TESV_D3D9_CAPS_PROBE=1
+TESV_D3D9_TRACE=1
+TESV_D3D9_SM3_GATE_PROBE=1
+TESV_D3D9_CAPTURE_DRAWS=8
+TESV_D3D9_HDR_LDR_FALLBACK=1
+TESV_D3D9_BUDGET_MB=64
+TESV_FAULT_REGS=1
+N3DS_WATCH_ADDR=0x545b4c90
+N3DS_WATCH_VALUE=4
+N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+```
+
+Logs:
+
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_fault_watch_writer_census.err`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_fault_watch_writer_census.out`
+- `E:\Skyrim_N3DS_build\analysis\sm3_gate_probe_fault_watch_writer_census.run.txt`
+
+The fault dump was:
+
+```text
+eax=00000000 ebx=545b4c50 ecx=40848c5c edx=00000002
+esi=545b4c50 edi=54114d58 ebp=00000000 esp=1007f8f0 eip=00fb5bd0
+[ecx+0x40]=00000000 [[ecx+0x40]]=unreadable [ecx+0x8]=00000000
+stack=545b4c50 545b4c50 54114d58 00000002 00000002 00000002
+unmapped addr=0000000c bytes=4
+```
+
+`ECX` is not the cube-map `this` in this AOT frame; the cube pointer
+`0x545b4c50` is visible in `EBX` and `ESI`. The CPU model has no architectural
+EIP, so the printed `eip=0x00fb5bd0` is the last dispatched virtual getter, not
+the faulting instruction. Symbolizing the host backtrace identifies
+`f_CED3E0` and the actual fault at **`0x00ced444`**:
+
+```asm
+mov ecx,[ebp+0xc]   ; EBP=0, so the effective address is 0x0c
+```
+
+The getter call at `0x00ced404` had just returned from `0x00fb5bd0`; the later
+call to `0x00ce9a40` returned `NULL`, and `f_CED3E0` dereferenced it without a
+check. `CreateCubeTexture` at `0x00ced472` is therefore still not reached.
+
+The watchpoint found **no write of `4`** to `cube+0x40`. A targeted print after
+the face-table store confirmed the actual writer and value:
+
+```text
+[cube-store] pc=00fb5cc1 addr=545b4c90 value=54882ec8
+```
+
+Thus face 0 (`m_pkBuffer[0]`) is written by the loop in `f_FB5C20` at
+**`0x00fb5cc1`**, with a live `Ni2DBuffer*`-shaped guest pointer `0x54882ec8`.
+`0x00fb5cd1` is the next-face loop step, not the face-0 writer. The generic
+watchpoint first observed the changed field at `0x00fb5cc7` during a subsequent
+`InterlockedIncrement` check; that PC is an observation point, not the store.
+No field write was observed at `0x00c8ff40` or `0x00c91d77`; the latter is the
+earlier group-builder width-getter call site.
+
+This corrects the previous inference: the value `4` was not read from
+`[cube+0x40]`. The fault address `0x0c` comes from `[EBP+0x0c]` with `EBP=0`.
+The cap-256 build still faults at the same guest address and before any cube,
+depth, scene, shader, draw or `Present` call. The next blocker is the unchecked
+`NULL` returned by `0x00ce9a40` in `NiDX9RenderedCubeMapData::CreateSurf`, not
+corruption of the face-0 pointer. This is measurement-only; no cube or frame is
+claimed.
 
 ## Ordered next blockers
 

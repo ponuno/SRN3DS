@@ -274,10 +274,43 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
             fprintf(stderr,"[guest] unmapped addr=%08x bytes=%lu last_call=%08x\n",
                     addr,(unsigned long)bytes,g_last_call);
             if(g_last_cpu){
-                uint32_t esp=g_last_cpu->r[4];
+                CPU *c=g_last_cpu;
+                uint32_t esp=c->r[4];
                 fprintf(stderr,"[guest] esp=%08x stack=%08x %08x %08x %08x %08x %08x\n",
                         esp,(unsigned)M32(esp),(unsigned)M32(esp+4),(unsigned)M32(esp+8),
                         (unsigned)M32(esp+12),(unsigned)M32(esp+16),(unsigned)M32(esp+20));
+                if(env_flag("TESV_FAULT_REGS",0)){
+                    uint32_t ecx=c->r[1];
+                    /* CPU has no architectural EIP.  Report the last dispatched
+                     * guest target; instrumented slices can refine this with
+                     * their PC-aware block trace/backtrace. */
+                    fprintf(stderr,"[guest] regs eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x eip=%08x\n",
+                            (unsigned)c->r[0],(unsigned)c->r[3],(unsigned)ecx,
+                            (unsigned)c->r[2],(unsigned)c->r[6],(unsigned)c->r[7],
+                            (unsigned)c->r[5],(unsigned)esp,(unsigned)g_last_call);
+                    if(memory){
+                        const uint8_t *p40=guest_ptr(memory,ecx+0x40,4);
+                        const uint8_t *p8=guest_ptr(memory,ecx+8,4);
+                        if(p40&&p8){
+                            uint32_t field=0,field8=0;
+                            memcpy(&field,p40,4);
+                            memcpy(&field8,p8,4);
+                            const uint8_t *inner=guest_ptr(memory,field,4);
+                            if(inner){
+                                uint32_t deref=0;memcpy(&deref,inner,4);
+                                fprintf(stderr,"[guest] ecx_deref: [ecx+0x40]=%08x [[ecx+0x40]]=%08x [ecx+0x8]=%08x\n",
+                                        field,deref,field8);
+                            }else{
+                                fprintf(stderr,"[guest] ecx_deref: [ecx+0x40]=%08x [[ecx+0x40]]=unreadable [ecx+0x8]=%08x\n",
+                                        field,field8);
+                            }
+                        }else{
+                            fprintf(stderr,"[guest] ecx_deref: unreadable\n");
+                        }
+                    }else{
+                        fprintf(stderr,"[guest] ecx_deref: unreadable\n");
+                    }
+                }
             }
 #if defined(_WIN32)
             {
