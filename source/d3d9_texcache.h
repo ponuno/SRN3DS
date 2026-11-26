@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#define D9TEXCACHE_MAX_ENTRIES 64u
+#define D9TEXCACHE_MAX_ENTRIES 256u
 #define D9TEXCACHE_NO_REHYDRATE_TOKEN 0u
 
 /* Opaque, asset-manager-defined handle.  The cache only stores and returns it;

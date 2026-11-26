@@ -2716,12 +2716,63 @@ static uint32_t shader_probe_object(unsigned kind,uint32_t out,const char *reaso
     }
     return OK;
 }
+static void shader_map_debug(uint32_t address){
+    if(!g.mem)return;
+    const char *v=getenv("TESV_SHADER_MAP_DEBUG");
+    if(!v||strcmp(v,"1"))return;
+    static unsigned logged;
+    if(logged>=4)return;
+    ++logged;
+    fprintf(stderr,"[shader-map] address=0x%08x regions=%lu slabs=%u\n",
+            (unsigned long)address,(unsigned long)g.mem->count,
+            (unsigned)GUEST_MAX_SLABS);
+    uint32_t best=0xffffffffu;const char *bestwhat="none";
+    for(size_t i=0;i<g.mem->count;++i){
+        GuestRegion *r=&g.mem->regions[i];
+        uint32_t d=0;
+        if(address<r->base)d=r->base-address;
+        else if(address>=r->base+r->size)d=address-(r->base+r->size-1u);
+        if(d<best){best=d;bestwhat="region";}
+        fprintf(stderr,"[shader-map] region %lu base=0x%08x size=0x%08x end=0x%08x data=%p%s\n",
+                (unsigned long)i,(unsigned long)r->base,(unsigned long)r->size,
+                (unsigned long)(r->base+r->size),(void *)r->data,
+                d==0?" <-- address inside":"");
+    }
+    for(unsigned i=0;i<GUEST_MAX_SLABS;++i){
+        GuestSlab *s=&g.mem->slabs[i];
+        if(!s->size)continue;
+        uint32_t d=0;
+        if(address<s->base)d=s->base-address;
+        else if(address>=s->base+s->size)d=address-(s->base+s->size-1u);
+        if(d<best){best=d;bestwhat="slab";}
+        fprintf(stderr,"[shader-map] slab %u base=0x%08x size=0x%08x end=0x%08x pages=%u backed=%u mapped=%d writable=%d type=%d%s\n",
+                i,(unsigned long)s->base,(unsigned long)s->size,
+                (unsigned long)(s->base+s->size),(unsigned)s->pages,
+                (unsigned)s->backed_pages,s->mapped,s->writable,s->type,
+                d==0?" <-- address inside":"");
+        if(address>=s->base&&address-s->base<s->size){
+            uint32_t off=address-s->base,page=off/GUEST_PAGE_SIZE;
+            fprintf(stderr,"[shader-map] slab-page off=0x%x page=%u state=%u protect=0x%02x backed_now=%d ever=%u\n",
+                    (unsigned)off,(unsigned)page,
+                    page<s->pages?(unsigned)s->state[page]:0xffu,
+                    page<s->pages?(unsigned)s->protect[page]:0xffu,
+                    page<s->pages&&s->page[page]!=NULL,
+                    page<s->pages?(unsigned)s->ever[page]:0);
+        }
+    }
+    fprintf(stderr,"[shader-map] nearest %s distance=0x%x\n",bestwhat,best);
+}
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     if(!address||(address&3)||!ptr(out,4)||OBJ_LIMIT_HIT())return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
     if(!count){
+        shader_map_debug(address);
+        GuestSlab *s=guest_slab_find(g.mem,address,4);
+        if(s)count=(s->size-(address-s->base))/4;
+    }
+    if(!count){
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
-                 "shader bytecode address 0x%08x is not in any guest region",
+                 "shader bytecode address 0x%08x is not in any guest region or slab",
                  address);
         return INVALID;
     }

@@ -7,9 +7,9 @@
 #include <stdio.h>
 #include <math.h>
 
-enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_VOLUMES=8,
+enum {MAX_BUFFERS=32,MAX_TEXTURES=128,MAX_CUBES=32,MAX_VOLUMES=32,
       MAX_TEX_ENTRIES=MAX_TEXTURES+MAX_CUBES+MAX_VOLUMES,
-      MAX_TARGETS=32,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11,
+      MAX_TARGETS=128,MAX_DEPTHS=32,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11,
       /* Indexed menu draws are not expanded into MAX_DRAW_VERTICES; the
        * backend receives the compact vertex stream plus 16-bit indices. */
       MAX_INDEXED_MENU_VERTICES=65536,MAX_INDEXED_MENU_INDICES=262144};
@@ -223,6 +223,11 @@ void d9_pica_transform(D9Matrix *out,const D9Matrix *w,const D9Matrix *v,const D
     for(unsigned i=0;i<4;++i){out->m[0][i]=b.m[i][1];out->m[1][i]=-b.m[i][0];out->m[2][i]=b.m[i][2]-b.m[i][3];out->m[3][i]=b.m[i][3];}
 }
 static void set_diagnosis(D9Device *d,const char *why){if(!d)return;if(!why)why="";snprintf(d->diagnosis,sizeof d->diagnosis,"%s",why);}
+static int table_full(D9Device *d,const char *name,unsigned count){
+    if(d)snprintf(d->diagnosis,sizeof d->diagnosis,
+                  "%s table exhausted (%u entries)",name,count);
+    return D9_MEMORY;
+}
 static int pow2(unsigned n){return n&&n<=1024&&!(n&(n-1));}
 static int dim(unsigned n){return n>=8&&pow2(n);}
 int d9_texture_layout(unsigned w,unsigned h,unsigned f,size_t *pitch,size_t *bytes){
@@ -447,7 +452,7 @@ int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned
     t.cpu_bytes=cpu;t.gpu_bytes=t.cpu_only?0:gpu;t.cost=cpu+t.gpu_bytes;
     int br=budget_reserve(d,t.cost);if(br)return br;
     Texture *slot=NULL;for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
-    if(!slot)return D9_MEMORY;
+    if(!slot)return table_full(d,"texture",MAX_TEXTURES);
     t.pixels=calloc(1,cpu);if(!t.pixels)return D9_MEMORY;
     if(!t.cpu_only){
         int made;
@@ -497,7 +502,7 @@ int d9_create_texture_sktx(D9Device *d,const void *sktx_data,size_t bytes,
     }
     int br=budget_reserve(d,sktx.data_bytes);if(br)return br;
     Texture *slot=NULL;for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
-    if(!slot)return D9_MEMORY;
+    if(!slot)return table_full(d,"texture",MAX_TEXTURES);
     Texture t={.w=sktx.width,.h=sktx.height,.format=sktx.format,.levels=sktx.levels,
                .gpu_levels=sktx.levels,.pool=pool,.usage=usage,.gpu_only=1,
                .gpu_bytes=sktx.data_bytes,.cost=sktx.data_bytes};
@@ -827,7 +832,7 @@ int d9_create_cube_texture_ex(D9Device *d,unsigned edge,unsigned levels,
     int br=budget_reserve(d,t.cost);if(br)return br;
     CubeTexture *slot=NULL;
     for(unsigned i=0;i<MAX_CUBES;++i)if(!d->cubes[i].id){slot=&d->cubes[i];break;}
-    if(!slot)return D9_MEMORY;
+    if(!slot)return table_full(d,"cube texture",MAX_CUBES);
     t.pixels=calloc(1,t.cpu_bytes);
     if(!t.pixels)return D9_MEMORY;
     if(!t.cpu_only){
@@ -1180,7 +1185,7 @@ int d9_create_volume_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned depth
     int br=budget_reserve(d,t.cost);if(br)return br;
     VolumeTexture *slot=NULL;
     for(unsigned i=0;i<MAX_VOLUMES;++i)if(!d->volumes[i].id){slot=&d->volumes[i];break;}
-    if(!slot)return D9_MEMORY;
+    if(!slot)return table_full(d,"volume texture",MAX_VOLUMES);
     t.pixels=calloc(1,t.cpu_bytes);
     if(!t.pixels)return D9_MEMORY;
     if(!t.cpu_only){
@@ -1467,7 +1472,7 @@ int d9_cube_face_target(D9Device *d,D9Handle h,unsigned face,unsigned level,
     size_t bytes=(size_t)edge*edge*4u; /* native depth attachment, not colour */
     int br=budget_reserve(d,bytes);if(br)return br;
     Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
-    if(!slot)return D9_MEMORY;
+    if(!slot)return table_full(d,"render-target",MAX_TARGETS);
     void *native=NULL;
     int rc=d->ops.target_create_cube_face(d->ctx,c->native,face,level,
                                           D9_CUBE_FACE_DEPTH24_STENCIL8,&native);
@@ -1529,7 +1534,7 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
     }
     size_t bytes=(size_t)nw*nh*4;int br=budget_reserve(d,bytes);if(br)return br;
     Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
-    if(!slot)return D9_MEMORY;void *native=NULL;
+    if(!slot)return table_full(d,"render-target",MAX_TARGETS);void *native=NULL;
     if(d->ops.target_create(d->ctx,nw,nh,format,&native)||!native){
         if(native)d->ops.target_delete(d->ctx,native);
         char why[160];
@@ -1559,7 +1564,11 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
     Target *tg=target(d,tgt);
     Texture *slot=NULL;
     for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
-    if(!tg||!slot){d9_release_render_target(d,tgt);return D9_MEMORY;}
+    if(!tg||!slot){
+        if(!slot)table_full(d,"sampleable texture",MAX_TEXTURES);
+        else table_full(d,"render-target",MAX_TARGETS);
+        d9_release_render_target(d,tgt);return D9_MEMORY;
+    }
     void *sample=d->ops.target_texture(d->ctx,tg->native);
     if(!sample){
         d9_release_render_target(d,tgt);
@@ -3042,7 +3051,7 @@ int d9_create_depth_surface(D9Device *d,unsigned w,unsigned h,unsigned format,
     unsigned pow2=(w>=8&&h>=8&&w<=1024&&h<=1024&&!(w&(w-1))&&!(h&(h-1)));
     if(!back_size&&!pow2)return D9_INVALID;
     Depth *slot=NULL;for(unsigned i=0;i<MAX_DEPTHS;++i)if(!d->depths[i].id){slot=&d->depths[i];break;}
-    if(!slot)return D9_MEMORY;
+    if(!slot)return table_full(d,"depth-stencil",MAX_DEPTHS);
     D9Handle id=d->next++;*slot=(Depth){id,w,h,format};*out=id;return D9_OK;
 }
 int d9_release_depth_surface(D9Device *d,D9Handle h){
