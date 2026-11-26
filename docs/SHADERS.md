@@ -4,7 +4,8 @@ Owner: shader-TEV agent. This file is the only `docs/` file this work owns.
 All numbers were measured on **2026-11-24** against the read-only install at
 `E:\SteamLibrary\steamapps\common\Skyrim\Data` with the extractor in
 `tools/skyrim/shaders.py`, the analysis in `tools/shaders/`, and the host tests
-in `tests/tev_*.c`. Game bytes are never stored in this repository; only
+in `tests/tev_*.c`; the TEV expansion rows in §§6–7 were remeasured on
+**2026-11-27**. Game bytes are never stored in this repository; only
 derived names, counts and hashes are.
 
 Primary data set: **`Skyrim - Shaders.bsa` — 122 `.fxp`, 10,475 chunks**
