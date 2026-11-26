@@ -2059,6 +2059,26 @@ static void fill_cube_view(D9CubeView *view,const CubeTexture *c){
         view->level_bytes[i]=c->level[i].bytes;
     }
 }
+/* Keep the core's fixed-function text route free of a hard link dependency on
+ * d3d9_tev.c (many small tests link the core alone).  This mirrors the
+ * certified d9_tev_text_plan() shape exactly. */
+static void core_text_plan(D9TevProgram *p){
+    memset(p,0,sizeof *p);
+    p->version=0xFFFF0300u;p->instructions=1u;p->stages=1u;
+    p->stage_limit=D9TEV_MAX_STAGES;p->backend_flags=D9TEV_PLAN_MENU_TEXT;
+    p->textures=1u;p->texture[0].texcoord_reg=0u;p->texture[0].sampler_reg=0u;
+    p->texture[0].sampler_type=2u;p->inputs=1u;
+    p->input[0].usage=D9TEV_USAGE_COLOR;p->input[0].usage_index=0u;
+    p->input[0].reg_index=1u;p->input[0].tev_source=D9TEV_SRC_PRIMARY;
+    p->uses_vertex_color=1u;
+    D9TevStage *s=&p->stage[0];
+    s->func_rgb=s->func_a=D9TEV_FUNC_MODULATE;
+    s->src_rgb[0]=s->src_a[0]=D9TEV_SRC_TEX0;
+    s->src_rgb[1]=s->src_a[1]=D9TEV_SRC_PRIMARY;
+    s->src_rgb[2]=s->src_a[2]=D9TEV_SRC_PRIMARY;
+    for(unsigned i=0;i<3;++i){s->op_rgb[i]=D9TEV_RGB_COLOR;s->op_a[i]=D9TEV_A_ALPHA;}
+    s->const_reg=0xFFu;
+}
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
     if(d->clip_plane_enable){
@@ -2203,17 +2223,45 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         return D9_OK;
     }
     int has_color=lit||(d->decl_active&&d->declaration.color!=UINT32_MAX);
+    /* The menu-text quad has an explicit certified plan even though the guest
+     * used fixed-function stage state.  Select it only for the exact
+     * MODULATE(TEXTURE0,DIFFUSE), one-stage, A8 case; anything else keeps the
+     * existing fixed-function colour path. */
+    const D9TevProgram *menu_plan=state.pixel_shader;
+    D9TevProgram text_plan;
+    if(!menu_plan&&d->ops.draw_menu&&has_color&&t&&t->format==D9_A8&&
+       !d->texture1&&d->second.stage_colorop==D9_TOP_DISABLE&&
+       state.stage_colorop==D9_TOP_MODULATE&&
+       state.stage_colorarg1==D9_TA_TEXTURE&&
+       state.stage_colorarg2==D9_TA_DIFFUSE&&
+       state.stage_alphaop==D9_TOP_MODULATE&&
+       state.stage_alphaarg1==D9_TA_TEXTURE&&
+       state.stage_alphaarg2==D9_TA_DIFFUSE&&
+       state.stage_texcoordindex==0){
+        core_text_plan(&text_plan);
+        menu_plan=&text_plan;
+    }
     /* Menu TEV plans can need a second texture unit, color0 and an external
      * constant bank.  Route those before the fixed-function two-stage path. */
-    if(state.pixel_shader&&d->ops.draw_menu&&
-       (state.pixel_shader->textures>1||state.pixel_shader->constants>0||
-        state.pixel_shader->uses_vertex_color)){
+    if(menu_plan&&d->ops.draw_menu&&
+       (menu_plan->textures>1||menu_plan->constants>0||
+        menu_plan->uses_vertex_color)){
+        if((menu_plan->backend_flags&D9TEV_PLAN_MENU_TEXT)&&
+           (!t||t->format!=D9_A8)){
+            set_diagnosis(d,"menu text TEV plan requires an A8 texture unit");
+            return D9_UNSUPPORTED;
+        }
+        if((menu_plan->backend_flags&D9TEV_PLAN_MENU_TEXT)&&
+           (d->texture1||d->second.stage_colorop!=D9_TOP_DISABLE)){
+            set_diagnosis(d,"menu text TEV plan accepts exactly one texture unit");
+            return D9_UNSUPPORTED;
+        }
         if(!has_color){
             set_diagnosis(d,"menu TEV plan requires per-vertex COLOR0; the declaration has no color");
             return D9_UNSUPPORTED;
         }
         Texture *second=NULL;
-        if(state.pixel_shader->textures>1){
+        if(menu_plan->textures>1){
             second=texture(d,d->texture1);
             if(!second||!second->native||second->locked||!second->level[0].uploaded){
                 set_diagnosis(d,"menu TEV plan requires a ready texture unit 1");
@@ -2224,13 +2272,14 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
                 return D9_UNSUPPORTED;
             }
         }
-        if(state.pixel_shader->textures>0&&(!t||!t->native)) {
+        if(menu_plan->textures>0&&(!t||!t->native)) {
             set_diagnosis(d,"menu TEV plan requires a ready texture unit 0");
             return D9_UNSUPPORTED;
         }
+        D9DrawState menu_state=state;menu_state.pixel_shader=menu_plan;
         if(d->ops.draw_menu(d->ctx,d->color_scratch,n,&clip,
                             t?t->native:NULL,second?second->native:NULL,
-                            &state,(const float (*)[4])d->tev_constants)){
+                            &menu_state,(const float (*)[4])d->tev_constants)){
             set_diagnosis(d,"menu TEV draw rejected by the backend");
             return D9_BACKEND;
         }

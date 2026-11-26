@@ -139,13 +139,14 @@ suite is **116 passed, 1 diagnostic, 0 failed**.  ARM `-Mode com` builds `Skyrim
 
 `d9_tev_text_plan()` certifies the menu-text quad as one TEV stage:
 `MODULATE(TEXTURE0, PRIMARY)` for both RGB and alpha, one 2D sampler at
-`texcoord0`, vertex COLOR0, no constants and no second stage.  Sampler
-POINT/CLAMP is supplied by the menu-text draw state; the plan itself carries
-the sampler/texcoord indices.  The builder refuses a pixel shader, a second
-texture and a missing A8 texture unit by name; without an A8 upload path the
-text operation stops at the named A8 refusal instead of substituting RGBA8.
-`tev_text_plan` checks the plan and the PICA descriptor (`stage_count == 1`,
-TEXTURE0/PRIMARY, no stage 1, no constants); no pixel result is claimed.
+`texcoord0`, vertex COLOR0, no constants and no second stage.  The core routes
+an A8 texture with fixed-function stage 0 `MODULATE(TEXTURE,DIFFUSE)` to
+`draw_menu` with that plan; the PICA adapter verifies the native texture really
+is A8, forces POINT/CLAMP sampling, binds texture unit 0, applies stage 0 and
+leaves stage 1 off before `C3D_DrawArrays`.  A non-A8 unit, a second texture or
+a pixel-shader mismatch is refused by name before the GPU call; no RGBA8
+substitution is made.  `tev_text_plan` and `menu_text_plan_draw` cover the plan,
+descriptor and recording-backend route.  No pixel result or frame is claimed.
 
 ### Render-target texture handles
 

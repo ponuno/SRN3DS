@@ -321,21 +321,33 @@ static int draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
     D9Citro *c=ctx;
     if(!c||!c->scene||!c->program_color_ready||!vertices||!clip||!state||
        !state->pixel_shader||!count||count%3)return -1;
-    if((state->pixel_shader->backend_flags&D9TEV_PLAN_MENU_TEXT)&&
+    int text_plan=(state->pixel_shader->backend_flags&D9TEV_PLAN_MENU_TEXT)!=0;
+    NativeTex *native0=texture0,*native1=texture1;
+    if(text_plan&&
        (state->pixel_shader->stages!=1||state->pixel_shader->textures!=1||
-        !texture0||texture1))return -1;
+        !native0||native1||native0->format!=D9_A8)){
+        fprintf(stderr,"[d3d9-citro] draw_menu: text TEV plan requires an A8 texture unit\n");
+        return -1;
+    }
     if(count>FRAME_VERTICES-c->cursor_color)return -1;
+    D9DrawState draw_state=*state;
+    if(text_plan){
+        /* The menu-text contract is point sampling with clamped UVs, regardless
+         * of any stale sampler state from an earlier draw. */
+        draw_state.address_u=3;draw_state.address_v=3; /* D3DTADDRESS_CLAMP */
+        draw_state.mag_filter=1;draw_state.min_filter=1; /* D3DTEXF_POINT */
+        draw_state.mip_filter=0; /* D3DTEXF_NONE */
+    }
     memcpy(c->arena_color+c->cursor_color,vertices,count*sizeof *vertices);
     GSPGPU_FlushDataCache(c->arena_color+c->cursor_color,count*sizeof *vertices);
     prepare_draw_color(c);
     D9Matrix mtx=*clip;orient_clip(c,&mtx);
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_color,&m);
-    apply_state(state,1);
-    if(texture0)configure_native_texture(texture0,state);
-    if(texture1)configure_native_texture(texture1,state);
+    apply_state(&draw_state,1);
+    if(texture0)configure_native_texture(texture0,&draw_state);
+    if(texture1)configure_native_texture(texture1,&draw_state);
     d9_pica_citro3d_restore_tev();
-    NativeTex *native0=texture0,*native1=texture1;
     if(d9_pica_citro3d_apply_tev_ex(state->pixel_shader,
                                     native0?&native0->tex:NULL,
                                     native1?&native1->tex:NULL,
