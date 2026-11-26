@@ -149,7 +149,7 @@ export OFILES := graphics_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o
 export INCLUDE += -I$(CURDIR)/$(BUILD)
 endif
 ifneq ($(strip $(GRAPHICS_COM)),)
-export OFILES := graphics_com_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_pica_tev.o d3d9_pica_citro3d.o d3d9_menu_light.o d3d9_citro3d.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d9shader.shbin.o d9shader_color.shbin.o d3d9_capture.o guest.o guest_heap.o pe_imports.o
+export OFILES := graphics_com_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_pica_tev.o d3d9_pica_citro3d.o d3d9_menu_light.o d3d9_citro3d.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d3d9_menu_text.o menu_swf_batch.o d9shader.shbin.o d9shader_color.shbin.o d3d9_capture.o guest.o guest_heap.o pe_imports.o
 export INCLUDE += -I$(CURDIR)/$(BUILD)
 endif
 ifneq ($(strip $(AUDIO)),)

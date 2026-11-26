@@ -11,13 +11,14 @@
 #include <string.h>
 
 typedef struct {
-    unsigned w, h, levels;
+    unsigned w, h, levels, format;
     uint8_t *data;
     size_t bytes;
 } MockTex;
 
 typedef struct {
     unsigned created, uploaded, deleted, begin, draw, colored, end;
+    unsigned last_format, a8_creates, a8_bytes;
     int active, fail_create;
     size_t count;
     void *texture;
@@ -26,8 +27,8 @@ typedef struct {
     MockTex *last_tex;
 } Mock;
 
-static int tex_create(void *ctx, unsigned w, unsigned h, unsigned levels,
-                      void **native) {
+static int tex_create_format(void *ctx, unsigned w, unsigned h,
+                             unsigned levels, unsigned format, void **native) {
     Mock *m = ctx;
     if (m->fail_create) return -1;
     MockTex *t = calloc(1, sizeof *t);
@@ -35,6 +36,7 @@ static int tex_create(void *ctx, unsigned w, unsigned h, unsigned levels,
     t->w = w;
     t->h = h;
     t->levels = levels;
+    t->format = format;
     t->bytes = (size_t)w * h * 4;
     t->data = calloc(1, t->bytes);
     if (!t->data) {
@@ -43,23 +45,37 @@ static int tex_create(void *ctx, unsigned w, unsigned h, unsigned levels,
     }
     *native = t;
     m->last_tex = t;
+    m->last_format = format;
+    if (format == D9_A8) ++m->a8_creates;
     ++m->created;
+    return 0;
+}
+
+static int tex_create(void *ctx, unsigned w, unsigned h, unsigned levels,
+                      void **native) {
+    return tex_create_format(ctx, w, h, levels, D9_A8R8G8B8, native);
+}
+
+static int tex_upload_format(void *ctx, void *native, unsigned level,
+                             const void *data, size_t bytes) {
+    Mock *m = ctx;
+    MockTex *t = native;
+    if (!t || level >= t->levels || !data || !bytes) return -1;
+    size_t pixels = (size_t)(t->w >> level) * (t->h >> level);
+    size_t want = t->format == D9_A8 ? pixels : pixels * 4;
+    if (bytes != want) return -1;
+    if (level == 0) {
+        size_t n = bytes < t->bytes ? bytes : t->bytes;
+        memcpy(t->data, data, n);
+    }
+    if (t->format == D9_A8) m->a8_bytes += (unsigned)bytes;
+    ++m->uploaded;
     return 0;
 }
 
 static int tex_upload(void *ctx, void *native, unsigned level,
                       const void *data, size_t bytes) {
-    Mock *m = ctx;
-    MockTex *t = native;
-    if (!t || level >= t->levels || !data || !bytes) return -1;
-    size_t pixels = (size_t)(t->w >> level) * (t->h >> level);
-    if (bytes != pixels && bytes != pixels * 4) return -1;
-    if (level == 0) {
-        size_t n = bytes < t->bytes ? bytes : t->bytes;
-        memcpy(t->data, data, n);
-    }
-    ++m->uploaded;
-    return 0;
+    return tex_upload_format(ctx, native, level, data, bytes);
 }
 
 static void tex_delete(void *ctx, void *native) {
@@ -123,6 +139,8 @@ static const D9Backend ops = {
     .draw = draw,
     .end = end,
     .draw_colored = draw_colored,
+    .texture_create_format = tex_create_format,
+    .texture_upload_format = tex_upload_format,
 };
 
 static uint32_t method(D9ComDemo *s, uint32_t obj, unsigned slot,
@@ -220,6 +238,8 @@ int main(void) {
     }
     assert(mock.created == created_before + 1);
     assert(mock.uploaded == uploaded_before + 1);
+    assert(mock.last_format == D9_A8 && mock.a8_creates == 1 &&
+           mock.a8_bytes == 64);
 
     uint32_t desc_args[2] = {0, 0x10010400};
     assert(!method(&demo, text.texture, 17, desc_args, 2));

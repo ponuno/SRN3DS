@@ -14,7 +14,8 @@ Integrated files:
 | `source/d3d9_pica_citro3d.h/.c` | 3DS-only `C3D_TexEnv` apply/restore adapter |
 | `source/d3d9_core.c/.h` | Borrowed active TEV pointer carried through `D9DrawState` |
 | `source/d3d9_com.c` | Named creation-time validation, SetPixelShader wiring, lifetime clearing |
-| `source/d3d9_citro3d.c` | TEV apply path plus deterministic fixed-function restore |
+| `source/d3d9_citro3d.c` | TEV apply path plus deterministic fixed-function restore, including GPU_A8 texture create/upload |
+| `source/d3d9_menu_text.c` | Host/menu COM A8 atlas upload and one DrawPrimitiveUP (compiled into ARM `com`) |
 | `source/tesv_slice_main.c` | Real PICA backend on 3DS, null fallback, teardown after COM |
 | `Makefile` | Validator/adapter/shbin objects and citro3d libraries for TESV |
 | `tools/run_host_tests.ps1` | Standalone `pica_tev` and validator linkage for COM tests |
@@ -27,6 +28,24 @@ programs TEV state only.  The newer `ui.copy` fixture proves one synthetic
 submission and deterministic texel output; it is not the Skyrim menu.  The TESV
 runner verifies backend startup/reachability separately and does not prove a
 game frame or visual equivalence.
+
+### A8 menu-text textures
+
+`GPU_A8` is present in the devkitPro PICA enums.  The citro3d backend now
+implements the append-only `D9Backend.texture_create_format`/
+`texture_upload_format` pair:
+
+* `D3DFMT_A8` maps to `GPU_A8`, `A8R8G8B8` to `GPU_RGBA8`, `X8R8G8B8` to
+  `GPU_RGB8`; unknown formats return a named backend rejection.
+* A8 upload uses one byte per texel through `C3D_TexLoadImage`; the byte count
+  is checked against `C3D_TexCalcLevelSize` (A8 8x8 = 64 bytes).
+* Core uses these callbacks only for A8.  A backend without them refuses A8 by
+  name instead of creating an RGBA8 native with the wrong layout.  Null and
+  host recording backends implement the same pair so A8 format/size
+  propagation is testable without citro3d.
+* ARM `-Mode com` compile/link includes `d3d9_menu_text.o` and
+  `menu_swf_batch.o`.  This is build-only evidence: PICA A8 sampling inside a
+  draw/TEV and any real menu frame are not tested here.
 
 ## 1. Accepted subset
 

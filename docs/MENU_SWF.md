@@ -432,6 +432,11 @@ match the packed atlas entries.  This is CPU vertex/index data only.
   the raw coverage bytes to the backend.  No A8 texture is replaced by
   A8R8G8B8.  If the backend cannot create/upload A8, init fails with
   `MENU_TEXT_DRAW_ERR_A8`/`ERR_UPLOAD` and no fallback texture is created.
+* The citro3d/PICA backend maps A8 to `GPU_A8` through the appended
+  `texture_create_format`/`texture_upload_format` callbacks and uploads one
+  byte/texel with `C3D_TexLoadImage`; RGBA8/RGB8 continue through the existing
+  path.  Compile-only ARM evidence exists; PICA A8 sampling in a real draw/TEV
+  is not runtime-tested here.
 * `menu_text_draw_init()` creates the A8 texture through the COM device path,
   uploads the atlas with exact pitch, and maps a caller guest scratch region
   for expanded vertices.
@@ -525,7 +530,7 @@ full viewport clipping, overflow without buffer mutation, NaN/negative-scale/
 rotated-clip refusals, and real 33..36 atlas quads.
 
 Full host suite with the main-tree generated slice and IR container:
-**109 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
+**113 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_batch`
 contributes 21 synthetic checks, `menu_swf_atlas` 27, `menu_swf_raster` 44,
 `menu_swf_text` 33, `menu_swf_tess` 47, `menu_swf_shape` 28,
 `menu_swf_display` 38 and `menu_swf` 86; `menu_text_draw` is an assertion-based

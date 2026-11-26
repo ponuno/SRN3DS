@@ -249,6 +249,16 @@ typedef struct {
      * native is still live and release stays retryable.  NULL falls back to the
      * generic release path. */
     int (*texture_delete_cube)(void *ctx,void *native);
+    /* Optional format-aware 2D texture create/upload.  Appended last so all
+     * existing positional initializers keep their meaning.  A8 textures use
+     * this pair; a NULL pair refuses A8 by name instead of creating an RGBA
+     * native with the wrong layout.  The upload callback derives the format
+     * from the native handle. */
+    int (*texture_create_format)(void *ctx,unsigned w,unsigned h,
+                                 unsigned levels,unsigned format,
+                                 void **native);
+    int (*texture_upload_format)(void *ctx,void *native,unsigned level,
+                                 const void *data,size_t bytes);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);

@@ -56,18 +56,33 @@ void d9_citro_close(D9Citro *c){
     if(c->program_ready)shaderProgramFree(&c->program);if(c->shader)DVLB_Free(c->shader);
     if(c->target)C3D_RenderTargetDelete(c->target);C3D_Fini();free(c);
 }
-typedef struct {C3D_Tex tex;unsigned levels;} NativeTex;
+typedef struct {C3D_Tex tex;unsigned levels,format;} NativeTex;
 typedef struct {C3D_Tex tex;C3D_TexCube cube;unsigned edge,levels,format;} NativeCube;
 typedef struct {C3D_Tex tex;C3D_RenderTarget *target;NativeTex sample;unsigned w,h,format;} NativeTarget;
-static int tex_create(void *ctx,unsigned w,unsigned h,unsigned levels,void **handle){
-    (void)ctx;NativeTex *n=calloc(1,sizeof *n);if(!n||!levels){free(n);return -1;}
-    C3D_TexInitParams params={(u16)w,(u16)h,(u8)(levels-1),GPU_RGBA8,GPU_TEX_2D,false};
+static int tex_create_format(void *ctx,unsigned w,unsigned h,unsigned levels,
+                             unsigned format,void **handle){
+    (void)ctx;GPU_TEXCOLOR pfmt;
+    if(format==D9_A8)pfmt=GPU_A8;
+    else if(format==D9_A8R8G8B8)pfmt=GPU_RGBA8;
+    else if(format==D9_X8R8G8B8)pfmt=GPU_RGB8;
+    else return -2;
+    NativeTex *n=calloc(1,sizeof *n);if(!n||!levels){free(n);return -1;}
+    C3D_TexInitParams params={(u16)w,(u16)h,(u8)(levels-1),pfmt,GPU_TEX_2D,false};
     if(!C3D_TexInitWithParams(&n->tex,NULL,params)){free(n);return -1;}
-    n->levels=levels;C3D_TexSetFilter(&n->tex,GPU_LINEAR,GPU_LINEAR);C3D_TexSetWrap(&n->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);*handle=n;return 0;
+    n->levels=levels;n->format=format;
+    C3D_TexSetFilter(&n->tex,GPU_LINEAR,GPU_LINEAR);C3D_TexSetWrap(&n->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
+    *handle=n;return 0;
+}
+static int tex_create(void *ctx,unsigned w,unsigned h,unsigned levels,void **handle){
+    return tex_create_format(ctx,w,h,levels,D9_A8R8G8B8,handle);
+}
+static int tex_upload_format(void *ctx,void *handle,unsigned level,const void *data,size_t bytes){
+    D9Citro *c=ctx;NativeTex *n=handle;C3D_Tex *t=&n->tex;
+    if(c->scene||level>=n->levels||bytes!=C3D_TexCalcLevelSize(t->size,(int)level))return -1;
+    C3D_FrameSync();t->maxLevel=(u8)(n->levels-1);t->minLevel=0;C3D_TexLoadImage(t,data,GPU_TEXFACE_2D,(int)level);C3D_TexFlush(t);return 0;
 }
 static int tex_upload(void *ctx,void *handle,unsigned level,const void *data,size_t bytes){
-    D9Citro *c=ctx;NativeTex *n=handle;C3D_Tex *t=&n->tex;if(c->scene||level>=n->levels||bytes!=C3D_TexCalcLevelSize(t->size,(int)level))return -1;
-    C3D_FrameSync();t->maxLevel=(u8)(n->levels-1);t->minLevel=0;C3D_TexLoadImage(t,data,GPU_TEXFACE_2D,(int)level);C3D_TexFlush(t);return 0;
+    return tex_upload_format(ctx,handle,level,data,bytes);
 }
 static void tex_delete(void *ctx,void *handle){(void)ctx;NativeTex *n=handle;C3D_FrameSync();C3D_TexDelete(&n->tex);free(n);}
 /* PICA cube textures.  C3D_TexInitWithParams allocates the six face images;
@@ -549,4 +564,5 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
     target_write,depth_clear,target_viewport,draw_menu,target_texture,
-    cube_create,cube_upload,target_viewport_scaled,NULL,NULL,NULL,cube_delete};return &ops;}
+    cube_create,cube_upload,target_viewport_scaled,NULL,NULL,NULL,cube_delete,
+    tex_create_format,tex_upload_format};return &ops;}

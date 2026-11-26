@@ -300,7 +300,21 @@ int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned
     if(!slot)return D9_MEMORY;
     t.pixels=calloc(1,cpu);if(!t.pixels)return D9_MEMORY;
     if(!t.cpu_only){
-        if(d->ops.texture_create(d->ctx,native_dim(w),native_dim(h),t.gpu_levels,&t.native)||!t.native){delete_unowned_native(d,t.native);free(t.pixels);return D9_BACKEND;}
+        int made;
+        if(fmt==D9_A8){
+            if(!d->ops.texture_create_format){
+                set_diagnosis(d,"A8 textures require backend texture_create_format; "
+                                "this backend has no A8 texture path");
+                free(t.pixels);
+                return D9_UNSUPPORTED;
+            }
+            made=d->ops.texture_create_format(d->ctx,native_dim(w),native_dim(h),
+                                              t.gpu_levels,fmt,&t.native);
+        }else{
+            made=d->ops.texture_create(d->ctx,native_dim(w),native_dim(h),
+                                       t.gpu_levels,&t.native);
+        }
+        if(made||!t.native){delete_unowned_native(d,t.native);free(t.pixels);return D9_BACKEND;}
     }
     D9Handle key=d->next;
     if(d9_texcache_add_guest(&d->tex_cache,key,t.pixels,cpu,1)!=D9TEXCACHE_OK){
@@ -370,8 +384,13 @@ int d9_texture_surface_unlocked(D9Device *d,D9Handle h,unsigned level){
     Level *l=&t->level[level];
     if(!t->cpu_only&&!t->gpu_only&&level<t->gpu_levels){
         if(t->format==D9_A8){
-            if(d->ops.texture_upload(d->ctx,t->native,level,t->pixels+l->offset,
-                                     l->bytes))return D9_BACKEND;
+            if(!d->ops.texture_upload_format){
+                set_diagnosis(d,"A8 texture upload requires backend texture_upload_format");
+                return D9_UNSUPPORTED;
+            }
+            if(d->ops.texture_upload_format(d->ctx,t->native,level,
+                                            t->pixels+l->offset,
+                                            l->bytes))return D9_BACKEND;
         }else{
             size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;
             const void *src=t->pixels+l->offset;
@@ -452,8 +471,13 @@ static int finish_texture_unlock(D9Device *d,Texture *t,unsigned level,int reado
     Level *l=&t->level[level];
     if(!readonly&&!t->cpu_only&&level<t->gpu_levels){
         if(t->format==D9_A8){
-            if(d->ops.texture_upload(d->ctx,t->native,level,t->pixels+l->offset,
-                                     l->bytes))return D9_BACKEND;
+            if(!d->ops.texture_upload_format){
+                set_diagnosis(d,"A8 texture upload requires backend texture_upload_format");
+                return D9_UNSUPPORTED;
+            }
+            if(d->ops.texture_upload_format(d->ctx,t->native,level,
+                                            t->pixels+l->offset,
+                                            l->bytes))return D9_BACKEND;
         }else{
             size_t bytes=(size_t)native_dim(l->w)*native_dim(l->h)*4;uint8_t *tmp=malloc(bytes);if(!tmp)return D9_MEMORY;const void *src=t->pixels+l->offset;
             int rc=d9_bc_block_bytes(t->format)?d9_bc_to_pica(t->format,tmp,bytes,src,l->bytes,l->w,l->h,l->pitch):

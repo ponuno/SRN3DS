@@ -220,9 +220,10 @@ read stage without fake successes. *Not met.*
 - [x] Host COM A8 text draw: real D3DFMT_A8 texture creation/upload, 8x8 pitch
       8 byte-exact coverage, POINT/CLAMP + MODULATE(TEXTURE,DIFFUSE), FVF
       0x142 and one DrawPrimitiveUP for 12 expanded vertices. Named A8 refusal
-      without RGBA substitution. No sampling/frame/pixel claim; real GFx
-      display list, masks, fonts and PICA A8 sampling remain open.
-      See `docs/MENU_SWF.md`.
+      without RGBA substitution. PICA maps A8 to `GPU_A8` with 1-byte/texel
+      upload through format-aware callbacks (ARM `com` build-only). No
+      sampling/frame/pixel claim; real GFx display list, masks, fonts and
+      PICA A8 sampling in draw/TEV remain open. See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer

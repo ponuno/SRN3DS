@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {unsigned w,h,levels;} NullTex;
+typedef struct {unsigned w,h,levels,format;} NullTex;
 typedef struct {unsigned w,h,format;uint8_t *pixels;} NullTarget;
 static D9NullStats g;
 /* The null backend owns no LCD, but Present's screen blit has a destination.
@@ -22,25 +22,42 @@ static void null_log(const char *op,const char *why){fprintf(stderr,"[d3d9-null]
 /* A D3DCOLOR 0xAARRGGBB has the little-endian byte order B,G,R,A, which is
  * exactly the top-first BGRA layout target_read returns. */
 
-static int null_texture_create(void *ctx,unsigned w,unsigned h,unsigned levels,void **native){
+static int null_texture_create_format(void *ctx,unsigned w,unsigned h,
+                                      unsigned levels,unsigned format,
+                                      void **native){
     D9NullStats *s=stats(ctx);
     if(!native){null_log("CreateTexture","null native handle");return -1;}
     if(!pow2(w)||!pow2(h)||w<8||h<8||!levels||levels>11){
         null_log("CreateTexture","only power-of-two 8..1024 textures with 1..11 uploaded levels are implemented");
         return -1;
     }
+    if(format!=D9_A8&&format!=D9_A8R8G8B8&&format!=D9_X8R8G8B8){
+        null_log("CreateTexture","format is not A8/RGBA8/RGB8");
+        return -1;
+    }
     NullTex *t=calloc(1,sizeof *t);if(!t){null_log("CreateTexture","out of memory");return -1;}
-    t->w=w;t->h=h;t->levels=levels;*native=t;++s->texture_creates;return 0;
+    t->w=w;t->h=h;t->levels=levels;t->format=format;*native=t;
+    ++s->texture_creates;return 0;
 }
-static int null_texture_upload(void *ctx,void *native,unsigned level,const void *data,size_t bytes){
+static int null_texture_create(void *ctx,unsigned w,unsigned h,unsigned levels,
+                               void **native){
+    return null_texture_create_format(ctx,w,h,levels,D9_A8R8G8B8,native);
+}
+static int null_texture_upload_format(void *ctx,void *native,unsigned level,
+                                      const void *data,size_t bytes){
     D9NullStats *s=stats(ctx);NullTex *t=native;
     if(!t||level>=t->levels||!data||!bytes){null_log("UnlockRect","invalid texture, mip level or pixel data");return -1;}
     size_t pixels=(size_t)level_dim(t->w,level)*level_dim(t->h,level);
-    if(bytes!=pixels&&bytes!=pixels*4){
-        null_log("UnlockRect","upload size does not match an A8 or RGBA8 mip level");
+    size_t want=t->format==D9_A8?pixels:pixels*4;
+    if(bytes!=want){
+        null_log("UnlockRect","upload size does not match the texture format");
         return -1;
     }
     ++s->texture_uploads;return 0;
+}
+static int null_texture_upload(void *ctx,void *native,unsigned level,
+                               const void *data,size_t bytes){
+    return null_texture_upload_format(ctx,native,level,data,bytes);
 }
 static void null_texture_delete(void *ctx,void *native){
     D9NullStats *s=stats(ctx);NullTex *t=native;
@@ -446,7 +463,8 @@ static const D9Backend backend={null_texture_create,null_texture_upload,null_tex
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
     null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
     null_cube_create,null_cube_upload,null_target_viewport_scaled,
-    null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete};
+    null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete,
+    null_texture_create_format,null_texture_upload_format};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}
