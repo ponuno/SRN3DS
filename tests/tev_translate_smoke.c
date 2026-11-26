@@ -527,6 +527,32 @@ static void test_literal_validation(void) {
     }
 }
 
+static void test_dag_fusion(void) {
+    static const uint32_t code[] = {
+        VER_PS30,
+        DI(0x1F, 2), DCL_COLOR(0), SRC_T(0),
+        DI(0x51, 5), DST_C(0), 0x3F000000u, 0x3F000000u, 0x3F000000u, 0x3F000000u,
+        DI(0x51, 5), DST_C(1), 0x3E800000u, 0x3E800000u, 0x3E800000u, 0x3E800000u,
+        DI(0x05, 3), DST_R(0), SRC_C(0), SRC_T(0),
+        DI(0x05, 3), DST_R(1), SRC_C(1), SRC_T(0),
+        DI(0x02, 3), DST_C0, SRC_R(0), SRC_R(1),
+        END_TOKEN,
+    };
+    D9TevProgram p;
+    char why[256];
+    check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) == 0, why);
+    check(p.stages == 2, "DAG fusion: two live MUL+ADD becomes two stages");
+    check(p.stage[1].func_rgb == D9TEV_FUNC_MULTIPLY_ADD,
+          "DAG fusion: ADD becomes MULTIPLY_ADD");
+    float c[D9TEV_MAX_STAGES][4] = {{0}};
+    float out[4];
+    eval_with(&p, c, out);
+    const float q50 = 128.0f / 255.0f, q25 = 64.0f / 255.0f;
+    const float expect[4] = {(q50 + q25) * 1.0f, (q50 + q25) * 0.5f,
+                             (q50 + q25) * 0.25f, (q50 + q25) * 0.75f};
+    for (int i = 0; i < 4; ++i) check_near(out[i], expect[i], "DAG fusion: math");
+}
+
 static void test_texkill(void) {
     D9TevProgram p;
     char why[256];
@@ -712,6 +738,7 @@ int main(void) {
     test_alpha_fixup();
     test_texld_validation();
     test_literal_validation();
+    test_dag_fusion();
     test_texkill();
     test_rejections();
     test_pack();

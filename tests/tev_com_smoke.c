@@ -252,9 +252,14 @@ int main(void){
     set_pixel_shader(&h,0);draw_frame(&h,&mock);assert(!mock.shader&&mock.texture);
     set_texture(&h,0);draw_frame(&h,&mock);assert(!mock.shader&&!mock.texture);
 
-    /* Backend/translator rejections are named and never reach the fixed path. */
+    /* Generic external constants are retained and reach the draw bank. */
     n=0;code[n++]=VER;code[n++]=DI(0x01,2);code[n++]=DST_C0;code[n++]=SRC_C0;code[n++]=END;
-    expect_shader_rejection(&h,code,n,UNAVAILABLE,"external constant c0");
+    assert(!guest_write(&h.memory,CODE,code,n*4));
+    assert(create_pixel_shader(&h,CODE,OUT)==0);
+    shader=rd(&h,OUT);assert(shader);
+    D9TevProgram const_tev;assert(d9_com_pixel_shader_tev(shader,&const_tev));
+    assert(const_tev.constants==1&&const_tev.constant_reg[0]==0);
+    assert(const_tev.stage[0].const_reg==0&&!const_tev.stage[0].const_is_literal);
     n=0;code[n++]=VER;code[n++]=DI(0x1F,2);code[n++]=0x80000000u;code[n++]=0x900F1000u;
     code[n++]=DI(0x01,2);code[n++]=DST_C0;code[n++]=0x90E41000u;code[n++]=END;
     expect_shader_rejection(&h,code,n,UNAVAILABLE,"VPOS");

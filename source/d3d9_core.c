@@ -3141,7 +3141,7 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         }else positiont_matrix(&clip,d->view_w,d->view_h);
     }else if(d->shader_active)clip=d->shader_clip;
     else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
-    D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
+    D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.tev_constants=d->tev_constants;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
     int has_color=lit||(d->decl_active&&d->declaration.color!=UINT32_MAX);
     /* The menu-text quad has an explicit certified plan even though the guest
      * used fixed-function stage state.  Select it only for the exact

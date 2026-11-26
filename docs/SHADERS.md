@@ -374,6 +374,15 @@ acceptance remains **27/9,621** (UI 3, sky 7). The next measured UI blockers are
 9 `dp4`, and full-vector two-live-intermediate shapes that cannot fit one
 PREVIOUS register without a larger scheduler.
 
+The bounded DAG fusion layer recognises the exact two-live shape
+`mul rA,x,y; add/sub rD,rA,z` and rewrites the consumer to `MAD`, consuming one
+`PREVIOUS` instead of two vectors. The independent evaluator covers the
+two-stage plan, and the stale-temp refusal now names the single-`PREVIOUS`
+limit explicitly. No shipped UI/skinning/particle chunk matches this exact
+adjacent pattern, so retail acceptance stays **27/9,621**; the remaining
+two-full-RGB shapes need either a larger algebraic scheduler or multi-pass /
+channel-packing that the six-stage, one-PREVIOUS combiner cannot express.
+
 The accepted column is the generic translator only. The separate fixed-pipeline
 matcher in §7.4 recognises 6 additional base-lit chunks (5 `p5_MAD_NORMAL`, 1
 `p1200005_ADD_NORMAL`); they remain rejected by the generic translator and are
@@ -464,6 +473,13 @@ feeds them to `C3D_TexEnv` directly. `D9TevStage` is the `C3D_TexEnv` shape:
 `src_rgb[3]`, `op_rgb[3]`, `func_rgb`, `src_a[3]`, `op_a[3]`, `func_a`,
 `scale_rgb/alpha`, and `const_rgba8`.
 
+The generic draw path now carries the borrowed c0..c7 PS constant bank in
+`D9DrawState.tev_constants` and calls the same two-texture-capable
+`d9_pica_citro3d_apply_tev_ex` used by menu plans. External constants are
+validated as materialised stages, not rejected at creation. This does not widen
+`DevCaps`: generic draws still bind one texture and no vertex-colour varying;
+plans needing `s1`, `dcl_color` or a third texture remain named refusals.
+
 The hook is now implemented in `source/d3d9_shader.c`. After the token walk
 reaches a valid END, an unknown pixel shader is passed to
 `d9_tev_translate_pixel` with the exact consumed word count. Success sets
@@ -484,7 +500,7 @@ objects, while `cmp` fails with
 
 ### 7.3 Measured accuracy
 
-`tests/tev_accuracy_smoke.c` assembles seven ps_3_0 programs and compares
+`tests/tev_accuracy_smoke.c` assembles ten ps_3_0 programs and compares
 `d9_tev_eval_pixel` (over the translated TEV stages) with an independent D3D9
 interpreter over the original tokens. Constants are RGBA8-quantised in both
 paths; inputs are LDR.
@@ -493,12 +509,15 @@ paths; inputs are LDR.
 |---|---:|---:|---:|---:|
 | blit (`dcl,dcl,texld`) | 1 | 1 | 4,000 | 0.000000000 |
 | tint (`tex*c0`) | 1 | 1 | 4,000 | 0.000000000 |
+| RGB/alpha channel carry | 3 | 1 | 4,000 | 0.000000000 |
+| split RGB TEXTURE0 / alpha TEXTURE1 | 1 | 2 | 4,000 | 0.000000000 |
+| two-live DAG fusion (`mul,mul,add`) | 2 | 0 | 4,000 | 0.000000000 |
 | lrp of 2 textures | 1 | 2 | 4,000 | 0.000000000 |
 | mad with 2 constants | 2 | 1 | 4,000 | 0.000000000 |
 | 3-stage chain | 3 | 1 | 4,000 | 0.000000000 |
 | dp3 lighting | 1 | 1 | 4,000 | 0.000000000 |
 | texture × vertex colour | 1 | 1 | 4,000 | 0.000000000 |
-| **total** | | | **28,000** | **0.000000000** |
+| **total** | | | **40,000** | **0.000000000** |
 
 The blit fixture has exactly the same tokens as the shipped 3-instruction
 program (`dcl_texcoord t0.xy`, `dcl_2d s0`, `texld oC0,t0,s0`), so the
@@ -507,8 +526,9 @@ just a synthetic shape. `tests/tev_real_smoke.c` additionally translates all
 9,621 shipped pixel chunks and reports the acceptance/rejection table in §6;
 `tests/tev_translate_smoke.c` exercises the rejection diagnostics (cmp, if,
 cube sampler, 4 textures, MRT, non-uniform swizzle, abs modifier, >6 stages,
-alpha fixup), plus malformed/out-of-range `texld` operands and non-finite or
-out-of-[0,1] `def` literals. The literal regression includes the previous wrong
+alpha fixup), plus malformed/out-of-range `texld` operands, non-finite literals,
+selected out-of-[0,1] `def` components and the explicit two-live-RGB refusal.
+The literal regression includes the previous wrong
 output: D3D9 `mad(-1,2,2)` is 0, while clamping the literals to RGBA8 first
 produced 1; the shader is now rejected.
 

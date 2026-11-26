@@ -270,7 +270,8 @@ static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *
     if(texture)configure_native_texture(texture,state);
     if(state->pixel_shader){
         NativeTex *native=texture;
-        if(d9_pica_citro3d_apply_tev(state->pixel_shader,native?&native->tex:NULL,NULL,0))return -1;
+        if(d9_pica_citro3d_apply_tev_ex(state->pixel_shader,native?&native->tex:NULL,NULL,
+                                        state->tev_constants,9,NULL,0))return -1;
     }else{
         d9_pica_citro3d_restore_tev();
         C3D_TexEnv *env=C3D_GetTexEnv(0);if(!env)return -1;

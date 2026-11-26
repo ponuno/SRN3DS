@@ -435,11 +435,9 @@ int d9_pica_tev_validate(const D9TevProgram *program,
                 out.const_reg = stage->const_reg;
                 out.constant_abgr = d9_pica_tev_color_abgr(stage->const_rgba8);
             } else {
-                if (!menu)
-                    return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
-                                  "TEV stage %u uses external constant c%u; generic translation requires literal def c# only",
-                                  s, stage->const_reg);
-                if (stage->const_reg > D9_PICA_TEV_AMBIENT_CONST)
+                unsigned max_reg = menu ? D9_PICA_TEV_AMBIENT_CONST
+                                        : D9TEV_MAX_CONSTANTS - 1u;
+                if (stage->const_reg > max_reg)
                     return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
                                   "TEV stage %u uses unsupported external constant c%u",
                                   s, stage->const_reg);
@@ -477,7 +475,7 @@ int d9_pica_tev_validate(const D9TevProgram *program,
             if (uses_const && stages[s].const_reg == program->constant_reg[c])
                 found = 1;
         }
-        if (!found && !menu)
+        if (!found)
             return reject(reason, D9_PICA_TEV_EXTERNAL_CONSTANT, why, why_size,
                           "external constant c%u is not materialised", program->constant_reg[c]);
     }

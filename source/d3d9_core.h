@@ -80,6 +80,9 @@ typedef struct {
     unsigned stage_alphaop,stage_alphaarg1,stage_alphaarg2;
     unsigned stage_texcoordindex;
     const D9TevProgram *pixel_shader; /* borrowed; transient, not guest render state */
+    /* Borrowed c0..c8 bank for generic TEV external constants.  Menu draws
+     * pass their bank through the dedicated callback instead. */
+    const float (*tev_constants)[4];
 } D9DrawState;
 
 /* --- test-only fixed-function T&L prototype --------------------------------

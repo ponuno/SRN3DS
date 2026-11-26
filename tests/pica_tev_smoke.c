@@ -318,10 +318,22 @@ static void test_descriptor_rejections(void) {
                              D9_PICA_TEV_TEXTURE_COUNT, "multiple textures");
     p = accepted_blit_program();
 
+    p.stage[0].src_rgb[0] = p.stage[0].src_a[0] = D9TEV_SRC_CONST;
+    p.stage[0].op_rgb[0] = D9TEV_RGB_COLOR;
+    p.stage[0].op_a[0] = D9TEV_A_ALPHA;
+    p.stage[0].const_reg = 7;
+    p.stage[0].const_is_literal = 0;
     p.constants = 1;
     p.constant_reg[0] = 7;
-    expect_descriptor_reject("reject external constants", &p,
-                             D9_PICA_TEV_EXTERNAL_CONSTANT, "external constant c7");
+    D9PicaTevProgram external;
+    D9PicaTevReject external_reason;
+    char external_why[256];
+    check(d9_pica_tev_validate(&p, &external, &external_reason,
+                               external_why, sizeof external_why) == 0,
+          "generic external constant accepted");
+    check(external.constant_count == 1 && external.constant_reg[0] == 7 &&
+          external.stage[0].const_is_literal == 0,
+          "generic external c7 reaches descriptor");
     p = accepted_blit_program();
 
     p.uses_vertex_color = 1;
@@ -424,12 +436,21 @@ static void test_raw_rejections(void) {
         expect_descriptor_reject("reject translated multiple textures", &translated,
                                  D9_PICA_TEV_TEXTURE_COUNT, "multiple textures");
     }
-    { /* c0 without def. */
+    { /* c0 without def is an external constant, supplied by the draw bank. */
+        D9TevProgram translated;
+        D9PicaTevProgram descriptor;
+        D9PicaTevReject reason;
+        char why[256];
         begin(&a);
         mov(&a, dr(8u, 0u, 0xFu), sr(2u, 0u, SW_ID));
         end(&a);
-        expect_reject("reject raw external constant", &a,
-                      D9_PICA_TEV_EXTERNAL_CONSTANT, "external constant c0");
+        check(validate_asm(&a, &translated, &descriptor, &reason,
+                           why, sizeof why) == 0,
+              "external constant c0 reaches generic descriptor");
+        check(descriptor.constant_count == 1 && descriptor.constant_reg[0] == 0 &&
+              descriptor.stage[0].uses_constant &&
+              !descriptor.stage[0].const_is_literal,
+              "external constant c0 is non-literal");
     }
     { /* Vertex colour declaration, even before translation. */
         begin(&a);
@@ -500,12 +521,18 @@ static void test_literal_only_stage(void) {
     Asm a;
     make_tint(&a);
     D9TevProgram translated;
+    D9PicaTevProgram descriptor;
     D9PicaTevReject reason;
     char why[256];
     check(validate_asm(&a, &translated, NULL, &reason, why, sizeof why) == 0, why);
     translated.stage[0].const_is_literal = 0;
-    expect_descriptor_reject("reject non-literal stage constant", &translated,
-                             D9_PICA_TEV_EXTERNAL_CONSTANT, "external constant");
+    check(d9_pica_tev_validate(&translated, &descriptor, &reason,
+                               why, sizeof why) == 0,
+          "externalised tint stage reaches descriptor");
+    check(descriptor.constant_count == 1 &&
+          descriptor.stage[0].uses_constant &&
+          !descriptor.stage[0].const_is_literal,
+          "externalised tint keeps a non-literal stage constant");
 }
 
 static D9TevProgram menu_light_plan(void) {

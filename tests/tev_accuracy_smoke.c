@@ -289,6 +289,24 @@ int main(void) {
         float constants[4][4] = {{q[0] / 255.0f, q[1] / 255.0f, q[2] / 255.0f, q[3] / 255.0f}};
         failures += run_case("split-channels", code, n, constants, 1, 0);
     }
+    { /* DAG fusion: two independent MUL results consumed by ADD */
+        unsigned q0[4] = {128, 128, 128, 128};
+        unsigned q1[4] = {64, 64, 64, 64};
+        size_t n = 0;
+        put_version(code, &n);
+        code[n++] = DI(0x1F, 2); code[n++] = DCL_COLOR(0); code[n++] = SRC_V(1);
+        put_def(code, &n, 0, q0);
+        put_def(code, &n, 1, q1);
+        code[n++] = DI(0x05, 3); code[n++] = DST_R(0); code[n++] = SRC_C(0); code[n++] = SRC_V(1);
+        code[n++] = DI(0x05, 3); code[n++] = DST_R(1); code[n++] = SRC_C(1); code[n++] = SRC_V(1);
+        code[n++] = DI(0x02, 3); code[n++] = DST_C0; code[n++] = SRC_R(0); code[n++] = SRC_R(1);
+        put_end(code, &n);
+        float constants[4][4] = {
+            {q0[0] / 255.0f, q0[1] / 255.0f, q0[2] / 255.0f, q0[3] / 255.0f},
+            {q1[0] / 255.0f, q1[1] / 255.0f, q1[2] / 255.0f, q1[3] / 255.0f},
+        };
+        failures += run_case("dag-fusion", code, n, constants, 2, 1);
+    }
     { /* two textures, lrp */
         unsigned q[4] = {192, 192, 192, 192};
         size_t n = 0;

@@ -31,6 +31,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* D3DSIO_* names, for rejection diagnostics. */
@@ -419,7 +420,8 @@ static int map_operand(Ctx *ctx, uint32_t token,
         }
         if (*taint) {
             reject(why, cap, "%s: reads r%u before it is written or after the "
-                   "TEV previous stage moved on", opname, index);
+                   "TEV previous stage moved on (two computed RGB intermediates "
+                   "cannot share the single PICA PREVIOUS register)", opname, index);
             return -1;
         }
         unsigned fallback = (needed & 1u) ? 0u : (needed & 2u) ? 1u :
@@ -617,9 +619,125 @@ static int resolve_texcoord(Ctx *ctx, uint32_t token, unsigned *reg,
     return -1;
 }
 
+/* Fuse one exact SM3 pattern that otherwise needs two live RGB intermediates:
+ *     mul rA, x, y          (full, unmodified temp destination)
+ *     add/sub rD, rA, z     (rA read once, identity swizzle)
+ * becomes
+ *     nop/omitted + mad rD, x, y, +/-z
+ * This is an algebraic DAG rewrite, not a hash rule.  It is deliberately
+ * narrow: the consumer keeps its destination; the mul result must have no
+ * other reader anywhere in the program. */
+static int temp_token(unsigned token, unsigned reg) {
+    return (token & 0x80000000u) && REGTYPE(token) == D9TEV_REG_TEMP &&
+           REGNUM(token) == reg;
+}
+
+static unsigned temp_reads_except(const uint32_t *code, size_t words,
+                                  unsigned reg, size_t except_pos) {
+    unsigned reads = 0;
+    size_t pos = 1;
+    while (pos < words) {
+        uint32_t token = code[pos];
+        unsigned op = token & 0xFFFFu;
+        if (op == 0xFFFFu) break;
+        if (op == 0xFFFEu) {
+            size_t skip = (size_t)((token >> 16) & 0x7FFFu);
+            if (skip > words - pos - 1) break;
+            pos += 1 + skip;
+            continue;
+        }
+        size_t total = 1u + ((token >> 24) & 0xFu);
+        if (total > words - pos) break;
+        if (pos != except_pos && op != 0x1F && op != 0x2F && op != 0x30 && op != 0x51) {
+            size_t first = 2;
+            size_t count = total >= 2 ? total - 2 : 0;
+            if (op == 0x41) { first = 1; count = 1; }
+            else if (op == 0x42) { first = 1; count = 1; }
+            for (size_t i = first; i < first + count && i < total; ++i)
+                if (temp_token(code[pos + i], reg)) ++reads;
+        }
+        pos += total;
+    }
+    return reads;
+}
+
+static int fuse_two_live_mul_add(const uint32_t *code, size_t words,
+                                 uint32_t **out_code, size_t *out_words) {
+    uint32_t *out = malloc((words + 16u) * sizeof *out);
+    if (!out) return -1;
+    size_t ip = 0, op = 0;
+    int changed = 0;
+    while (ip < words) {
+        uint32_t token = code[ip];
+        unsigned opcode = token & 0xFFFFu;
+        size_t total = 1u + ((token >> 24) & 0xFu);
+        if (opcode == 0xFFFFu || total > words - ip) {
+            memcpy(out + op, code + ip, (words - ip) * sizeof *out);
+            op += words - ip;
+            break;
+        }
+        if (opcode == 0x05 && total == 4 && ip + total < words) {
+            uint32_t dst = code[ip + 1];
+            size_t np = ip + total;
+            uint32_t next = code[np];
+            unsigned nopcode = next & 0xFFFFu;
+            size_t ntotal = 1u + ((next >> 24) & 0xFu);
+            unsigned reg = REGNUM(dst);
+            if ((dst & 0x80000000u) && REGTYPE(dst) == D9TEV_REG_TEMP &&
+                DSTMASK(dst) == 0xFu && DSTMOD(dst) == 0 &&
+                (nopcode == 0x02 || nopcode == 0x03) && ntotal == 4 &&
+                np + ntotal <= words &&
+                temp_reads_except(code, words, reg, np) == 0) {
+                uint32_t a = code[np + 2], b = code[np + 3];
+                int a_is = temp_token(a, reg), b_is = temp_token(b, reg);
+                if ((a_is ^ b_is) && SWZ(a_is ? a : b) == 0xE4u &&
+                    SRCMOD(a_is ? a : b) == 0) {
+                    uint32_t other = a_is ? b : a;
+                    uint32_t x = code[ip + 2];
+                    uint32_t y = code[ip + 3];
+                    if (nopcode == 0x03) {
+                        if (a_is) other ^= (1u << 24); /* rA - z -> -z + x*y */
+                        else x ^= (1u << 24);          /* z - rA -> -x*y + z */
+                    }
+                    out[op++] = 4u | (4u << 24); /* mad, dst + three sources */
+                    out[op++] = code[np + 1];
+                    out[op++] = x;
+                    out[op++] = y;
+                    out[op++] = other;
+                    ip = np + ntotal;
+                    changed = 1;
+                    continue;
+                }
+            }
+        }
+        memcpy(out + op, code + ip, total * sizeof *out);
+        op += total;
+        ip += total;
+    }
+    if (!changed) {
+        free(out);
+        return 0;
+    }
+    *out_code = out;
+    *out_words = op;
+    return 1;
+}
+
 static int translate(Ctx *ctx, const uint32_t *code, size_t words,
                      char *why, size_t cap) {
     D9TevProgram *p = ctx->out;
+    uint32_t *fused = NULL;
+    size_t fused_words = 0;
+    int fusion = fuse_two_live_mul_add(code, words, &fused, &fused_words);
+    if (fusion < 0) {
+        reject(why, cap, "DAG fusion: out of memory");
+        return -1;
+    }
+    if (fusion > 0) {
+        int rc = translate(ctx, fused, fused_words, why, cap);
+        free(fused);
+        return rc;
+    }
     if (!code || words < 2) {
         reject(why, cap, "bytecode too short");
         return -1;
