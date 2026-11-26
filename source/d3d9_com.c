@@ -68,6 +68,7 @@ typedef struct Obj {
      * still subject to draw-time preconditions and a named backend gate. */
     D9MenuShaderMatch menu;int has_menu,has_menu_vs,menu_backend_ok;
     char menu_backend_why[D9_MENU_SHADER_REASON_MAX];
+    int probe_skip; /* TEST-ONLY shader-skip object: bytecode kept, no TEV/plan */
     D9Decl *declaration;
     /* Level surface view: pixels point into the parent texture's CPU store. */
     struct Obj *view_parent;D9Handle view_texture;unsigned view_level,view_face;int is_view,view_cube;
@@ -87,6 +88,7 @@ static struct {
     void (*handlers[KIND_COUNT][MAX_SLOTS])(CPU *c);
     int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;
     int hdr_ldr_fallback; /* measurement-only: store 0x71/0x72 RTs as A8R8G8B8 */int tnl_proto;
+    int shader_skip_probe,shader_probe_logged; /* host-slice measurement-only */
 } g;
 static void upload_tev_constants(void);
 static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
@@ -2083,11 +2085,56 @@ static int menu_ps_state(void){
     }
     return 0;
 }
+static uint32_t shader_probe_object(unsigned kind,uint32_t out,const char *reason,
+                                    uint32_t *code,size_t words){
+    if(!code||!words)return INVALID;
+    if(g.next>=MAX_OBJECTS){free(code);return OUTMEM;}
+    Obj *o=new_obj(kind);if(!o){free(code);return OUTMEM;}
+    /* The request asked for a named, non-executable object: keep the original
+     * token stream only so GetFunction can report it, but install no menu
+     * match, no TEV program and no draw plan. */
+    o->probe_skip=1;o->code=code;o->words=(uint32_t)words;o->has_menu=0;o->has_tev=0;
+    retain(g.dev);M32(out)=o->guest;
+    if(!g.shader_probe_logged){
+        g.shader_probe_logged=1;
+        fprintf(stderr,"[d3d9] MEASUREMENT ONLY shader-skip probe active: %s (%s); "
+                       "non-executable shader object created, draws will be refused\n",
+                kind==VS?"CreateVertexShader":"CreatePixelShader",
+                reason&&*reason?reason:"shader outside the certified closure");
+    }
+    return OK;
+}
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     if(!address||(address&3)||!ptr(out,4)||g.next>=MAX_OBJECTS)return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
     if(!count)return INVALID;if(count>D9_SHADER_MAX_WORDS)count=D9_SHADER_MAX_WORDS;
     uint32_t *code=malloc(count*4);if(!code)return OUTMEM;for(size_t i=0;i<count;++i)guest_read32(g.mem,address+(uint32_t)i*4,code+i);
+    /* Measurement-only skip probe: a shader outside the certified closure is
+     * represented by a named, non-executable object so the census can pass the
+     * renderer's shader wall.  Draws with it are explicitly refused below.
+     * Without the env this branch is not taken and the old closure/legacy
+     * rejection path is unchanged. */
+    if(g.shader_skip_probe){
+        D9MenuClosureVerdict probe_verdict;
+        D9MenuClosureRequest request;
+        memset(&request,0,sizeof request);
+        request.stage=kind==PS?D9_MENU_STAGE_PS:D9_MENU_STAGE_VS;
+        request.code=code;request.available_words=count;
+        int match=d9_menu_closure_certify(&request,&probe_verdict);
+        if(match!=D9_MENU_MATCH){
+            char reason[D9_MENU_CLOSURE_REASON_MAX];
+            snprintf(reason,sizeof reason,"%s",probe_verdict.reason[0]?
+                     probe_verdict.reason:"shader outside the certified closure");
+            /* GetFunction must report the real token-stream length.  The
+             * scan is the same one the legacy path uses; it never mutates. */
+            D9ShaderInfo info;
+            d9_shader_analyze_tev(code,count,&info,NULL);
+            size_t words=info.saw_end&&info.words?info.words:count;
+            uint32_t *exact=realloc(code,words*4);
+            if(exact)code=exact;
+            return shader_probe_object(kind,out,reason,code,words);
+        }
+    }
     /* Named first-menu closure.  While the TESV menu path has armed this
      * contract, the only shaders that may be created are the certified
      * menu.logo.ps / menu.composite.ps / menu.generic.vs set.  Anything else
@@ -2373,6 +2420,13 @@ static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2
     if(provided<need||!ptr(p,(size_t)need*8))RET(INVALID,3);memcpy(ptr(p,(size_t)need*8),o->declaration->elements,(need-1)*8);
     D9VertexElement end={0xff,0,D9_DECL_UNUSED,0,0,0};memcpy(ptr(p+(need-1)*8,8),&end,8);RET(OK,3);}
 static int shader_state(void){
+    /* A code-less shader created by the measurement-only skip probe is never
+     * executable: refuse the batch by name instead of drawing with no plan. */
+    if((g.vs&&g.vs->probe_skip)||(g.ps&&g.ps->probe_skip)){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "shader-skip probe: draw with a code-less shader is refused (measurement only)");
+        return D9_UNSUPPORTED;
+    }
     /* A selected menu plan still needs its declaration/material preconditions
      * and a backend that can execute it.  Both are named refusals here, before
      * the draw, so the batch is never partially submitted. */
@@ -2810,6 +2864,11 @@ static int d9_com_start(GuestMemory *m,D9Device *d,const D9Backend *ops,void *ct
     const char *hdr=getenv("TESV_D3D9_HDR_LDR_FALLBACK");
     g.hdr_ldr_fallback=hdr&&!strcmp(hdr,"1");
     if(g.hdr_ldr_fallback)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: float render targets are stored as A8R8G8B8; not shippable\n");
+    const char *skip=getenv("TESV_D3D9_SHADER_SKIP_PROBE");
+    g.shader_skip_probe=skip&&skip[0]&&strcmp(skip,"0")?1:0;
+    g.shader_probe_logged=0;
+    if(g.shader_skip_probe)fprintf(stderr,"[d3d9] MEASUREMENT ONLY: shader-skip probe active (host slice only); "
+        "non-closure shaders become non-executable objects and their draws are refused\n");
     if(d)(void)d9_set_tnl_proto(d,g.tnl_proto);
     g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
     init_tables();win32_set_external_resolver(d9_com_resolve,NULL);

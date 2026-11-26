@@ -243,6 +243,8 @@ Add-Test "pica_cube_texture" $liftCommon ($legacySources + @("source/d3d9_core.c
 Add-Test "texture_update" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3dx_texture_shims.c") + $picaSources + @("tests/texture_update_smoke.c")) @()
 # GetRenderTargetData readback into a CPU offscreen surface; front-buffer refusal.
 Add-Test "rt_readback" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3dx_texture_shims.c") + $picaSources + @("tests/rt_readback_smoke.c")) @()
+# Measurement-only shader-skip probe (unknown shader -> non-executable object, draw refusal).
+Add-Test "shader_skip_probe" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3dx_texture_shims.c") + $picaSources + @("tests/shader_skip_probe_smoke.c")) @()
 Add-Test "render_target" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/render_target_smoke.c") @()
 Add-Test "render_target_bounded" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_null.c", "tests/render_target_bounded_smoke.c") @()
 Add-Test "render_target_budget" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/render_target_budget_smoke.c") @()
@@ -396,7 +398,11 @@ if (Test-Path $TesvExe) {
         } else {
             Write-Log "tesv_slice: no generated D3DX table; hotpatch bodies will fail explicitly"
         }
-        Add-Test "tesv_slice" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c", "source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160")
+        $sliceCubeProbe = @()
+        if (Select-String -Path (Join-Path $TesvSliceGen "tesv_*.c") -SimpleMatch -Pattern "tesv_cube_probe_fb5c20" -List -ErrorAction SilentlyContinue) {
+            $sliceCubeProbe = @("source/tesv_cube_probe_slice.c")
+        }
+        Add-Test "tesv_slice" $sliceFlags ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "source/tesv_slice_main.c", "source/tesv_sm3_probe.c", "source/tesv_cube_probe.c") + $sliceCubeProbe + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_null.c", "source/d3dx_texture_shims.c", "source/d3dx_surface_shims.c") + $picaSources + $sliceSrc + $sliceD3dx) @($TesvExe, ".", "200000", "167772160")
     }
 }
 

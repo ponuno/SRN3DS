@@ -817,6 +817,80 @@ The final fault remains `0x00ced19d rep movsd`, count `0x11`, `ESI=0`, address
 `0`; `CreateCubeTexture`, depth, scene, shaders, `SetTexture`, draw and `Present`
 remain unreached. No cube or frame is claimed.
 
+### Shader-skip probe (2026-11-26)
+
+`TESV_D3D9_SHADER_SKIP_PROBE=1` is host-slice-only and **MEASUREMENT ONLY**. It
+does not change `GetDeviceCaps`, the SM3 words or T&L, and it must never become
+a shipping default.
+
+- With the env unset, `CreateVertexShader`/`CreatePixelShader` keep the existing
+  closure and legacy behavior: unknown token streams still return
+  `D3DERR_NOTAVAILABLE`/`D3DERR_INVALIDCALL` and no object is created.
+- With the env set, a token stream that fails `d9_menu_closure_certify()` is
+  turned into a named object: the existing token walk supplies the END length,
+  the original token stream is retained only for `GetFunction`, and the object
+  carries `probe_skip=1`, `has_menu=0`, `has_tev=0` and no draw plan. The device
+  is retained and Create* returns `S_OK`. One `MEASUREMENT ONLY ...` line is
+  printed for the first such object.
+- `SetVertexShader`/`SetPixelShader` accept the object through the normal
+  lookup. `shader_state()` checks `probe_skip` before every menu/legacy
+  precondition and refuses any draw with `D3DERR_NOTAVAILABLE` and
+  `shader-skip probe: draw with a code-less shader is refused (measurement only)`.
+  No batch is submitted and no pixels are fabricated.
+
+Host test `tests/shader_skip_probe_smoke.c` (registered as `shader_skip_probe`)
+covers env-off rejection, env-on create/`GetFunction`, QI `IUnknown`,
+`AddRef`/`Release`, repeated create/release, `Set*`, the named draw refusal,
+caps `0x00082000` unchanged, the unchanged NORMAL-FVF refusal, and shutdown.
+Targeted run PASS; full suite **106 passed, 0 failed** (the full suite does not
+register `tesv_slice` without `-TesvSliceGen`; its separate targeted build was
+10 passed, 1 expected diagnostic).
+
+#### Census (evidence: `E:\Skyrim_N3DS_build\analysis\shader_skip_probe_census2.err`)
+
+Slice `E:\Skyrim_N3DS_build\analysis\growth_probe\gen01` (its three
+`tesv_cube_probe_fb5c20` call-site renames are present; the companion
+`source/tesv_cube_probe_slice.c` is now in the `tesv_slice` source list).
+Targeted slice build: **10 passed, 1 expected diagnostic**, 153 s. Run:
+
+```text
+TESV_MEMPROBE=1 TESV_D3D9_CAPS_PROBE=1 TESV_D3D9_TRACE=1
+TESV_D3D9_SM3_GATE_PROBE=1 TESV_D3D9_HDR_LDR_FALLBACK=1
+TESV_D3D9_BUDGET_MB=64 TESV_D3D9_CUBE_SKIP_PROBE=1
+TESV_D3D9_SHADER_SKIP_PROBE=1 N3DS_IRC_PATH=F:\Skyrim\ir\tesv.irc
+tesv_slice.exe F:\Skyrim\TESV.exe F:\Skyrim 2000000000 167772160
+```
+
+Result: **94.791 s**, exit `1`. First trace tuple `Direct3DCreate9 ->
+0x50002000`; the next reported tuple is `GetAdapterCount -> 1`. The last D3D
+tuple before the fault is
+`IDirect3DSurface9::Release slot=2 this=0x50002190 caller=0x00ce715b -> S_OK`.
+Then the first fatal event is
+`[guest] unmapped addr=00000000 bytes=68 last_call=0x004b7a20` with
+`esp=1007fab0 stack=541154d8 408486b0 541153e8 408486cc 54115280 00000000`,
+i.e. the same `0x00ced19d rep movsd` (count `0x11`, `ESI=0`) format/buffer-table
+blocker recorded above.
+
+Counts in this run: `CreateDepthStencilSurface` 0, `SetRenderTarget` 0,
+`SetDepthStencilSurface` 0, `CreateVertexShader` 0, `CreatePixelShader` 0,
+`SetTexture` 0, both draw entry points 0, `Present` 0, and `CreateCubeTexture`
+0. The engine therefore never creates a probe object: the census dies in the
+format descriptor path before any shader creation. The shader-skip behavior is
+covered by the host test, not by this census. Cube-skip is active; it does not
+fault at `0xfb6090` here because the earlier format/descriptor path dies first.
+
+Next blocker: initialize or validate the `f_CECDC0` `[esp+0x18]` base array
+before `0xced04b` (or skip the `0xc92676` group build and its slot bookkeeping)
+so the 68-byte descriptor copy stops reading NULL. Only then can the census
+reach `CreateCubeTexture`/depth/render-target/shaders/`SetTexture`/draw/`Present`.
+The probe is measurement-only; no cube or frame is claimed.
+
+ARM `-Mode com -Isolated shader_skip`: `.elf` 5,912,604 B SHA256
+`ef05ee582eb21aed7050b48e6da687f39869644a6bd88b22166ef583a63054f4`;
+`.3dsx` 867,460 B SHA256
+`7b33e74dc3a1338dfdcc87be8105fea982ecceafe0a7dbdd4911bbf782b78e5a`;
+`.text` 849,836 B.
+
 ## Ordered next blockers
 
 1. **SM3 renderer gate (`0x00c6e22d`).** Requires level 7 (VS/PS 3.0) while the
