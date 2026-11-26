@@ -157,3 +157,13 @@ Azahar pixel proof for the 512x256 retained target, the present blit and the
 depth clear is not done. Host evidence is pixel-complete through the null
 backend only. PICA depth and stencil share one 24+8 buffer, so a Z-only clear
 also writes the stencil byte (documented in `docs/BACK_BUFFER_LOCKABLE.md`).
+
+The render-target *texture* path is now explicit: `D9Backend.target_texture()`
+returns the sampleable view, core stores that in `Texture.native`, and citro3d
+keeps the view inside `NativeTarget` sharing the target's storage.  The target
+is the sole owner; no second delete.  Core budget counts colour bytes only
+(1024x1024 RGBA8 = 4 MiB); the citro3d depth attachment is backend-owned and a
+1024x1024 colour+depth pair is expected to exceed the 6 MiB VRAM budget, in
+which case `target_create` is surfaced as `D9_BACKEND`, not a fake success.
+Host mock coverage is in `tests/render_texture_sample_smoke.c`; no real VRAM
+or Azahar sampling proof is claimed.

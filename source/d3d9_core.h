@@ -180,6 +180,12 @@ typedef struct {
     int (*draw_menu)(void *ctx,const D9ColorVertex *vertices,size_t count,
                      const D9Matrix *clip,void *tex0,void *tex1,
                      const D9DrawState *state,const float (*constants)[4]);
+    /* Sampleable view of a render-target native handle.  Required for
+     * D3DUSAGE_RENDERTARGET textures: core stores this result in
+     * Texture.native instead of assuming the target itself is a texture.
+     * NULL means the backend cannot sample its targets and RT-texture creation
+     * is refused by name. */
+    void *(*target_texture)(void *ctx,void *native);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);

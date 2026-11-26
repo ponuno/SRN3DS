@@ -213,6 +213,9 @@ static int null_draw_two(void *ctx,const D9ColorVertex *vertices,size_t count,
         return -1;
     return null_draw_colored(ctx,vertices,count,clip,tex0,stage0);
 }
+static void *null_target_texture(void *ctx,void *native){
+    (void)ctx;return native;
+}
 static int null_draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
                           const D9Matrix *clip,void *tex0,void *tex1,
                           const D9DrawState *state,const float (*constants)[4]){
@@ -238,7 +241,7 @@ static int null_draw_menu(void *ctx,const D9ColorVertex *vertices,size_t count,
 }
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
-    null_target_write,null_depth_clear,null_target_viewport,null_draw_menu};
+    null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

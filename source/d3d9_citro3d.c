@@ -57,7 +57,7 @@ void d9_citro_close(D9Citro *c){
     if(c->target)C3D_RenderTargetDelete(c->target);C3D_Fini();free(c);
 }
 typedef struct {C3D_Tex tex;unsigned levels;} NativeTex;
-typedef struct {C3D_Tex tex;C3D_RenderTarget *target;unsigned w,h,format;} NativeTarget;
+typedef struct {C3D_Tex tex;C3D_RenderTarget *target;NativeTex sample;unsigned w,h,format;} NativeTarget;
 static int tex_create(void *ctx,unsigned w,unsigned h,unsigned levels,void **handle){
     (void)ctx;NativeTex *n=calloc(1,sizeof *n);if(!n||!levels){free(n);return -1;}
     C3D_TexInitParams params={(u16)w,(u16)h,(u8)(levels-1),GPU_RGBA8,GPU_TEX_2D,false};
@@ -308,7 +308,14 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
             C3D_RenderTargetClear(t->target,C3D_CLEAR_DEPTH|C3D_CLEAR_COLOR,0,0);
         C3D_FrameEnd(0);
     }
+    /* Sampling view: same C3D_Tex data, separate filter/wrap state.  The
+     * target's own C3D_Tex owns the storage; the view is never deleted. */
+    t->sample.tex=t->tex;t->sample.levels=1;
     t->w=w;t->h=h;t->format=format;*native=t;return 0;
+}
+static void *target_texture(void *ctx,void *native){
+    (void)ctx;NativeTarget *t=native;if(!t)return NULL;
+    return &t->sample;
 }
 static int target_bind(void *ctx,void *native){
     D9Citro *c=ctx;if(!c||!c->scene)return -1;
@@ -457,4 +464,4 @@ static int target_blit(void *ctx,const D9BlitRegion *dst,const D9BlitRegion *src
 }
 const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,tex_upload,tex_delete,begin,draw,end,NULL,tex_create_encoded,tex_upload_encoded,
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
-    target_write,depth_clear,target_viewport,draw_menu};return &ops;}
+    target_write,depth_clear,target_viewport,draw_menu,target_texture};return &ops;}

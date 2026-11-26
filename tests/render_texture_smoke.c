@@ -94,6 +94,9 @@ static void core_render_texture(void) {
 
 /* ----------------------------------------------------------------- COM --- */
 
+#define TEX_MAGIC 0x54455831u
+#define TARGET_MAGIC 0x54475231u
+#define SAMPLE_MAGIC 0x53414d31u
 typedef struct {
     unsigned created, uploaded, deleted, begin, draw, end;
     size_t n;
@@ -102,8 +105,11 @@ typedef struct {
     D9DrawState state;
     D9Vertex vertices[36];
     unsigned targets_created, targets_deleted, targets_bound;
+    unsigned sample_draws, texture_draws;
 } Mock;
-typedef struct { size_t base; unsigned levels; uint8_t *data; } Tex;
+typedef struct { size_t base; unsigned levels; uint8_t *data; uint32_t magic; } Tex;
+typedef struct { uint32_t magic; } MockSample;
+typedef struct { uint32_t magic; MockSample sample; } MockTarget;
 
 static int tex_create(void *ctx, unsigned w, unsigned h, unsigned levels, void **native) {
     Mock *m = ctx;
@@ -111,6 +117,7 @@ static int tex_create(void *ctx, unsigned w, unsigned h, unsigned levels, void *
     if (!t) return -1;
     t->base = (size_t)w * h * 4;
     t->levels = levels;
+    t->magic = TEX_MAGIC;
     size_t total = 0;
     for (unsigned i = 0; i < levels; ++i) total += t->base >> (2 * i);
     t->data = malloc(total);
@@ -149,6 +156,9 @@ static int draw(void *ctx, const D9Vertex *v, size_t n, const D9Matrix *mat, voi
                 const D9DrawState *state) {
     Mock *s = ctx;
     assert(s->active && v && mat && t && n <= 36);
+    uint32_t magic = *(uint32_t *)t;
+    assert(magic == TEX_MAGIC || magic == SAMPLE_MAGIC);
+    if (magic == SAMPLE_MAGIC) ++s->sample_draws; else ++s->texture_draws;
     s->n = n;
     s->clip = *mat;
     s->state = *state;
@@ -165,23 +175,40 @@ static void end(void *ctx) {
 static int target_create(void *ctx, unsigned w, unsigned h, unsigned format, void **native) {
     Mock *m = ctx;
     (void)w; (void)h; (void)format;
-    *native = (void *)(uintptr_t)(++m->targets_created);
+    MockTarget *t = calloc(1, sizeof *t);
+    if (!t) return -1;
+    t->magic = TARGET_MAGIC;
+    t->sample.magic = SAMPLE_MAGIC;
+    *native = t;
+    ++m->targets_created;
     return 0;
 }
 static void target_delete(void *ctx, void *native) {
     Mock *m = ctx;
-    (void)native;
+    MockTarget *t = native;
+    assert(t && t->magic == TARGET_MAGIC);
+    t->magic = 0;
+    free(t);
     ++m->targets_deleted;
 }
 static int target_bind(void *ctx, void *native) {
     Mock *m = ctx;
-    (void)native;
+    MockTarget *t = native;
+    assert(!t || t->magic == TARGET_MAGIC);
     ++m->targets_bound;
     return 0;
 }
 static int target_clear(void *ctx, void *native, uint32_t argb) {
-    (void)ctx; (void)native; (void)argb;
+    (void)ctx; (void)argb;
+    MockTarget *t = native;
+    assert(!t || t->magic == TARGET_MAGIC);
     return 0;
+}
+static void *target_texture(void *ctx, void *native) {
+    (void)ctx;
+    MockTarget *t = native;
+    assert(t && t->magic == TARGET_MAGIC);
+    return &t->sample;
 }
 static const D9Backend ops = {
     .texture_create = tex_create,
@@ -194,6 +221,7 @@ static const D9Backend ops = {
     .target_delete = target_delete,
     .target_bind = target_bind,
     .target_clear = target_clear,
+    .target_texture = target_texture,
 };
 
 static uint32_t call(D9ComDemo *s, uint32_t object, unsigned slot,
@@ -283,6 +311,7 @@ static void com_render_texture(void) {
     assert(m.draw == draws_before + 1);
     assert(m.targets_bound >= 1);
     assert(m.n == 36);
+    assert(m.sample_draws == 1 && m.texture_draws == 0);
 
     /* 5. Restoring the implicit back buffer and the demo texture still works. */
     uint32_t back[] = {0, 0};

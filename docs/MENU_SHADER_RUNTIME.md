@@ -129,6 +129,12 @@ The fixed PICA vertex shader still emits position+texcoord0 only, so the
 material loader must still supply normal/tangent evidence and the c8 ambient
 value.  No menu frame or pixel proof is claimed.
 
+Render-target textures use an explicit `D9Backend.target_texture()` sample view;
+core stores that handle in `Texture.native` instead of assuming a target is a
+texture.  This is required for a menu plan that samples a rendered LDR target.
+The citro3d view is embedded in `NativeTarget` and shares the target's storage;
+the target remains the only owner and the only delete.
+
 ### 1.4 Caps and closure separation
 
 - `d9_menu_closure_caps_claim()` and `d9_adapter_caps()` remain
@@ -248,7 +254,7 @@ powershell -File tools\run_host_tests.ps1 `
   -OutDir C:\Users\vasya\Documents\Skyrim_N3DS_wt\menu-shader-vs\build_host_full_menu_abs
 ```
 
-Result: **74 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
+Result: **80 passed, 1 diagnostic, 0 failed**. The diagnostic is `tesv_slice`
 hitting the documented guest memory gate (`Not enough memory to run
 application.`), not a rendering PASS.
 

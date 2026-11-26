@@ -350,15 +350,26 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
     if(!d||d->scene||d->teardown||!out||!d->next||pool!=D9_POOL_DEFAULT||
        usage!=D9_USAGE_RENDERTARGET||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))
         return D9_INVALID;
+    if(!d->ops.target_texture){
+        if(out)*out=0;
+        set_diagnosis(d,"CreateTexture: backend has no sampleable render-target texture view");
+        return D9_UNSUPPORTED;
+    }
     D9Handle tgt=0;int rc=d9_create_render_target(d,w,h,format,0,&tgt);
     if(rc)return rc;
     Target *tg=target(d,tgt);
     Texture *slot=NULL;
     for(unsigned i=0;i<MAX_TEXTURES;++i)if(!d->textures[i].id){slot=&d->textures[i];break;}
     if(!tg||!slot){d9_release_render_target(d,tgt);return D9_MEMORY;}
+    void *sample=d->ops.target_texture(d->ctx,tg->native);
+    if(!sample){
+        d9_release_render_target(d,tgt);
+        set_diagnosis(d,"CreateTexture: backend target_texture() returned no sampleable view");
+        return D9_BACKEND;
+    }
     Texture t;memset(&t,0,sizeof t);
     t.w=w;t.h=h;t.format=format;t.levels=1;t.gpu_levels=1;t.pool=pool;t.usage=usage;
-    t.gpu_only=1;t.native=tg->native;t.rt_target=tgt;
+    t.gpu_only=1;t.native=sample;t.rt_target=tgt;
     t.level[0]=(Level){w,h,(size_t)w*4u,(size_t)w*h*4u,0,1};
     t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }

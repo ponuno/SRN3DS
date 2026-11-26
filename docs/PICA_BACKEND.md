@@ -110,9 +110,37 @@ texture units and materialises each stage constant from the c0..c8 float bank.
 Host coverage: `pica_tev` **152 checks, 0 failures** (including the exact
 menu-light plan, fog/tint plans, third-texture/duplicate-sampler/c9/color1
 negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
-menu plan through `draw_menu`, and the full suite is **74 passed, 1 diagnostic,
+menu plan through `draw_menu`, and the full suite is **80 passed, 1 diagnostic,
 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
-(`.3dsx` 786,472 B, `.elf` 5,368,816 B).  No Azahar pixel run is claimed.
+(`.3dsx` 802,176 B, `.elf` 5,463,344 B).  No Azahar pixel run is claimed.
+
+### Render-target texture handles
+
+A target native and a sampleable texture native are separate objects.  The
+append-only `D9Backend.target_texture(ctx, native)` returns the sampleable view;
+`d9_create_render_texture()` stores that result in `Texture.native` instead of
+assuming the target pointer is a texture.  A backend without the callback gets a
+named `D9_UNSUPPORTED`; a callback returning NULL gets `D9_BACKEND`.
+
+Citro3d keeps an embedded `NativeTex` view (`C3D_Tex` with the target's data and
+separate filter/wrap state) inside `NativeTarget`.  The target's own `C3D_Tex`
+owns the allocation; the view is never deleted, and `target_delete()` is the
+only delete.  The null backend returns the target handle; its draw ignores it.
+`tests/render_texture_sample_smoke.c` uses distinct target/texture magic tags and
+also covers bind-before/after-target-render, `draw_two` with a second RT
+texture, exactly-once deletion, and the colour-budget/backend split.
+
+### Render-target budget
+
+The core budget counts **colour bytes only** (`w*h*4`).  A 1024x1024 RGBA8
+target is 4 MiB; the citro3d target also allocates a DEPTH24_STENCIL8
+attachment, so the pair needs about 8 MiB.  That exceeds the 6 MiB N3DS VRAM
+budget and is expected to fail in `target_create()`; the failure is surfaced as
+`D9_BACKEND`, never as a fake success.  Practical sizes are 256x256 (512 KiB
+colour+depth) and 512x512 (2 MiB colour+depth).  By colour accounting alone the
+core's 16 MiB device budget admits four 1024x1024 colour buffers, but actual
+VRAM residency (plus depth) is lower.  No hardware memory proof is claimed
+here.
 
 The translator packs literals as RGBA8 with red in bits 0..7.  PICA TEV constants
 are ABGR8888, so the descriptor stores `constant_abgr`, produced by
