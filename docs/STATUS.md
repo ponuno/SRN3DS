@@ -361,7 +361,11 @@ to the PICA depth attachment and `Clear(Z|STENCIL)` reaches hardware. The ARM
 through the null backend only; Azahar pixel proof for the retained target,
 present orientation and depth clear is still open. Details and the remaining
 steps: `docs/BACK_BUFFER_LOCKABLE.md`. The HW T&L caps bit is still **not**
-claimed; scope and the A/B decision inputs: `docs/HWTL_IMPLEMENTATION.md`.
+claimed; a CPU T&L prototype (fixed-function state, directional/point lights,
+per-vertex lighting into the existing draw path) now exists behind
+`TESV_D3D9_TNL_PROTO=1` for host tests and does not change `DevCaps`. Scope,
+test evidence and the remaining work for a real claim:
+`docs/HWTL_IMPLEMENTATION.md`.
 
 ## 7. Next concrete tasks
 

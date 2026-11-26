@@ -78,7 +78,7 @@ static struct {
     char last_diagnostic[224];
     char last_stretch_rejection[192];
     void (*handlers[KIND_COUNT][MAX_SLOTS])(CPU *c);
-    int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;
+    int trace;const char *trace_method;unsigned trace_kind,trace_slot;uint32_t trace_this;int tnl_proto;
 } g;
 static void upload_tev_constants(void);
 static uint32_t arg(CPU *c,unsigned n){return M32(c->r[4]+4+n*4);}
@@ -487,6 +487,7 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
         if(!g.device){d3d_log("CreateDevice","d3d9_core could not create the device from the backend");RET(UNAVAILABLE,7);}
         g.owns_device=1;
     }
+    (void)d9_set_tnl_proto(g.device,g.tnl_proto);
     presentation_store(ptr(pp,56));
     int bbrc=d9_set_back_buffer_info_ex(g.device,g.pp[0],g.pp[1],g.pp[2],g.pp[11]&1u);
     if(bbrc){
@@ -540,6 +541,7 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     D9Device *replacement=d9_create_device(g.backend,g.backend_ctx,g.backend_limit);
     if(!replacement){d3d_log("Reset","could not allocate replacement device state");RET(OUTMEM,2);}
     d9_destroy_device(g.device);g.device=replacement;
+    (void)d9_set_tnl_proto(g.device,g.tnl_proto);
     presentation_store(ptr(pp,56));
     int bbrc=d9_set_back_buffer_info_ex(g.device,g.pp[0],g.pp[1],g.pp[2],g.pp[11]&1u);
     if(bbrc){
@@ -810,7 +812,9 @@ static void cooperative(CPU *c){RET(obj(A(0),DEVICE)?OK:INVALID,1);}
 static void direct3d(CPU *c){if(!obj(A(0),DEVICE)||!g.factory||!ptr(A(1),4))RET(INVALID,2);retain(g.factory);M32(A(1))=g.factory->guest;RET(OK,2);}
 static void resource_device(CPU *c){Obj *o=obj(A(0),0);if(!o||o->kind<VB||!g.dev||!ptr(A(1),4))RET(INVALID,2);retain(g.dev);M32(A(1))=g.dev->guest;RET(OK,2);}
 static int fvf_admitted(unsigned fvf){
-    return !fvf||fvf==0x102u||fvf==0x104u||fvf==0x142u||fvf==0x144u;
+    if(!g.tnl_proto)return !fvf||fvf==0x102u||fvf==0x104u||fvf==0x142u||fvf==0x144u;
+    D9Decl decl;const char *why=NULL;
+    return d9_decl_from_fvf(fvf,1,&decl,&why)==D9_OK;
 }
 static void create_vb(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,7);M32(out)=0;
     if(A(6))RET(INVALID,7);
@@ -1128,17 +1132,142 @@ static void present(CPU *c){if(!obj(A(0),DEVICE)||g.phase!=2||A(1)||A(2)||A(3)||
 #endif
         collect();
     }RET(hr(rc),5);}
+static int transform_index(unsigned which){
+    return which==256?D9_WORLD:which==2?D9_VIEW:which==3?D9_PROJECTION:-1;
+}
 static void transform(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(2),sizeof(D9Matrix)))RET(INVALID,3);
-    unsigned t=A(1)==256?D9_WORLD:A(1)==2?D9_VIEW:A(1)==3?D9_PROJECTION:99;D9Matrix m;memcpy(&m,ptr(A(2),sizeof m),sizeof m);RET(hr(d9_set_transform(g.device,t,&m)),3);}
+    int t=transform_index(A(1));if(t<0){d3d_log("SetTransform","only WORLD/VIEW/PROJECTION transforms exist");RET(INVALID,3);}
+    D9Matrix m;memcpy(&m,ptr(A(2),sizeof m),sizeof m);RET(hr(d9_set_transform(g.device,t,&m)),3);}
+/* ---- test-only CPU T&L state surface ------------------------------------- */
+static int guest_floats(uint32_t address,float *out,unsigned count){
+    size_t bytes=(size_t)count*4;
+    if(!ptr(address,bytes))return -1;
+    memcpy(out,ptr(address,bytes),bytes);return 0;
+}
+static int guest_put_floats(uint32_t address,const float *in,unsigned count){
+    size_t bytes=(size_t)count*4;
+    if(!ptr(address,bytes))return -1;
+    memcpy(ptr(address,bytes),in,bytes);return 0;
+}
+static int read_material(uint32_t p,D9MaterialState *m){
+    if(!ptr(p,68))return -1;
+    return guest_floats(p,m->diffuse,4)||guest_floats(p+16,m->ambient,4)||
+           guest_floats(p+32,m->specular,4)||guest_floats(p+48,m->emissive,4)||
+           guest_floats(p+64,&m->power,1)?-1:0;
+}
+static int write_material(uint32_t p,const D9MaterialState *m){
+    if(!ptr(p,68))return -1;
+    return guest_put_floats(p,m->diffuse,4)||guest_put_floats(p+16,m->ambient,4)||
+           guest_put_floats(p+32,m->specular,4)||guest_put_floats(p+48,m->emissive,4)||
+           guest_put_floats(p+64,&m->power,1)?-1:0;
+}
+static int read_light(uint32_t p,D9LightState *l){
+    if(!ptr(p,104))return -1;
+    l->type=M32(p);
+    return guest_floats(p+4,l->diffuse,4)||guest_floats(p+20,l->specular,4)||
+           guest_floats(p+36,l->ambient,4)||guest_floats(p+52,l->position,3)||
+           guest_floats(p+64,l->direction,3)||guest_floats(p+76,&l->range,1)||
+           guest_floats(p+80,&l->falloff,1)||guest_floats(p+84,&l->attenuation0,1)||
+           guest_floats(p+88,&l->attenuation1,1)||guest_floats(p+92,&l->attenuation2,1)||
+           guest_floats(p+96,&l->theta,1)||guest_floats(p+100,&l->phi,1)?-1:0;
+}
+static int write_light(uint32_t p,const D9LightState *l){
+    if(!ptr(p,104))return -1;
+    M32(p)=l->type;
+    return guest_put_floats(p+4,l->diffuse,4)||guest_put_floats(p+20,l->specular,4)||
+           guest_put_floats(p+36,l->ambient,4)||guest_put_floats(p+52,l->position,3)||
+           guest_put_floats(p+64,l->direction,3)||guest_put_floats(p+76,&l->range,1)||
+           guest_put_floats(p+80,&l->falloff,1)||guest_put_floats(p+84,&l->attenuation0,1)||
+           guest_put_floats(p+88,&l->attenuation1,1)||guest_put_floats(p+92,&l->attenuation2,1)||
+           guest_put_floats(p+96,&l->theta,1)||guest_put_floats(p+100,&l->phi,1)?-1:0;
+}
+static void get_transform(CPU *c){
+    if(!obj(A(0),DEVICE)||!ptr(A(2),sizeof(D9Matrix)))RET(INVALID,3);
+    if(!g.tnl_proto){d3d_fail("GetTransform","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,3);}
+    int t=transform_index(A(1));if(t<0){d3d_fail("GetTransform","only WORLD/VIEW/PROJECTION transforms exist",INVALID);RET(INVALID,3);}
+    D9Matrix m;if(d9_get_transform(g.device,t,&m))RET(INVALID,3);
+    memcpy(ptr(A(2),sizeof m),&m,sizeof m);RET(OK,3);
+}
+static void multiply_transform(CPU *c){
+    if(!obj(A(0),DEVICE)||!ptr(A(2),sizeof(D9Matrix)))RET(INVALID,3);
+    if(!g.tnl_proto){d3d_fail("MultiplyTransform","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,3);}
+    int t=transform_index(A(1));if(t<0){d3d_fail("MultiplyTransform","only WORLD/VIEW/PROJECTION transforms exist",INVALID);RET(INVALID,3);}
+    D9Matrix m;memcpy(&m,ptr(A(2),sizeof m),sizeof m);
+    int rc=d9_multiply_transform(g.device,t,&m);
+    if(rc){d3d_fail("MultiplyTransform","the prototype rejected the matrix",INVALID);RET(INVALID,3);}
+    RET(OK,3);
+}
+static void set_material(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,2);
+    if(!g.tnl_proto){d3d_fail("SetMaterial","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,2);}
+    D9MaterialState m;if(read_material(A(1),&m)){
+        d3d_fail("SetMaterial","invalid 68-byte D3DMATERIAL9 pointer",INVALID);RET(INVALID,2);}
+    int rc=d9_set_material(g.device,&m);
+    if(rc){d3d_fail("SetMaterial","material contains non-finite values or a negative power",INVALID);RET(INVALID,2);}
+    RET(OK,2);
+}
+static void get_material(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,2);
+    if(!g.tnl_proto){d3d_fail("GetMaterial","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,2);}
+    D9MaterialState m;if(d9_get_material(g.device,&m)){
+        d3d_fail("GetMaterial","invalid device state",INVALID);RET(INVALID,2);}
+    if(write_material(A(1),&m)){
+        d3d_fail("GetMaterial","invalid 68-byte D3DMATERIAL9 pointer",INVALID);RET(INVALID,2);}
+    RET(OK,2);
+}
+static void set_light(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    if(!g.tnl_proto){d3d_fail("SetLight","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,3);}
+    unsigned index=A(1);uint32_t p=A(2);
+    if(index>=D9_TNL_MAX_LIGHTS||!ptr(p,104)){
+        d3d_fail("SetLight","invalid light index or 104-byte D3DLIGHT9 pointer",INVALID);RET(INVALID,3);}
+    D9LightState l;if(read_light(p,&l)){
+        d3d_fail("SetLight","invalid D3DLIGHT9 pointer",INVALID);RET(INVALID,3);}
+    int rc=d9_set_light(g.device,index,&l);
+    if(rc==D9_UNSUPPORTED){
+        d3d_fail("SetLight","only point and directional lights are implemented by the CPU T&L prototype",UNAVAILABLE);RET(UNAVAILABLE,3);}
+    if(rc){d3d_fail("SetLight","invalid light type or non-finite light values",INVALID);RET(INVALID,3);}
+    RET(OK,3);
+}
+static void get_light(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    if(!g.tnl_proto){d3d_fail("GetLight","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,3);}
+    unsigned index=A(1);uint32_t p=A(2);
+    if(index>=D9_TNL_MAX_LIGHTS||!ptr(p,104)){
+        d3d_fail("GetLight","invalid light index or 104-byte D3DLIGHT9 pointer",INVALID);RET(INVALID,3);}
+    D9LightState l;if(d9_get_light(g.device,index,&l)||write_light(p,&l)){
+        d3d_fail("GetLight","invalid light state or pointer",INVALID);RET(INVALID,3);}
+    RET(OK,3);
+}
+static void light_enable(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    if(!g.tnl_proto){d3d_fail("LightEnable","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,3);}
+    unsigned index=A(1),enable=A(2)?1:0;
+    if(index>=D9_TNL_MAX_LIGHTS){d3d_fail("LightEnable","invalid light index",INVALID);RET(INVALID,3);}
+    if(d9_set_light_enable(g.device,index,(int)enable))RET(INVALID,3);
+    RET(OK,3);
+}
+static void get_light_enable(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,3);
+    if(!g.tnl_proto){d3d_fail("GetLightEnable","the CPU T&L prototype is disabled (TESV_D3D9_TNL_PROTO)",UNAVAILABLE);RET(UNAVAILABLE,3);}
+    unsigned index=A(1);uint32_t out=A(2);
+    if(index>=D9_TNL_MAX_LIGHTS||!ptr(out,4)){d3d_fail("GetLightEnable","invalid light index or output pointer",INVALID);RET(INVALID,3);}
+    int enable=0;if(d9_get_light_enable(g.device,index,&enable))RET(INVALID,3);
+    M32(out)=enable?1u:0u;RET(OK,3);
+}
 static void set_fvf(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,2);
     unsigned fvf=A(1);const char *why=NULL;D9Decl decl;
-    if(d9_decl_from_fvf(fvf,&decl,&why)){
+    if(d9_decl_from_fvf(fvf,g.tnl_proto,&decl,&why)){
         d3d_fail("SetFVF",why?why:"FVF is not an admitted XYZ|TEX1/DIFFUSE variant",UNAVAILABLE);RET(UNAVAILABLE,2);
     }
     if(d9_set_vertex_declaration(g.device,&decl)){d3d_fail("SetFVF","declaration rejected by the core",INVALID);RET(INVALID,2);}
     bind(&g.declaration,NULL);g.fvf=fvf;g.last_diagnostic[0]=0;RET(OK,2);}
 static void get_fvf(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);M32(A(1))=g.fvf;RET(OK,2);}
-static void set_render(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);RET(hr(d9_set_render_state(g.device,A(1),A(2))),3);}
+static void set_render(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,3);
+    int rc=d9_set_render_state(g.device,A(1),A(2));
+    if(rc==D9_UNSUPPORTED){
+        d3d_fail("SetRenderState",d9_last_draw_diagnostic(g.device),UNAVAILABLE);RET(UNAVAILABLE,3);}
+    RET(hr(rc),3);}
 static void get_render(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(2),4)||d9_get_render_state(g.device,A(1),&v))RET(INVALID,3);M32(A(2))=v;RET(OK,3);}
 static void set_sampler(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,4);RET(hr(d9_set_unit_sampler(g.device,A(1),A(2),A(3))),4);}
 /* D3D9 IDirect3DDevice9 slot 67.  The GFx UI batch uses stage 0
@@ -1173,7 +1302,7 @@ static void texture(CPU *c){Obj *o=obj(A(2),TEX);if(!obj(A(0),DEVICE)||(A(2)&&!o
  * tangent and ambient+emissive evidence remains explicit-only. */
 static const D9Decl *menu_current_decl(D9Decl *tmp){
     if(g.declaration&&g.declaration->declaration)return g.declaration->declaration;
-    if(g.fvf){const char *why=NULL;if(!d9_decl_from_fvf(g.fvf,tmp,&why))return tmp;}
+    if(g.fvf){const char *why=NULL;if(!d9_decl_from_fvf(g.fvf,0,tmp,&why))return tmp;}
     return NULL;
 }
 static int menu_decl_has(const D9Decl *decl,unsigned usage,unsigned index){
@@ -1666,6 +1795,7 @@ static void draw_indexed_up(CPU *c){
  X(d3dperf_set_options) X(d3dperf_begin) X(d3dperf_end) X(d3dperf_status) \
  X(cooperative) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
  X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
+ X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
  X(stream) X(indices) X(texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
@@ -1785,6 +1915,9 @@ static void init_tables(void){
     SLOT(DEVICE,23,create_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
     SLOT(DEVICE,36,create_offscreen);SLOT(DEVICE,37,set_render_target);SLOT(DEVICE,38,get_render_target);SLOT(DEVICE,34,stretch_rect);SLOT(DEVICE,39,set_depth_stencil);
     SLOT(DEVICE,40,get_depth_stencil);SLOT(DEVICE,41,begin_scene);SLOT(DEVICE,42,end_scene);SLOT(DEVICE,43,clear);SLOT(DEVICE,44,transform);
+    SLOT(DEVICE,45,get_transform);SLOT(DEVICE,46,multiply_transform);
+    SLOT(DEVICE,49,set_material);SLOT(DEVICE,50,get_material);
+    SLOT(DEVICE,51,set_light);SLOT(DEVICE,52,get_light);SLOT(DEVICE,53,light_enable);SLOT(DEVICE,54,get_light_enable);
     SLOT(DEVICE,47,set_viewport);SLOT(DEVICE,48,get_viewport);SLOT(DEVICE,65,texture);
     SLOT(DEVICE,21,set_gamma_ramp);SLOT(DEVICE,22,get_gamma_ramp);
     SLOT(DEVICE,75,set_scissor_rect);SLOT(DEVICE,76,get_scissor_rect);
@@ -1807,6 +1940,10 @@ static int d9_com_start(GuestMemory *m,D9Device *d,const D9Backend *ops,void *ct
     if(!m||g.mem||guest_map(m,BASE,0x3000))return -1;
     memset(&g,0,sizeof g);g.mem=m;g.device=d;g.backend=ops;g.backend_ctx=ctx;g.backend_limit=limit;g.clear=0xff000000u;g.clear_flags=1;
     const char *trace=getenv("TESV_D3D9_TRACE");g.trace=trace&&!strcmp(trace,"1");
+    const char *tnl=getenv("TESV_D3D9_TNL_PROTO");
+    g.tnl_proto=tnl&&tnl[0]&&strcmp(tnl,"0")?1:0;
+    if(g.tnl_proto)fprintf(stderr,"[d3d9] CPU T&L prototype enabled (host/test only; DevCaps are unchanged)\n");
+    if(d)(void)d9_set_tnl_proto(d,g.tnl_proto);
     g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
     init_tables();win32_set_external_resolver(d9_com_resolve,NULL);
     capture_start();

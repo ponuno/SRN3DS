@@ -70,15 +70,22 @@ int main(void){
     D9Decl rhw,rhwc,xyzc,plain,unsupported;
 
     /* --- FVF decode: exact required byte sizes and semantics ------------- */
-    assert(!d9_decl_from_fvf(0x102,&plain,&why));
-    assert(!d9_decl_from_fvf(0x104,&rhw,&why));
+    assert(!d9_decl_from_fvf(0x102,0,&plain,&why));
+    assert(!d9_decl_from_fvf(0x104,0,&rhw,&why));
     assert(rhw.position_t&&rhw.color==UINT32_MAX&&rhw.uv!=UINT32_MAX&&rhw.required[0]==24);
-    assert(!d9_decl_from_fvf(0x142,&xyzc,&why));
+    assert(!d9_decl_from_fvf(0x142,0,&xyzc,&why));
     assert(!xyzc.position_t&&xyzc.color!=UINT32_MAX&&xyzc.required[0]==24);
-    assert(!d9_decl_from_fvf(0x144,&rhwc,&why));
+    assert(!d9_decl_from_fvf(0x144,0,&rhwc,&why));
     assert(rhwc.position_t&&rhwc.color!=UINT32_MAX&&rhwc.uv!=UINT32_MAX&&rhwc.required[0]==28);
-    assert(d9_decl_from_fvf(0x112,&unsupported,&why)==D9_UNSUPPORTED&&why&&strstr(why,"unsupported"));
-    assert(d9_decl_from_fvf(0x1ff,&unsupported,&why)==D9_UNSUPPORTED);
+    assert(d9_decl_from_fvf(0x112,0,&unsupported,&why)==D9_UNSUPPORTED&&why&&strstr(why,"unsupported"));
+    assert(d9_decl_from_fvf(0x1ff,0,&unsupported,&why)==D9_UNSUPPORTED);
+    /* The prototype widens exactly one bit: NORMAL (production stays closed). */
+    D9Decl lit;
+    assert(!d9_decl_from_fvf(0x112,1,&lit,&why));
+    assert(lit.normal!=UINT32_MAX&&lit.uv!=UINT32_MAX&&lit.required[0]==32);
+    assert(!d9_decl_from_fvf(0x012,1,&lit,&why));
+    assert(lit.normal!=UINT32_MAX&&lit.uv==UINT32_MAX&&lit.required[0]==24);
+    assert(d9_decl_from_fvf(0x112,0,&lit,&why)==D9_UNSUPPORTED);
 
     /* --- POSITIONT without colour draws today --------------------------- */
     Mock gray={0};

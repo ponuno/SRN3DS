@@ -200,7 +200,7 @@ int main(void) {
         {64.0f, 0.0f, 0.5f, 0xff00ff00u, 1.0f, 0.0f},
         {0.0f, 64.0f, 0.5f, 0xff0000ffu, 0.0f, 1.0f}};
     D9Decl packed_decl; const char *why = NULL;
-    assert(!d9_decl_from_fvf(0x142, &packed_decl, &why));
+    assert(!d9_decl_from_fvf(0x142,0, &packed_decl, &why));
     D9Handle vb = upload_vb(d, packed, sizeof packed);
     bind_colour(d, vb, sizeof packed[0]);
     assert(!d9_set_vertex_declaration(d, &packed_decl));
@@ -249,7 +249,7 @@ int main(void) {
     const D9Vertex plain[3] = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 0}, {0, 1, 0, 0, 1}};
     D9Handle vb3 = upload_vb(d, plain, sizeof plain);
     D9Decl plain_decl;
-    assert(!d9_decl_from_fvf(0x102, &plain_decl, &why));
+    assert(!d9_decl_from_fvf(0x102,0, &plain_decl, &why));
     assert(!d9_set_stream_source(d, vb3, 0, sizeof plain[0]));
     bind_colour(d, vb3, sizeof plain[0]);
     assert(!d9_begin_scene(d, 0xff000000));

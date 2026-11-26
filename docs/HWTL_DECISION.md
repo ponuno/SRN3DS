@@ -107,7 +107,11 @@ renderer." This is the current shipping behaviour.
   See `docs/BACK_BUFFER_LOCKABLE.md`.
 - `docs/HWTL_IMPLEMENTATION.md` records the minimum honest Option A scope
   (~4,000-6,000 LOC plus a pixel-proof campaign and DX7 `DRAWPRIMITIVES2EX`
-  conformance). It does not fit the current pass, so it is not implemented.
+  conformance) and now also the **CPU T&L prototype** implemented behind
+  `TESV_D3D9_TNL_PROTO=1`: fixed-function state, up to eight directional/point
+  lights, material ambient/diffuse/emissive, per-vertex lighting feeding the
+  existing draw path, named refusals, host tests. It does not change `DevCaps`
+  and is not hardware T&L.
 - The 2026-11-26 census reached `CreateDevice` `S_OK` but the engine aborts at
   the SM3 gate `0x00c6e22d` before any render pass, depth surface, Clear or
   fixed-function lighting call. The A/B census is therefore still empty; SM3 is

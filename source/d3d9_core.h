@@ -42,6 +42,48 @@ typedef struct {
     const D9TevProgram *pixel_shader; /* borrowed; transient, not guest render state */
 } D9DrawState;
 
+/* --- test-only fixed-function T&L prototype --------------------------------
+ * Enabled per device by d9_set_tnl_proto(); COM sets it from
+ * TESV_D3D9_TNL_PROTO (host/test only).  It never changes DevCaps: the lighting
+ * runs on the CPU before the existing draw path and is not a hardware-T&L
+ * claim.  Supported subset: world/view/projection transforms, material
+ * ambient/diffuse/emissive, up to eight directional or point lights, per-vertex
+ * diffuse+ambient lighting, optional vertex-diffuse source and normal
+ * normalization.  Spot lights, specular, local viewer, two-sided lighting and
+ * texture transforms are rejected with names. */
+#define D9_TNL_MAX_LIGHTS 8
+enum {D9_LIGHT_POINT=1,D9_LIGHT_SPOT=2,D9_LIGHT_DIRECTIONAL=3};
+enum {
+    D9_RS_SPECULARENABLE=29,
+    D9_RS_LIGHTING=137,
+    D9_RS_AMBIENT=139,
+    D9_RS_COLORVERTEX=141,
+    D9_RS_NORMALIZENORMALS=143,
+    D9_RS_DIFFUSEMATERIALSOURCE=145,
+    D9_RS_LOCALVIEWER=146,
+    D9_RS_AMBIENTMATERIALSOURCE=147,
+    D9_RS_SPECULARMATERIALSOURCE=148,
+    D9_RS_EMISSIVEMATERIALSOURCE=149
+};
+enum {D9_MCS_MATERIAL=0,D9_MCS_COLOR1=1,D9_MCS_COLOR2=2};
+typedef struct {
+    unsigned type;
+    float diffuse[4],specular[4],ambient[4];
+    float position[3],direction[3];
+    float range,falloff,attenuation0,attenuation1,attenuation2,theta,phi;
+} D9LightState;
+typedef struct {
+    float diffuse[4],ambient[4],specular[4],emissive[4],power;
+} D9MaterialState;
+typedef struct {
+    D9LightState lights[D9_TNL_MAX_LIGHTS];
+    unsigned enabled;            /* bit i = light i enabled */
+    D9MaterialState material;
+    uint32_t global_ambient;     /* D3DCOLOR 0xAARRGGBB */
+    unsigned lighting,color_vertex,normalize_normals,local_viewer,specular_enable;
+    unsigned diffuse_source,ambient_source,specular_source,emissive_source;
+} D9TnlState;
+
 /* Backend description of one LDR surface participating in a blit.  native ==
  * NULL selects the implicit back buffer.  width/height are the logical D3D
  * surface dimensions (the 400x240 presentation size for the back buffer);
@@ -288,6 +330,22 @@ int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program);
  * are rejected.  This is evidence for the menu path, not a D3D9 cap. */
 int d9_set_tev_constants(D9Device *d,const float values[9][4]);
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m);
+/* Test-only CPU T&L prototype.  d9_set_tnl_proto resets the fixed-function
+ * lighting state to the D3D defaults when enabling; disabling leaves the
+ * existing path untouched.  None of these calls changes DevCaps.
+ * d9_set_light returns D9_UNSUPPORTED for a spot light and D9_INVALID for a
+ * bad index/type/NaN; d9_multiply_transform implements World = World * m
+ * (row-vector convention) for WORLD/VIEW/PROJECTION. */
+void d9_tnl_defaults(D9TnlState *s);
+int d9_set_tnl_proto(D9Device *d,int enabled);
+int d9_tnl_proto(const D9Device *d);
+int d9_set_light(D9Device *d,unsigned index,const D9LightState *light);
+int d9_get_light(const D9Device *d,unsigned index,D9LightState *out);
+int d9_set_light_enable(D9Device *d,unsigned index,int enable);
+int d9_get_light_enable(const D9Device *d,unsigned index,int *enable);
+int d9_set_material(D9Device *d,const D9MaterialState *m);
+int d9_get_material(const D9Device *d,D9MaterialState *m);
+int d9_multiply_transform(D9Device *d,unsigned which,const D9Matrix *m);
 /* Shader constants c0..c3 as four D3D column-vector clip rows, or NULL for fixed transforms. */
 int d9_set_shader_clip(D9Device *d,const D9Matrix *rows);
 /* D3D9 numeric D3DRS/D3DSAMP values. Unsupported enum/state returns D9_INVALID. */

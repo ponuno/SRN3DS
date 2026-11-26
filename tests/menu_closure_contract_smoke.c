@@ -730,9 +730,9 @@ static void test_menu_runtime_vs_family(void) {
              D9_MENU_VS_OUT_COLOR0 | D9_MENU_VS_OUT_COLOR1);
 
     /* The certified member needs the declaration inputs it really reads. */
-    CHECK_EQ(d9_decl_from_fvf(0x142u, &decl, &decl_why), D9_OK);
+    CHECK_EQ(d9_decl_from_fvf(0x142u, 0, &decl, &decl_why), D9_OK);
     CHECK_EQ(d9_menu_shader_vs_check_decl(&vs, &decl, why, sizeof why), 0);
-    CHECK_EQ(d9_decl_from_fvf(0x102u, &decl, &decl_why), D9_OK);
+    CHECK_EQ(d9_decl_from_fvf(0x102u, 0, &decl, &decl_why), D9_OK);
     CHECK_EQ(d9_menu_shader_vs_check_decl(&vs, &decl, why, sizeof why), -1);
     CHECK(strstr(why, "color0") != 0);
     CHECK_EQ(d9_menu_shader_vs_check_decl(&vs, NULL, why, sizeof why), -1);

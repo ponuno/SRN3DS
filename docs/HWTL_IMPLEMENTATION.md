@@ -1,6 +1,7 @@
 # HW T&L: implementation scope, decision and alternatives
 
-Date: 2026-11-26. Status: **decision only; not implemented, caps unchanged.**
+Date: 2026-11-26. Status: **CPU T&L prototype implemented behind a test flag;
+no caps claim; the hardware pipeline is not implemented.**
 Companion to `docs/HWTL_DECISION.md` (measurement and options) and
 `docs/BACK_BUFFER_LOCKABLE.md` (the feature that now lets the engine get past
 `CreateDevice`).
@@ -94,10 +95,10 @@ CPU-composed normal matrix avoids a separate inverse-transpose uniform.
   material/light uniforms, state) plus a `caps` query so the core never
   advertises a capability the backend lacks. Existing `draw`/`draw_colored`
   stay.
-- `d3d9_com.c`: `SetLight` (slot 50), `GetLight` (51), `LightEnable` (52),
-  `GetLightEnable` (53), `SetMaterial` (54), `GetMaterial` (55),
-  `MultiplyTransform` (45), `SetClipPlane` (113), `GetClipPlane` (114). Each
-  must validate the full D3DLIGHT9/D3DMATERIAL9 layout (104/68 bytes) in guest
+- `d3d9_com.c`: `MultiplyTransform` (slot 46), `SetMaterial` (49), `GetMaterial`
+  (50), `SetLight` (51), `GetLight` (52), `LightEnable` (53), `GetLightEnable`
+  (54), `GetTransform` (45), `SetClipPlane` (55), `GetClipPlane` (56). Each must
+  validate the full D3DLIGHT9/D3DMATERIAL9 layout (104/68 bytes) in guest
   memory, reject non-finite values and invalid types/ranges, and stay
   unimplemented-with-a-name only if the caps bit is not claimed.
 - `d3d9_adapter.c`: `max_active_lights`, `shade_caps`, `max_user_clip_planes`,
@@ -120,18 +121,88 @@ CPU-composed normal matrix avoids a separate inverse-transpose uniform.
 the current pass. It is not one more incremental feature; it is a second
 renderer pipeline.
 
+### 2.5 CPU T&L prototype (implemented behind a test flag)
+
+`TESV_D3D9_TNL_PROTO=1` (read once at `d9_com_init`; host/test only) enables:
+
+- core state: world/view/projection (existing), `MultiplyTransform`
+  (`World = World * matrix`, row-vector), material diffuse/ambient/emissive,
+  up to eight directional or point lights, `LightEnable`, global ambient,
+  `NORMALIZENORMALS`, `COLORVERTEX` and the diffuse material source;
+- per-vertex CPU lighting: world position, inverse-transpose world normal,
+  ambient + Σ(diffuse·N·L·attenuation), emissive; the result is fed to the
+  existing colour draw path (`draw_colored`) so the PICA rasteriser still draws
+  the triangles;
+- normal fetch in the declaration/FVF path: only when the flag is on may an FVF
+  carry `D3DFVF_NORMAL` (0x010), and the admitted FVF set widens by exactly that
+  bit. The production path still rejects it;
+- honest refusals: spot lights, specular, local viewer, two-sided lighting,
+  texture transforms, extra texture stages, lighting without a NORMAL element,
+  a singular world matrix, non-finite light/material values, indices >= 8;
+- COM slots 45/46/49/50/51/52/53/54.
+
+Defaults are the D3D9 fixed-function ones (lighting on, material diffuse/ambient
+white, no light enabled, global ambient black, diffuse source COLOR1). With the
+flag off, every new entry point is a named `D3DERR_NOTAVAILABLE` refusal and
+`SetFVF(0x012)` is rejected, exactly as before.
+
+Tests: `tests/tnl_proto_smoke.c` runs twice
+(`tnl_proto_off`/`tnl_proto`). The null backend records the exact RGBA handed to
+the rasteriser, so the test proves:
+
+- directional light: normals facing/opposing the light give red/black;
+- point light: a linear attenuation of 0.5 at distance 2 gives 0.5 red;
+- ambient: material ambient (0.5) × global ambient (0x40) gives 0.125;
+- material/light round-trips; `GetTransform`/`MultiplyTransform` composition;
+- refusals: spot, index 8, NaN light, specular, local viewer, lighting without
+  a normal, singular world matrix;
+- `D3DCAPS9.DevCaps == 0x00082000` (no `0x10000`, no `0x8000`) with the flag off
+  and on.
+
+This is **not** hardware T&L and **not** a rendered frame: it is CPU math feeding
+the existing draw path, with caps unchanged. It does not satisfy TESV's gate and
+must not be described as such.
+
+### 2.6 What remains to claim `HWTRANSFORMANDLIGHT` honestly
+
+After the prototype the state validation, the lighting math, the fetch shape and
+the test harness already exist; what remains is moving the math into PICA and
+conforming to the DX7 protocol:
+
+1. **PICA vertex-shader variants** for the supported state matrix (light count,
+   specular, local viewer, two-sided, texture transform, fog) or a single
+   unrolled 8-light shader; normal/colour attributes; uniforms for
+   material/lights. Estimated 600-1,000 LOC plus picasso asm, **high** risk
+   (variant explosion, uniform/instruction budget).
+2. **Fog** (vertex or PICA stage) and **user clip planes** (shader-side, or
+   `MaxUserClipPlanes = 0`).
+3. **`DRAWPRIMITIVES2EX`** conformance: extended `DrawPrimitives2` streaming,
+   state blocks, vertex-buffer management. Separate large protocol.
+4. **Truthful caps fields**: `MaxActiveLights`, `ShadeCaps`, `MaxUserClipPlanes`,
+   `MaxPointSize`, and `DRAWPRIMITIVES2EX`, only after 1-3 pass.
+5. **Azahar pixel proof** for directional/point/specular/fog plus the conformance
+   tests.
+
+Estimated remaining effort: ~2,000-3,500 LOC plus the pixel/conformance campaign
+(4-8 weeks at the current pace), dominated by the PICA variants and
+`DRAWPRIMITIVES2EX`. The prototype reduces the core/state/test portion, not the
+shader or protocol risk.
+
 ## 3. Decision for this pass
 
 - **Do not** set `D3DDEVCAPS_HWTRANSFORMANDLIGHT`, do not set
-  `DRAWPRIMITIVES2EX`, and do not add placeholder `SetLight` successes.
-- Keep the truthful `0x00082000` caps in the production path.
+  `DRAWPRIMITIVES2EX`, and do not add placeholder `SetLight` successes in the
+  production path.
+- Keep the truthful `0x00082000` caps.
+- The CPU T&L prototype (`TESV_D3D9_TNL_PROTO=1`) implements the state and math
+  behind a test flag without changing `DevCaps`; it is a stepping stone, not a
+  capability claim (section 2.5).
 - Finish the features that Option A and Option B both need first (done:
   lockable retained back buffer, Present blit, explicit depth-stencil).
-- Run the **post-device census** now that `CreateDevice` can succeed: the new
-  `TESV_D3D9_PP_PROBE`-free path removes the only rejected parameter, so the
-  host slice can record whether TESV ever calls `SetLight`/`LightEnable`/
-  `SetMaterial`/`MultiplyTransform` after device creation. That measurement
-  decides between A and B; it does not require a frame.
+- The post-device census reached `CreateDevice` `S_OK` but the engine aborts at
+  the SM3 gate `0x00c6e22d` before any render pass, depth surface, Clear or
+  fixed-function lighting call (section 5). The A/B census is therefore still
+  empty; SM3 is the next renderer blocker, not T&L.
 
 ## 4. Alternatives
 

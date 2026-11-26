@@ -40,6 +40,7 @@ struct D9Device {
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
     float tev_constants[9][4];
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
+    D9TnlState tnl;int tnl_proto;
     D9Handle texture1;
     D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
     D9ColorVertex color_scratch[MAX_DRAW_VERTICES];unsigned color_scratch_count;
@@ -119,6 +120,7 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     d->second=d->state;
     d->second.stage_colorop=d->second.stage_alphaop=D9_TOP_DISABLE;
     d->second.stage_texcoordindex=1;
+    d9_tnl_defaults(&d->tnl);
     for(unsigned i=0;i<3;++i)d9_matrix_identity(&d->transforms[i]);return d;
 }
 static Buffer *buffer(D9Device *d,D9Handle id){if(id)for(unsigned i=0;i<MAX_BUFFERS;++i)if(d->buffers[i].id==id)return &d->buffers[i];return NULL;}
@@ -600,6 +602,146 @@ int d9_set_shader_clip(D9Device *d,const D9Matrix *m){if(!d)return D9_INVALID;if
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;
     for(unsigned i=0;i<4;++i){d->shader_clip.m[0][i]=m->m[1][i];d->shader_clip.m[1][i]=-m->m[0][i];
         d->shader_clip.m[2][i]=m->m[2][i]-m->m[3][i];d->shader_clip.m[3][i]=m->m[3][i];}d->shader_active=1;return D9_OK;}
+/* --- test-only CPU T&L prototype ----------------------------------------- */
+void d9_tnl_defaults(D9TnlState *s){
+    if(!s)return;
+    memset(s,0,sizeof *s);
+    /* D3D9 fixed-function defaults: lighting and vertex colour on, global
+     * ambient black, material diffuse/ambient white, no enabled light. */
+    s->lighting=1;s->color_vertex=1;
+    s->diffuse_source=D9_MCS_COLOR1;
+    s->ambient_source=D9_MCS_MATERIAL;
+    s->specular_source=D9_MCS_COLOR2;
+    s->emissive_source=D9_MCS_MATERIAL;
+    for(unsigned i=0;i<4;++i){s->material.diffuse[i]=1.0f;s->material.ambient[i]=1.0f;}
+    for(unsigned i=0;i<D9_TNL_MAX_LIGHTS;++i)s->lights[i].type=D9_LIGHT_POINT;
+}
+int d9_set_tnl_proto(D9Device *d,int enabled){
+    if(!d)return D9_INVALID;
+    d->tnl_proto=enabled?1:0;
+    if(d->tnl_proto)d9_tnl_defaults(&d->tnl);
+    return D9_OK;
+}
+int d9_tnl_proto(const D9Device *d){return d?d->tnl_proto:0;}
+static int light_type_ok(unsigned type){
+    if(type==D9_LIGHT_POINT||type==D9_LIGHT_DIRECTIONAL)return 1;
+    return type==D9_LIGHT_SPOT?2:0;
+}
+static int light_values_finite(const D9LightState *l){
+    for(unsigned i=0;i<4;++i)
+        if(!isfinite(l->diffuse[i])||!isfinite(l->specular[i])||!isfinite(l->ambient[i]))return 0;
+    for(unsigned i=0;i<3;++i)
+        if(!isfinite(l->position[i])||!isfinite(l->direction[i]))return 0;
+    return isfinite(l->range)&&isfinite(l->falloff)&&isfinite(l->attenuation0)&&
+           isfinite(l->attenuation1)&&isfinite(l->attenuation2)&&isfinite(l->theta)&&isfinite(l->phi);
+}
+int d9_set_light(D9Device *d,unsigned index,const D9LightState *light){
+    if(!d||!d->tnl_proto||!light||index>=D9_TNL_MAX_LIGHTS)return D9_INVALID;
+    int ok=light_type_ok(light->type);
+    if(ok!=1||!light_values_finite(light))return ok==2?D9_UNSUPPORTED:D9_INVALID;
+    d->tnl.lights[index]=*light;return D9_OK;
+}
+int d9_get_light(const D9Device *d,unsigned index,D9LightState *out){
+    if(!d||!d->tnl_proto||!out||index>=D9_TNL_MAX_LIGHTS)return D9_INVALID;
+    *out=d->tnl.lights[index];return D9_OK;
+}
+int d9_set_light_enable(D9Device *d,unsigned index,int enable){
+    if(!d||!d->tnl_proto||index>=D9_TNL_MAX_LIGHTS)return D9_INVALID;
+    unsigned bit=1u<<index;if(enable)d->tnl.enabled|=bit;else d->tnl.enabled&=~bit;return D9_OK;
+}
+int d9_get_light_enable(const D9Device *d,unsigned index,int *enable){
+    if(!d||!d->tnl_proto||!enable||index>=D9_TNL_MAX_LIGHTS)return D9_INVALID;
+    *enable=(d->tnl.enabled>>index)&1u;return D9_OK;
+}
+int d9_set_material(D9Device *d,const D9MaterialState *m){
+    if(!d||!d->tnl_proto||!m)return D9_INVALID;
+    for(unsigned i=0;i<4;++i)
+        if(!isfinite(m->diffuse[i])||!isfinite(m->ambient[i])||
+           !isfinite(m->specular[i])||!isfinite(m->emissive[i]))return D9_INVALID;
+    if(!isfinite(m->power)||m->power<0.0f)return D9_INVALID;
+    d->tnl.material=*m;return D9_OK;
+}
+int d9_get_material(const D9Device *d,D9MaterialState *m){
+    if(!d||!d->tnl_proto||!m)return D9_INVALID;
+    *m=d->tnl.material;return D9_OK;
+}
+int d9_multiply_transform(D9Device *d,unsigned which,const D9Matrix *m){
+    if(!d||!d->tnl_proto||!m||which>2)return D9_INVALID;
+    for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;
+    D9Matrix out;d9_matrix_multiply(&out,&d->transforms[which],m);d->transforms[which]=out;return D9_OK;
+}
+/* Row-vector normal matrix: transpose(inverse(world 3x3)).  Returns 0 on
+ * success, -1 when the world matrix is singular. */
+static int tnl_normal_matrix(const D9Matrix *world,float nm[3][3]){
+    float a[3][3];for(unsigned i=0;i<3;++i)for(unsigned j=0;j<3;++j)a[i][j]=world->m[i][j];
+    float det=a[0][0]*(a[1][1]*a[2][2]-a[1][2]*a[2][1])
+             -a[0][1]*(a[1][0]*a[2][2]-a[1][2]*a[2][0])
+             +a[0][2]*(a[1][0]*a[2][1]-a[1][1]*a[2][0]);
+    if(!isfinite(det)||fabsf(det)<1e-12f)return -1;
+    float inv[3][3];
+    inv[0][0]=(a[1][1]*a[2][2]-a[1][2]*a[2][1])/det;
+    inv[0][1]=(a[0][2]*a[2][1]-a[0][1]*a[2][2])/det;
+    inv[0][2]=(a[0][1]*a[1][2]-a[0][2]*a[1][1])/det;
+    inv[1][0]=(a[1][2]*a[2][0]-a[1][0]*a[2][2])/det;
+    inv[1][1]=(a[0][0]*a[2][2]-a[0][2]*a[2][0])/det;
+    inv[1][2]=(a[0][2]*a[1][0]-a[0][0]*a[1][2])/det;
+    inv[2][0]=(a[1][0]*a[2][1]-a[1][1]*a[2][0])/det;
+    inv[2][1]=(a[0][1]*a[2][0]-a[0][0]*a[2][1])/det;
+    inv[2][2]=(a[0][0]*a[1][1]-a[0][1]*a[1][0])/det;
+    for(unsigned i=0;i<3;++i)for(unsigned j=0;j<3;++j)nm[i][j]=inv[j][i];
+    return 0;
+}
+static float clamp01(float v){return v<0.0f?0.0f:v>1.0f?1.0f:v;}
+static int tnl_light_vertex(const D9TnlState *s,const D9Matrix *world,
+                            const float pos[3],const float normal[3],
+                            const D9ColorVertex *vtx,float out[4]){
+    float wp[3];
+    for(unsigned j=0;j<3;++j)
+        wp[j]=pos[0]*world->m[0][j]+pos[1]*world->m[1][j]+pos[2]*world->m[2][j]+world->m[3][j];
+    float nm[3][3];
+    if(tnl_normal_matrix(world,nm))return -1;
+    float n[3]={0,0,0};
+    for(unsigned j=0;j<3;++j)
+        n[j]=normal[0]*nm[0][j]+normal[1]*nm[1][j]+normal[2]*nm[2][j];
+    if(s->normalize_normals){
+        float len=sqrtf(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]);
+        if(len>0.0f&&isfinite(len)){n[0]/=len;n[1]/=len;n[2]/=len;}
+    }
+    float md[4];
+    if(vtx&&s->color_vertex&&s->diffuse_source==D9_MCS_COLOR1){
+        md[0]=vtx->r;md[1]=vtx->g;md[2]=vtx->b;md[3]=vtx->a;
+    }else for(unsigned i=0;i<4;++i)md[i]=s->material.diffuse[i];
+    float ga[4];ga[0]=((s->global_ambient>>16)&0xff)/255.0f;
+    ga[1]=((s->global_ambient>>8)&0xff)/255.0f;ga[2]=(s->global_ambient&0xff)/255.0f;
+    float amb[3],diff[3];
+    for(unsigned j=0;j<3;++j){amb[j]=s->material.ambient[j]*ga[j];diff[j]=0.0f;}
+    for(unsigned i=0;i<D9_TNL_MAX_LIGHTS;++i){
+        if(!(s->enabled&(1u<<i)))continue;
+        const D9LightState *l=&s->lights[i];
+        /* D3D fixed-function light ambient is not range- or distance-
+         * attenuated, so it contributes even when the diffuse term is cut. */
+        for(unsigned j=0;j<3;++j)amb[j]+=s->material.ambient[j]*l->ambient[j];
+        float lv[3],attenuation=1.0f;
+        if(l->type==D9_LIGHT_DIRECTIONAL){
+            lv[0]=-l->direction[0];lv[1]=-l->direction[1];lv[2]=-l->direction[2];
+        }else if(l->type==D9_LIGHT_POINT){
+            lv[0]=l->position[0]-wp[0];lv[1]=l->position[1]-wp[1];lv[2]=l->position[2]-wp[2];
+            float d=sqrtf(lv[0]*lv[0]+lv[1]*lv[1]+lv[2]*lv[2]);
+            if(l->range>0.0f&&d>l->range)continue;
+            float denom=l->attenuation0+l->attenuation1*d+l->attenuation2*d*d;
+            if(!(denom>0.0f)||!isfinite(denom))continue;
+            attenuation=1.0f/denom;
+        }else continue; /* spot is rejected at SetLight */
+        float len=sqrtf(lv[0]*lv[0]+lv[1]*lv[1]+lv[2]*lv[2]);
+        if(!(len>0.0f)||!isfinite(len))continue;
+        lv[0]/=len;lv[1]/=len;lv[2]/=len;
+        float ndl=n[0]*lv[0]+n[1]*lv[1]+n[2]*lv[2];
+        if(ndl>0.0f)for(unsigned j=0;j<3;++j)diff[j]+=md[j]*l->diffuse[j]*ndl*attenuation;
+    }
+    for(unsigned j=0;j<3;++j)out[j]=clamp01(s->material.emissive[j]+amb[j]+diff[j]);
+    out[3]=clamp01(md[3]);
+    return 0;
+}
 static unsigned *render_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned *max){*min=0;*max=1;switch(id){
     case 7:return &s->z_enable;case 14:return &s->z_write;case 15:return &s->alpha_test;case 27:return &s->blend;
     case 19:*min=1;*max=11;return &s->src_blend;case 20:*min=1;*max=11;return &s->dst_blend;
@@ -610,8 +752,71 @@ static unsigned *sampler_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned 
     case 1:*max=3;return &s->address_u;case 2:*max=3;return &s->address_v;
     case 5:return &s->mag_filter;case 6:return &s->min_filter;case 7:*min=0;return &s->mip_filter;
     case 9:*min=0;*max=10;return &s->max_mip;default:return NULL;}}
-int d9_set_render_state(D9Device *d,unsigned id,unsigned v){unsigned lo,hi,*p=d?render_slot(&d->state,id,&lo,&hi):NULL;if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;}
-int d9_get_render_state(D9Device *d,unsigned id,unsigned *v){unsigned lo,hi,*p=d?render_slot(&d->state,id,&lo,&hi):NULL;if(!p||!v)return D9_INVALID;*v=*p;return D9_OK;}
+static int tnl_set_state(D9Device *d,unsigned id,unsigned v){
+    switch(id){
+    case D9_RS_SPECULARENABLE:
+        if(v>1)return D9_INVALID;
+        if(v){set_diagnosis(d,"CPU T&L prototype does not implement per-vertex specular");return D9_UNSUPPORTED;}
+        d->tnl.specular_enable=0;return D9_OK;
+    case D9_RS_LIGHTING:
+        if(v>1)return D9_INVALID;d->tnl.lighting=v;return D9_OK;
+    case D9_RS_AMBIENT:
+        d->tnl.global_ambient=v;return D9_OK;
+    case D9_RS_COLORVERTEX:
+        if(v>1)return D9_INVALID;d->tnl.color_vertex=v;return D9_OK;
+    case D9_RS_NORMALIZENORMALS:
+        if(v>1)return D9_INVALID;d->tnl.normalize_normals=v;return D9_OK;
+    case D9_RS_DIFFUSEMATERIALSOURCE:
+        if(v>D9_MCS_COLOR2)return D9_INVALID;
+        if(v==D9_MCS_COLOR2){set_diagnosis(d,"CPU T&L prototype supports the material or COLOR1 diffuse source");return D9_UNSUPPORTED;}
+        d->tnl.diffuse_source=v;return D9_OK;
+    case D9_RS_AMBIENTMATERIALSOURCE:
+    case D9_RS_EMISSIVEMATERIALSOURCE:
+        if(v>D9_MCS_COLOR2)return D9_INVALID;
+        if(v!=D9_MCS_MATERIAL){set_diagnosis(d,"CPU T&L prototype supports only the material source for ambient/emissive");return D9_UNSUPPORTED;}
+        if(id==D9_RS_AMBIENTMATERIALSOURCE)d->tnl.ambient_source=v;else d->tnl.emissive_source=v;return D9_OK;
+    case D9_RS_SPECULARMATERIALSOURCE:
+        if(v>D9_MCS_COLOR2)return D9_INVALID;d->tnl.specular_source=v;return D9_OK;
+    case D9_RS_LOCALVIEWER:
+        if(v>1)return D9_INVALID;
+        if(v){set_diagnosis(d,"CPU T&L prototype does not implement the local viewer");return D9_UNSUPPORTED;}
+        d->tnl.local_viewer=0;return D9_OK;
+    default:return D9_INVALID;
+    }
+}
+static int tnl_get_state(const D9Device *d,unsigned id,unsigned *v){
+    switch(id){
+    case D9_RS_SPECULARENABLE:*v=d->tnl.specular_enable;return D9_OK;
+    case D9_RS_LIGHTING:*v=d->tnl.lighting;return D9_OK;
+    case D9_RS_AMBIENT:*v=d->tnl.global_ambient;return D9_OK;
+    case D9_RS_COLORVERTEX:*v=d->tnl.color_vertex;return D9_OK;
+    case D9_RS_NORMALIZENORMALS:*v=d->tnl.normalize_normals;return D9_OK;
+    case D9_RS_DIFFUSEMATERIALSOURCE:*v=d->tnl.diffuse_source;return D9_OK;
+    case D9_RS_AMBIENTMATERIALSOURCE:*v=d->tnl.ambient_source;return D9_OK;
+    case D9_RS_SPECULARMATERIALSOURCE:*v=d->tnl.specular_source;return D9_OK;
+    case D9_RS_EMISSIVEMATERIALSOURCE:*v=d->tnl.emissive_source;return D9_OK;
+    case D9_RS_LOCALVIEWER:*v=d->tnl.local_viewer;return D9_OK;
+    default:return D9_INVALID;
+    }
+}
+int d9_set_render_state(D9Device *d,unsigned id,unsigned v){
+    if(!d)return D9_INVALID;
+    if(d->tnl_proto){
+        int rc=tnl_set_state(d,id,v);
+        if(rc!=D9_INVALID)return rc;
+    }
+    unsigned lo,hi,*p=render_slot(&d->state,id,&lo,&hi);
+    if(!p||v<lo||v>hi)return D9_INVALID;*p=v;return D9_OK;
+}
+int d9_get_render_state(D9Device *d,unsigned id,unsigned *v){
+    if(!d||!v)return D9_INVALID;
+    if(d->tnl_proto){
+        int rc=tnl_get_state(d,id,v);
+        if(rc==D9_OK)return D9_OK;
+    }
+    unsigned lo,hi,*p=render_slot(&d->state,id,&lo,&hi);
+    if(!p)return D9_INVALID;*v=*p;return D9_OK;
+}
 int d9_set_sampler_state(D9Device *d,unsigned id,unsigned v){return d9_set_unit_sampler(d,0,id,v);}
 int d9_set_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned v){
     if(stage>=d9_stage_count(d))return D9_UNSUPPORTED;
@@ -686,11 +891,12 @@ static void positiont_matrix(D9Matrix *m,unsigned w,unsigned h){
     m->m[2][2]=1.0f;m->m[2][3]=-1.0f;            /* out z = z - 1 */
     m->m[3][0]=m->m[3][1]=m->m[3][2]=0.0f;m->m[3][3]=1.0f;
 }
-static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9ColorVertex *col){
+static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9ColorVertex *col,float normal[3]){
     if(!d->decl_active){
         memcpy(out,s[0].data+(size_t)index*s[0].stride,sizeof *out);
         *col=(D9ColorVertex){out->x,out->y,out->z,out->u,out->v,1.0f,1.0f,1.0f,1.0f};
-    }else{const D9Decl *decl=&d->declaration;float pos[4],uv[4]={0,0,0,1},rgba[4]={1,1,1,1};
+        normal[0]=normal[1]=normal[2]=0.0f;
+    }else{const D9Decl *decl=&d->declaration;float pos[4],uv[4]={0,0,0,1},rgba[4]={1,1,1,1},nrm[4]={0,0,0,1};
         const D9VertexElement *p=&decl->elements[decl->position];
         if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),pos))return D9_INVALID;
         if(decl->position_t){
@@ -698,11 +904,14 @@ static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9
         }else if(pos[3]!=1.0f)return D9_INVALID;
         if(decl->uv!=UINT32_MAX){p=&decl->elements[decl->uv];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),uv))return D9_INVALID;}
         if(decl->color!=UINT32_MAX){p=&decl->elements[decl->color];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),rgba))return D9_INVALID;}
+        if(decl->normal!=UINT32_MAX){p=&decl->elements[decl->normal];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),nrm))return D9_INVALID;}
         *out=(D9Vertex){pos[0],pos[1],pos[2],uv[0],uv[1]};
         *col=(D9ColorVertex){pos[0],pos[1],pos[2],uv[0],uv[1],rgba[0],rgba[1],rgba[2],rgba[3]};
+        normal[0]=nrm[0];normal[1]=nrm[1];normal[2]=nrm[2];
     }
     return isfinite(out->x)&&isfinite(out->y)&&isfinite(out->z)&&isfinite(out->u)&&isfinite(out->v)&&
-           isfinite(col->r)&&isfinite(col->g)&&isfinite(col->b)&&isfinite(col->a)?D9_OK:D9_INVALID;
+           isfinite(col->r)&&isfinite(col->g)&&isfinite(col->b)&&isfinite(col->a)&&
+           isfinite(normal[0])&&isfinite(normal[1])&&isfinite(normal[2])?D9_OK:D9_INVALID;
 }
 static size_t triangle_index(unsigned type,size_t i){size_t t=i/3,c=i%3;
     if(type==D9_TRIANGLELIST)return i;
@@ -712,6 +921,18 @@ static size_t triangle_index(unsigned type,size_t i){size_t t=i/3,c=i%3;
  * A linear sample or mip transition would use a different physical footprint. */
 static int padded_filter_supported(const Texture *t,const D9DrawState *s){
     return !t||(t->w>=8&&t->h>=8)||(s->min_filter==1&&s->mag_filter==1&&!s->mip_filter&&!s->max_mip);
+}
+/* D3D9 stage 0 CURRENT is the diffuse (vertex) colour.  A lit draw must keep
+ * DIFFUSE/CURRENT in the stage output, otherwise the CPU lighting would be
+ * silently replaced by the texture. */
+static int stage_uses_diffuse(const D9DrawState *s){
+    if(s->stage_colorop==D9_TOP_DISABLE)return 0;
+    if(s->stage_colorop==D9_TOP_SELECTARG1)
+        return s->stage_colorarg1==D9_TA_DIFFUSE||s->stage_colorarg1==D9_TA_CURRENT;
+    if(s->stage_colorop==D9_TOP_SELECTARG2)
+        return s->stage_colorarg2==D9_TA_DIFFUSE||s->stage_colorarg2==D9_TA_CURRENT;
+    return s->stage_colorarg1==D9_TA_DIFFUSE||s->stage_colorarg1==D9_TA_CURRENT||
+           s->stage_colorarg2==D9_TA_DIFFUSE||s->stage_colorarg2==D9_TA_CURRENT;
 }
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>MAX_DRAW_VERTICES/3||(limited&&!count))return D9_INVALID;
@@ -729,8 +950,31 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     if(t&&(t->locked||!t->level[0].uploaded))return D9_INVALID;
     if(t&&d->decl_active&&d->declaration.uv==UINT32_MAX)return D9_INVALID;
     DrawStream streams[D9_MAX_STREAMS]={0};size_t max_index;if(prepare_streams(d,streams,&max_index,up))return D9_INVALID;
+    /* Test-only CPU T&L: light object-space vertices before the existing draw
+     * path.  POSITIONT bypasses the transform, so it is never lit (D3D does the
+     * same for pre-transformed vertices). */
+    int lit=0;
+    if(d->tnl_proto&&d->tnl.lighting&&!(d->decl_active&&d->declaration.position_t)){
+        if(!d->decl_active||d->declaration.normal==UINT32_MAX){
+            set_diagnosis(d,"CPU T&L lighting requires a NORMAL element in the active FVF/declaration");
+            return D9_UNSUPPORTED;
+        }
+        if(!d->ops.draw_colored){
+            set_diagnosis(d,"CPU T&L lighting requires a colour-capable backend (draw_colored)");
+            return D9_UNSUPPORTED;
+        }
+        if(d->second.stage_colorop!=D9_TOP_DISABLE){
+            set_diagnosis(d,"CPU T&L prototype supports only one texture stage");
+            return D9_UNSUPPORTED;
+        }
+        if(!stage_uses_diffuse(&d->state)){
+            set_diagnosis(d,"CPU T&L lighting requires stage 0 to source DIFFUSE/CURRENT; the current stage would drop the lit colour");
+            return D9_UNSUPPORTED;
+        }
+        lit=1;
+    }
     /* Repeated indexed vertices often share UV/position. Cache decoded values per draw only. */
-    struct Cached {uint64_t index;D9Vertex vertex;D9ColorVertex color;int valid;} cache[64]={0};
+    struct Cached {uint64_t index;D9Vertex vertex;D9ColorVertex color;float normal[3];int valid;} cache[64]={0};
     size_t n=(size_t)primitives*3,in=type==D9_TRIANGLELIST?n:(size_t)primitives+2;
     if(indexed&&!(up&&up->indices)&&((size_t)start>ixbytes/step||in>ixbytes/step-(size_t)start))return D9_INVALID;
     for(size_t i=0;i<n;++i){size_t rel=triangle_index(type,i);int64_t index=(int64_t)start+(int64_t)rel;
@@ -739,10 +983,19 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
             if(limited&&(raw<min||(uint64_t)raw>=((uint64_t)min+count)))return D9_INVALID;index=(int64_t)base+raw;}
         if(index<0||(uint64_t)index>max_index)return D9_INVALID;
         struct Cached *entry=&cache[(unsigned)index&63];if(!entry->valid||entry->index!=(uint64_t)index){
-            int rc=fetch(d,streams,(uint64_t)index,&entry->vertex,&entry->color);
+            int rc=fetch(d,streams,(uint64_t)index,&entry->vertex,&entry->color,entry->normal);
             if(rc){set_diagnosis(d,rc==D9_UNSUPPORTED?
                 "POSITIONT vertex has w != 1; the current fixed-w PICA shader cannot represent it":
                 "vertex decode failed");return rc;}
+            if(lit){
+                float out[4];
+                if(tnl_light_vertex(&d->tnl,&d->transforms[D9_WORLD],&entry->vertex.x,entry->normal,
+                                    d->declaration.color!=UINT32_MAX?&entry->color:NULL,out)){
+                    set_diagnosis(d,"CPU T&L: the world matrix is singular; the normal cannot be transformed");
+                    return D9_INVALID;
+                }
+                entry->color.r=out[0];entry->color.g=out[1];entry->color.b=out[2];entry->color.a=out[3];
+            }
             entry->index=(uint64_t)index;entry->valid=1;}
         d->scratch[i]=entry->vertex;d->color_scratch[i]=entry->color;
     }
@@ -758,7 +1011,7 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     }else if(d->shader_active)clip=d->shader_clip;
     else d9_pica_transform(&clip,&d->transforms[0],&d->transforms[1],&d->transforms[2]);
     D9DrawState state=d->state;state.pixel_shader=d->pixel_shader;state.resident_mips=0;if(t)while(state.resident_mips<t->gpu_levels&&t->level[state.resident_mips].uploaded)++state.resident_mips;
-    int has_color=d->decl_active&&d->declaration.color!=UINT32_MAX;
+    int has_color=lit||(d->decl_active&&d->declaration.color!=UINT32_MAX);
     /* Menu TEV plans can need a second texture unit, color0 and an external
      * constant bank.  Route those before the fixed-function two-stage path. */
     if(state.pixel_shader&&d->ops.draw_menu&&

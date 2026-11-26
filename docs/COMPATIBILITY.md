@@ -147,7 +147,9 @@ it has not tested.
 Not supported: universal SM3 translation, fog, anisotropic filtering, multiple
 sampler stages, state blocks, automatic mip generation, instancing frequency >1,
 arbitrary FVF/declaration semantics (normals, skinning, colors are validated but
-unused), ProcessVertices, multisampling, queries, swap-chain control. Reset,
+unused in the production path; a test-only CPU T&L prototype can consume NORMAL
+behind `TESV_D3D9_TNL_PROTO=1`), ProcessVertices,
+multisampling, queries, swap-chain control. Reset,
 back-buffer, CPU offscreen surface, one explicit LDR render-target and viewport
 methods work through COM. `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER` is real: a
 retained 512x256 target for the 400x240 mode with a Present blit and

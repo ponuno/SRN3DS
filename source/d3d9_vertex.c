@@ -34,7 +34,7 @@ int d9_decl_decode(unsigned t,const void *data,size_t bytes,float out[4]){
 static int color_type(unsigned t){return t==D9_DECL_COLOR||t==D9_DECL_UBYTE4||t==D9_DECL_UBYTE4N||t==D9_DECL_FLOAT4;}
 int d9_decl_init(D9Decl *d,const D9VertexElement *e,unsigned n){
     if(!d||!e||!n||n>D9_MAX_DECL)return -1;
-    D9Decl tmp={.count=n,.position=UINT32_MAX,.uv=UINT32_MAX,.color=UINT32_MAX};
+    D9Decl tmp={.count=n,.position=UINT32_MAX,.uv=UINT32_MAX,.color=UINT32_MAX,.normal=UINT32_MAX};
     unsigned position_seen=0,positiont_seen=0;
     for(unsigned i=0;i<n;++i){const D9VertexElement *x=e+i;unsigned size=d9_decl_type_size(x->type),end=(unsigned)x->offset+size;
         if(x->stream>=D9_MAX_STREAMS||!size||x->method||x->usage>13||x->usage_index>15||end>4096)return -1;
@@ -48,6 +48,10 @@ int d9_decl_init(D9Decl *d,const D9VertexElement *e,unsigned n){
             if(x->type!=D9_DECL_FLOAT4)return -1;tmp.position=i;tmp.position_t=1;++positiont_seen;}
         if(x->usage==D9_USAGE_TEXCOORD&&!x->usage_index){if(d9_decl_components(x->type)<2)return -1;tmp.uv=i;}
         if(x->usage==D9_USAGE_COLOR&&!x->usage_index){if(!color_type(x->type))return -1;tmp.color=i;}
+        /* NORMAL is decoded only by the test-only CPU T&L prototype.  It is
+         * admitted here so a declaration carrying it is not misreported as
+         * malformed; an unlit draw still ignores it. */
+        if(x->usage==D9_USAGE_NORMAL&&!x->usage_index){if(d9_decl_components(x->type)<3)return -1;tmp.normal=i;}
         tmp.elements[i]=*x;
     }
     if(tmp.position==UINT32_MAX||position_seen>1||positiont_seen>1||(position_seen&&positiont_seen))return -1;
@@ -58,7 +62,7 @@ static int push_element(D9Decl *d,unsigned stream,unsigned type,unsigned usage,u
     d->elements[d->count++]=(D9VertexElement){(uint16_t)stream,(uint16_t)offset,(uint8_t)type,0,(uint8_t)usage,0};
     return 0;
 }
-int d9_decl_from_fvf(unsigned fvf,D9Decl *decl,const char **why){
+int d9_decl_from_fvf(unsigned fvf,int allow_normal,D9Decl *decl,const char **why){
     if(why)*why=NULL;
     if(!decl){if(why)*why="null declaration output";return D9_INVALID;}
     D9Decl d={0};
@@ -73,6 +77,16 @@ int d9_decl_from_fvf(unsigned fvf,D9Decl *decl,const char **why){
         if(why)*why="FVF has no XYZ/XYZRHW position";
         return D9_UNSUPPORTED;
     }
+    if(fvf&D9_FVF_NORMAL){
+        /* CPU T&L prototype only: the production path has no user-visible
+         * normal semantics yet, so it must not admit the bit. */
+        if(!allow_normal){
+            if(why)*why="FVF contains NORMAL, which is unsupported without the CPU T&L prototype";
+            return D9_UNSUPPORTED;
+        }
+        if(push_element(&d,0,D9_DECL_FLOAT3,D9_USAGE_NORMAL,offset,why))return D9_INVALID;
+        offset+=12;
+    }
     if(fvf&D9_FVF_DIFFUSE){
         if(push_element(&d,0,D9_DECL_COLOR,D9_USAGE_COLOR,offset,why))return D9_INVALID;
         offset+=4;
@@ -81,8 +95,10 @@ int d9_decl_from_fvf(unsigned fvf,D9Decl *decl,const char **why){
         if(push_element(&d,0,D9_DECL_FLOAT2,D9_USAGE_TEXCOORD,offset,why))return D9_INVALID;
         offset+=8;
     }
-    if(fvf&~(D9_FVF_XYZ|D9_FVF_XYZRHW|D9_FVF_DIFFUSE|D9_FVF_TEX1)){
-        if(why)*why="FVF contains unsupported bits (normal/specular/stencil/size or extra texcoords)";return D9_UNSUPPORTED;}
+    unsigned allowed=D9_FVF_XYZ|D9_FVF_XYZRHW|D9_FVF_DIFFUSE|D9_FVF_TEX1;
+    if(allow_normal)allowed|=D9_FVF_NORMAL;
+    if(fvf&~allowed){
+        if(why)*why="FVF contains unsupported bits (specular/stencil/size or extra texcoords)";return D9_UNSUPPORTED;}
     if(d9_decl_init(decl,d.elements,d.count)){if(why)*why="FVF maps to a declaration the core cannot admit";return D9_UNSUPPORTED;}
     return D9_OK;
 }

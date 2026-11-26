@@ -9,7 +9,7 @@ enum {D9_DECL_FLOAT1=0,D9_DECL_FLOAT2,D9_DECL_FLOAT3,D9_DECL_FLOAT4,D9_DECL_COLO
 enum {D9_USAGE_POSITION=0,D9_USAGE_NORMAL=3,D9_USAGE_TEXCOORD=5,D9_USAGE_POSITIONT=9,D9_USAGE_COLOR=10};
 /* D3DFVF_* bits used by the admitted pre-transformed GFx batch. */
 enum {D9_OK=0,D9_INVALID=-1,D9_MEMORY=-2,D9_BACKEND=-3,D9_RELEASE_FAILED=-4,D9_UNSUPPORTED=-5};
-enum {D9_FVF_XYZ=0x002u,D9_FVF_XYZRHW=0x004u,D9_FVF_DIFFUSE=0x040u,D9_FVF_TEX1=0x100u};
+enum {D9_FVF_XYZ=0x002u,D9_FVF_XYZRHW=0x004u,D9_FVF_NORMAL=0x010u,D9_FVF_DIFFUSE=0x040u,D9_FVF_TEX1=0x100u};
 enum {
     D9_FVF_XYZ_TEX1=D9_FVF_XYZ|D9_FVF_TEX1,              /* 0x102 */
     D9_FVF_XYZ_DIFFUSE_TEX1=D9_FVF_XYZ|D9_FVF_DIFFUSE|D9_FVF_TEX1, /* 0x142? no: 0x142 */
@@ -18,7 +18,7 @@ enum {
 };
 typedef struct {uint16_t stream,offset;uint8_t type,method,usage,usage_index;} D9VertexElement;
 typedef struct {
-    D9VertexElement elements[D9_MAX_DECL];unsigned count,position,uv,color,stream_mask,position_t;
+    D9VertexElement elements[D9_MAX_DECL];unsigned count,position,uv,color,normal,stream_mask,position_t;
     unsigned required[D9_MAX_STREAMS];
 } D9Decl;
 unsigned d9_decl_type_size(unsigned type);
@@ -30,5 +30,7 @@ int d9_decl_decode(unsigned type,const void *data,size_t bytes,float out[4]);
  * gate (see d9_draw_* and D9Backend.draw_colored). */
 int d9_decl_init(D9Decl *decl,const D9VertexElement *elements,unsigned count);
 /* Map a supported D3D9 FVF to a declaration.  On failure *why names the exact
- * rejected bit or combination.  D9_OK, D9_INVALID or D9_UNSUPPORTED. */
-int d9_decl_from_fvf(unsigned fvf,D9Decl *decl,const char **why);
+ * rejected bit or combination.  D9_OK, D9_INVALID or D9_UNSUPPORTED.
+ * allow_normal admits D3DFVF_NORMAL for the test-only CPU T&L prototype; the
+ * production path passes 0 so its admitted FVF set does not widen. */
+int d9_decl_from_fvf(unsigned fvf,int allow_normal,D9Decl *decl,const char **why);
