@@ -588,14 +588,24 @@ static void s_VirtualAlloc(CPU *c){
         uint32_t a=requested&~(VA_PAGE_SIZE-1);
         uint64_t end=((uint64_t)requested+n+VA_PAGE_SIZE-1)&~(uint64_t)(VA_PAGE_SIZE-1);
         VaRes *res=va_res_find(a);
-        if(!res || end>(uint64_t)res->base+res->size)FAIL(ERR_INVALID_ADDRESS,0,4);
+        if(!res || end>(uint64_t)res->base+res->size){
+            fprintf(stderr,"[mem] commit outside reservation: %lu KiB at %08lx "
+                           "res=%s base=%08lx size=%lu KiB\n",
+                    (unsigned long)(n>>10),(unsigned long)a,res?"yes":"no",
+                    (unsigned long)(res?res->base:0),
+                    (unsigned long)(res?(res->size>>10):0));
+            FAIL(ERR_INVALID_ADDRESS,0,4);
+        }
         uint32_t size=(uint32_t)(end-a);
         uint64_t add=0;
         uint32_t err=va_commit_range(a,size,prot,&add);
         if(err){
+            GuestSlab *slab=guest_slab_find(mem,a,size);
             ++va_commit_failures;va_last_fail_size=size;
-            fprintf(stderr,"[mem] VirtualAlloc commit failed: %lu KiB at %08lx\n",
-                    (unsigned long)(size>>10),(unsigned long)a);
+            fprintf(stderr,"[mem] VirtualAlloc commit failed: %lu KiB at %08lx "
+                           "err=%lu slab=%s\n",
+                    (unsigned long)(size>>10),(unsigned long)a,
+                    (unsigned long)err,slab?"yes":"no");
             FAIL(err,0,4);
         }
         va_promise_live+=add;
@@ -609,7 +619,12 @@ static void s_VirtualAlloc(CPU *c){
         uint64_t add=0;
         uint32_t err=va_commit_range(requested,n,prot,&add);
         if(err){
+            GuestSlab *slab=guest_slab_find(mem,requested,n);
             ++va_commit_failures;va_last_fail_size=n;
+            fprintf(stderr,"[mem] VirtualAlloc reserve+commit failed: %lu KiB at %08lx "
+                           "err=%lu slab=%s\n",
+                    (unsigned long)(n>>10),(unsigned long)requested,
+                    (unsigned long)err,slab?"yes":"no");
             va_release(requested);
             FAIL(err,0,4);
         }
