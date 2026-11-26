@@ -1,0 +1,874 @@
+{
+ "note": "Derived IR metadata only: no bytecode. sha256 over the canonical MojoShader d3d text is the IR fingerprint.",
+ "prefix_to_full": {
+  "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b": {
+   "distinct_full_hashes": 8,
+   "full_sha256": "0cce461b63669edd2c6a0966c4457d6ec915a9e1648adbbc4d214a2c478edd0b",
+   "objects": 8,
+   "slot": 12
+  },
+  "1b279738cdd7559ca1bbd05e8b46c63d8f54f412f8bb8b45d2456278ab94f907": {
+   "distinct_full_hashes": 4,
+   "full_sha256": "0a244f5491a86d7b28c8ceb0a6f5e86cb57750e479a01da6832a52038f37492c",
+   "objects": 4,
+   "slot": 8
+  },
+  "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a": {
+   "distinct_full_hashes": 12,
+   "full_sha256": "0eb58f00a88d68a6378e149f165bd371c069f344c6d459390c27624ea976817e",
+   "objects": 14,
+   "slot": 1
+  },
+  "4281bd82262c5a5a8d26588a60fea83d52a265f8ef08fcbf34ce2b0045eb826a": {
+   "distinct_full_hashes": 1,
+   "full_sha256": "264c20659a094788a9f7c7f53e7626fc5f6a07613894c150510ffb5a3066be39",
+   "objects": 1,
+   "slot": 2
+  },
+  "77bc67a86e38ea6565c82f95313185a48420430c4f4c7afa6144d144ce075376": {
+   "distinct_full_hashes": 3,
+   "full_sha256": "6186c545f488d0f84789cf3e0ca55d0fd87f37c2091f87239f5dccf7afc404a0",
+   "objects": 3,
+   "slot": 1
+  },
+  "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d": {
+   "distinct_full_hashes": 4,
+   "full_sha256": "ee79ab273f78b5ffff36dd949c51957e922135399a3aa152a25d361b23786efd",
+   "objects": 4,
+   "slot": 20
+  },
+  "ad97e55f922355acfd8f40e8d37f53ab122c8d3f7dbc5e2af1cc5e4adbe1f924": {
+   "distinct_full_hashes": 1,
+   "full_sha256": "0975cc503f63d9b1a1a36f8886a34043742e9a13f4a351e203d5dbd33b3f95ce",
+   "objects": 1,
+   "slot": 5
+  },
+  "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b": {
+   "distinct_full_hashes": 4,
+   "full_sha256": "5b9901615aa94246b480e0a589ed3e70a99da6c3259bd5da76db5d6a10fdca87",
+   "objects": 4,
+   "slot": 15
+  },
+  "cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918": {
+   "distinct_full_hashes": 4,
+   "full_sha256": "0b031a8ab9925a66aa2bd715fcc40238e7fd81a5da366d8421cada8979a982fe",
+   "objects": 4,
+   "slot": 10
+  },
+  "f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652": {
+   "distinct_full_hashes": 2,
+   "full_sha256": "bfc0b3e0df8802bde722c0d0a815a3bff6de1b82fe67653262cfab2b75d9805e",
+   "objects": 2,
+   "slot": 0
+  }
+ },
+ "rows": [
+  {
+   "body": [
+    {
+     "name": "dp4",
+     "offset": 208,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 224,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 240,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 256,
+     "opcode": 9
+    },
+    {
+     "name": "mov",
+     "offset": 272,
+     "opcode": 1
+    },
+    {
+     "name": "mov",
+     "offset": 284,
+     "opcode": 1
+    }
+   ],
+   "defs": {},
+   "full_sha256": "264c20659a094788a9f7c7f53e7626fc5f6a07613894c150510ffb5a3066be39",
+   "inputs": {
+    "0": {
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    "1": {
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    "2": {
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    }
+   },
+   "instructions": 6,
+   "outputs": {
+    "0": {
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    "1": {
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    "2": {
+     "type": 6,
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    }
+   },
+   "prefix_sha256": "4281bd82262c5a5a8d26588a60fea83d52a265f8ef08fcbf34ce2b0045eb826a",
+   "samplers": {},
+   "stage": "vs",
+   "version": "vs_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "dp4",
+     "offset": 216,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 232,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 248,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 264,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 280,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 296,
+     "opcode": 9
+    }
+   ],
+   "defs": {},
+   "full_sha256": "6186c545f488d0f84789cf3e0ca55d0fd87f37c2091f87239f5dccf7afc404a0",
+   "inputs": {
+    "0": {
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    }
+   },
+   "instructions": 6,
+   "outputs": {
+    "0": {
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    "1": {
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   },
+   "prefix_sha256": "77bc67a86e38ea6565c82f95313185a48420430c4f4c7afa6144d144ce075376",
+   "samplers": {},
+   "stage": "vs",
+   "version": "vs_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "dp4",
+     "offset": 276,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 292,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 308,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 324,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 340,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 356,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 372,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 388,
+     "opcode": 9
+    },
+    {
+     "name": "mov",
+     "offset": 404,
+     "opcode": 1
+    },
+    {
+     "name": "mov",
+     "offset": 416,
+     "opcode": 1
+    }
+   ],
+   "defs": {},
+   "full_sha256": "0975cc503f63d9b1a1a36f8886a34043742e9a13f4a351e203d5dbd33b3f95ce",
+   "inputs": {
+    "0": {
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    "1": {
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    },
+    "2": {
+     "usage": 10,
+     "usage_index": 1,
+     "usage_name": "color"
+    }
+   },
+   "instructions": 10,
+   "outputs": {
+    "0": {
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    "1": {
+     "type": 6,
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    },
+    "2": {
+     "type": 6,
+     "usage": 10,
+     "usage_index": 1,
+     "usage_name": "color"
+    },
+    "3": {
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    "4": {
+     "type": 6,
+     "usage": 5,
+     "usage_index": 1,
+     "usage_name": "texcoord"
+    }
+   },
+   "prefix_sha256": "ad97e55f922355acfd8f40e8d37f53ab122c8d3f7dbc5e2af1cc5e4adbe1f924",
+   "samplers": {},
+   "stage": "vs",
+   "version": "vs_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "mov",
+     "offset": 192,
+     "opcode": 1
+    },
+    {
+     "name": "mad",
+     "offset": 204,
+     "opcode": 4
+    },
+    {
+     "name": "mul",
+     "offset": 224,
+     "opcode": 5
+    },
+    {
+     "name": "mov",
+     "offset": 240,
+     "opcode": 1
+    }
+   ],
+   "defs": {},
+   "full_sha256": "0cce461b63669edd2c6a0966c4457d6ec915a9e1648adbbc4d214a2c478edd0b",
+   "inputs": {
+    "0": {
+     "usage": 10,
+     "usage_index": 0,
+     "usage_name": "color"
+    },
+    "1": {
+     "usage": 10,
+     "usage_index": 1,
+     "usage_name": "color"
+    }
+   },
+   "instructions": 4,
+   "outputs": {},
+   "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
+   "samplers": {},
+   "stage": "ps",
+   "version": "ps_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "def",
+     "offset": 296,
+     "opcode": 81
+    },
+    {
+     "name": "def",
+     "offset": 320,
+     "opcode": 81
+    },
+    {
+     "name": "texld",
+     "offset": 392,
+     "opcode": 66
+    },
+    {
+     "name": "add",
+     "offset": 408,
+     "opcode": 2
+    },
+    {
+     "name": "mul",
+     "offset": 424,
+     "opcode": 5
+    },
+    {
+     "name": "texld",
+     "offset": 440,
+     "opcode": 66
+    },
+    {
+     "name": "add",
+     "offset": 456,
+     "opcode": 2
+    },
+    {
+     "name": "mad",
+     "offset": 472,
+     "opcode": 4
+    },
+    {
+     "name": "mul",
+     "offset": 492,
+     "opcode": 5
+    },
+    {
+     "name": "texld",
+     "offset": 508,
+     "opcode": 66
+    },
+    {
+     "name": "add",
+     "offset": 524,
+     "opcode": 2
+    },
+    {
+     "name": "mad",
+     "offset": 540,
+     "opcode": 4
+    },
+    {
+     "name": "mov",
+     "offset": 560,
+     "opcode": 1
+    },
+    {
+     "name": "mad",
+     "offset": 572,
+     "opcode": 4
+    },
+    {
+     "name": "mad",
+     "offset": 592,
+     "opcode": 4
+    },
+    {
+     "name": "mov",
+     "offset": 612,
+     "opcode": 1
+    },
+    {
+     "name": "mad",
+     "offset": 624,
+     "opcode": 4
+    }
+   ],
+   "defs": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     1.0
+    ]
+   },
+   "full_sha256": "0a244f5491a86d7b28c8ceb0a6f5e86cb57750e479a01da6832a52038f37492c",
+   "inputs": {
+    "0": {
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   },
+   "instructions": 17,
+   "outputs": {},
+   "prefix_sha256": "1b279738cdd7559ca1bbd05e8b46c63d8f54f412f8bb8b45d2456278ab94f907",
+   "samplers": {
+    "0": 2,
+    "1": 2,
+    "2": 2
+   },
+   "stage": "ps",
+   "version": "ps_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "texld",
+     "offset": 232,
+     "opcode": 66
+    },
+    {
+     "name": "mov",
+     "offset": 248,
+     "opcode": 1
+    },
+    {
+     "name": "mad",
+     "offset": 260,
+     "opcode": 4
+    }
+   ],
+   "defs": {},
+   "full_sha256": "0eb58f00a88d68a6378e149f165bd371c069f344c6d459390c27624ea976817e",
+   "inputs": {
+    "0": {
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   },
+   "instructions": 3,
+   "ir_expression": [
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      0
+     ],
+     [
+      "const",
+      2,
+      0
+     ],
+     [
+      "const",
+      3,
+      0
+     ]
+    ],
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      1
+     ],
+     [
+      "const",
+      2,
+      1
+     ],
+     [
+      "const",
+      3,
+      1
+     ]
+    ],
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      2
+     ],
+     [
+      "const",
+      2,
+      2
+     ],
+     [
+      "const",
+      3,
+      2
+     ]
+    ],
+    [
+     "op",
+     "mad",
+     [
+      "tex",
+      0,
+      3
+     ],
+     [
+      "const",
+      2,
+      3
+     ],
+     [
+      "const",
+      3,
+      3
+     ]
+    ]
+   ],
+   "ir_value_graph_error": null,
+   "outputs": {},
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "samplers": {
+    "0": 2
+   },
+   "stage": "ps",
+   "version": "ps_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "texld",
+     "offset": 252,
+     "opcode": 66
+    },
+    {
+     "name": "dp4",
+     "offset": 268,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 284,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 300,
+     "opcode": 9
+    },
+    {
+     "name": "dp4",
+     "offset": 316,
+     "opcode": 9
+    },
+    {
+     "name": "add",
+     "offset": 332,
+     "opcode": 2
+    },
+    {
+     "name": "mad",
+     "offset": 348,
+     "opcode": 4
+    }
+   ],
+   "defs": {},
+   "full_sha256": "ee79ab273f78b5ffff36dd949c51957e922135399a3aa152a25d361b23786efd",
+   "inputs": {
+    "0": {
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   },
+   "instructions": 7,
+   "outputs": {},
+   "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
+   "samplers": {
+    "0": 2
+   },
+   "stage": "ps",
+   "version": "ps_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "texld",
+     "offset": 312,
+     "opcode": 66
+    },
+    {
+     "name": "texld",
+     "offset": 328,
+     "opcode": 66
+    },
+    {
+     "name": "lrp",
+     "offset": 344,
+     "opcode": 18
+    },
+    {
+     "name": "mov",
+     "offset": 364,
+     "opcode": 1
+    },
+    {
+     "name": "mad",
+     "offset": 376,
+     "opcode": 4
+    }
+   ],
+   "defs": {},
+   "full_sha256": "5b9901615aa94246b480e0a589ed3e70a99da6c3259bd5da76db5d6a10fdca87",
+   "inputs": {
+    "0": {
+     "usage": 10,
+     "usage_index": 1,
+     "usage_name": "color"
+    },
+    "1": {
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    "2": {
+     "usage": 5,
+     "usage_index": 1,
+     "usage_name": "texcoord"
+    }
+   },
+   "instructions": 5,
+   "outputs": {},
+   "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
+   "samplers": {
+    "0": 2,
+    "1": 2
+   },
+   "stage": "ps",
+   "version": "ps_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "def",
+     "offset": 340,
+     "opcode": 81
+    },
+    {
+     "name": "def",
+     "offset": 364,
+     "opcode": 81
+    },
+    {
+     "name": "texld",
+     "offset": 448,
+     "opcode": 66
+    },
+    {
+     "name": "texld",
+     "offset": 464,
+     "opcode": 66
+    },
+    {
+     "name": "add",
+     "offset": 480,
+     "opcode": 2
+    },
+    {
+     "name": "mul",
+     "offset": 496,
+     "opcode": 5
+    },
+    {
+     "name": "texld",
+     "offset": 512,
+     "opcode": 66
+    },
+    {
+     "name": "add",
+     "offset": 528,
+     "opcode": 2
+    },
+    {
+     "name": "mad",
+     "offset": 544,
+     "opcode": 4
+    },
+    {
+     "name": "mul",
+     "offset": 564,
+     "opcode": 5
+    },
+    {
+     "name": "texld",
+     "offset": 580,
+     "opcode": 66
+    },
+    {
+     "name": "add",
+     "offset": 596,
+     "opcode": 2
+    },
+    {
+     "name": "mad",
+     "offset": 612,
+     "opcode": 4
+    },
+    {
+     "name": "mad",
+     "offset": 632,
+     "opcode": 4
+    },
+    {
+     "name": "mad",
+     "offset": 652,
+     "opcode": 4
+    },
+    {
+     "name": "mov",
+     "offset": 672,
+     "opcode": 1
+    },
+    {
+     "name": "mad",
+     "offset": 684,
+     "opcode": 4
+    }
+   ],
+   "defs": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     0.0
+    ]
+   },
+   "full_sha256": "0b031a8ab9925a66aa2bd715fcc40238e7fd81a5da366d8421cada8979a982fe",
+   "inputs": {
+    "0": {
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   },
+   "instructions": 17,
+   "outputs": {},
+   "prefix_sha256": "cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918",
+   "samplers": {
+    "0": 2,
+    "1": 2,
+    "2": 2,
+    "3": 2
+   },
+   "stage": "ps",
+   "version": "ps_3_0"
+  },
+  {
+   "body": [
+    {
+     "name": "mov",
+     "offset": 140,
+     "opcode": 1
+    }
+   ],
+   "defs": {},
+   "full_sha256": "bfc0b3e0df8802bde722c0d0a815a3bff6de1b82fe67653262cfab2b75d9805e",
+   "inputs": {},
+   "instructions": 1,
+   "ir_expression": [
+    [
+     "const",
+     0,
+     0
+    ],
+    [
+     "const",
+     0,
+     1
+    ],
+    [
+     "const",
+     0,
+     2
+    ],
+    [
+     "const",
+     0,
+     3
+    ]
+   ],
+   "ir_value_graph_error": null,
+   "outputs": {},
+   "prefix_sha256": "f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652",
+   "samplers": {},
+   "stage": "ps",
+   "version": "ps_3_0"
+  }
+ ],
+ "schema": "ui-menu-ir/1"
+}
