@@ -34,6 +34,7 @@
 
 static GuestMemory *memory;
 static char last_error[320];
+static unsigned compile_shader_calls;
 
 static uint32_t arg(CPU *c, unsigned n) { return M32(c->r[4] + 4 + n * 4); }
 
@@ -404,6 +405,7 @@ static uint32_t compile_shader(CPU *c) {
     uint32_t pp_shader = arg(c, 7), pp_errors = arg(c, 8);
     uint32_t pp_constants = arg(c, 9), profile = arg(c, 5);
 
+    ++compile_shader_calls;
     last_error[0] = 0;
     /* No compile is attempted, so no guest bytecode pointer is dereferenced.
      * Outputs are cleared so a caller cannot mistake the failure for an empty
@@ -413,9 +415,10 @@ static uint32_t compile_shader(CPU *c) {
     zero_output(pp_constants);
 
     const char *name = (memory && profile) ? guest_cstr(memory, profile, 32u) : NULL;
-    diagnostic("D3DXCompileShader%s%s%s: Shader Model 3 (SM3) bytecode "
+    diagnostic("D3DXCompileShader call #%u%s%s%s: Shader Model 3 (SM3) bytecode "
                "compilation is an architectural blocker; E_NOTIMPL, no shader "
                "or error buffer was produced",
+               compile_shader_calls,
                name ? "(" : "", name ? name : "", name ? ")" : "");
     return SHIM_E_NOTIMPL;
 }
@@ -464,13 +467,16 @@ int d3dx_surface_init(GuestMemory *m) {
     if (win32_add_external_resolver(d3dx_surface_resolve, NULL)) return -1;
     memory = m;
     last_error[0] = 0;
+    compile_shader_calls = 0;
     return 0;
 }
 
 void d3dx_surface_shutdown(void) {
     memory = NULL;
     last_error[0] = 0;
+    compile_shader_calls = 0;
 }
 
 const char *d3dx_surface_last_error(void) { return last_error; }
+unsigned d3dx_surface_compile_shader_calls(void) { return compile_shader_calls; }
 

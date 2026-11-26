@@ -5,6 +5,7 @@
 #include "d3d9_shader.h"
 #include "d3d9_pica_tev.h"
 #include "d3d9_menu_closure.h"
+#include "d3d9_menu_shader_runtime.h"
 /* First-draw capture is an optional diagnostic.  It is compiled by default,
  * can be removed entirely with -DD9_CAPTURE_HOOK=0, and stays inert at run
  * time unless TESV_D3D9_CAPTURE_DRAWS requests one or more records. */
@@ -53,6 +54,10 @@ typedef struct Obj {
     uint8_t *pixels;
     uint32_t *code;unsigned words;
     D9TevProgram tev;int has_tev;
+    /* Exact first-menu selection (d3d9_menu_shader_runtime.h).  A menu plan is
+     * still subject to draw-time preconditions and a named backend gate. */
+    D9MenuShaderMatch menu;int has_menu,menu_backend_ok;
+    char menu_backend_why[D9_MENU_SHADER_REASON_MAX];
     D9Decl *declaration;
     /* Level surface view: pixels point into the parent texture's CPU store. */
     struct Obj *view_parent;D9Handle view_texture;unsigned view_level;int is_view;
@@ -518,8 +523,10 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
     }
     g.rt=g.back;g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;
     (void)d9_set_render_target(g.device,0);
-    /* A new device starts with an unarmed, empty menu closure observation. */
+    /* A new device starts with an unarmed, empty menu closure observation and
+     * no material-precondition evidence. */
     d9_menu_closure_reset();
+    d9_menu_shader_runtime_reset();
     M32(out)=g.dev->guest;RET(OK,7);}
 static int explicit_resources(void){
     for(unsigned i=0;i<g.next;++i){Obj *o=&g.o[i];if(o->refs&&o->kind!=FACTORY&&o->kind!=DEVICE&&!(o->kind==SURFACE&&o==g.back))return 1;}
@@ -543,8 +550,9 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     g.back->width=g.pp[0];g.back->height=g.pp[1];g.back->format=g.pp[2];
     g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;memset(&g.constants,0,sizeof g.constants);
     g.rt=g.back;(void)d9_set_render_target(g.device,0);default_viewport();default_gamma();
-    /* Reset also discards every closure observation. */
+    /* Reset also discards every closure observation and material evidence. */
     d9_menu_closure_reset();
+    d9_menu_shader_runtime_reset();
 #if D9_CAPTURE_HOOK
     g.frame_index=g.draw_index=0;g.capture_present=0;g.capture_present_flags=0;
 #endif
@@ -1071,7 +1079,24 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         free(code);
         return closure.match==D9_MENU_BAD_ARGUMENT?INVALID:UNAVAILABLE;
     }
-    if(kind==PS&&count&&code[0]==0xFFFF0300u){
+    /* Exact menu subset: select a specialised TEV plan from the certified
+     * bytecode hash.  Anything outside the two PS entries stays on the legacy
+     * path; a certified entry whose plan cannot be built is a named failure
+     * before any object or partial plan exists. */
+    D9MenuShaderMatch menu;int has_menu=0;char menu_why[D9_MENU_SHADER_REASON_MAX];
+    if(kind==PS){
+        int menu_result=d9_menu_shader_match_ps(code,count,&menu,
+                                                menu_why,sizeof menu_why);
+        if(menu_result<0){
+            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                      "menu shader: %s",menu_why);
+            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+            d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+            free(code);return UNAVAILABLE;
+        }
+        has_menu=menu_result>0;
+    }
+    if(!has_menu&&kind==PS&&count&&code[0]==0xFFFF0300u){
         D9PicaTevReject reason;char backend_why[256];
         if(d9_pica_tev_preflight_pixel(code,count,&reason,backend_why,sizeof backend_why)){
             snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
@@ -1079,26 +1104,53 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
             free(code);return (reason==D9_PICA_TEV_MALFORMED||reason==D9_PICA_TEV_PROGRAM_VERSION)?INVALID:UNAVAILABLE;}
     }
-    D9ShaderInfo info;D9TevProgram tev;int result=d9_shader_analyze_tev(code,count,&info,&tev);int wanted=kind==VS?D9_SHADER_VS_MATRIX_UV:D9_SHADER_PS_TEXTURE;
-    if(result!=wanted&&!(kind==PS&&result==D9_SHADER_TEV)){
-        char diagnostic[320];d9_shader_diagnostic(&info,diagnostic,sizeof diagnostic);
-        snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"%s",diagnostic);
-        fprintf(stderr,"D3D9 shader rejected: %s (hash %08lx, mismatch %u)\n",diagnostic,(unsigned long)info.signature,info.first_mismatch);
-        d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
-        free(code);return result==D9_SHADER_INVALID?INVALID:UNAVAILABLE;}
+    D9ShaderInfo info;D9TevProgram tev;int result;
+    if(has_menu){
+        memset(&info,0,sizeof info);
+        info.version=code[0];info.major=3;info.minor=0;
+        info.stream=D9_SHADER_STREAM_VALID;info.saw_end=1;
+        info.kind=D9_SHADER_TEV;info.words=(unsigned)closure.used_words;
+        info.instructions=closure.instructions;
+        tev=menu.plan;result=D9_SHADER_TEV;
+    }else{
+        result=d9_shader_analyze_tev(code,count,&info,&tev);
+        int wanted=kind==VS?D9_SHADER_VS_MATRIX_UV:D9_SHADER_PS_TEXTURE;
+        if(result!=wanted&&!(kind==PS&&result==D9_SHADER_TEV)){
+            char diagnostic[320];d9_shader_diagnostic(&info,diagnostic,sizeof diagnostic);
+            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"%s",diagnostic);
+            fprintf(stderr,"D3D9 shader rejected: %s (hash %08lx, mismatch %u)\n",diagnostic,(unsigned long)info.signature,info.first_mismatch);
+            d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+            free(code);return result==D9_SHADER_INVALID?INVALID:UNAVAILABLE;}
+    }
+    char menu_backend_why[D9_MENU_SHADER_REASON_MAX];menu_backend_why[0]=0;int menu_backend_ok=1;
     if(kind==PS&&result==D9_SHADER_TEV){
         D9PicaTevReject reason;char backend_why[256];
         if(d9_pica_tev_validate(&tev,NULL,&reason,backend_why,sizeof backend_why)){
-            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
-            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
-            d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
-            free(code);return UNAVAILABLE;}
+            if(has_menu){
+                /* The plan is complete and selected, but this backend cannot
+                 * execute it yet.  Keep the object; the draw gate refuses by
+                 * name instead of submitting a partial program. */
+                menu_backend_ok=0;
+                snprintf(menu_backend_why,sizeof menu_backend_why,
+                          "PICA200 backend: %s",backend_why);
+            }else{
+                snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,"PICA200 backend: %s",backend_why);
+                fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);
+                d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+                free(code);return UNAVAILABLE;}
+        }
     }
     g.last_shader_rejection[0]=0;
     /* Retain original bytecode for GetFunction, including comments. */
     uint32_t *exact=realloc(code,(size_t)info.words*4);if(exact)code=exact;
     Obj *o=new_obj(kind);o->code=code;o->words=info.words;
-    if(kind==PS&&result==D9_SHADER_TEV){o->tev=tev;o->has_tev=1;}
+    if(kind==PS&&result==D9_SHADER_TEV){
+        o->tev=tev;o->has_tev=1;
+        if(has_menu){
+            o->menu=menu;o->has_menu=1;o->menu_backend_ok=menu_backend_ok;
+            snprintf(o->menu_backend_why,sizeof o->menu_backend_why,"%s",menu_backend_why);
+        }
+    }
     retain(g.dev);M32(out)=o->guest;
     /* Observation, not a D3D9 capability: the closure becomes READY only when
      * every required entry has really been created. */
@@ -1136,7 +1188,25 @@ static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2
     unsigned need=o->declaration->count+1,provided=M32(n);M32(n)=need;if(!p)RET(OK,3);
     if(provided<need||!ptr(p,(size_t)need*8))RET(INVALID,3);memcpy(ptr(p,(size_t)need*8),o->declaration->elements,(need-1)*8);
     D9VertexElement end={0xff,0,D9_DECL_UNUSED,0,0,0};memcpy(ptr(p+(need-1)*8,8),&end,8);RET(OK,3);}
-static int shader_state(void){int needs_texture=g.ps&&(!g.ps->has_tev||g.ps->tev.textures!=0);if(needs_texture&&!g.tex)return D9_INVALID;if(!g.vs)return d9_set_shader_clip(g.device,NULL);
+static int shader_state(void){
+    /* A selected menu plan still needs its material preconditions and a backend
+     * that can execute it.  Both are named refusals here, before the draw, so
+     * the batch is never partially submitted. */
+    if(g.ps&&g.ps->has_menu){
+        char why[D9_MENU_SHADER_REASON_MAX];
+        if(d9_menu_shader_missing_preconditions(&g.ps->menu,d9_menu_shader_preconditions(),
+                                                why,sizeof why)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                     "%s: missing preconditions: %s",g.ps->menu.id,why);
+            return D9_UNSUPPORTED;
+        }
+        if(!g.ps->menu_backend_ok){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: %s",
+                     g.ps->menu.id,g.ps->menu_backend_why);
+            return D9_UNSUPPORTED;
+        }
+    }
+    int needs_texture=g.ps&&(!g.ps->has_tev||g.ps->tev.textures!=0);if(needs_texture&&!g.tex)return D9_INVALID;if(!g.vs)return d9_set_shader_clip(g.device,NULL);
     if(g.constants_mask!=15)return D9_INVALID;return d9_set_shader_clip(g.device,&g.constants);}
 #if D9_CAPTURE_HOOK
 /* ---- first-draw capture -------------------------------------------------- */

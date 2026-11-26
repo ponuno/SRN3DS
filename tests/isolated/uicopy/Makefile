@@ -21,7 +21,8 @@ RUNTIME := guest guest_heap pe_image pe_imports guest_process \
            win32_audio win32_thread win32_input win32_steam win32_registry \
            win32_hostctx n3ds_lift_runtime ir_core ir_decode ir_exec ir_container rt_prof fpu
 D3D := d3d9_core d3d9_texcache d3d9_texture_data d3d9_bc d3d9_vertex \
-       d3d9_adapter d3d9_null d3d9_shader d3d9_tev d3d9_pica_tev d3d9_com d3d9_capture
+       d3d9_adapter d3d9_null d3d9_shader d3d9_tev d3d9_menu_closure \
+       d3d9_menu_shader_runtime d3d9_pica_tev d3d9_com d3d9_capture
 PIPELINE := d3d9_pipeline_match d3d9_pipeline_registry d3d9_menu_light
 COMMON_OFILES := $(BUILD)/shbin_blob.o $(BUILD)/d3d9_pica_citro3d.o \
                  $(addprefix $(BUILD)/,$(addsuffix .o,$(RUNTIME) $(D3D) $(PIPELINE)))

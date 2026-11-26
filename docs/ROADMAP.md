@@ -198,7 +198,11 @@ read stage without fake successes. *Not met.*
       Guest `CreatePixelShader` integration is tested; every other opcode/feature
       is rejected by name. A structural menu-light matcher plus five-stage TEV
       prototype covers 6 additional retail logo signatures; automatic selection
-      still requires the material/normal/tangent preconditions.
+      still requires the material/normal/tangent preconditions. The bounded
+      first-menu runtime selector is now connected: exact-hash
+      `menu.logo.ps`/`menu.composite.ps` plans plus fixed fog/tint contract
+      plans, with named precondition/backend draw refusals
+      (`docs/MENU_SHADER_RUNTIME.md`).
 - [x] Offline menu preprocessing tools validate both normal-decode signatures,
       tangent/material constants and Scaleform glyph quads; real `Logo02_n.dds`
       normalization passes. Runtime loader integration remains pending.

@@ -386,6 +386,10 @@ static void test_compile_shader(H *h) {
     uint32_t bad[10] = {0, 0, 0, 0, 0, 0, 0, 0x20000000u, 0x20000004u, 0x20000008u};
     assert(d3dx_call(h, "D3DXCompileShader", bad, 10, &r) == HR_E_NOTIMPL);
 
+    /* Counter only; it never turns E_NOTIMPL into a compile success.  Zero is
+     * expected on the precompiled-FXP menu path. */
+    assert(d3dx_surface_compile_shader_calls() == 4u);
+
     printf("d3dx compile shader named unsupported: PASS\n");
 }
 

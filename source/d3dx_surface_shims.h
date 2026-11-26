@@ -49,3 +49,9 @@ FnModule d3dx_surface_module(void);
 /* Named reason for the most recent call, or "" after success.  Host-facing
  * diagnostic hook; never a guest import. */
 const char *d3dx_surface_last_error(void);
+
+/* Number of D3DXCompileShader entries observed since init.  The shim still
+ * returns E_NOTIMPL; this counter only makes a future trace state whether TESV
+ * calls the compiler after the renderer gate.  Zero is the expected value for
+ * the precompiled-FXP menu path. */
+unsigned d3dx_surface_compile_shader_calls(void);
