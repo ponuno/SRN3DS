@@ -110,9 +110,9 @@ texture units and materialises each stage constant from the c0..c8 float bank.
 Host coverage: `pica_tev` **152 checks, 0 failures** (including the exact
 menu-light plan, fog/tint plans, third-texture/duplicate-sampler/c9/color1
 negatives), `two_stage` submits a synthetic 2-texture + color0 + external-c7
-menu plan through `draw_menu`, and the full suite is **83 passed, 1 diagnostic,
+menu plan through `draw_menu`, and the full suite is **86 passed, 1 diagnostic,
 0 failed**.  ARM `-Mode com` builds `Skyrim_N3DS_graphics_com_menu_pica`
-(`.3dsx` 805,924 B, `.elf` 5,484,136 B).  No Azahar pixel run is claimed.
+(`.3dsx` 818,844 B, `.elf` 5,578,568 B).  No Azahar pixel run is claimed.
 
 ### Render-target texture handles
 
@@ -133,9 +133,18 @@ texture, exactly-once deletion, and the colour-budget/backend split.
 ### Bounded native render targets
 
 Explicit render targets and render-target textures keep their D3D logical size
-but cap native colour storage at **512 per axis** (`D9_TARGET_NATIVE_MAX`).  A
-1024x1024 target therefore allocates 512x512 RGBA8 (1 MiB) and keeps 1024x1024
-in `GetDesc`/`GetLevelDesc` and `d9_render_target_info()`.  The
+but cap native colour storage per axis.  The cap is captured per device at
+creation from `TESV_D3D9_TARGET_NATIVE_MAX`:
+
+- accepted range **64..512**, rounded down to a power of two;
+- invalid, empty or out-of-range values fall back to the default **256**;
+- the variable is read when the D9Device is created, so set it before
+  `CreateDevice`;
+- `d9_target_native_max()` reports the effective value;
+- the retained back buffer is not capped (it has its own 512x256 path).
+
+A 1024x1024 target with the default cap allocates 256x256 RGBA8 (256 KiB) and
+keeps 1024x1024 in `GetDesc`/`GetLevelDesc` and `d9_render_target_info()`.  The
 `d9_render_target_storage_info()` accessor exposes the native size; `bytes`
 from `d9_render_target_info()` is the native allocation.
 
@@ -145,28 +154,45 @@ sets the PICA viewport to native_w x native_h, so NDC covers the whole image
 instead of clipping at the native edge; the logical D3D viewport and clip
 matrices are unchanged.  A backend without this callback refuses a target whose
 native size is smaller than its logical size with a named `D9_UNSUPPORTED`
-(`target_viewport_scaled` in the diagnosis).  Equal sizes (512x512, 256x256) and
-the retained back buffer keep the existing `target_viewport` path; the
-retained back buffer is created unbounded because its 400x240 logical surface
-already uses a 512x256 native corner.
+(`target_viewport_scaled` in the diagnosis).  Equal-size targets and the
+retained back buffer keep the existing `target_viewport` path.
 
 Scaled `LockRect`/`UnlockRect` and `StretchRect` are named refusals rather than
-silently reading or copying 1024 logical pixels from 512 native storage.  A
-lockable explicit target larger than 512 is refused at creation with a named
-`D9_UNSUPPORTED` for the same reason.  Equal-size targets and the retained back
-buffer keep read/write/blit support.
+silently reading or copying logical pixels from smaller native storage.  A
+lockable explicit target whose native size would be smaller is refused at
+creation with a named `D9_UNSUPPORTED`.  Equal-size targets and the retained
+back buffer keep read/write/blit support.
 
 ### Render-target budget
 
-The core budget counts **native colour bytes only**.  A 1024x1024 logical
-target is 512x512 native = 1 MiB, not 4 MiB.  The citro3d target also allocates
-a DEPTH24_STENCIL8 attachment at the same 512x512 size, so a single target needs
-about 2 MiB: that fits the 6 MiB N3DS VRAM budget.  Five simultaneous 1024
-logical targets need five 1 MiB colour buffers plus five 1 MiB depth
-attachments = 10 MiB, so at most three fit by raw accounting and the fourth is
-surfaced as `D9_BACKEND` by `target_create()`, never as a fake success.  A
-future shared/depth-lazy scheme is still required to hold all five measured TESV
-targets.  No hardware memory proof is claimed here.
+The core budget counts **native colour bytes only**.  The measured TESV set is
+five 1024x1024 targets (float fallback stored as A8R8G8B8), three 512x512 A8
+targets and one 512x512 float target, i.e. nine explicit targets.  With the
+default 256 cap every one is 256x256:
+
+```text
+colour:  9 * 256 * 256 * 4 = 2,359,296 B = 2.25 MiB
+depth:   9 * 256 * 256 * 4 = 2,359,296 B = 2.25 MiB
+total:                       4,718,592 B = 4.5 MiB
+```
+
+The retained back buffer is 512x256 unbounded:
+
+```text
+colour:  512 * 256 * 4 = 524,288 B = 0.5 MiB
+depth:   512 * 256 * 4 = 524,288 B = 0.5 MiB
+total:                   1,048,576 B = 1.0 MiB
+```
+
+Measured set plus back buffer = **5,767,168 B = 5.5 MiB**, under the 6 MiB N3DS
+VRAM bound with 0.5 MiB raw headroom.  This is an arithmetic/structural budget,
+not a hardware measurement.
+
+With a too-large `TESV_D3D9_TARGET_NATIVE_MAX=512`, a 1024 target is 512x512
+(1 MiB colour + 1 MiB depth = 2 MiB), so only three fit 6 MiB and the fourth is
+surfaced as `D9_BACKEND` by `target_create()` with the exact native size in the
+diagnosis.  The cap can be lowered to 128 or 64 for more headroom at the cost of
+resolution.  No hardware VRAM proof is claimed here.
 
 The translator packs literals as RGBA8 with red in bits 0..7.  PICA TEV constants
 are ABGR8888, so the descriptor stores `constant_abgr`, produced by

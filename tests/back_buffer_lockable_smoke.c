@@ -15,6 +15,7 @@
 #include "n3ds_lift_runtime.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SCRATCH 0x10010000u
@@ -260,7 +261,17 @@ static void capture_flow(Harness *h,uint32_t device){
     check_screen(0xff336699u);
 }
 
+static void set_cap_env(const char *v){
+#ifdef _WIN32
+    _putenv_s("TESV_D3D9_TARGET_NATIVE_MAX",v?v:"");
+#else
+    if(v&&*v)setenv("TESV_D3D9_TARGET_NATIVE_MAX",v,1);
+    else unsetenv("TESV_D3D9_TARGET_NATIVE_MAX");
+#endif
+}
+
 int main(void){
+    set_cap_env("512"); /* this regression exercises the 512x256 readable target */
     Harness h;assert(!harness_start(&h));
 
     /* Depth-stencil format reporting matches what CreateDepthStencilSurface

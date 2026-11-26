@@ -16,6 +16,15 @@
 
 #define TARGET_MAGIC 0x54475242u
 
+static void set_cap_env(const char *v) {
+#ifdef _WIN32
+    _putenv_s("TESV_D3D9_TARGET_NATIVE_MAX", v ? v : "");
+#else
+    if (v && *v) setenv("TESV_D3D9_TARGET_NATIVE_MAX", v, 1);
+    else unsetenv("TESV_D3D9_TARGET_NATIVE_MAX");
+#endif
+}
+
 typedef struct { uint32_t magic; unsigned w, h; size_t cost; } MockTarget;
 typedef struct {
     unsigned creates, deletes, binds, clears, draws;
@@ -155,6 +164,7 @@ static void check_target(D9Device *d, unsigned logical_w, unsigned logical_h,
 }
 
 int main(void) {
+    set_cap_env("512"); /* this regression pins the 512-cap path */
     Ctx c;
     memset(&c, 0, sizeof c);
     D9Device *d = d9_create_device(&ops_scaled, &c, 8u << 20);

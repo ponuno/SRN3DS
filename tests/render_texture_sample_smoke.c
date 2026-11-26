@@ -14,6 +14,15 @@
 #include <string.h>
 
 #define TEX_MAGIC 0x54455832u
+
+static void set_cap_env(const char *v) {
+#ifdef _WIN32
+    _putenv_s("TESV_D3D9_TARGET_NATIVE_MAX", v ? v : "");
+#else
+    if (v && *v) setenv("TESV_D3D9_TARGET_NATIVE_MAX", v, 1);
+    else unsetenv("TESV_D3D9_TARGET_NATIVE_MAX");
+#endif
+}
 #define TARGET_MAGIC 0x54475232u
 #define SAMPLE_MAGIC 0x53414d32u
 
@@ -177,6 +186,7 @@ static void stage1(D9Device *d) {
 }
 
 int main(void) {
+    set_cap_env("512"); /* this regression pins the 512-cap sample path */
     Ctx c;
     memset(&c, 0, sizeof c);
     D9Device *d = d9_create_device(&ops, &c, 16u << 20);

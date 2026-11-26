@@ -8,11 +8,23 @@
 #include <math.h>
 
 enum {MAX_BUFFERS=32,MAX_TEXTURES=32,MAX_CUBES=8,MAX_TARGETS=12,MAX_DEPTHS=4,MAX_DRAW_VERTICES=4096,MAX_LEVELS=11};
-/* Native storage cap for explicit LDR render targets.  A 1024x1024 D3D target
- * keeps 1024x1024 logical dimensions but is rasterised into at most 512x512,
- * which matches the retained-back-buffer model and avoids a 4 MiB colour +
- * 4 MiB depth allocation. */
-enum {D9_TARGET_NATIVE_MAX=512};
+/* Bounded native storage for explicit LDR render targets.  The default is 256
+ * so the measured TESV set fits the N3DS 6 MiB VRAM budget:
+ *   5x1024 + 4x512 logical targets -> nine 256x256 targets
+ *   = 9 * (256 KiB colour + 256 KiB depth) = 4.5 MiB.
+ * The retained back buffer is created through the unbounded path. */
+enum {D9_TARGET_NATIVE_MIN=64,D9_TARGET_NATIVE_DEFAULT=256,D9_TARGET_NATIVE_LIMIT=512};
+static unsigned target_native_max_from_env(void){
+    const char *s=getenv("TESV_D3D9_TARGET_NATIVE_MAX");
+    if(!s||!*s)return D9_TARGET_NATIVE_DEFAULT;
+    char *end=NULL;
+    unsigned long v=strtoul(s,&end,10);
+    if(!end||*end||v<D9_TARGET_NATIVE_MIN||v>D9_TARGET_NATIVE_LIMIT)
+        return D9_TARGET_NATIVE_DEFAULT;
+    unsigned p=D9_TARGET_NATIVE_MIN;
+    while((p<<1)<=v&&(p<<1)<=D9_TARGET_NATIVE_LIMIT)p<<=1;
+    return p;
+}
 typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
 typedef struct {
     D9Handle id;size_t offset,stride;
@@ -49,6 +61,7 @@ struct D9Device {
      * (power-of-two) storage dimensions; the logical surface stays back_w x
      * back_h. */
     D9Handle back_target;unsigned back_tex_w,back_tex_h;int back_lockable;
+    unsigned target_native_max; /* env-selected cap for explicit targets, 64..512 */
     Depth depths[MAX_DEPTHS];D9Handle depth;
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEXTURES];D9TexCache tex_cache;
@@ -123,6 +136,7 @@ int d9_unswizzle_rgba8(void *dst,size_t dst_pitch,const void *src,
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     if(!ops||!ops->texture_create||!ops->texture_upload||!ops->texture_delete||!ops->begin||!ops->draw||!ops->end||!limit)return NULL;
     D9Device *d=calloc(1,sizeof *d);if(!d)return NULL;d->ops=*ops;d->ctx=ctx;d->limit=limit;d->next=1;
+    d->target_native_max=target_native_max_from_env();
     D9TexCacheOps cache_ops={d,cache_release_guest,cache_release_gpu};
     if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEXTURES,&cache_ops,0,0)){
         free(d);return NULL;
@@ -494,8 +508,8 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
 }
 static Target *target(D9Device *d,D9Handle h){if(d&&h)for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id==h)return &d->targets[i];return NULL;}
 static Depth *depth_slot(D9Device *d,D9Handle h);
-static unsigned bounded_native_dim(unsigned v){
-    return v>D9_TARGET_NATIVE_MAX?D9_TARGET_NATIVE_MAX:v;
+static unsigned bounded_native_dim(unsigned v,unsigned cap){
+    return v>cap?cap:v;
 }
 /* bounded=0 is the retained back buffer: it is already created at its native
  * power-of-two size and keeps the existing corner-viewport/present path.
@@ -508,8 +522,8 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
        (w&(w-1))||(h&(h-1))||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
        !d->ops.target_create||!d->ops.target_delete||!d->ops.target_bind||!d->ops.target_clear||
        (lockable&&!d->ops.target_read))return D9_INVALID;
-    unsigned nw=bounded?bounded_native_dim(w):w;
-    unsigned nh=bounded?bounded_native_dim(h):h;
+    unsigned nw=bounded?bounded_native_dim(w,d->target_native_max):w;
+    unsigned nh=bounded?bounded_native_dim(h,d->target_native_max):h;
     if((nw<w||nh<h)&&!d->ops.target_viewport_scaled){
         char why[160];
         snprintf(why,sizeof why,"CreateRenderTarget: backend cannot scale %ux%u logical to %ux%u native; no target_viewport_scaled",w,h,nw,nh);
@@ -622,6 +636,9 @@ int d9_render_target_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height,
 int d9_render_target_storage_info(D9Device *d,D9Handle h,unsigned *w,unsigned *height){
     Target *t=target(d,h);if(!t)return D9_INVALID;
     if(w)*w=t->native_w;if(height)*height=t->native_h;return D9_OK;
+}
+unsigned d9_target_native_max(const D9Device *d){
+    return d?d->target_native_max:0;
 }
 int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height){
