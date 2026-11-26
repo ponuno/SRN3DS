@@ -550,13 +550,18 @@ static int build_menu(const uint8_t *swf, size_t swf_size, MenuSwfAtlasTarget *a
 }
 
 static int set_menu_transforms(D9Device *device) {
+    /* StartMenu.swf declares a 1280x720 stage (verified from the FWS frame
+     * rect: 25600x14400 twips).  The earlier 400x240 projection left almost
+     * every shape outside the NDC cube; the PICA viewport now scales the whole
+     * stage down to the 400x240 LCD. */
+    const float stage_w = 1280.0f, stage_h = 720.0f;
     D9Matrix world, view, projection;
     d9_matrix_identity(&world);
     d9_matrix_identity(&view);
     d9_matrix_identity(&projection);
-    projection.m[0][0] = 2.0f / 400.0f;
+    projection.m[0][0] = 2.0f / stage_w;
     projection.m[0][3] = -1.0f;
-    projection.m[1][1] = -2.0f / 240.0f;
+    projection.m[1][1] = -2.0f / stage_h;
     projection.m[1][3] = 1.0f;
     projection.m[2][2] = 1.0f;
     return d9_set_transform(device, D9_WORLD, &world) ||
