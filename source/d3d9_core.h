@@ -513,6 +513,18 @@ int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,
 int d9_end_scene(D9Device *d);
 int d9_present(D9Device *d);
 size_t d9_memory_used(const D9Device *d);
+/* Remaining device budget in bytes (limit - d9_memory_used), never negative.
+ * This is the honest GetAvailableTextureMem estimate. */
+size_t d9_available_texture_mem(const D9Device *d);
+/* Validate the current fixed-function/TEV state against the backend capability
+ * set.  On success *passes is 1.  On failure the reason is in
+ * d9_last_draw_diagnostic(); returns D9_UNSUPPORTED or D9_INVALID. */
+int d9_validate_device(D9Device *d,unsigned *passes);
+/* EvictManagedResources backing check: every MANAGED 2D/cube/volume resource
+ * must still carry its guest copy, which is the re-upload source.  The method
+ * itself is a no-op (it does not free resident GPU copies), so this only
+ * answers whether that no-op is honest. */
+int d9_evict_managed_resources(D9Device *d);
 /* Read-only copy of the device's texture-cache counters (cube/volume included). */
 int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out);
 int d9_texture_layout(unsigned w,unsigned h,unsigned format,size_t *pitch,size_t *bytes);

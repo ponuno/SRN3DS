@@ -1943,6 +1943,96 @@ int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
 }
 size_t d9_memory_used(const D9Device *d){if(!d)return 0;D9TexCacheStats st;d9_texcache_stats(&d->tex_cache,&st);
     return memory_sum(d->used,memory_sum(st.guest_bytes,memory_sum(st.gpu_bytes,d->target_used)));}
+size_t d9_available_texture_mem(const D9Device *d){
+    if(!d)return 0;
+    size_t used=d9_memory_used(d);
+    return used<d->limit?d->limit-used:0;
+}
+int d9_validate_device(D9Device *d,unsigned *passes){
+    if(!d||!passes)return D9_INVALID;
+    *passes=0;
+    if(d->teardown){set_diagnosis(d,"ValidateDevice: device is shutting down");return D9_INVALID;}
+    if(d->pixel_shader){
+        const D9TevProgram *p=d->pixel_shader;
+        if(p->stage_limit<1||p->stage_limit>D9TEV_MAX_STAGES){
+            char why[160];
+            snprintf(why,sizeof why,"ValidateDevice: pixel shader stage limit %u is outside 1..%u",p->stage_limit,D9TEV_MAX_STAGES);
+            set_diagnosis(d,why);return D9_UNSUPPORTED;
+        }
+        if(p->textures>D9TEV_MAX_TEXTURES){
+            char why[160];
+            snprintf(why,sizeof why,"ValidateDevice: pixel shader needs %u textures; PICA supports at most %u",p->textures,D9TEV_MAX_TEXTURES);
+            set_diagnosis(d,why);return D9_UNSUPPORTED;
+        }
+        if(p->textures>d9_stage_count(d)){
+            char why[180];
+            snprintf(why,sizeof why,"ValidateDevice: pixel shader needs %u texture units; backend binds %u",p->textures,d9_stage_count(d));
+            set_diagnosis(d,why);return D9_UNSUPPORTED;
+        }
+        if(p->uses_vertex_color&&!d->ops.draw_colored){
+            set_diagnosis(d,"ValidateDevice: pixel shader uses vertex colour; backend has no colour draw path");
+            return D9_UNSUPPORTED;
+        }
+    }else{
+        if(d->state.stage_colorop<D9_TOP_DISABLE||d->state.stage_colorop>D9_TOP_MODULATE||
+           d->state.stage_alphaop<D9_TOP_DISABLE||d->state.stage_alphaop>D9_TOP_MODULATE||
+           d->second.stage_colorop<D9_TOP_DISABLE||d->second.stage_colorop>D9_TOP_MODULATE||
+           d->second.stage_alphaop<D9_TOP_DISABLE||d->second.stage_alphaop>D9_TOP_MODULATE){
+            set_diagnosis(d,"ValidateDevice: texture stage operator is outside the supported DISABLE/SELECTARG1/SELECTARG2/MODULATE set");
+            return D9_UNSUPPORTED;
+        }
+        if(d->state.stage_texcoordindex>7){
+            set_diagnosis(d,"ValidateDevice: texture coordinate index is outside the supported range");
+            return D9_UNSUPPORTED;
+        }
+        if(d9_stage_count(d)>1&&
+           (d->second.stage_colorop!=D9_TOP_DISABLE||d->second.stage_alphaop!=D9_TOP_DISABLE)&&
+           d->second.stage_texcoordindex!=0){
+            set_diagnosis(d,"ValidateDevice: stage 1 texture coordinate index must be 0");
+            return D9_UNSUPPORTED;
+        }
+    }
+    if(d->cube_texture||d->cube_texture1||d->volume_texture||d->volume_texture1){
+        set_diagnosis(d,"ValidateDevice: cube/volume sampling has no draw path in this bridge");
+        return D9_UNSUPPORTED;
+    }
+    *passes=1;
+    set_diagnosis(d,"");
+    return D9_OK;
+}
+int d9_evict_managed_resources(D9Device *d){
+    if(!d)return D9_INVALID;
+    if(d->teardown){set_diagnosis(d,"EvictManagedResources: device is shutting down");return D9_INVALID;}
+    for(unsigned i=0;i<MAX_TEXTURES;++i){
+        Texture *t=&d->textures[i];
+        if(!t->id||t->pool!=D9_POOL_MANAGED)continue;
+        D9TexEntry *e=d9_texcache_find(&d->tex_cache,t->id);
+        if(t->gpu_only||!t->pixels||!e||!e->has_guest){
+            set_diagnosis(d,"EvictManagedResources: a MANAGED texture has no guest-backed re-upload source");
+            return D9_UNSUPPORTED;
+        }
+    }
+    for(unsigned i=0;i<MAX_CUBES;++i){
+        CubeTexture *c=&d->cubes[i];
+        if(!c->id||c->pool!=D9_POOL_MANAGED)continue;
+        D9TexEntry *e=d9_texcache_find(&d->tex_cache,c->id);
+        if(!c->pixels||!e||!e->has_guest){
+            set_diagnosis(d,"EvictManagedResources: a MANAGED cube has no guest-backed re-upload source");
+            return D9_UNSUPPORTED;
+        }
+    }
+    for(unsigned i=0;i<MAX_VOLUMES;++i){
+        VolumeTexture *v=&d->volumes[i];
+        if(!v->id||v->pool!=D9_POOL_MANAGED)continue;
+        D9TexEntry *e=d9_texcache_find(&d->tex_cache,v->id);
+        if(!v->pixels||!e||!e->has_guest){
+            set_diagnosis(d,"EvictManagedResources: a MANAGED volume has no guest-backed re-upload source");
+            return D9_UNSUPPORTED;
+        }
+    }
+    set_diagnosis(d,"");
+    return D9_OK;
+}
 int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out){
     if(!d||!out)return D9_INVALID;
     d9_texcache_stats(&d->tex_cache,out);

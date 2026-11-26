@@ -843,6 +843,53 @@ static void get_npatch_mode(CPU *c){
     RETF(g.npatch_segments,1);
 }
 static void cooperative(CPU *c){RET(obj(A(0),DEVICE)?OK:INVALID,1);}
+static void available_texture_mem(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,1);
+    size_t avail=d9_available_texture_mem(g.device);
+    uint32_t value=avail>0xffffffffu?0xffffffffu:(uint32_t)avail;
+    trace_detail("GetAvailableTextureMem: %lu bytes remaining of the device budget",(unsigned long)value);
+    RET(value,1);
+}
+static void evict_managed(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,1);
+    int rc=d9_evict_managed_resources(g.device);
+    if(rc){
+        d3d_fail("EvictManagedResources",d9_last_draw_diagnostic(g.device),rc==D9_INVALID?INVALID:UNAVAILABLE);
+        RET(rc==D9_INVALID?INVALID:UNAVAILABLE,1);
+    }
+    g.last_diagnostic[0]=0;
+    RET(OK,1);
+}
+static void raster_status(CPU *c){
+    if(!obj(A(0),DEVICE)||!ptr(A(1),8))RET(INVALID,2);
+    /* PICA has no scanline or vblank status register exposed through this
+     * bridge.  Refuse rather than invent an InVBlank/ScanLine pair. */
+    M32(A(1))=0;M32(A(1)+4)=0;
+    d3d_fail("GetRasterStatus","PICA has no scanline/vblank raster status",UNAVAILABLE);
+    RET(UNAVAILABLE,2);
+}
+static void dialog_box_mode(CPU *c){
+    if(!obj(A(0),DEVICE))RET(INVALID,2);
+    if(A(1)){
+        d3d_fail("SetDialogBoxMode","TRUE is not implemented; pass FALSE",UNAVAILABLE);
+        RET(UNAVAILABLE,2);
+    }
+    g.last_diagnostic[0]=0;
+    RET(OK,2);
+}
+static void validate_device(CPU *c){
+    uint32_t out=A(1);
+    if(!obj(A(0),DEVICE)||!ptr(out,4))RET(INVALID,2);
+    M32(out)=0;
+    unsigned passes=0;
+    int rc=d9_validate_device(g.device,&passes);
+    if(rc){
+        d3d_fail("ValidateDevice",d9_last_draw_diagnostic(g.device),rc==D9_INVALID?INVALID:UNAVAILABLE);
+        RET(rc==D9_INVALID?INVALID:UNAVAILABLE,2);
+    }
+    M32(out)=passes;g.last_diagnostic[0]=0;
+    RET(OK,2);
+}
 static void direct3d(CPU *c){if(!obj(A(0),DEVICE)||!g.factory||!ptr(A(1),4))RET(INVALID,2);retain(g.factory);M32(A(1))=g.factory->guest;RET(OK,2);}
 static void resource_device(CPU *c){Obj *o=obj(A(0),0);if(!o||o->kind<VB||!g.dev||!ptr(A(1),4))RET(INVALID,2);retain(g.dev);M32(A(1))=g.dev->guest;RET(OK,2);}
 static int fvf_admitted(unsigned fvf){
@@ -2162,7 +2209,7 @@ static void draw_indexed_up(CPU *c){
  X(adapter_identifier) X(adapter_mode_count) X(enum_modes) X(check_device_type) X(check_multisample) X(check_depth_stencil) X(check_format_conversion) \
  X(factory_caps) X(device_caps) X(adapter_monitor) X(register_software) \
  X(d3dperf_set_options) X(d3dperf_begin) X(d3dperf_end) X(d3dperf_status) \
- X(cooperative) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(create_cube_tex) X(create_volume_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
+ X(cooperative) X(available_texture_mem) X(evict_managed) X(raster_status) X(dialog_box_mode) X(validate_device) X(direct3d) X(resource_device) X(create_vb) X(create_ib) X(create_tex) X(create_cube_tex) X(create_volume_tex) X(buffer_lock) X(buffer_unlock) X(texture_lock) X(texture_unlock) \
  X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
  X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
  X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
@@ -2296,6 +2343,9 @@ static void init_tables(void){
     SLOT(FACTORY,12,check_depth_stencil);SLOT(FACTORY,13,check_format_conversion);SLOT(FACTORY,14,factory_caps);
     SLOT(FACTORY,15,adapter_monitor);SLOT(FACTORY,16,create_device);
     SLOT(DEVICE,3,cooperative);SLOT(DEVICE,6,direct3d);SLOT(DEVICE,7,device_caps);SLOT(DEVICE,8,device_display_mode);
+    SLOT(DEVICE,4,available_texture_mem);SLOT(DEVICE,5,evict_managed);
+    SLOT(DEVICE,19,raster_status);SLOT(DEVICE,20,dialog_box_mode);
+    SLOT(DEVICE,70,validate_device);
     SLOT(DEVICE,9,creation_parameters);SLOT(DEVICE,15,number_swap_chains);SLOT(DEVICE,16,reset_device);SLOT(DEVICE,17,present);SLOT(DEVICE,18,get_back_buffer);
     SLOT(DEVICE,23,create_tex);SLOT(DEVICE,24,create_volume_tex);SLOT(DEVICE,25,create_cube_tex);SLOT(DEVICE,26,create_vb);SLOT(DEVICE,27,create_ib);SLOT(DEVICE,28,create_render_target);SLOT(DEVICE,29,create_depth_stencil);
     SLOT(DEVICE,36,create_offscreen);SLOT(DEVICE,37,set_render_target);SLOT(DEVICE,38,get_render_target);SLOT(DEVICE,34,stretch_rect);SLOT(DEVICE,39,set_depth_stencil);
