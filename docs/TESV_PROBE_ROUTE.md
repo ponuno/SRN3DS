@@ -647,6 +647,47 @@ Route closed for this guard.  A real next layer must patch the copied
 vtable/container call (or give that group a valid real buffer), not the global
 vtable slot.  No fake width/height and no frame are claimed.
 
+### No-cube-skip source-fill census (2026-11-26)
+
+The standard `tesv_slice` was built from `b3b409c`/`gen01` with only the
+`n3ds_cecdc0_source_fill` hook in `f_CECDC0` (no `f_FB5C20` rename and no
+cube-skip, vtable, stack or shader-skip env).  Env: MEMPROBE, CAPS, TRACE,
+SM3, HDR fallback, budget64 and `TESV_CECDC0_SOURCE_FILL=1`; 2e9 steps.
+
+Result: **99.254 s**, exit 1.  `0x00ced19d` is gone and `CreateTexture=53`,
+but the cube call is still the 32/0 probe:
+
+```text
+IDirect3DDevice9::CreateCubeTexture slot=25 this=0x50002020 caller=0x00cecc92
+args=[0x00000020 0x00000001 0x00000000 0x00000000 0x00000001 0x1007faa8 0x00000000]
+-> 0x8876086c   (D3DERR_INVALIDCALL; format 0)
+```
+
+There is no 512/0x71 LDR cube call.  `GetCubeMapSurface`,
+`CreateDepthStencilSurface`, `SetRenderTarget`, `SetDepthStencilSurface`,
+`CreateVertexShader`, `CreatePixelShader`, `SetTexture`, both draw entry
+points and `Present` are all 0.
+
+First fault:
+
+```text
+[guest] unmapped addr=0000000c bytes=4 last_call=00fb5bd0
+eax=0 ebx=0x545b4c50 ecx=0x40848c5c edx=2 esi=0x545b4c50 edi=0x54114ce0
+ebp=0 esp=0x1007f8f0
+```
+
+The host backtrace is `n3ds_guest_ptr <- f_CED3E0 <- f_CED4B0 <- f_CD4E90 <-
+f_FB5C20 <- f_C91540 <- f_C91BA0 <- f_C92410 <- f_C74710`: the real
+`NiRenderedCubeMap::Create` path.  `ecx=0x40848c5c` is
+`[[esp+0x54]+0x5ac]` (the render-target cube table) and `eax=0`, so the
+caller reads `[0+0xc]`.
+
+The LDR cube RT did not engage for the 32/0 probe; the cube create is still
+refused and the engine falls back to the NULL render-target cube entry.  No
+depth, shader, texture-bind or draw was reached; no frame is claimed.  Next:
+feed the 32/0 cube probe (or the `+0x5ac` table) the real 0x71 LDR descriptor,
+or gate the cube create on the bridge's cube-RT capability.
+
 ### Fault-register / face-writer probe (2026-11-26)
 
 Base: `main` at `ca60984` (default native render-target cap 256). Added the
