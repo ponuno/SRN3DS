@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/skyrim-n3ds/docs/shader_plan_schema.json",
+  "title": "d9-shader-plan-v1",
+  "description": "One offline plan format for pixel and vertex shaders. A document maps exact bytecode SHA-256 values to materialised PICA200 descriptors. Status is derived, not declared: draw_enabled=1 -> 'draw-enabled', kind=tev/pica_vs with draw_enabled=0 -> 'translated', and a census row with no plan -> 'refused'. The verifier (tools/shaders/plan_verify.py) normalises and checks this.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "archive", "entries"],
+  "properties": {
+    "schema": { "const": "d9-shader-plan-v1" },
+    "archive": { "type": "string", "minLength": 1 },
+    "generated_for": { "type": "string" },
+    "note": { "type": "string" },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "status": {
+      "enum": ["translated", "draw-enabled", "refused"],
+      "description": "Normalised by the verifier from kind + draw_enabled."
+    },
+    "family": {
+      "enum": ["ui", "blit_post", "sky_water", "terrain", "skinning",
+               "lighting", "menu_light", "generic"]
+    },
+    "entry": {
+      "type": "object",
+      "required": ["id", "sha256", "stage", "kind", "draw_enabled", "note"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "sha1": { "$ref": "#/$defs/sha1" },
+        "stage": { "enum": ["ps_3_0", "vs_3_0"] },
+        "kind": { "enum": ["tev", "pica_vs"] },
+        "draw_enabled": { "enum": [0, 1] },
+        "status": { "$ref": "#/$defs/status" },
+        "family": { "$ref": "#/$defs/family" },
+        "version": { "type": "string", "pattern": "^0x[0-9a-f]{8}$" },
+        "source_package": { "type": "string" },
+        "source_key": { "type": "string" },
+        "instructions": { "type": "integer", "minimum": 0 },
+        "note": { "type": "string" },
+        "preconditions": { "type": "array", "items": { "type": "string" } },
+        "inputs": { "type": "array" },
+        "outputs": { "type": "array" },
+        "constants": { "type": "array", "items": { "type": "integer" } },
+        "textures": { "type": "array" },
+        "stages": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "stage_data": {
+          "type": "array",
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/stage" }
+        },
+        "ldr_clamped": { "enum": [0, 1] },
+        "requires_alpha_fixup": { "enum": [0, 1] },
+        "uses_vertex_color": { "enum": [0, 1] },
+        "expandable": { "type": "array", "items": { "type": "string" } },
+        "uniform_registers": { "type": "integer", "minimum": 0 },
+        "skinning": { "type": "boolean" },
+        "codegen": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "tev" } } },
+          "then": {
+            "required": ["stages", "stage_data", "textures", "constants"],
+            "properties": {
+              "stage": { "const": "ps_3_0" },
+              "stages": { "type": "integer", "minimum": 1, "maximum": 6 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "pica_vs" } } },
+          "then": {
+            "required": ["outputs", "inputs"],
+            "properties": {
+              "stage": { "const": "vs_3_0" },
+              "outputs": { "type": "array", "minItems": 1, "maxItems": 7 },
+              "inputs": { "type": "array", "maxItems": 16 },
+              "uniform_registers": { "type": "integer", "maximum": 96 }
+            }
+          }
+        },
+        {
+          "comment": "A PICA VS descriptor is never draw-enabled without native codegen.",
+          "if": { "properties": { "kind": { "const": "pica_vs" } } },
+          "then": { "properties": { "draw_enabled": { "const": 0 } } }
+        }
+      ]
+    },
+    "stage": {
+      "type": "object",
+      "required": ["func_rgb", "func_a", "src_rgb", "src_a", "op_rgb", "op_a"],
+      "properties": {
+        "word": { "type": "integer", "minimum": 0 },
+        "instruction": { "type": "string" },
+        "func_rgb": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "func_a": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "src_rgb": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": { "type": "integer", "minimum": 0, "maximum": 15 }
+        },
+        "src_a": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": { "type": "integer", "minimum": 0, "maximum": 15 }
+        },
+        "op_rgb": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": { "enum": [0, 1, 2, 3, 4, 5, 8, 9, 12, 13] }
+        },
+        "op_a": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": { "type": "integer", "minimum": 0, "maximum": 7 }
+        },        "const_reg": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "const_is_literal": { "enum": [0, 1] },
+        "const_rgba8": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "scale_rgb": { "enum": [0, 1, 2, 3] },
+        "scale_a": { "enum": [0, 1, 2, 3] }
+      }
+    }
+  }
+}

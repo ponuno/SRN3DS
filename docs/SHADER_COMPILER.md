@@ -4,6 +4,10 @@ Status: **offline compiler, census and generated runtime table connected as a
 lookup module; no runtime SM3 translation and no new draw path.** A rendered
 menu frame is still not claimed.
 
+The host-only phase that makes the census reusable — a MojoShader canonical IR,
+a field-level differential, one plan schema with a verifier, and the six
+per-family shader packs — is documented in [`SM3_PHASE1.md`](SM3_PHASE1.md).
+
 The port has two honest ways to run a shipped shader. Variant A keeps a
 bounded runtime selector for the two certified menu programs. Variant B,
 described here, moves the work offline: every `.fxp` bytecode blob is decoded,

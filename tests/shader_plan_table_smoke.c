@@ -248,6 +248,27 @@ int main(void) {
               "generated VS out-of-range index returns NULL");
     }
 
+    /* Per-family packs partition the whole census, append-only. */
+    {
+        unsigned chunks = 0, hashes = 0, draws = 0;
+        CHECK(d9_shader_pack_count() == 6, "six shader packs");
+        for (unsigned i = 0; i < d9_shader_pack_count(); ++i) {
+            const D9ShaderPackRow *row = d9_shader_pack_at(i);
+            CHECK(row && row->pack && row->owner, "pack row is named");
+            CHECK(row && row->translated + row->draw_enabled + row->refused
+                  == row->unique_hashes, "pack statuses cover its hashes");
+            if (row) {
+                chunks += row->chunks;
+                hashes += row->unique_hashes;
+                draws += row->draw_enabled;
+            }
+        }
+        CHECK(chunks == 10475u, "packs cover all 10,475 chunks");
+        CHECK(hashes == 6659u, "packs cover all 6,659 hashes");
+        CHECK(draws == 1u, "exactly one draw-enabled plan across the packs");
+        CHECK(d9_shader_pack_at(6) == NULL, "pack out-of-range returns NULL");
+    }
+
     /* Caps are untouched by plan lookup/selection. */
     D9Caps9 caps;
     memset(&caps, 0xAA, sizeof caps);

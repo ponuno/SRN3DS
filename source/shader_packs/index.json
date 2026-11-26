@@ -1,0 +1,73 @@
+{
+ "schema": "shader-pack-index/1",
+ "packs": {
+  "ui": {
+   "owner": "sm3-agent-ui",
+   "chunks": 314,
+   "unique_hashes": 113,
+   "coverage": {
+    "translated": 0,
+    "draw-enabled": 0,
+    "refused": 113,
+    "contract_only": 40
+   }
+  },
+  "blit_post": {
+   "owner": "sm3-agent-blit-post",
+   "chunks": 131,
+   "unique_hashes": 69,
+   "coverage": {
+    "translated": 1,
+    "draw-enabled": 1,
+    "refused": 67,
+    "contract_only": 8
+   }
+  },
+  "sky_water": {
+   "owner": "sm3-agent-sky-water",
+   "chunks": 82,
+   "unique_hashes": 45,
+   "coverage": {
+    "translated": 0,
+    "draw-enabled": 0,
+    "refused": 45,
+    "contract_only": 0
+   }
+  },
+  "terrain": {
+   "owner": "sm3-agent-terrain",
+   "chunks": 327,
+   "unique_hashes": 247,
+   "coverage": {
+    "translated": 0,
+    "draw-enabled": 0,
+    "refused": 247,
+    "contract_only": 0
+   }
+  },
+  "skinning": {
+   "owner": "sm3-agent-skinning",
+   "chunks": 2162,
+   "unique_hashes": 1194,
+   "coverage": {
+    "translated": 0,
+    "draw-enabled": 0,
+    "refused": 1194,
+    "contract_only": 97
+   }
+  },
+  "lighting": {
+   "owner": "sm3-agent-lighting",
+   "chunks": 7459,
+   "unique_hashes": 4991,
+   "coverage": {
+    "translated": 2,
+    "draw-enabled": 0,
+    "refused": 4989,
+    "contract_only": 130
+   }
+  }
+ },
+ "chunks": 10475,
+ "unique_hashes": 6659
+}

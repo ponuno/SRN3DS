@@ -1,4 +1,5 @@
 #include "d3d9_core.h"
+#include "d3d9_text_plan.h"
 #include "d3d9_adapter.h"
 #include "d3d9_bc.h"
 #include "d3d9_texcache.h"
@@ -2886,42 +2887,23 @@ static int volume_levels_ready(const VolumeTexture *v){
     return 1;
 }
 /* Keep the core's fixed-function text route free of a hard link dependency on
- * d3d9_tev.c (many small tests link the core alone).  This mirrors the
- * certified d9_tev_text_plan() shape exactly. */
+ * d3d9_tev.c (many small tests link the core alone).  The accepted shape lives
+ * in d3d9_text_plan.h and is shared with d9_tev_text_plan(), so the two cannot
+ * drift.  Only the measurement diagnostics stay local to the core. */
 static void core_text_plan(D9TevProgram *p){
-    memset(p,0,sizeof *p);
-    p->version=0xFFFF0300u;p->instructions=1u;p->stages=1u;
-    p->stage_limit=D9TEV_MAX_STAGES;p->backend_flags=D9TEV_PLAN_MENU_TEXT;
-    p->textures=1u;p->texture[0].texcoord_reg=0u;p->texture[0].sampler_reg=0u;
-    p->texture[0].sampler_type=2u;p->inputs=1u;
-    p->input[0].usage=D9TEV_USAGE_COLOR;p->input[0].usage_index=0u;
-    p->input[0].reg_index=1u;p->input[0].tev_source=D9TEV_SRC_PRIMARY;
-    p->uses_vertex_color=1u;
-    D9TevStage *s=&p->stage[0];
+    d9_text_plan_a8(p);
     if(getenv("MENU_DEBUG_SOLID")){
         /* Measurement diagnostic: ignore the atlas entirely so the geometry
          * and vertex colours can be inspected independently of A8 sampling. */
+        D9TevStage *s=&p->stage[0];
         s->func_rgb=s->func_a=D9TEV_FUNC_REPLACE;
         for(unsigned i=0;i<3;++i){
             s->src_rgb[i]=D9TEV_SRC_PRIMARY;
             s->src_a[i]=D9TEV_SRC_PRIMARY;
         }
-    }else{
-        /* The menu atlas is A8: it carries coverage in alpha only, so its RGB
-         * is zero.  RGB comes from the vertex colour and alpha from coverage. */
-        s->func_rgb=D9TEV_FUNC_REPLACE;
-        s->src_rgb[0]=D9TEV_SRC_PRIMARY;
-        s->src_rgb[1]=D9TEV_SRC_PRIMARY;
-        s->src_rgb[2]=D9TEV_SRC_PRIMARY;
-        s->func_a=D9TEV_FUNC_MODULATE;
-        s->src_a[0]=D9TEV_SRC_TEX0;
-        s->src_a[1]=D9TEV_SRC_PRIMARY;
-        s->src_a[2]=D9TEV_SRC_PRIMARY;
-        if(getenv("MENU_DEBUG_A8_RED"))
-            s->op_a[0]=D9TEV_A_R; /* diagnostic: A8 coverage may live in red */
+    }else if(getenv("MENU_DEBUG_A8_RED")){
+        p->stage[0].op_a[0]=D9TEV_A_R; /* diagnostic: A8 coverage may live in red */
     }
-    for(unsigned i=0;i<3;++i){s->op_rgb[i]=D9TEV_RGB_COLOR;s->op_a[i]=D9TEV_A_ALPHA;}
-    s->const_reg=0xFFu;
 }
 /* A mip-filtered cube may only draw when every face of every level is present;
  * the PICA cube view exposes one native for the whole mip chain. */

@@ -13,6 +13,18 @@
  * certified. */
 #include "d3d9_generated_vs_table.inc"
 
+/* Per-family coverage index (tools/shader_packs.py), append-only. */
+#include "d3d9_shader_pack_table.inc"
+
+unsigned d9_shader_pack_count(void) {
+    return (unsigned)D9_SHADER_PACK_ROW_COUNT;
+}
+
+const D9ShaderPackRow *d9_shader_pack_at(unsigned index) {
+    if (index >= D9_SHADER_PACK_ROW_COUNT) return NULL;
+    return &d9_shader_pack_rows[index];
+}
+
 unsigned d9_shader_plan_count(void) {
     return (unsigned)D9_SHADER_PLAN_ENTRY_COUNT;
 }

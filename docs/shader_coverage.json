@@ -1,0 +1,150 @@
+{
+ "schema": "shader-coverage/1",
+ "census_chunks": 10475,
+ "census_hashes": 6659,
+ "packs": [
+  {
+   "pack": "ui",
+   "owner": "sm3-agent-ui",
+   "chunks": 314,
+   "unique_hashes": 113,
+   "translated": 0,
+   "draw_enabled": 0,
+   "refused": 113,
+   "contract_only": 40,
+   "refused_classes": {
+    "pica_vs": 40,
+    "unsupported_opcode": 37,
+    "dataflow": 17,
+    "def_literal_out_of_range": 13,
+    "tev_prebake": 6
+   },
+   "needs": [
+    "opcode lowering (cmp/if/loop/rcp/derivatives)",
+    "multi-temp dataflow -> scheduler or software fallback",
+    "literal range rewrite (def outside RGBA8 [0,1])"
+   ]
+  },
+  {
+   "pack": "blit_post",
+   "owner": "sm3-agent-blit-post",
+   "chunks": 131,
+   "unique_hashes": 69,
+   "translated": 1,
+   "draw_enabled": 1,
+   "refused": 67,
+   "contract_only": 8,
+   "refused_classes": {
+    "def_literal_out_of_range": 19,
+    "dataflow": 18,
+    "unsupported_opcode": 13,
+    "pica_vs": 8,
+    "tev_direct": 5,
+    "non_uniform_swizzle": 2,
+    "tev_prebake": 1,
+    "input_not_a_colour_varying": 1
+   },
+   "needs": [
+    "literal range rewrite (def outside RGBA8 [0,1])",
+    "multi-temp dataflow -> scheduler or software fallback",
+    "opcode lowering (cmp/if/loop/rcp/derivatives)",
+    "per-channel TEV selectors",
+    "varying semantic mapping"
+   ]
+  },
+  {
+   "pack": "sky_water",
+   "owner": "sm3-agent-sky-water",
+   "chunks": 82,
+   "unique_hashes": 45,
+   "translated": 0,
+   "draw_enabled": 0,
+   "refused": 45,
+   "contract_only": 0,
+   "refused_classes": {
+    "def_literal_out_of_range": 39,
+    "unsupported_opcode": 3,
+    "dataflow": 2,
+    "multiple_output_writes (2)": 1
+   },
+   "needs": [
+    "literal range rewrite (def outside RGBA8 [0,1])",
+    "opcode lowering (cmp/if/loop/rcp/derivatives)",
+    "multi-temp dataflow -> scheduler or software fallback",
+    "channel-carry plan"
+   ]
+  },
+  {
+   "pack": "terrain",
+   "owner": "sm3-agent-terrain",
+   "chunks": 327,
+   "unique_hashes": 247,
+   "translated": 0,
+   "draw_enabled": 0,
+   "refused": 247,
+   "contract_only": 0,
+   "refused_classes": {
+    "def_literal_out_of_range": 247
+   },
+   "needs": [
+    "literal range rewrite (def outside RGBA8 [0,1])"
+   ]
+  },
+  {
+   "pack": "skinning",
+   "owner": "sm3-agent-skinning",
+   "chunks": 2162,
+   "unique_hashes": 1194,
+   "translated": 0,
+   "draw_enabled": 0,
+   "refused": 1194,
+   "contract_only": 97,
+   "refused_classes": {
+    "def_literal_out_of_range": 1044,
+    "pica_vs": 97,
+    "unsupported_opcode": 42,
+    "too_many_vs_varyings (8 > 7)": 9,
+    "too_many_vs_varyings (9 > 7)": 2
+   },
+   "needs": [
+    "literal range rewrite (def outside RGBA8 [0,1])",
+    "opcode lowering (cmp/if/loop/rcp/derivatives)",
+    "varying packing or multi-pass VS",
+    "varying packing or multi-pass VS"
+   ]
+  },
+  {
+   "pack": "lighting",
+   "owner": "sm3-agent-lighting",
+   "chunks": 7459,
+   "unique_hashes": 4991,
+   "translated": 2,
+   "draw_enabled": 0,
+   "refused": 4989,
+   "contract_only": 130,
+   "refused_classes": {
+    "def_literal_out_of_range": 4804,
+    "pica_vs": 130,
+    "unsupported_opcode": 31,
+    "too_many_vs_varyings (8 > 7)": 17,
+    "too_many_vs_varyings (9 > 7)": 5,
+    "dataflow": 2
+   },
+   "needs": [
+    "literal range rewrite (def outside RGBA8 [0,1])",
+    "opcode lowering (cmp/if/loop/rcp/derivatives)",
+    "varying packing or multi-pass VS",
+    "varying packing or multi-pass VS",
+    "multi-temp dataflow -> scheduler or software fallback"
+   ]
+  }
+ ],
+ "total": {
+  "translated": 3,
+  "draw-enabled": 1,
+  "refused": 6655,
+  "chunks": 10475,
+  "unique_hashes": 6659
+ },
+ "note": "translated = offline plan/contract exists; draw-enabled = certified runtime plan; refused = named software refusal; contract_only = a pica_vs envelope hash with no committed descriptor"
+}
