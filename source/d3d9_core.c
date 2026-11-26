@@ -2726,7 +2726,10 @@ int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
     if(d->ops.target_bind&&d->ops.target_bind(d->ctx,t?t->native:NULL)){
         d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
     }
-    if(t){
+    /* The implicit screen has no Target object, but its viewport still has to
+     * be programmed; otherwise PICA keeps a zero-sized viewport and the whole
+     * frame is discarded even though Clear and the draw calls succeed. */
+    {
         int vrc=apply_target_viewport(d,t);
         if(vrc){d->ops.end(d->ctx);d->scene=0;return vrc;}
     }
