@@ -1,9 +1,10 @@
 # MENU_SWF — bounded StartMenu.swf summary
 
-Status: the SWF **container, tag stream, bounded display-state snapshots and
-DefineFont3 metrics** are parsed.  This is still not a menu: there is no
-renderable display list, AVM/AS2 execution, glyph rasterisation, image decode or
-draw.
+Status: the SWF **container, tag stream, flattened display list, shape/glyph
+tessellation, A8 raster/atlas/batch and a host CPU -> COM DrawPrimitiveUP
+integration** are implemented and exercised on the real StartMenu.  This is
+still not a menu frame: mask/clip rendering, AVM/AS2, full GFx text/assets,
+per-fill gradient/style reproduction and PICA sampling remain open.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -34,7 +35,8 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_atlas_smoke.c` | Synthetic varied-size pack/determinism/UV/composition/overflow/empty cases; optional real codes 33..36 coverage-sum comparison |
 | `tests/menu_swf_batch_smoke.c` | Synthetic 3-glyph positions/UV/indices/winding/empty/viewport/overflow and optional real 33..36 atlas batch |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_clip`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch` and `menu_text_draw`; `menu_bsa` now links `menu_swf.c` |
+| `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: flattened records -> per-record shape tessellation -> one real Font3 glyph raster/atlas/batch -> bounded COM DrawPrimitiveUP chunks; explicit skip counts and no frame claim |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -616,21 +618,82 @@ contributes 21 synthetic checks, `menu_swf_atlas` 27, `menu_swf_raster` 44,
 `menu_text_draw` is an assertion-based COM test outside that real-data matrix.
 No real-data checks are run in that suite.
 
+## 15. Real StartMenu CPU -> COM pipeline
+
+`tests/menu_pipeline_e2e_smoke.c` is the integration smoke for the existing
+CPU layers and the real COM demo.  It reads the winning
+`Interface/StartMenu.swf` from `Update.bsa` through the same
+`SKYRIM_N3DS_REAL_DATA` path as the other real-data tests, then:
+
+1. builds the first flattened display-list frame;
+2. classifies every record as sprite, mask/clip, shape, DefineEditText or
+   unknown character;
+3. tessellates every unmasked shape record with its accumulated 16.16 matrix,
+   appends transformed triangle-list vertices/indices and counts skipped stroke
+   segments;
+4. lays out one synthetic string (`"!"`) using the real 243-glyph DefineFont3,
+   rasterises its 159 triangles, packs the used A8 rectangle beside one white
+   texel and appends the resulting text quad;
+5. creates/uploads the 64x64 A8 atlas through `d3d9_menu_text`, submits the
+   combined indexed batch in 4,095-index (1,365-triangle) chunks and verifies
+   `DrawPrimitiveUP`, FVF `0x142`, POINT/NONE/CLAMP, MODULATE(TEXTURE,DIFFUSE),
+   A8 identity/upload/lock bytes, draw/expanded-vertex counts and named empty /
+   bad-index refusals.
+
+Measured real result (2026-11-26):
+
+```text
+source=Update.bsa StartMenu.swf bytes=60284 tags=1186 avm_skipped=53
+records=216 sprites=71 sprite_records=106 shape_definitions=27
+shape_records=53 text_records=57 mask_records=0 unsupported_records=0
+edit_text_definitions=22 edit_text_ids=22
+empty_shapes=0 degenerate_shapes=0 strokes_skipped=182
+tessellated_vertices=57528 triangles=28742
+shape_batch_vertices=57528 shape_batch_indices=86226
+glyph=33 tess_vertices=319 triangles=159
+raster=64x64 rect=24,1,40,63 sum=178003 atlas_used_height=62
+batch_vertices=57532 indices=86232 triangles=28744
+limits=262144 vertices / 786432 indices; draw_chunk_indices=4095
+COM draw_calls=22 expanded_vertices=86232 max_draw_vertices=4095
+FVF=0x142 A8=64x64; 49 checks, 0 failures
+```
+
+The 57 real text records are deliberately not rendered as full GFx text; the
+single real-font glyph exercises the raster/atlas/batch/COM path.  Shape fills
+use the atlas's white texel plus the display-list colour transform, so original
+fill colours, gradients, bitmap fills and line styles are not reproduced; the
+182 stroke segments are counted and skipped.  The host mock `Present` only
+closes the COM scene state machine so releases are not deferred.  No pixel
+readback, GPU/PICA sampling, visual equivalence or frame is claimed.
+
+Verification:
+
+* targeted `menu_pipeline_e2e,menu_swf_display_list,menu_swf_tess,menu_swf_batch,menu_text_draw,com`:
+  **6 C targets passed; harness 16 passed, 0 diagnostic, 0 failed**;
+* new real e2e under ASan: **49 checks, 0 failures; harness 11 passed,
+  0 diagnostic, 0 failed**;
+* full host suite with `SKYRIM_N3DS_REAL_DATA=F:\Skyrim\Data`:
+  **113 passed, 0 diagnostic, 0 failed**;
+* ARM compile-only `-Mode com -Isolated menu_pipe_e2e`: `.elf` 6,178,384 B,
+  SHA256 `ae96969be21eb92007bfa424ec32126139c1ff5e1cd47077b1b5f4558287ca76`;
+  `.3dsx` 913,460 B, SHA256
+  `27fd1752fdc0b8e645a32c73d8f4c9b3c362d95fb08e09e12014a2db6004e5d6`.
+
 ## 16. What remains
 
 1. **Renderable display list** — bounded state, flattened CPU transform records,
-   rectangular clip-mask intersections and triangle tessellation exist, but
-   this is not a GFx display list: complex mask-shape tessellation, clip
-   rendering, clipping layers, button states, frame scripts and draw submission
-   remain.
+   shape geometry, tessellation and a host COM triangle batch exist, but this is
+   not a GFx display list: mask/clip rendering, clipping layers, button states,
+   frame scripts and real draw submission remain.
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
    the menu's script behaviour.  `DoAction`/clip-action payloads are not
    executed.
 3. **Atlas cache/real GFx fonts** — `fonts_en.swf`/`fonts_console.swf`,
    `FontConfig.txt`, texture cache/rehydration, richer shaping (ligatures,
    bidi, fallback fonts) and text metrics beyond advance+kerning.  The host
-   COM demo can create/upload an A8 texture and draw one quad batch; there is
-   no persistent cache, PICA A8 sampling or real GFx text object yet.
+   COM demo can create/upload an A8 atlas and draw the combined shape/text
+   batch; there is no persistent cache, PICA A8 sampling or real GFx text
+   object yet.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
 5. **Draw path** — real GFx display list/masks, dynamic vertex buffer/FVF,
@@ -753,5 +816,10 @@ frame.
   uploads coverage byte-exactly, sets POINT/CLAMP + MODULATE(TEXTURE,DIFFUSE)
   + FVF `0x142`, and issues one DrawPrimitiveUP for **12 expanded vertices**.
   A refusing backend is `ERR_A8` with no RGBA substitution.
+* The real StartMenu integration classifies all 216 flattened records,
+  tessellates 53 shape records into 28,742 triangles, appends one real-font text
+  quad and submits 57,532 batch vertices / 86,232 indices through **22 bounded
+  DrawPrimitiveUP calls**.  Sprite/text/mask/stroke/style gaps are counted, not
+  silently rendered.
 * No AVM action is executed, no texture cache or real GFx draw/frame is built,
   and no frame/pixel/Azahar/hardware result is claimed.
