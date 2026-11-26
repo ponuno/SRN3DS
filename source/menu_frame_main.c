@@ -662,6 +662,12 @@ int main(void) {
             g_batch_vertices[i].color = 0xffff0000u;
         fprintf(stderr, "MENU_DEBUG_RED: all batch vertex colours forced to opaque red\n");
     }
+    FILE *white_flag = fopen("sdmc:/menu_debug_white.flag", "r");
+    if (white_flag) {
+        fclose(white_flag);
+        memset(g_atlas_pixels, 0xFF, sizeof g_atlas_pixels);
+        fprintf(stderr, "MENU_DEBUG_WHITE: atlas filled with opaque coverage\n");
+    }
 
     D9Citro *gpu = NULL;
     D9Device *device = NULL;
