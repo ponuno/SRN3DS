@@ -1221,6 +1221,29 @@ int d9_set_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned
     }
     set_diagnosis(d,"");return D9_OK;
 }
+int d9_get_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned *value){
+    if(!d||!value)return D9_INVALID;
+    if(stage>7){set_diagnosis(d,"GetTextureStageState: only stages 0..7 exist");return D9_UNSUPPORTED;}
+    if(stage>=d9_stage_count(d)){
+        if(type!=D9_TSS_COLOROP&&type!=D9_TSS_ALPHAOP){
+            set_diagnosis(d,"GetTextureStageState: only COLOROP/ALPHAOP exist on stages 1..7");return D9_UNSUPPORTED;}
+        *value=D9_TOP_DISABLE;set_diagnosis(d,"");return D9_OK;
+    }
+    const D9DrawState *state=stage?&d->second:&d->state;
+    switch(type){
+    case D9_TSS_COLOROP:*value=state->stage_colorop;break;
+    case D9_TSS_ALPHAOP:*value=state->stage_alphaop;break;
+    case D9_TSS_COLORARG1:*value=state->stage_colorarg1;break;
+    case D9_TSS_COLORARG2:*value=state->stage_colorarg2;break;
+    case D9_TSS_ALPHAARG1:*value=state->stage_alphaarg1;break;
+    case D9_TSS_ALPHAARG2:*value=state->stage_alphaarg2;break;
+    case D9_TSS_TEXCOORDINDEX:*value=state->stage_texcoordindex;break;
+    default:
+        set_diagnosis(d,"GetTextureStageState: only COLOROP/COLORARG1/COLORARG2/ALPHAOP/ALPHAARG1/ALPHAARG2/TEXCOORDINDEX are implemented");
+        return D9_UNSUPPORTED;
+    }
+    set_diagnosis(d,"");return D9_OK;
+}
 int d9_set_indices(D9Device *d,D9Handle h){Buffer *b=d?buffer(d,h):NULL;if(d&&!h){d->index=0;return D9_OK;}if(!b||!b->kind||b->locked)return D9_INVALID;d->index=h;return D9_OK;}
 unsigned d9_stage_count(const D9Device *d){return d&&d->ops.draw_two?2:1;}
 int d9_set_texture(D9Device *d,D9Handle h){return d9_bind_texture(d,0,h);}

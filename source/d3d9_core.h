@@ -455,6 +455,10 @@ int d9_set_viewport_size(D9Device *d,unsigned width,unsigned height);
  * DISABLE.  Unsupported values return D9_UNSUPPORTED and name the rejection in
  * d9_last_draw_diagnostic(). */
 int d9_set_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned value);
+/* Read back exactly what d9_set_texture_stage_state() accepted.  Stages above
+ * the backend stage count report COLOROP/ALPHAOP as DISABLE; any other type
+ * there is D9_UNSUPPORTED.  An unsupported type leaves *value untouched. */
+int d9_get_texture_stage_state(D9Device *d,unsigned stage,unsigned type,unsigned *value);
 int d9_set_indices(D9Device *d,D9Handle h);
 unsigned d9_stage_count(const D9Device *d);
 int d9_bind_texture(D9Device *d,unsigned stage,D9Handle texture);

@@ -144,6 +144,18 @@ int main(void){
     diup[4]=0x10010780;diup[6]=0;assert(method(&s,s.device,84,diup,8)==0x8876086c); /* null vertices */
     diup[6]=0x10010ff0;diup[1]=0;diup[2]=3;assert(method(&s,s.device,84,diup,8)==0x8876086c); /* vertex range crosses mapping */
     assert(d9_memory_used(d)==used_before);
+    /* Slot 66 readback: only values accepted by slot 67 are returned. */
+    uint32_t tss[]={0,1,4};assert(!method(&s,s.device,67,tss,3)); /* COLOROP=MODULATE */
+    assert(!guest_write32(&s.memory,0x10010790,0xdeadbeefu));
+    tss[0]=0;tss[1]=1;tss[2]=0x10010790;assert(!method(&s,s.device,66,tss,3));
+    uint32_t tss_out=0;assert(!guest_read32(&s.memory,0x10010790,&tss_out)&&tss_out==4);
+    /* Stage 1 has no second backend stage here, so COLOROP reads DISABLE. */
+    tss[0]=1;tss[1]=1;tss[2]=0x10010790;assert(!method(&s,s.device,66,tss,3));
+    assert(!guest_read32(&s.memory,0x10010790,&tss_out)&&tss_out==1);
+    /* An unimplemented type fails and leaves the output untouched. */
+    assert(!guest_write32(&s.memory,0x10010790,0xdeadbeefu));
+    tss[0]=0;tss[1]=0x99;tss[2]=0x10010790;assert(method(&s,s.device,66,tss,3)==0x8876086c);
+    assert(!guest_read32(&s.memory,0x10010790,&tss_out)&&tss_out==0xdeadbeefu);
     stage[1]=s.texture;assert(!method(&s,s.device,65,stage,2));assert(m.deleted==0);
     assert(!method(&s,s.device,42,NULL,0));uint32_t present[]={0,0,0,0};assert(!method(&s,s.device,17,present,4)&&m.deleted==1);
     /* Binding holds a reference, so an additional Release cannot destroy a bound resource. */

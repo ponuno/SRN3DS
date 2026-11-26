@@ -1669,6 +1669,7 @@ static void set_texture_stage_state(CPU *c){
     RET(OK,4);
 }
 static void get_sampler(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(3),4)||d9_get_unit_sampler(g.device,A(1),A(2),&v))RET(INVALID,4);M32(A(3))=v;RET(OK,4);}
+static void get_texture_stage_state(CPU *c){unsigned v;if(!obj(A(0),DEVICE)||!ptr(A(3),4)||d9_get_texture_stage_state(g.device,A(1),A(2),&v))RET(INVALID,4);M32(A(3))=v;RET(OK,4);}
 static void stream(CPU *c){Obj *o=obj(A(2),VB);unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||(A(2)&&!o)||g.phase==2)RET(INVALID,5);
     int rc=d9_set_stream(g.device,s,o?o->handle:0,A(3),A(4));if(!rc){bind(&g.streams[s],o);g.offsets[s]=A(3);g.strides[s]=A(4);}RET(hr(rc),5);}
 static void get_stream(CPU *c){unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||!ptr(A(2),4)||!ptr(A(3),4)||!ptr(A(4),4))RET(INVALID,5);
@@ -2213,7 +2214,7 @@ static void draw_indexed_up(CPU *c){
  X(buffer_desc) X(level_count) X(texture_desc) X(resource_type) X(clear) X(begin_scene) X(end_scene) X(present) X(transform) X(set_fvf) X(get_fvf) \
  X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
  X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) X(shader_function) \
- X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
+ X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
  X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
  X(set_scissor_rect) X(get_scissor_rect) X(set_gamma_ramp) X(get_gamma_ramp) X(set_npatch_mode) X(get_npatch_mode) \
@@ -2357,7 +2358,7 @@ static void init_tables(void){
     SLOT(DEVICE,21,set_gamma_ramp);SLOT(DEVICE,22,get_gamma_ramp);
     SLOT(DEVICE,75,set_scissor_rect);SLOT(DEVICE,76,get_scissor_rect);
     SLOT(DEVICE,79,set_npatch_mode);SLOT(DEVICE,80,get_npatch_mode);
-    SLOT(DEVICE,57,set_render);SLOT(DEVICE,58,get_render);SLOT(DEVICE,67,set_texture_stage_state);SLOT(DEVICE,68,get_sampler);SLOT(DEVICE,69,set_sampler);
+    SLOT(DEVICE,57,set_render);SLOT(DEVICE,58,get_render);SLOT(DEVICE,66,get_texture_stage_state);SLOT(DEVICE,67,set_texture_stage_state);SLOT(DEVICE,68,get_sampler);SLOT(DEVICE,69,set_sampler);
     SLOT(DEVICE,81,draw_primitive);SLOT(DEVICE,82,draw_indexed);SLOT(DEVICE,83,draw_primitive_up);SLOT(DEVICE,84,draw_indexed_up);SLOT(DEVICE,89,set_fvf);SLOT(DEVICE,90,get_fvf);SLOT(DEVICE,100,stream);SLOT(DEVICE,104,indices);
     SLOT(DEVICE,86,create_decl);SLOT(DEVICE,87,set_decl);SLOT(DEVICE,88,get_decl);SLOT(DEVICE,101,get_stream);SLOT(DEVICE,102,stream_freq);SLOT(DEVICE,103,get_stream_freq);SLOT(DEVICE,105,get_indices);
     SLOT(DEVICE,91,create_vs);SLOT(DEVICE,92,set_vs);SLOT(DEVICE,93,get_vs);SLOT(DEVICE,94,set_vs_const);SLOT(DEVICE,95,get_vs_const);
