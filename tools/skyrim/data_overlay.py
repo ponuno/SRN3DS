@@ -663,7 +663,11 @@ class DataOverlay:
             except OSError:
                 entries = []
             listing = {name.lower(): name for name in entries}
-            self._dir_cache[cache_key] = listing
+            # Do not cache a miss for a directory that did not exist yet: a
+            # loose file may be created after the first resolve (tests and
+            # mod installation both do this).
+            if entries or os.path.isdir(directory):
+                self._dir_cache[cache_key] = listing
         actual = listing.get(parts[-1].lower())
         if actual is None:
             return None
