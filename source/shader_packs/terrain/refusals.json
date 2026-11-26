@@ -4,8 +4,8 @@
   "append_only": true,
   "source_table": "terrain_classes.json",
   "counts": {
-    "terrain.needs_multipass": 228,
-    "terrain.stage_budget": 19
+    "terrain.needs_multipass": 218,
+    "terrain.stage_budget": 10
   },
   "hashes": [
     {
@@ -57,39 +57,6 @@
         "terrain.material_contract_missing",
         "terrain.unsupported_opcodes",
         "terrain.control_flow",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "08d6497f4381d696d86b342ff1d655cfc0b9c9efe7fe4adaa8a446b0ff0ba6da",
-      "chunks": 1,
-      "class": "terrain.height_layers",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 92,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
-      ]
-    },
-    {
-      "sha256": "0918b5240abca5504144a626bff95e799f1ece9c169e9382dcf116ce984e80ab",
-      "chunks": 5,
-      "class": "terrain.multitexture_14_15_lod",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 14,
-      "minimum_passes": 5,
-      "stage_demand_min": 44,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
         "terrain.def_literal_out_of_range",
         "terrain.needs_multipass"
       ]
@@ -195,22 +162,6 @@
         "terrain.control_flow",
         "terrain.def_literal_out_of_range",
         "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "123b141b6aba5b6e6ba91370b1b8b2a05516a013fd857fb4284aaebeeb79a644",
-      "chunks": 1,
-      "class": "terrain.height_layers",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 103,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
       ]
     },
     {
@@ -452,22 +403,6 @@
         "terrain.control_flow",
         "terrain.def_literal_out_of_range",
         "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "1fbd853b6458109fadf1e2a5cae6957d8b886a702d150c767dc715d5e1300cf6",
-      "chunks": 1,
-      "class": "terrain.height_layers",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 70,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
       ]
     },
     {
@@ -867,22 +802,6 @@
       ]
     },
     {
-      "sha256": "31bc3e5823ac36ab2962fcc5259142dd5d5863e3a978568aad2716f586e2dee3",
-      "chunks": 1,
-      "class": "terrain.height_layers",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 81,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
-      ]
-    },
-    {
       "sha256": "32170ecaa6b8ca4ba686875350b4fe36e64c83a0634083b3547b82b6f731f191",
       "chunks": 1,
       "class": "terrain.multitexture_12_13",
@@ -983,22 +902,6 @@
         "terrain.unsupported_opcodes",
         "terrain.def_literal_out_of_range",
         "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "3c07d2e0caea71d67caea9fe4eda8c570c95c55c8e9af2147502d70dd1ab7ba8",
-      "chunks": 1,
-      "class": "terrain.world_map_overlay",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 62,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
       ]
     },
     {
@@ -1346,23 +1249,6 @@
       ]
     },
     {
-      "sha256": "50f69dc23a3e3480943b998daeb1670bd849cfaf16d2459ccd42e13ded78c528",
-      "chunks": 5,
-      "class": "terrain.multitexture_14_15_lod",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 15,
-      "minimum_passes": 5,
-      "stage_demand_min": 46,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
       "sha256": "510fc549a868143ae751a4b58e361017f73256641abb5827150b2199e999f37b",
       "chunks": 1,
       "class": "terrain.height_layers",
@@ -1605,23 +1491,6 @@
       ]
     },
     {
-      "sha256": "60cf4e2076c9c790cdc9eb2b0e404f9f4199a537414c23042dbf87d1ed113152",
-      "chunks": 4,
-      "class": "terrain.multitexture_12_13",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 13,
-      "minimum_passes": 5,
-      "stage_demand_min": 55,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
       "sha256": "64115eb1b37c86ff4752cff9f91cfb0e99dbadaa7d39646cb6be7e9064fdde9c",
       "chunks": 1,
       "class": "terrain.multitexture_14_15_lod",
@@ -1708,22 +1577,6 @@
       ]
     },
     {
-      "sha256": "6634b86aeeed0f462d5da15f1c512d0040ae30f32dbd17e7ed6b2cbea2b790c5",
-      "chunks": 5,
-      "class": "terrain.height_layers",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 25,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
-      ]
-    },
-    {
       "sha256": "68169f1dabee64dce6015e7c39c1714482cc7f0a31d8083bc9bccb634311803c",
       "chunks": 1,
       "class": "terrain.height_layers",
@@ -1773,22 +1626,6 @@
         "terrain.unsupported_opcodes",
         "terrain.def_literal_out_of_range",
         "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "6b48ad17fe7a2e5cfcc29c77c4f39071b946ec60812efe4e5809c341d2338f26",
-      "chunks": 1,
-      "class": "terrain.lod_noise_overlay",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 28,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
       ]
     },
     {
@@ -1965,23 +1802,6 @@
       ]
     },
     {
-      "sha256": "7b8e681726260255a35681c20b4c92650e602e08497629eb4cca5c3469755068",
-      "chunks": 1,
-      "class": "terrain.world_map_overlay",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 4,
-      "minimum_passes": 2,
-      "stage_demand_min": 70,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
       "sha256": "7d970cfa51cf64e0f6b8108682fd5f268e4cacf600342e2530fbea4bc50d3bef",
       "chunks": 3,
       "class": "terrain.height_layers",
@@ -2108,23 +1928,6 @@
       "texture_layers": 4,
       "minimum_passes": 2,
       "stage_demand_min": 100,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "8126da793c14371a8624bbc5c20fff4fb5c7c308d33829ec2de2e79f9a15fce0",
-      "chunks": 4,
-      "class": "terrain.multitexture_14_15_lod",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 15,
-      "minimum_passes": 5,
-      "stage_demand_min": 63,
       "blockers": [
         "terrain.normal_basis_prebake_required",
         "terrain.single_accumulator_scheduler_required",
@@ -2377,23 +2180,6 @@
       ]
     },
     {
-      "sha256": "8f824d0be21233b34e8107f7204c2eaf99deb1aec7f0ae947cc9ea8fbef75214",
-      "chunks": 1,
-      "class": "terrain.lod_world_map_overlay",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 5,
-      "minimum_passes": 2,
-      "stage_demand_min": 89,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
       "sha256": "91a1f5b7467076d13cdbc3c71be52291d0ce15d0c65484146ed43163865e5470",
       "chunks": 1,
       "class": "terrain.height_layers",
@@ -2463,23 +2249,6 @@
       ]
     },
     {
-      "sha256": "9794ce211311b05f9869da61ad25d29b11d0cdbe049f077ee175afa9e48f5bf1",
-      "chunks": 5,
-      "class": "terrain.multitexture_12_13",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 12,
-      "minimum_passes": 4,
-      "stage_demand_min": 36,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
       "sha256": "9a2a9381615d4a2031f762229ba785c010fa213726e528250b77213f12c37a0a",
       "chunks": 1,
       "class": "terrain.multitexture_14_15_lod",
@@ -2504,23 +2273,6 @@
       "texture_layers": 13,
       "minimum_passes": 5,
       "stage_demand_min": 72,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "9e2ec2da94e222617eff90bf61df84fa220d90685b1b6d1d2a6b5e7b951361a2",
-      "chunks": 5,
-      "class": "terrain.multitexture_12_13",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 13,
-      "minimum_passes": 5,
-      "stage_demand_min": 38,
       "blockers": [
         "terrain.normal_basis_prebake_required",
         "terrain.single_accumulator_scheduler_required",
@@ -2667,23 +2419,6 @@
       ]
     },
     {
-      "sha256": "a592262cff471341625fa5d0c5eebda7a6bbc261534a6d9bb09b178660556689",
-      "chunks": 1,
-      "class": "terrain.world_map_overlay",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 4,
-      "minimum_passes": 2,
-      "stage_demand_min": 61,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
       "sha256": "a648039b8d78035778f673fe9009119c314ba94dc35fcd99580bb71244b6166a",
       "chunks": 1,
       "class": "terrain.height_layers",
@@ -2783,22 +2518,6 @@
         "terrain.unsupported_opcodes",
         "terrain.def_literal_out_of_range",
         "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "ae5f9e5d30d6b7158a070e4ad01807e6d4e79c63a660d1aa17e5cf84a588cc93",
-      "chunks": 1,
-      "class": "terrain.world_map_overlay",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 45,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
       ]
     },
     {
@@ -3334,22 +3053,6 @@
         "terrain.unsupported_opcodes",
         "terrain.def_literal_out_of_range",
         "terrain.needs_multipass"
-      ]
-    },
-    {
-      "sha256": "cff470b24c125967b3f5b442279e1783ddd21b701b654c1cb58da4831cb868d5",
-      "chunks": 5,
-      "class": "terrain.height_layers",
-      "name": "terrain.stage_budget",
-      "texture_layers": 3,
-      "minimum_passes": null,
-      "stage_demand_min": 31,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range"
       ]
     },
     {
@@ -4071,23 +3774,6 @@
       ]
     },
     {
-      "sha256": "f5753de02d5704332ac4cbd881b333f1fa8210c63f83b25862579c3bc78e66c2",
-      "chunks": 1,
-      "class": "terrain.world_map_overlay",
-      "name": "terrain.needs_multipass",
-      "texture_layers": 4,
-      "minimum_passes": 2,
-      "stage_demand_min": 84,
-      "blockers": [
-        "terrain.normal_basis_prebake_required",
-        "terrain.single_accumulator_scheduler_required",
-        "terrain.material_contract_missing",
-        "terrain.unsupported_opcodes",
-        "terrain.def_literal_out_of_range",
-        "terrain.needs_multipass"
-      ]
-    },
-    {
       "sha256": "f64ed7126434b4803fa23eb0cfe6c353b2fa70e4f7c0f3655bc5e9e55df2b43b",
       "chunks": 1,
       "class": "terrain.multitexture_12_13",
@@ -4243,5 +3929,5 @@
       ]
     }
   ],
-  "source_table_sha256": "f93367479e288b1c35da941d5d144115919a755d4cce0a7ad2ac3fb573186567"
+  "source_table_sha256": "971aee3907bf7ecb80d8c152180c6ca9bf392f151946be8a2fe8ff95d330f94f"
 }

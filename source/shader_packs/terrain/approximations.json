@@ -1,0 +1,257 @@
+{
+  "schema": "terrain-approximations/1",
+  "pack": "terrain",
+  "source_table": "terrain_classes.json",
+  "source_table_sha256": "971aee3907bf7ecb80d8c152180c6ca9bf392f151946be8a2fe8ff95d330f94f",
+  "totals": {
+    "hashes": 19,
+    "draw_enabled": 0,
+    "runtime": 0,
+    "runtime_candidates": 5
+  },
+  "policies": [
+    {
+      "policy": "near_three_equal",
+      "hashes": 6,
+      "chunks": 28
+    },
+    {
+      "policy": "unlit_diffuse_baseline",
+      "hashes": 6,
+      "chunks": 14
+    },
+    {
+      "policy": "unlit_diffuse_overlay_pass",
+      "hashes": 7,
+      "chunks": 7
+    }
+  ],
+  "weight_analysis": {
+    "per_cell_histogram_available": false,
+    "reason": "the corpus has shader bytecode/CTAB metadata, not terrain cell weight tables",
+    "near_three_weights": [
+      0.3320261437908497,
+      0.334640522875817,
+      0.3333333333333333
+    ],
+    "max_deviation_vs_equal": 0.001307189542483711,
+    "max_original_channel_error_bound": 1.0,
+    "bound_note": "conservative [0,1] colour bound after dropping layers and lighting"
+  },
+  "plans": [
+    {
+      "sha256": "08d6497f4381d696d86b342ff1d655cfc0b9c9efe7fe4adaa8a446b0ff0ba6da",
+      "id": "terrain.approx.08d6497f",
+      "policy": "unlit_diffuse_baseline",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 1,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "0918b5240abca5504144a626bff95e799f1ece9c169e9382dcf116ce984e80ab",
+      "id": "terrain.approx.0918b524",
+      "policy": "near_three_equal",
+      "stages": 3,
+      "textures": 3,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "123b141b6aba5b6e6ba91370b1b8b2a05516a013fd857fb4284aaebeeb79a644",
+      "id": "terrain.approx.123b141b",
+      "policy": "unlit_diffuse_baseline",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 1,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "1fbd853b6458109fadf1e2a5cae6957d8b886a702d150c767dc715d5e1300cf6",
+      "id": "terrain.approx.1fbd853b",
+      "policy": "unlit_diffuse_baseline",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 1,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "31bc3e5823ac36ab2962fcc5259142dd5d5863e3a978568aad2716f586e2dee3",
+      "id": "terrain.approx.31bc3e58",
+      "policy": "unlit_diffuse_baseline",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "3c07d2e0caea71d67caea9fe4eda8c570c95c55c8e9af2147502d70dd1ab7ba8",
+      "id": "terrain.approx.3c07d2e0",
+      "policy": "unlit_diffuse_overlay_pass",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "50f69dc23a3e3480943b998daeb1670bd849cfaf16d2459ccd42e13ded78c528",
+      "id": "terrain.approx.50f69dc2",
+      "policy": "near_three_equal",
+      "stages": 3,
+      "textures": 3,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "60cf4e2076c9c790cdc9eb2b0e404f9f4199a537414c23042dbf87d1ed113152",
+      "id": "terrain.approx.60cf4e20",
+      "policy": "near_three_equal",
+      "stages": 3,
+      "textures": 3,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "6634b86aeeed0f462d5da15f1c512d0040ae30f32dbd17e7ed6b2cbea2b790c5",
+      "id": "terrain.approx.6634b86a",
+      "policy": "unlit_diffuse_baseline",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 1,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "6b48ad17fe7a2e5cfcc29c77c4f39071b946ec60812efe4e5809c341d2338f26",
+      "id": "terrain.approx.6b48ad17",
+      "policy": "unlit_diffuse_overlay_pass",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and LOD-noise detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "7b8e681726260255a35681c20b4c92650e602e08497629eb4cca5c3469755068",
+      "id": "terrain.approx.7b8e6817",
+      "policy": "unlit_diffuse_overlay_pass",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "8126da793c14371a8624bbc5c20fff4fb5c7c308d33829ec2de2e79f9a15fce0",
+      "id": "terrain.approx.8126da79",
+      "policy": "near_three_equal",
+      "stages": 3,
+      "textures": 3,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "8f824d0be21233b34e8107f7204c2eaf99deb1aec7f0ae947cc9ea8fbef75214",
+      "id": "terrain.approx.8f824d0b",
+      "policy": "unlit_diffuse_overlay_pass",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail and LOD-noise detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "9794ce211311b05f9869da61ad25d29b11d0cdbe049f077ee175afa9e48f5bf1",
+      "id": "terrain.approx.9794ce21",
+      "policy": "near_three_equal",
+      "stages": 3,
+      "textures": 3,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "9e2ec2da94e222617eff90bf61df84fa220d90685b1b6d1d2a6b5e7b951361a2",
+      "id": "terrain.approx.9e2ec2da",
+      "policy": "near_three_equal",
+      "stages": 3,
+      "textures": 3,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "a592262cff471341625fa5d0c5eebda7a6bbc261534a6d9bb09b178660556689",
+      "id": "terrain.approx.a592262c",
+      "policy": "unlit_diffuse_overlay_pass",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "ae5f9e5d30d6b7158a070e4ad01807e6d4e79c63a660d1aa17e5cf84a588cc93",
+      "id": "terrain.approx.ae5f9e5d",
+      "policy": "unlit_diffuse_overlay_pass",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "cff470b24c125967b3f5b442279e1783ddd21b701b654c1cb58da4831cb868d5",
+      "id": "terrain.approx.cff470b2",
+      "policy": "unlit_diffuse_baseline",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 1,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+      "symbolic_verify": "pass"
+    },
+    {
+      "sha256": "f5753de02d5704332ac4cbd881b333f1fa8210c63f83b25862579c3bc78e66c2",
+      "id": "terrain.approx.f5753de0",
+      "policy": "unlit_diffuse_overlay_pass",
+      "stages": 1,
+      "textures": 1,
+      "quality": "approx",
+      "runtime_candidate": 0,
+      "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+      "symbolic_verify": "pass"
+    }
+  ],
+  "blockers": [
+    "terrain approximation policy is not selectable by the runtime",
+    "live texture/format/sampler bindings have not been observed",
+    "two/three-texture generic backend gate and overlay blend contract are not wired"
+  ]
+}

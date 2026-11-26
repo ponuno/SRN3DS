@@ -1,6 +1,3290 @@
 {
   "schema": "d9-shader-plan-v1",
   "archive": "Skyrim - Shaders.bsa",
-  "note": "Terrain phase-2 classification found no hash in the current single-pass TEV subset; no plan is emitted or runtime-enabled.",
-  "entries": []
+  "note": "Explicit port-lite terrain approximations. Every plan is verified against its declared simplified specification; none is runtime-enabled.",
+  "entries": [
+    {
+      "id": "terrain.approx.08d6497f",
+      "sha256": "08d6497f4381d696d86b342ff1d655cfc0b9c9efe7fe4adaa8a446b0ff0ba6da",
+      "sha1": "b6f9db5248ed22840fed10a8955c446037e4d725",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 95,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 1,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p600001.fxp",
+      "source_key": "0x00600061",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_baseline",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "HeightSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "not_present",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "replace_original_with_texcoord0",
+            "original_uv": {
+              "reg_type": 0,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.0918b524",
+      "sha256": "0918b5240abca5504144a626bff95e799f1ece9c169e9382dcf116ce984e80ab",
+      "sha1": "623ddff506f4e785a18b897643b62f5b678efe40",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 58,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p2600001.fxp",
+      "source_key": "0x02608201",
+      "note": "port-lite near-three quantized equal diffuse mix; original weights/lighting are replaced",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d",
+        "texture1_ldr_2d",
+        "texture2_ldr_2d"
+      ],
+      "stages": 3,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            4
+          ],
+          "src_a": [
+            15,
+            14,
+            4
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2139062143
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            5
+          ],
+          "src_a": [
+            15,
+            14,
+            5
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2863311530
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 1,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 2,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "near_three_equal",
+        "layers_kept": 3,
+        "textures_kept": 3,
+        "dropped_policy": "keep diffuse0..2; replace guest weights with quantized equal mix",
+        "dropped_roles": [
+          "MultiTextureDiffuse3Sampler",
+          "MultiTextureDiffuse4Sampler",
+          "MultiTextureDiffuse5Sampler",
+          "MultiTextureNormal0Sampler",
+          "MultiTextureNormal1Sampler",
+          "MultiTextureNormal2Sampler",
+          "MultiTextureNormal3Sampler",
+          "MultiTextureNormal4Sampler",
+          "MultiTextureNormal5Sampler",
+          "MultiTextureDiffuseLODSampler",
+          "LODNoiseSampler"
+        ],
+        "lighting": "dropped",
+        "normal_maps": "dropped",
+        "lod": "dropped",
+        "renormalize": true,
+        "weights": [
+          0.3320261437908497,
+          0.334640522875817,
+          0.3333333333333333
+        ],
+        "literal_quantization": [
+          "127/255",
+          "170/255"
+        ],
+        "max_weight_deviation_vs_equal": 0.001307189542483711,
+        "max_colour_error_vs_equal": 0.001307189542483711,
+        "max_channel_error_bound": 1.0,
+        "error_basis": "weight deviation is exact for convex [0,1] colours; original-error bound is conservative because three layers and lighting are dropped",
+        "reason": "three PICA texture units; guest per-cell weights are not available offline",
+        "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail"
+      },
+      "simplified_spec": {
+        "kind": "near3",
+        "selected_samplers": [
+          0,
+          1,
+          2
+        ],
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "MultiTextureDiffuse0Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 1,
+            "sampler_reg": 1,
+            "role": "MultiTextureDiffuse1Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 2,
+            "sampler_reg": 2,
+            "role": "MultiTextureDiffuse2Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.123b141b",
+      "sha256": "123b141b6aba5b6e6ba91370b1b8b2a05516a013fd857fb4284aaebeeb79a644",
+      "sha1": "7641e2f7dde8cc8d145db9f5b5ee181b09ae1767",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 106,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 1,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p600001.fxp",
+      "source_key": "0x00600071",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_baseline",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "HeightSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "not_present",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "replace_original_with_texcoord0",
+            "original_uv": {
+              "reg_type": 0,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.1fbd853b",
+      "sha256": "1fbd853b6458109fadf1e2a5cae6957d8b886a702d150c767dc715d5e1300cf6",
+      "sha1": "48cf011444dac1ffb843863dc1584cc1e8dd862b",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 73,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 1,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p600001.fxp",
+      "source_key": "0x00600041",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_baseline",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "HeightSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "not_present",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "replace_original_with_texcoord0",
+            "original_uv": {
+              "reg_type": 0,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.31bc3e58",
+      "sha256": "31bc3e5823ac36ab2962fcc5259142dd5d5863e3a978568aad2716f586e2dee3",
+      "sha1": "66f9bb4c0057efcbe852bc695fa76904ff33fd1a",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 84,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p600001.fxp",
+      "source_key": "0x00600051",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_baseline",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "HeightSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "not_present",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "replace_original_with_texcoord0",
+            "original_uv": {
+              "reg_type": 0,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.3c07d2e0",
+      "sha256": "3c07d2e0caea71d67caea9fe4eda8c570c95c55c8e9af2147502d70dd1ab7ba8",
+      "sha1": "ca9af3f3f7612c87c0d59eb58c078addd26ba6ee",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 67,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1e80001.fxp",
+      "source_key": "0x01e80001",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_overlay_pass",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "WorldMapOverlayNormalSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "dropped",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "src_alpha",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.50f69dc2",
+      "sha256": "50f69dc23a3e3480943b998daeb1670bd849cfaf16d2459ccd42e13ded78c528",
+      "sha1": "7abfce6e2e8e4320b13f3b42815ada25113f88d1",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 61,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p2600001.fxp",
+      "source_key": "0x0260c201",
+      "note": "port-lite near-three quantized equal diffuse mix; original weights/lighting are replaced",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d",
+        "texture1_ldr_2d",
+        "texture2_ldr_2d"
+      ],
+      "stages": 3,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            4
+          ],
+          "src_a": [
+            15,
+            14,
+            4
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2139062143
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            5
+          ],
+          "src_a": [
+            15,
+            14,
+            5
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2863311530
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 1,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 2,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "near_three_equal",
+        "layers_kept": 3,
+        "textures_kept": 3,
+        "dropped_policy": "keep diffuse0..2; replace guest weights with quantized equal mix",
+        "dropped_roles": [
+          "MultiTextureDiffuse3Sampler",
+          "MultiTextureDiffuse4Sampler",
+          "MultiTextureDiffuse5Sampler",
+          "ShadowMaskSampler",
+          "MultiTextureNormal0Sampler",
+          "MultiTextureNormal1Sampler",
+          "MultiTextureNormal2Sampler",
+          "MultiTextureNormal3Sampler",
+          "MultiTextureNormal4Sampler",
+          "MultiTextureNormal5Sampler",
+          "MultiTextureDiffuseLODSampler",
+          "LODNoiseSampler"
+        ],
+        "lighting": "dropped",
+        "normal_maps": "dropped",
+        "lod": "dropped",
+        "renormalize": true,
+        "weights": [
+          0.3320261437908497,
+          0.334640522875817,
+          0.3333333333333333
+        ],
+        "literal_quantization": [
+          "127/255",
+          "170/255"
+        ],
+        "max_weight_deviation_vs_equal": 0.001307189542483711,
+        "max_colour_error_vs_equal": 0.001307189542483711,
+        "max_channel_error_bound": 1.0,
+        "error_basis": "weight deviation is exact for convex [0,1] colours; original-error bound is conservative because three layers and lighting are dropped",
+        "reason": "three PICA texture units; guest per-cell weights are not available offline",
+        "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail"
+      },
+      "simplified_spec": {
+        "kind": "near3",
+        "selected_samplers": [
+          0,
+          1,
+          2
+        ],
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "MultiTextureDiffuse0Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 1,
+            "sampler_reg": 1,
+            "role": "MultiTextureDiffuse1Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 2,
+            "sampler_reg": 2,
+            "role": "MultiTextureDiffuse2Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.60cf4e20",
+      "sha256": "60cf4e2076c9c790cdc9eb2b0e404f9f4199a537414c23042dbf87d1ed113152",
+      "sha1": "1ac2f3310d406062883f3c7422e297bc2c77ace7",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 68,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1000001.fxp",
+      "source_key": "0x0100c211",
+      "note": "port-lite near-three quantized equal diffuse mix; original weights/lighting are replaced",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d",
+        "texture1_ldr_2d",
+        "texture2_ldr_2d"
+      ],
+      "stages": 3,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            4
+          ],
+          "src_a": [
+            15,
+            14,
+            4
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2139062143
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            5
+          ],
+          "src_a": [
+            15,
+            14,
+            5
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2863311530
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 1,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 2,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "near_three_equal",
+        "layers_kept": 3,
+        "textures_kept": 3,
+        "dropped_policy": "keep diffuse0..2; replace guest weights with quantized equal mix",
+        "dropped_roles": [
+          "MultiTextureDiffuse3Sampler",
+          "MultiTextureDiffuse4Sampler",
+          "MultiTextureDiffuse5Sampler",
+          "ShadowMaskSampler",
+          "MultiTextureNormal0Sampler",
+          "MultiTextureNormal1Sampler",
+          "MultiTextureNormal2Sampler",
+          "MultiTextureNormal3Sampler",
+          "MultiTextureNormal4Sampler",
+          "MultiTextureNormal5Sampler"
+        ],
+        "lighting": "dropped",
+        "normal_maps": "dropped",
+        "lod": "dropped",
+        "renormalize": true,
+        "weights": [
+          0.3320261437908497,
+          0.334640522875817,
+          0.3333333333333333
+        ],
+        "literal_quantization": [
+          "127/255",
+          "170/255"
+        ],
+        "max_weight_deviation_vs_equal": 0.001307189542483711,
+        "max_colour_error_vs_equal": 0.001307189542483711,
+        "max_channel_error_bound": 1.0,
+        "error_basis": "weight deviation is exact for convex [0,1] colours; original-error bound is conservative because three layers and lighting are dropped",
+        "reason": "three PICA texture units; guest per-cell weights are not available offline",
+        "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail"
+      },
+      "simplified_spec": {
+        "kind": "near3",
+        "selected_samplers": [
+          0,
+          1,
+          2
+        ],
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "MultiTextureDiffuse0Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 1,
+            "sampler_reg": 1,
+            "role": "MultiTextureDiffuse1Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 2,
+            "sampler_reg": 2,
+            "role": "MultiTextureDiffuse2Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.6634b86a",
+      "sha256": "6634b86aeeed0f462d5da15f1c512d0040ae30f32dbd17e7ed6b2cbea2b790c5",
+      "sha1": "9a9692b5f3d1924f74afe956b393fe9ae9999edf",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 28,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 1,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p600001.fxp",
+      "source_key": "0x00608201",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_baseline",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "HeightSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "not_present",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "replace_original_with_texcoord0",
+            "original_uv": {
+              "reg_type": 0,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.6b48ad17",
+      "sha256": "6b48ad17fe7a2e5cfcc29c77c4f39071b946ec60812efe4e5809c341d2338f26",
+      "sha1": "8d468e04a1fbac89d172b29d350e31cd5680c3a4",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 31,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p2400005.fxp",
+      "source_key": "0x02400005",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_overlay_pass",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "LODNoiseSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "not_present",
+        "lod_noise": "dropped",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and LOD-noise detail",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "src_alpha",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.7b8e6817",
+      "sha256": "7b8e681726260255a35681c20b4c92650e602e08497629eb4cca5c3469755068",
+      "sha1": "6240e6c6c8461f30240345f70aea73666d52053d",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 76,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1e90001.fxp",
+      "source_key": "0x01e90001",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_overlay_pass",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "ProjectedNoiseSampler",
+          "WorldMapOverlayNormalSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "dropped",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "src_alpha",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.8126da79",
+      "sha256": "8126da793c14371a8624bbc5c20fff4fb5c7c308d33829ec2de2e79f9a15fce0",
+      "sha1": "96dbd1e1cf602181e177748e815985d2b62ffb18",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 78,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p2600001.fxp",
+      "source_key": "0x0260c211",
+      "note": "port-lite near-three quantized equal diffuse mix; original weights/lighting are replaced",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d",
+        "texture1_ldr_2d",
+        "texture2_ldr_2d"
+      ],
+      "stages": 3,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            4
+          ],
+          "src_a": [
+            15,
+            14,
+            4
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2139062143
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            5
+          ],
+          "src_a": [
+            15,
+            14,
+            5
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2863311530
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 1,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 2,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "near_three_equal",
+        "layers_kept": 3,
+        "textures_kept": 3,
+        "dropped_policy": "keep diffuse0..2; replace guest weights with quantized equal mix",
+        "dropped_roles": [
+          "MultiTextureDiffuse3Sampler",
+          "MultiTextureDiffuse4Sampler",
+          "MultiTextureDiffuse5Sampler",
+          "ShadowMaskSampler",
+          "MultiTextureNormal0Sampler",
+          "MultiTextureNormal1Sampler",
+          "MultiTextureNormal2Sampler",
+          "MultiTextureNormal3Sampler",
+          "MultiTextureNormal4Sampler",
+          "MultiTextureNormal5Sampler",
+          "MultiTextureDiffuseLODSampler",
+          "LODNoiseSampler"
+        ],
+        "lighting": "dropped",
+        "normal_maps": "dropped",
+        "lod": "dropped",
+        "renormalize": true,
+        "weights": [
+          0.3320261437908497,
+          0.334640522875817,
+          0.3333333333333333
+        ],
+        "literal_quantization": [
+          "127/255",
+          "170/255"
+        ],
+        "max_weight_deviation_vs_equal": 0.001307189542483711,
+        "max_colour_error_vs_equal": 0.001307189542483711,
+        "max_channel_error_bound": 1.0,
+        "error_basis": "weight deviation is exact for convex [0,1] colours; original-error bound is conservative because three layers and lighting are dropped",
+        "reason": "three PICA texture units; guest per-cell weights are not available offline",
+        "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail"
+      },
+      "simplified_spec": {
+        "kind": "near3",
+        "selected_samplers": [
+          0,
+          1,
+          2
+        ],
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "MultiTextureDiffuse0Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 1,
+            "sampler_reg": 1,
+            "role": "MultiTextureDiffuse1Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 2,
+            "sampler_reg": 2,
+            "role": "MultiTextureDiffuse2Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.8f824d0b",
+      "sha256": "8f824d0be21233b34e8107f7204c2eaf99deb1aec7f0ae947cc9ea8fbef75214",
+      "sha1": "048c515213ff3eddd674164ce9e2cc1f3a602c5c",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 98,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p2480005.fxp",
+      "source_key": "0x02480005",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_overlay_pass",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "LODNoiseSampler",
+          "WorldMapOverlayNormalSampler",
+          "WorldMapOverlayNormalSnowSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "dropped",
+        "lod_noise": "dropped",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail and LOD-noise detail",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "src_alpha",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.9794ce21",
+      "sha256": "9794ce211311b05f9869da61ad25d29b11d0cdbe049f077ee175afa9e48f5bf1",
+      "sha1": "d21b2864dfb0bbf6253b620bff324f9803071b1c",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 48,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1000001.fxp",
+      "source_key": "0x01008201",
+      "note": "port-lite near-three quantized equal diffuse mix; original weights/lighting are replaced",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d",
+        "texture1_ldr_2d",
+        "texture2_ldr_2d"
+      ],
+      "stages": 3,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            4
+          ],
+          "src_a": [
+            15,
+            14,
+            4
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2139062143
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            5
+          ],
+          "src_a": [
+            15,
+            14,
+            5
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2863311530
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 1,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 2,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "near_three_equal",
+        "layers_kept": 3,
+        "textures_kept": 3,
+        "dropped_policy": "keep diffuse0..2; replace guest weights with quantized equal mix",
+        "dropped_roles": [
+          "MultiTextureDiffuse3Sampler",
+          "MultiTextureDiffuse4Sampler",
+          "MultiTextureDiffuse5Sampler",
+          "MultiTextureNormal0Sampler",
+          "MultiTextureNormal1Sampler",
+          "MultiTextureNormal2Sampler",
+          "MultiTextureNormal3Sampler",
+          "MultiTextureNormal4Sampler",
+          "MultiTextureNormal5Sampler"
+        ],
+        "lighting": "dropped",
+        "normal_maps": "dropped",
+        "lod": "dropped",
+        "renormalize": true,
+        "weights": [
+          0.3320261437908497,
+          0.334640522875817,
+          0.3333333333333333
+        ],
+        "literal_quantization": [
+          "127/255",
+          "170/255"
+        ],
+        "max_weight_deviation_vs_equal": 0.001307189542483711,
+        "max_colour_error_vs_equal": 0.001307189542483711,
+        "max_channel_error_bound": 1.0,
+        "error_basis": "weight deviation is exact for convex [0,1] colours; original-error bound is conservative because three layers and lighting are dropped",
+        "reason": "three PICA texture units; guest per-cell weights are not available offline",
+        "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail"
+      },
+      "simplified_spec": {
+        "kind": "near3",
+        "selected_samplers": [
+          0,
+          1,
+          2
+        ],
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "MultiTextureDiffuse0Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 1,
+            "sampler_reg": 1,
+            "role": "MultiTextureDiffuse1Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 2,
+            "sampler_reg": 2,
+            "role": "MultiTextureDiffuse2Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.9e2ec2da",
+      "sha256": "9e2ec2da94e222617eff90bf61df84fa220d90685b1b6d1d2a6b5e7b951361a2",
+      "sha1": "947b0700ccc27019d5c33b43e030aed4a7021937",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 51,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1000001.fxp",
+      "source_key": "0x0100c201",
+      "note": "port-lite near-three quantized equal diffuse mix; original weights/lighting are replaced",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d",
+        "texture1_ldr_2d",
+        "texture2_ldr_2d"
+      ],
+      "stages": 3,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            4
+          ],
+          "src_a": [
+            15,
+            14,
+            4
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2139062143
+        },
+        {
+          "func_rgb": 4,
+          "func_a": 4,
+          "src_rgb": [
+            15,
+            14,
+            5
+          ],
+          "src_a": [
+            15,
+            14,
+            5
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 1,
+          "const_rgba8": 2863311530
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 1,
+          "sampler_type": 2
+        },
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 2,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "near_three_equal",
+        "layers_kept": 3,
+        "textures_kept": 3,
+        "dropped_policy": "keep diffuse0..2; replace guest weights with quantized equal mix",
+        "dropped_roles": [
+          "MultiTextureDiffuse3Sampler",
+          "MultiTextureDiffuse4Sampler",
+          "MultiTextureDiffuse5Sampler",
+          "ShadowMaskSampler",
+          "MultiTextureNormal0Sampler",
+          "MultiTextureNormal1Sampler",
+          "MultiTextureNormal2Sampler",
+          "MultiTextureNormal3Sampler",
+          "MultiTextureNormal4Sampler",
+          "MultiTextureNormal5Sampler"
+        ],
+        "lighting": "dropped",
+        "normal_maps": "dropped",
+        "lod": "dropped",
+        "renormalize": true,
+        "weights": [
+          0.3320261437908497,
+          0.334640522875817,
+          0.3333333333333333
+        ],
+        "literal_quantization": [
+          "127/255",
+          "170/255"
+        ],
+        "max_weight_deviation_vs_equal": 0.001307189542483711,
+        "max_colour_error_vs_equal": 0.001307189542483711,
+        "max_channel_error_bound": 1.0,
+        "error_basis": "weight deviation is exact for convex [0,1] colours; original-error bound is conservative because three layers and lighting are dropped",
+        "reason": "three PICA texture units; guest per-cell weights are not available offline",
+        "expected_visual": "smooth equal-ish three-layer albedo; loses layer dominance, normals and LOD detail"
+      },
+      "simplified_spec": {
+        "kind": "near3",
+        "selected_samplers": [
+          0,
+          1,
+          2
+        ],
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "MultiTextureDiffuse0Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 1,
+            "sampler_reg": 1,
+            "role": "MultiTextureDiffuse1Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          },
+          {
+            "unit": 2,
+            "sampler_reg": 2,
+            "role": "MultiTextureDiffuse2Sampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=lerp_tev(prev,tex1,127/255); then lerp_tev(prev,tex2,170/255)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.a592262c",
+      "sha256": "a592262cff471341625fa5d0c5eebda7a6bbc261534a6d9bb09b178660556689",
+      "sha1": "86f23587213ec6bb2c95913beffa8d27cb3c5660",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 67,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1a90001.fxp",
+      "source_key": "0x01a90001",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_overlay_pass",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "ProjectedNoiseSampler",
+          "WorldMapOverlayNormalSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "dropped",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "src_alpha",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.ae5f9e5d",
+      "sha256": "ae5f9e5d30d6b7158a070e4ad01807e6d4e79c63a660d1aa17e5cf84a588cc93",
+      "sha1": "ff4ed9d6d80432d1c27f19df0f956472a5b21b52",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 50,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1a80001.fxp",
+      "source_key": "0x01a80001",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_overlay_pass",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "WorldMapOverlayNormalSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "dropped",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "src_alpha",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.cff470b2",
+      "sha256": "cff470b24c125967b3f5b442279e1783ddd21b701b654c1cb58da4831cb868d5",
+      "sha1": "8a4c355105a78dd86a18decf669024ee88e0970e",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 34,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 1,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p600401.fxp",
+      "source_key": "0x00608601",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_baseline",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "HeightSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "not_present",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "replace_original_with_texcoord0",
+            "original_uv": {
+              "reg_type": 0,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "preserve_guest_state",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    },
+    {
+      "id": "terrain.approx.f5753de0",
+      "sha256": "f5753de02d5704332ac4cbd881b333f1fa8210c63f83b25862579c3bc78e66c2",
+      "sha1": "6e50bd31138f7e574f843c0a8b60fda925c9b704",
+      "stage": "ps_3_0",
+      "kind": "tev",
+      "family": "terrain",
+      "version": "0xffff0300",
+      "instructions": 92,
+      "draw_enabled": 0,
+      "runtime": 0,
+      "runtime_candidate": 0,
+      "quality": "approx",
+      "pass": 1,
+      "source_package": "shadersfx\\lighting\\059\\p1280005.fxp",
+      "source_key": "0x01280005",
+      "note": "port-lite unlit diffuse baseline; original terrain lighting/detail is explicitly dropped",
+      "preconditions": [
+        "approx_policy_selected",
+        "texture0_ldr_2d"
+      ],
+      "stages": 1,
+      "stage_data": [
+        {
+          "func_rgb": 0,
+          "func_a": 0,
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "scale_rgb": 0,
+          "scale_a": 0,
+          "const_reg": 255,
+          "const_is_literal": 0,
+          "const_rgba8": 0
+        }
+      ],
+      "textures": [
+        {
+          "texcoord_reg": 0,
+          "sampler_reg": 0,
+          "sampler_type": 2
+        }
+      ],
+      "inputs": [],
+      "constants": [],
+      "uses_vertex_color": 0,
+      "requires_alpha_fixup": 0,
+      "ldr_clamped": 1,
+      "approximation": {
+        "policy": "unlit_diffuse_overlay_pass",
+        "layers_kept": 1,
+        "textures_kept": 1,
+        "dropped_policy": "keep DiffuseSampler only; drop all other samplers and lighting",
+        "dropped_roles": [
+          "NormalSampler",
+          "WorldMapOverlayNormalSampler",
+          "WorldMapOverlayNormalSnowSampler"
+        ],
+        "lighting": "dropped",
+        "parallax": "dropped",
+        "shadows": "dropped",
+        "world_map_normal_overlay": "dropped",
+        "lod_noise": "not_present",
+        "renormalize": false,
+        "reason": "single-pass PICA port-lite baseline; no baked atlas or live weight table",
+        "expected_visual": "flat unlit albedo; loses normal lighting, parallax, shadows and world-map normal detail",
+        "max_channel_error_bound": 1.0,
+        "error_basis": "conservative [0,1] colour bound; no per-cell weight histogram exists"
+      },
+      "simplified_spec": {
+        "kind": "single",
+        "selected_samplers": [
+          0
+        ],
+        "expression": "oC0=tex(s0)"
+      },
+      "material_contract": {
+        "status": "measured_static",
+        "measured_from": [
+          "dcl_2d",
+          "CTAB sampler register set",
+          "texld UV operand"
+        ],
+        "binding_observation": "static_only; no live draw binding was observed",
+        "textures": [
+          {
+            "unit": 0,
+            "sampler_reg": 0,
+            "role": "DiffuseSampler",
+            "sampler_type": "2d",
+            "texcoord_reg": 0,
+            "format_policy": "ldr_2d_required",
+            "uv_policy": "original_texcoord0",
+            "original_uv": {
+              "reg_type": 1,
+              "reg_index": 0,
+              "swizzle": "xyzw",
+              "modifier": 0
+            }
+          }
+        ],
+        "constants": [],
+        "varyings": [],
+        "blend": "src_alpha",
+        "depth": "preserve_guest_state",
+        "alpha_test": "preserve_guest_state"
+      },
+      "symbolic_verify": {
+        "status": "pass",
+        "reference": "declared simplified specification",
+        "model": "PICA LDR clamp; all leaves/weights and mix intermediates are in [0,1]",
+        "expression": "oC0=tex(s0)"
+      },
+      "draw_blockers": [
+        "multi_texture_or_blend_contract_not_wired",
+        "approximation_policy_not_wired",
+        "runtime_binding_not_observed"
+      ]
+    }
+  ]
 }

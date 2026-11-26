@@ -7,12 +7,16 @@ landscape multitexture, LOD and world-map overlay
 * census families: `terrain/landscape`, `grass/trees`
 * chunks: **327** / unique hashes: **247** (all PS; measured rows are all
   `terrain/landscape`, no shipped `grass/trees` rows)
-* phase-2 coverage: **0 translated, 0 draw-enabled, 247 refused**
+* exact-subset coverage: 0 translated, 0 draw-enabled, 247 refused
+* port-lite coverage: **19 translated / 49 chunks, 0 draw-enabled, 228 refused**
 * generated IR table: [`terrain_classes.json`](terrain_classes.json)
-* named refusals: [`refusals.json`](refusals.json)
-* plan catalogue: [`plans.json`](plans.json) (empty; no runtime entries)
+* named refusals: [`refusals.json`](refusals.json) (228 remaining hashes)
+* plan catalogue: [`plans.json`](plans.json) (19 explicit approximations; no runtime entries)
+* approximation report: [`approximations.json`](approximations.json)
 * reproducible classifier: [`classify.py`](classify.py)
-* pack-local tests: [`test_terrain_classes.py`](test_terrain_classes.py)
+* approximation generator: [`approximate.py`](approximate.py)
+* pack-local tests: [`test_terrain_classes.py`](test_terrain_classes.py),
+  [`test_approximate_plans.py`](test_approximate_plans.py)
 
 ## Phase-2 result: the requested simple subset is empty
 
@@ -21,9 +25,11 @@ requested simple subset only if it has 1–3 sampled textures, a static TEV stag
 lower bound of at most 6, no control flow, only direct opcodes, and no `def`
 component outside `[0,1]` other than `0`, `1` or `-1`.
 
-**Result: 0 hashes / 0 chunks.**  No plan was emitted and no draw was enabled.
-`def_literal_out_of_range` is only the census's first rejection; fixing literal
-range alone unlocks none of these shaders.
+**Exact-subset result: 0 hashes / 0 chunks.**  No original-equivalent plan was
+emitted.  The port-lite follow-up explicitly approximates 19 hashes instead of
+refusing the whole family; see below.  `def_literal_out_of_range` was only the
+census's first rejection, and fixing literal range alone unlocks none of the
+original shaders.
 
 | Measured property | Hashes | Chunks |
 |---|---:|---:|
@@ -66,7 +72,38 @@ not automatically alpha-blended overlays.
 `terrain_classes.json` carries every SHA-256, chunk count, package/meta, opcode
 histogram, sampled units, exact `def` vectors, CTAB vocabulary, stage lower
 bound, blockers and named refusal.  `refusals.json` is the compact per-hash
-named-refusal catalogue.  Neither stores retail bytecode.
+named-refusal catalogue for the 228 still-unplanned hashes.  Neither stores
+retail bytecode.
+
+## Port-lite adaptation: 19 translated hashes / 49 chunks
+
+Every entry in `plans.json` has `quality: "approx"`, an explicit `approximation`
+object, a declared simplified specification and a symbolic verification against
+that specification.  No entry claims equivalence to the retail shader.
+
+| Policy | Hashes | Chunks | TEV stages | Textures | Declared simplification / visual effect |
+|---|---:|---:|---:|---:|---|
+| `unlit_diffuse_baseline` | 6 | 14 | 1 | 1 | Keep `DiffuseSampler`; drop normal lighting, height/parallax and shadows. Flat unlit albedo. |
+| `unlit_diffuse_overlay_pass` | 7 | 7 | 1 | 1 | Keep base diffuse; drop world-map normal, LOD-noise and lighting detail. Source-alpha overlay state is preserved externally. |
+| `near_three_equal` | 6 | 28 | 3 | 3 | Keep diffuse0..2 with a quantized equal-ish mix; drop diffuse3..5, all normal maps and LOD. Smooth but flatter layer blending. |
+
+`near_three_equal` uses two PICA interpolations with literals `127/255` and
+`170/255`; effective weights are approximately `0.332026 / 0.334641 / 0.333333`.
+Maximum deviation from equal thirds is **0.001307**.  The original-error bound is
+conservatively **1.0 per channel** because three layers and all lighting are
+dropped.  A per-cell weight histogram is not present in the corpus, so no
+fabricated “typical cell” statistic is reported.
+
+Five one-texture plans have a complete static material contract and are marked
+`runtime_candidate: 1`.  They remain `draw_enabled: 0` / `runtime: 0`: the
+runtime cannot yet select the terrain approximation policy and no live
+texture/format/sampler binding was observed.  The three-texture plans also need
+the generic backend's multi-texture gate; overlay plans need the external
+source-alpha contract wired explicitly.
+
+Atlas/prebake was not selected: the corpus does not contain a baked atlas or a
+measured common-UV/material table.  Multi-pass was not selected for these 19:
+the declared single-pass approximations fit PICA's 3-unit / 6-stage envelope.
 
 ## `def` values and the schema request
 
@@ -113,7 +150,7 @@ them honestly:
   constant values, varying routing and blend state.  String preconditions alone
   are not enough for `draw_enabled=1`.
 
-## Why no first plan was accepted
+## Why no original-equivalent plan was accepted
 
 All 247 hashes contain the retail `dp4` normal/tangent-basis transform.  The
 smallest three-texture candidates still have 25–45 static non-texture
@@ -121,24 +158,26 @@ instructions and need normal prebake plus a one-accumulator DAG scheduler.
 Many also contain `nrm`, `rsq`, `rcp`, `pow`, `cmp`, `dp2add` or loops.  The
 12–15-texture classes additionally require a real multi-pass contract.
 
-Therefore the next blocker is **not** another literal-range patch.  It is the
-combination of offline normal/tangent prebake, a symbolic TEV scheduler, and a
-multi-pass/material schema.  The 19 hashes with at most three textures remain
-named `terrain.stage_budget`; the other 228 are named
-`terrain.needs_multipass` with their layer count and minimum pass count.
+The 19 port-lite entries above therefore verify only their declared simplified
+specifications, never the original `oC0`.  The remaining 228 hashes stay named
+`terrain.needs_multipass` (218) or `terrain.stage_budget` (10).
 
 ## Reproduce and test
 
 ```powershell
 python source\shader_packs\terrain\classify.py --corpus E:\host_sm3
+python source\shader_packs\terrain\approximate.py --corpus E:\host_sm3 --data F:\Skyrim\Data
 python source\shader_packs\terrain\test_terrain_classes.py
+python source\shader_packs\terrain\test_approximate_plans.py
 python tools\shader_packs.py check
-python tools\shaders\plan_verify.py --plans docs\shader_plans.json
+python tools\shaders\plan_verify.py --plans source\shader_packs\terrain\plans.json
 ```
 
-The pack-local IR regression rebuilds the complete table from `corpus.json`,
-`ps_ir.bin` and the read-only retail CTABs, then compares it field for field.
-No plan-vs-IR equivalence is claimed because no terrain plan exists.
+The pack-local IR regression rebuilds the complete classification table from
+`corpus.json`, `ps_ir.bin` and the read-only retail CTABs, then compares it
+field for field.  The approximation regression rebuilds all 19 plans and
+re-runs their symbolic simplified-spec verification.  Original-shader
+equivalence is deliberately not claimed.
 
 Only this directory was edited.  `DevCaps` remains `0x00082000`; no SM3 slots,
 frame, retail bytecode or new draw path are claimed.

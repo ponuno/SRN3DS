@@ -59,10 +59,12 @@ class TerrainClassTest(unittest.TestCase):
         })
         plans = load(REPO / "docs" / "shader_plans.json")["entries"]
         pack_plans = load(PACK_DIR / "plans.json")["entries"]
-        self.assertEqual(pack_plans, [])
+        self.assertEqual(len(pack_plans), 19)
+        self.assertTrue(all(plan["draw_enabled"] == 0 and plan["runtime"] == 0
+                            for plan in pack_plans))
         terrain_hashes = {row["sha256"] for row in self.rows}
         self.assertFalse(terrain_hashes & {entry["sha256"] for entry in plans})
-        self.assertFalse(terrain_hashes & {entry["sha256"] for entry in pack_plans})
+        self.assertEqual(len(terrain_hashes & {entry["sha256"] for entry in pack_plans}), 19)
         for row in self.rows:
             self.assertEqual((row["translated"], row["draw_enabled"]), (0, 0))
 
@@ -101,12 +103,15 @@ class TerrainClassTest(unittest.TestCase):
     def test_named_refusal_catalog(self):
         refusals = load(PACK_DIR / "refusals.json")
         self.assertEqual(refusals["counts"], {
-            "terrain.needs_multipass": 228, "terrain.stage_budget": 19,
+            "terrain.needs_multipass": 218, "terrain.stage_budget": 10,
         })
         self.assertEqual(refusals["source_table_sha256"],
                          hashlib.sha256((PACK_DIR / "terrain_classes.json").read_bytes()).hexdigest())
-        self.assertEqual(len(refusals["hashes"]), 247)
-        for refusal, row in zip(refusals["hashes"], self.rows):
+        planned = {entry["sha256"] for entry in load(PACK_DIR / "plans.json")["entries"]}
+        remaining = [row for row in self.rows if row["sha256"] not in planned]
+        self.assertEqual(len(refusals["hashes"]), 228)
+        self.assertEqual(len(remaining), 228)
+        for refusal, row in zip(refusals["hashes"], remaining):
             self.assertEqual(refusal["sha256"], row["sha256"])
             self.assertEqual(refusal["name"], row["refusal"]["name"])
             self.assertEqual(refusal["blockers"], row["blockers"])

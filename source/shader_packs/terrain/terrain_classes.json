@@ -8,7 +8,7 @@
     "canonical_ir": "ps_ir.bin",
     "canonical_ir_sha256": "57dc0dc3dadeac52140bac35fed3b5877653aab9552c1385f0c152be44d037b0",
     "manifest": "manifest.json",
-    "manifest_sha256": "4690816e1d098e5f86f50a0ff2fc2f6afcdfc16545904240144f78211e1c99e0",
+    "manifest_sha256": "4e5028383fd9947e1148f26d42fbc3d08186e7f146fb33499bdcaad66dcab568",
     "retail_archive": "Skyrim - Shaders.bsa (read-only; no bytecode stored)"
   },
   "limits": {

@@ -346,9 +346,12 @@ def build_table(corpus_dir: Path, manifest_path: Path, data_dir: str = "") -> di
     }
 
 
-def build_refusals(table: dict) -> dict:
+def build_refusals(table: dict, planned_hashes=()) -> dict:
+    planned = set(planned_hashes)
     rows = []
     for row in table["hashes"]:
+        if row["sha256"] in planned:
+            continue
         refusal = row["refusal"]
         rows.append({
             "sha256": row["sha256"],
@@ -384,7 +387,9 @@ def main(argv=None) -> int:
     with args.out.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(table, handle, indent=2, sort_keys=False)
         handle.write("\n")
-    refusals = build_refusals(table)
+    refusals = build_refusals(table, {
+        entry["sha256"] for entry in _load(PACK_DIR / "plans.json").get("entries", [])
+    })
     refusals["source_table_sha256"] = _sha256(args.out)
     args.refusals.parent.mkdir(parents=True, exist_ok=True)
     with args.refusals.open("w", encoding="utf-8", newline="\n") as handle:
