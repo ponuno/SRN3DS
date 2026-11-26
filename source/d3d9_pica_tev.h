@@ -83,6 +83,7 @@ typedef struct {
     uint8_t constant_reg[8];     /* external c# values the plan reads */
     uint8_t uses_primary_color;  /* color0 via GPU_PRIMARY_COLOR */
     uint8_t uses_ambient_fold;   /* color1 folded into c8 constant */
+    uint8_t requires_alpha_test; /* texkill folded to oC0.a > 0 */
     D9PicaTevStage stage[D9_PICA_TEV_MAX_STAGES];
 } D9PicaTevProgram;
 

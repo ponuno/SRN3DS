@@ -225,6 +225,16 @@ int main(void){
     assert(mock.shader&&mock.shader->stage[0].func_rgb==D9TEV_FUNC_MODULATE);
     assert(mock.shader->stage[0].const_is_literal&&mock.texture);
 
+    /* texkill is accepted only when it is exactly the final output-alpha test. */
+    n=0;prefix(code,&n);
+    code[n++]=DI(0x42,3);code[n++]=DST_R(0);code[n++]=SRC_T0;code[n++]=SAMP0;
+    code[n++]=DI(0x41,1);code[n++]=0x80FF0000u; /* texkill r0.wwww */
+    code[n++]=DI(0x01,2);code[n++]=DST_C0;code[n++]=SRC_R(0);code[n++]=END;
+    assert(!guest_write(&h.memory,CODE,code,n*4));assert(create_pixel_shader(&h,CODE,OUT)==0);
+    shader=rd(&h,OUT);assert(shader);
+    D9TevProgram kill_tev;assert(d9_com_pixel_shader_tev(shader,&kill_tev));
+    assert(kill_tev.requires_alpha_test&&kill_tev.texkill_count==1&&kill_tev.stages==1);
+
     /* Zero-texture literal programs draw without a bound texture. */
     n=0;code[n++]=VER;
     code[n++]=DI(0x51,5);code[n++]=0xA00F0000u;

@@ -355,6 +355,13 @@ widening the six-stage/three-texture envelope. The new three-stage
 `oC0.rgb`/`oC0.w` regression matches the independent D3D9 interpreter on 4,000
 vectors with zero error.
 
+The texkill layer adds a real `D9TevProgram.requires_alpha_test` contract and
+maps it to `C3D_AlphaTest(GPU_GREATER, 0)` in both generic and menu draw paths.
+Only a direct replicated scalar proven identical to final `oC0.a` is accepted;
+all other discard forms remain named refusals. Retail acceptance stays
+**27/9,621** (UI 3, sky 7): the shipped UI texkill programs use adjusted or
+intermediate scalars, so none is falsely accepted.
+
 The accepted column is the generic translator only. The separate fixed-pipeline
 matcher in §7.4 recognises 6 additional base-lit chunks (5 `p5_MAD_NORMAL`, 1
 `p1200005_ADD_NORMAL`); they remain rejected by the generic translator and are
@@ -403,11 +410,15 @@ This is a **real translation** of the token stream, not a hash template.
 | `mad` | `MULTIPLY_ADD` (`a*b+c`) |
 | `lrp` | `INTERPOLATE` (`a*c + b*(1-c)`) |
 | `dp3` | `DOT3_RGBA` |
+| `texkill rN.wwww` | hardware alpha test `oC0.a > 0`, only when that exact direct scalar is the final alpha; every other form is rejected by name |
 | `nop` | dropped |
 
 Every other opcode is rejected with its name, including `cmp`, `rcp`, `rsq`,
-`pow`, `nrm`, `dp4`, `min`, `max`, `texkill`, `texldd`, `texldl`, `defi` and
-all branch/loop/call instructions.
+`pow`, `nrm`, `dp4`, `texldd`, `texldl`, `defi` and all branch/loop/call
+instructions. `texkill` has the narrow final-alpha mapping above; an
+intermediate, adjusted-threshold, negated or non-replicated discard is a named
+refusal because PICA has only one alpha-test input and testing a TEV
+intermediate would require changing the blended output alpha.
 
 Further limits: straight-line code only; at most 6 stages; at most 3 texture
 units; at most 2 distinct constants in one instruction (one may be loaded into

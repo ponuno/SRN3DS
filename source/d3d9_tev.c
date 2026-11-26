@@ -2,6 +2,7 @@
  *
  * Supported subset (all other opcodes are rejected by name):
  *   nop, mov, add, sub, mad, mul, dp3, lrp, texld, dcl, def
+ *   texkill is folded only when its replicated scalar is exactly final oC0.a
  * with full or partial destination masks, source negate only, 2D samplers,
  * texcoord/colour inputs, straight-line code, at most 3 texture units,
  * at most 6 combiner stages and at most two distinct constants per
@@ -122,6 +123,11 @@ typedef struct {
     int current_stage;
     int saw_output_mask;
     uint8_t output_mask;
+    int texkill_pending;
+    unsigned texkill_src;
+    unsigned texkill_comp;
+    unsigned texkill_creg;
+    unsigned texkill_count;
 } Ctx;
 
 static DefConst *lookup_def(Ctx *ctx, int reg) {
@@ -340,6 +346,24 @@ static unsigned alpha_selector(unsigned comp, int negate) {
     return negate ? op ^ 1u : op;
 }
 
+static unsigned rgb_selector_comp(unsigned op) {
+    switch (op) {
+    case D9TEV_RGB_R: case D9TEV_RGB_1M_R: return 0;
+    case D9TEV_RGB_G: case D9TEV_RGB_1M_G: return 1;
+    case D9TEV_RGB_B: case D9TEV_RGB_1M_B: return 2;
+    default: return 3;
+    }
+}
+
+static unsigned alpha_selector_comp(unsigned op) {
+    switch (op) {
+    case D9TEV_A_R: case D9TEV_A_1M_R: return 0;
+    case D9TEV_A_G: case D9TEV_A_1M_G: return 1;
+    case D9TEV_A_B: case D9TEV_A_1M_B: return 2;
+    default: return 3;
+    }
+}
+
 /* Map one D3D operand to independent PICA RGB and alpha sources/selectors.
  * This is what lets r0.rgb come from TEXTURE0 while r0.a comes from TEXTURE1,
  * instead of forcing both sides through the last PREVIOUS result. */
@@ -527,6 +551,7 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
     uint8_t output_mask = 0;
     uint8_t output_defined = 0;
     int output_stage = -1;
+    Value output_value = empty_value();
 
     while (pos < words) {
         uint32_t token = code[pos];
@@ -627,6 +652,48 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
             continue;
         }
         if (op == 0x00) { pos += total; continue; } /* nop */
+
+        if (op == 0x41) { /* texkill dst-less scalar discard */
+            if (total != 2) {
+                reject(why, cap, "texkill expects one source operand");
+                return -1;
+            }
+            unsigned src_rgb, src_a, rop, aop, creg[2];
+            uint8_t taint;
+            if (map_operand(ctx, arg[0], &src_rgb, &rop, &src_a, &aop,
+                            creg, &taint, 0xFu, why, cap, "texkill") < 0)
+                return -1;
+            uint32_t sw = SWZ(arg[0]);
+            unsigned c0 = sw & 3u, c1 = (sw >> 2) & 3u;
+            unsigned c2 = (sw >> 4) & 3u, c3 = (sw >> 6) & 3u;
+            unsigned comp = rgb_selector_comp(rop);
+            if (SRCMOD(arg[0]) != 0 || c0 != c1 || c1 != c2 || c2 != c3 ||
+                src_rgb != src_a || comp != alpha_selector_comp(aop)) {
+                reject(why, cap, "texkill: PICA alpha test requires one unmodified "
+                       "replicated scalar shared by RGB and alpha");
+                return -1;
+            }
+            if (src_rgb == D9TEV_SRC_PREV) {
+                reject(why, cap, "texkill: intermediate '%s' is not final oC0.a; "
+                       "PICA alpha test cannot test a clamped TEV intermediate",
+                       d9_tev_opcode_name(op));
+                return -1;
+            }
+            if (ctx->texkill_pending &&
+                (ctx->texkill_src != src_rgb || ctx->texkill_comp != comp ||
+                 ctx->texkill_creg != creg[1])) {
+                reject(why, cap, "texkill: multiple discard scalars do not match "
+                       "the final PICA alpha-test source");
+                return -1;
+            }
+            ctx->texkill_pending = 1;
+            ctx->texkill_src = src_rgb;
+            ctx->texkill_comp = comp;
+            ctx->texkill_creg = src_a == D9TEV_SRC_CONST ? creg[1] : 0xFFu;
+            ++ctx->texkill_count;
+            pos += total;
+            continue;
+        }
 
         if (op == 0x42) { /* texld dst, texcoord, sampler */
             if (total != 4) {
@@ -750,6 +817,12 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
                 output_mask = (uint8_t)mask;
                 output_defined = (uint8_t)mask;
                 output_stage = (int)p->stages - 1;
+                for (int c = 0; c < 4; ++c) {
+                    if (!(mask & (1u << c))) continue;
+                    output_value.src[c] = (uint8_t)(D9TEV_SRC_TEX0 + unit);
+                    output_value.comp[c] = (uint8_t)c;
+                    output_value.defined |= (uint8_t)(1u << c);
+                }
             } else {
                 Value value = empty_value();
                 for (int c = 0; c < 4; ++c) {
@@ -1003,8 +1076,29 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
         if (dst_type == D9TEV_REG_COLOROUT) {
             have_output = 1;
             output_mask |= (uint8_t)mask;
-            if (writes_rgb) output_defined &= (uint8_t)~7u;
-            if (writes_a) output_defined &= (uint8_t)~8u;
+            if (writes_rgb) {
+                output_defined &= (uint8_t)~7u;
+                for (int c = 0; c < 3; ++c) output_value.src[c] = VAL_NONE;
+            }
+            if (writes_a) {
+                output_defined &= (uint8_t)~8u;
+                output_value.src[3] = VAL_NONE;
+            }
+            if (op == 0x01) {
+                for (int c = 0; c < 4; ++c) {
+                    if (!(mask & (1u << c))) continue;
+                    unsigned source = c == 3 ? src_a[0] : src_rgb[0];
+                    if (source == D9TEV_SRC_PREV) continue;
+                    output_value.src[c] = (uint8_t)source;
+                    output_value.comp[c] = (uint8_t)(c == 3 ? alpha_selector_comp(aop[0])
+                                                             : rop[0] == D9TEV_RGB_COLOR
+                                                             ? (unsigned)c : rgb_selector_comp(rop[0]));
+                    output_value.const_reg[c] = source == D9TEV_SRC_CONST
+                                              ? (uint8_t)(c == 3 ? creg[0][1] : creg[0][0])
+                                              : 0xFFu;
+                    output_value.defined |= (uint8_t)(1u << c);
+                }
+            }
             output_defined |= (uint8_t)(mask & result.defined);
             output_stage = (int)p->stages - 1;
         } else {
@@ -1026,6 +1120,18 @@ static int translate(Ctx *ctx, const uint32_t *code, size_t words,
         reject(why, cap, "code after the final oC0 write would overwrite the "
                "TEV PREVIOUS stage; reorder or reject this permutation");
         return -1;
+    }
+    if (ctx->texkill_pending) {
+        if (!(output_defined & 8u) ||
+            output_value.src[3] != ctx->texkill_src ||
+            output_value.comp[3] != ctx->texkill_comp ||
+            output_value.const_reg[3] != ctx->texkill_creg) {
+            reject(why, cap, "texkill: discard scalar is not final oC0.a; "
+                   "PICA alpha test cannot test an intermediate without changing alpha");
+            return -1;
+        }
+        p->requires_alpha_test = 1;
+        p->texkill_count = ctx->texkill_count;
     }
 
     /* If alpha was never written, force it to 1 with one extra stage.  The RGB

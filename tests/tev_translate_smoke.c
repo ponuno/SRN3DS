@@ -461,6 +461,58 @@ static void test_literal_validation(void) {
     }
 }
 
+static void test_texkill(void) {
+    D9TevProgram p;
+    char why[256];
+    {
+        static const uint32_t code[] = {
+            VER_PS30,
+            DI(0x1F, 2), DCL_TEXCOORD(0), TEXD(0),
+            DI(0x1F, 2), DCL_SAMPLER2D, SAMP(0),
+            DI(0x42, 3), DST_R(0), SRC_T(0), SAMP(0),
+            DI(0x41, 1), 0x80FF0000u, /* texkill r0.wwww */
+            DI(0x01, 2), DST_C0, SRC_R(0),
+            END_TOKEN,
+        };
+        check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) == 0, why);
+        check(p.requires_alpha_test == 1 && p.texkill_count == 1,
+              "texkill: folded to output alpha test");
+        check(p.stages == 1, "texkill: no combiner stage for discard");
+    }
+    {
+        static const uint32_t code[] = {
+            VER_PS30,
+            DI(0x1F, 2), DCL_TEXCOORD(0), TEXD(0),
+            DI(0x1F, 2), DCL_SAMPLER2D, SAMP(0),
+            DI(0x51, 5), DST_C(0), 0x3F000000u, 0, 0, 0,
+            DI(0x42, 3), DST_R(0), SRC_T(0), SAMP(0),
+            DI(0x03, 3), DST_R(1), 0x80FF0000u, SRC_CX(0),
+            DI(0x41, 1), 0x80FF0001u,
+            DI(0x01, 2), DST_C0, SRC_R(0),
+            END_TOKEN,
+        };
+        check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) < 0,
+              "texkill: reject intermediate scalar");
+        check(strstr(why, "texkill") && strstr(why, "intermediate"),
+              "texkill: intermediate refusal is named");
+    }
+    {
+        static const uint32_t code[] = {
+            VER_PS30,
+            DI(0x1F, 2), DCL_TEXCOORD(0), TEXD(0),
+            DI(0x1F, 2), DCL_SAMPLER2D, SAMP(0),
+            DI(0x42, 3), DST_R(0), SRC_T(0), SAMP(0),
+            DI(0x41, 1), SRC_RX(0), /* texkill r0.xxxx */
+            DI(0x01, 2), DST_C0, SRC_R(0),
+            END_TOKEN,
+        };
+        check(translate(code, sizeof code / sizeof *code, &p, why, sizeof why) < 0,
+              "texkill: reject scalar unlike output alpha");
+        check(strstr(why, "not final oC0.a") != NULL,
+              "texkill: output-alpha mismatch is named");
+    }
+}
+
 static void test_rejections(void) {
     D9TevProgram p;
     char why[256];
@@ -592,6 +644,7 @@ int main(void) {
     test_alpha_fixup();
     test_texld_validation();
     test_literal_validation();
+    test_texkill();
     test_rejections();
     test_pack();
     printf("tev translate: %d checks, %d failures\n", checks, failures);

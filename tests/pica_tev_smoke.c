@@ -190,6 +190,27 @@ static void test_textured_blit(void) {
           "textured blit: no constant");
 }
 
+static void test_texkill_descriptor(void) {
+    Asm a;
+    begin(&a);
+    textured_decls(&a, 0u);
+    texld(&a, 0u, 0u);
+    emit(&a, DI(0x41u, 1u));
+    emit(&a, sr(0u, 0u, 0xFFu));
+    mov(&a, dr(8u, 0u, 0xFu), sr(0u, 0u, SW_ID));
+    end(&a);
+    D9TevProgram translated;
+    D9PicaTevProgram descriptor;
+    D9PicaTevReject reason;
+    char why[256];
+    check(validate_asm(&a, &translated, &descriptor, &reason, why, sizeof why) == 0,
+          why);
+    check(translated.requires_alpha_test && translated.texkill_count == 1,
+          "texkill: translator flag");
+    check(descriptor.requires_alpha_test == 1,
+          "texkill: PICA descriptor carries alpha-test requirement");
+}
+
 static void make_tint(Asm *a) {
     begin(a);
     textured_decls(a, 0u);
@@ -644,6 +665,7 @@ static void test_helpers(void) {
 int main(void) {
     test_constant_blit();
     test_textured_blit();
+    test_texkill_descriptor();
     test_tint();
     test_textured_chain();
     test_descriptor_rejections();

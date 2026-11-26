@@ -249,6 +249,16 @@ static void apply_state(const D9DrawState *s,int has_depth){
     GPU_BLENDEQUATION eq=s->blend?(GPU_BLENDEQUATION)(s->blend_op-1):GPU_BLEND_ADD;
     C3D_AlphaBlend(eq,eq,src,dst,src,dst);
 }
+static int apply_shader_alpha_test(const D9DrawState *s) {
+    if (!s->pixel_shader || !s->pixel_shader->requires_alpha_test) return 0;
+    if (s->alpha_test && (s->alpha_func != 5 || s->alpha_ref != 0)) {
+        fprintf(stderr, "[d3d9-citro] texkill alpha test conflicts with draw-state alpha test\n");
+        return -1;
+    }
+    C3D_AlphaTest(true, GPU_GREATER, 0);
+    return 0;
+}
+
 static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *texture,const D9DrawState *state){
     D9Citro *c=ctx;if(!c->scene||n>FRAME_VERTICES-c->cursor)return -1;
     memcpy(c->arena+c->cursor,v,n*sizeof *v);GSPGPU_FlushDataCache(c->arena+c->cursor,n*sizeof *v);
@@ -256,6 +266,7 @@ static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform,&m);
     apply_state(state,1);
+    if(apply_shader_alpha_test(state))return -1;
     if(texture)configure_native_texture(texture,state);
     if(state->pixel_shader){
         NativeTex *native=texture;
@@ -325,6 +336,7 @@ static int draw_color_stages(void *ctx,const D9ColorVertex *v,size_t n,const D9M
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_color,&m);
     apply_state(state,1);
+    if(apply_shader_alpha_test(state))return -1;
     if(texture)configure_native_texture(texture,state);
     d9_pica_citro3d_restore_tev();
     if(texture){NativeTex *native=texture;C3D_TexBind(0,&native->tex);}
@@ -490,6 +502,7 @@ static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_color,&m);
     apply_state(&draw_state,1);
+    if(apply_shader_alpha_test(&draw_state))return -1;
     if(texture0)configure_native_texture(texture0,&draw_state);
     if(texture1)configure_native_texture(texture1,&draw_state);
     /* The generic draw path binds its unit explicitly; the menu path used to

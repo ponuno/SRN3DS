@@ -498,6 +498,7 @@ int d9_pica_tev_validate(const D9TevProgram *program,
                                                     : D9_PICA_TEV_NO_SAMPLER;
         result.uses_primary_color = (uint8_t)uses_primary;
         result.uses_ambient_fold = (uint8_t)ambient_fold;
+        result.requires_alpha_test = (uint8_t)(program->requires_alpha_test != 0);
         *descriptor = result;
     }
     return 0;
