@@ -16,6 +16,15 @@
 #define COPY_SHA "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de"
 #define FOREIGN_SHA "0000000000000000000000000000000000000000000000000000000000000000"
 
+#define DI(op, operands) ((uint32_t)(op) | ((uint32_t)(operands) << 24))
+#define DR(type_, reg, mask, mod) (0x80000000u | (((type_) & 7u) << 28) | \
+    (((type_) & 0x18u) << 8) | ((reg) & 0x7FFu) | (((mask) & 0xFu) << 16) | \
+    (((mod) & 0xFu) << 20))
+#define SR(type_, reg, sw, mod) (0x80000000u | (((type_) & 7u) << 28) | \
+    (((type_) & 0x18u) << 8) | ((reg) & 0x7FFu) | (((sw) & 0xFFu) << 16) | \
+    (((mod) & 0xFu) << 24))
+#define SW_ID 0xE4u
+
 static int checks, failures;
 #define CHECK(condition, text) do { ++checks; if (!(condition)) { \
     ++failures; printf("FAIL: %s (%s:%d)\n", text, __FILE__, __LINE__); \
@@ -136,6 +145,71 @@ int main(void) {
           "PICA VS descriptor draw is refused");
     CHECK(strstr(why, "code emitter") != NULL || strstr(why, "not draw-enabled") != NULL,
           "PICA VS refusal is named");
+
+    /* The table's draw-enabled copy entry must be the same descriptor the
+     * existing C translator builds from the same three-instruction stream. */
+    {
+        uint32_t code[16];
+        size_t n = 0;
+        code[n++] = 0xFFFF0300u;
+        code[n++] = DI(0x1F, 2);
+        code[n++] = 5u;                       /* D3DDECLUSAGE_TEXCOORD, index 0 */
+        code[n++] = DR(1, 0, 0xF, 0);         /* v0 */
+        code[n++] = DI(0x1F, 2);
+        code[n++] = 2u << 27;                 /* texture type 2D */
+        code[n++] = DR(10, 0, 0xF, 0);        /* s0 */
+        code[n++] = DI(0x42, 3);
+        code[n++] = DR(8, 0, 0xF, 0);         /* oC0 */
+        code[n++] = SR(1, 0, SW_ID, 0);       /* v0 */
+        code[n++] = SR(10, 0, SW_ID, 0);      /* s0 */
+        code[n++] = 0x0000FFFFu;
+        D9TevProgram translated;
+        char tev_why[256] = "";
+        CHECK(d9_tev_translate_pixel(code, n, &translated, tev_why,
+                                     sizeof tev_why) == 0,
+              "C translator accepts the synthetic copy");
+        CHECK(copy && translated.stages == copy->tev.stages,
+              "copy entry stage count equals the C plan");
+        if (copy && translated.stages == copy->tev.stages) {
+            int same = 1;
+            for (unsigned s = 0; s < translated.stages; ++s) {
+                const D9TevStage *a = &translated.stage[s];
+                const D9TevStage *b = &copy->tev.stage[s];
+                unsigned rgb_arity = a->func_rgb == D9TEV_FUNC_REPLACE ? 1u : 2u;
+                if (a->func_rgb == D9TEV_FUNC_MULTIPLY_ADD ||
+                    a->func_rgb == D9TEV_FUNC_INTERPOLATE ||
+                    a->func_rgb == D9TEV_FUNC_ADD_MULTIPLY)
+                    rgb_arity = 3u;
+                unsigned a_arity = a->func_a == D9TEV_FUNC_REPLACE ? 1u : 2u;
+                if (a->func_a == D9TEV_FUNC_MULTIPLY_ADD ||
+                    a->func_a == D9TEV_FUNC_INTERPOLATE ||
+                    a->func_a == D9TEV_FUNC_ADD_MULTIPLY)
+                    a_arity = 3u;
+                if (a->func_a == D9TEV_FUNC_DOT3_RGBA)
+                    a_arity = 0;
+                same &= a->func_rgb == b->func_rgb && a->func_a == b->func_a;
+                for (unsigned i = 0; i < rgb_arity; ++i) {
+                    same &= a->src_rgb[i] == b->src_rgb[i];
+                    same &= a->op_rgb[i] == b->op_rgb[i];
+                }
+                for (unsigned i = 0; i < a_arity; ++i) {
+                    same &= a->src_a[i] == b->src_a[i];
+                    same &= a->op_a[i] == b->op_a[i];
+                }
+                same &= a->scale_rgb == b->scale_rgb && a->scale_a == b->scale_a;
+                same &= a->const_reg == b->const_reg;
+                same &= a->const_is_literal == b->const_is_literal;
+                same &= a->const_rgba8 == b->const_rgba8;
+            }
+            CHECK(same, "copy entry used stage fields equal the C plan");
+        }
+        CHECK(copy && translated.textures == copy->tev.textures,
+              "copy entry texture count equals the C plan");
+        CHECK(copy && translated.uses_vertex_color == copy->tev.uses_vertex_color,
+              "copy entry vertex-colour flag equals the C plan");
+        CHECK(copy && translated.requires_alpha_fixup == copy->tev.requires_alpha_fixup,
+              "copy entry alpha-fixup flag equals the C plan");
+    }
 
     /* Caps are untouched by plan lookup/selection. */
     D9Caps9 caps;

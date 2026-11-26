@@ -36,7 +36,7 @@ static const D9ShaderPlan d9_shader_plan_entries[] = {
         "certified one-stage copy; same plan as the runtime selector",
         {0xffff0300u, 1, 1,
             {
-                {0,0,{3,3,3},{3,3,3},{0,0,0},{0,0,0},0,0,255,0,0x00000000u},
+                {0,0,{3,15,15},{3,15,15},{0,0,0},{0,0,0},0,0,255,0,0x00000000u},
             },
         1,
             {

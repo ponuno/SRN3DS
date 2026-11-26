@@ -451,7 +451,8 @@ class TevPlanner:
             self.textures[unit]["texcoord_reg"] = ins.srcs[0].index
             stage = {
                 "func_rgb": FUNC_REPLACE, "func_a": FUNC_REPLACE,
-                "src_rgb": [SRC_TEX0 + unit] * 3, "src_a": [SRC_TEX0 + unit] * 3,
+                "src_rgb": [SRC_TEX0 + unit, SRC_PREV, SRC_PREV],
+                "src_a": [SRC_TEX0 + unit, SRC_PREV, SRC_PREV],
                 "op_rgb": [RGB_COLOR] * 3, "op_a": [A_ALPHA] * 3,
                 "scale_rgb": 0, "scale_a": 0, "const_reg": 255,
                 "const_is_literal": 0, "const_rgba8": 0,
