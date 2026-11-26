@@ -39,8 +39,8 @@ powershell -ExecutionPolicy Bypass -File tools\run_host_tests.ps1 `
 # targeted
 ... -Only com,render_texture,cube_rt -OutDir E:\host_t -TestTimeoutSec 300
 
-# ARM build (TESV) / com build
-powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Mode tesv `
+# ARM build (TESV) / com build: -NoClean for incremental, -Jobs for parallel make
+powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Mode tesv -NoClean -Jobs 8 `
   -TesvGen E:\Skyrim_N3DS_build\live_arm_check2\gen -TesvArmSteps 2000000000 `
   -ForceMemProbe -Isolated d3dxNN
 powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Mode com -Isolated name
@@ -50,6 +50,22 @@ powershell -ExecutionPolicy Bypass -File tools\build_cia.ps1 `
   -Elf dist\Skyrim_N3DS_tesv_d3dxNN\...elf -Out build_cia\....cia
 ```
 
+### Fast iteration (measured 2026-11-26)
+
+`run_host_tests.ps1` keeps a **shared clang object cache** (default
+`E:\host_objcache`, override `HOST_OBJ_CACHE`). Each `(relative source,
+content, flags, clang build)` compiles once; every test, worktree and agent
+links from it.
+
+- Full suite (145 tests + Python): **145 s** warm, previously ~25 min.
+- Targeted 3 tests: **19 s** warm / 27 s cold (Python tests dominate).
+- Do not run the full suite per iteration. Use `-Only a,b,c`; run the full
+  suite once before the final commit of a layer.
+- ARM: `-NoClean -Jobs 8` is safe (shader/bin2s dependencies are explicit in
+  the Makefile). Full clean only when flags or generated inputs change.
+- The cache is content-addressed and safe to share between worktrees. Delete
+  `E:\host_objcache` to force a clean rebuild.
+
 Azahar install/run (SD card is `%APPDATA%\Azahar\sdmc`):
 - `"C:\Program Files\Azahar\azahar.exe" -i <cia>` installs;
 - for emulator debugging, drag the `.3dsx` into Azahar; automation of its GUI is
@@ -57,32 +73,34 @@ Azahar install/run (SD card is `%APPDATA%\Azahar\sdmc`):
 - Device logs: `sdmc:/Skyrim_N3DS_tesv.log` (rc/exit), and
   `sdmc:/Skyrim_N3DS_stderr.log` (mirrored stderr).
 
-## Current state (2026-11-26, main `9c6def2`)
+## Current state (2026-11-26, current `main`)
 
-- Final ARM: `d3dx41`, `.3dsx` 2,349,536 B SHA256
-  `3b182136ad9aa42fecaa8e816a76886d0563b42e96abf0355351119d478fd47d`,
-  `.text` 2,329,124 B.
-- Host suite: run and confirm the current number; known diagnostic is
-  `tesv_slice` (early TESV memory gate / memory probe), not a render result.
-- No Azahar frame or pixel proof exists. The device now boots far enough to load
+- Latest ARM: `d3dx42`, `.3dsx` 2,349,980 B SHA256
+  `804e704741bc9d31ef27cb329a0a45b89ed11f54da08694aab93d743caa20054`.
+- Host suite: **145 passed, 1 diagnostic, 0 failed** in 145 s warm.
+  The diagnostic is `tesv_slice` (reporting a documented guest fault, not a
+  render result).
+- No Azahar frame or pixel proof exists. The device boots far enough to load
   BSAs and initialise the renderer, then stops on honest gates.
 
 ### TESV route (the hard blocker)
 
-Host census (with probe env) now reaches:
-`CreateCubeTexture(512,1,1,0x71,0) -> S_OK`, 6 `GetCubeMapSurface`, depth
-surfaces, one `SetRenderTarget` (implicit back buffer 400x240), then
-`SetDepthStencilSurface` with a **512x1024 depth** -> mismatch.
+Measurement-only `TESV_D3D9_DEPTH_PAIR_PROBE=1` (SD flag
+`sdmc:/Skyrim/tesv_depth_pair_probe.flag`) creates a retained 512x1024 back
+buffer and Present scales it to 400x240. With it, the host census now:
 
-- The bridge now returns `D3DERR_INVALIDCALL` (correct D3D9 class) with both
-  sizes, but the engine retries through
-  `NiDX9Renderer::BeginUsingRenderTargetGroup` and overflows a 64 KiB worker
-  stack at `0x1d1ffffc`.
-- Root cause is the pair: the engine wants a 512x1024 colour target/group while
-  our implicit back buffer is 400x240. Next work is a real 512x1024 RT/group
-  registration (or a matching back buffer), not another error-code change.
-- Before that, two honest gates were passed only with the measurement flag:
-  HW T&L and SM3. Do not ship those flips; they are only for measurement.
+- binds the engine's 512x1024 depth to the implicit 512x1024 target
+  (`Depth=0x50002060 512x1024 RenderTarget=0x50002030 512x1024 Implicit=1`),
+  `SetDepthStencilSurface -> S_OK`;
+- runs four `BeginScene`/`EndScene`/`Present` cycles with `S_OK`, 64
+  `SetTexture`, 1756 `CreateVertexShader`, 744 `CreateVertexDeclaration`;
+- reaches **no Draw call yet** and then faults at
+  `Guest fault at 00f520e0: unknown function/import` (after a 29 ms Sleep).
+- `SetSamplerState(stage=0,type=8,value=0)` returns `INVALIDCALL`; a separate
+  track owns that audit.
+- The depth pair is fixed only under the measurement probe; the shipping path
+  still refuses the 400x240-vs-512x1024 pair honestly. HW T&L and SM3 remain
+  measurement-only flips.
 
 ### Device (Azahar) state
 
@@ -92,9 +110,11 @@ surfaces, one `SetRenderTarget` (implicit back buffer 400x240), then
   trailing `\`), stripping a duplicated `Skyrim` component.
 - With `sdmc:/Skyrim/tesv_caps_probe.flag` present, the runner sets
   `TESV_D3D9_CAPS_PROBE`, `TESV_D3D9_SM3_GATE_PROBE`,
-  `TESV_D3D9_SHADER_SKIP_PROBE` (all measurement-only). The run then passes
-  T&L/SM3 and faults at `Guest fault at 00000030: unmapped guest memory`
-  (NULL renderer pointer after shader creation).
+  `TESV_D3D9_SHADER_SKIP_PROBE`; `sdmc:/Skyrim/tesv_depth_pair_probe.flag`
+  adds `TESV_D3D9_DEPTH_PAIR_PROBE` (all measurement-only). The last observed
+  run passes T&L/SM3 and faults at
+  `Guest fault at 00000030: unmapped guest memory` (NULL renderer pointer
+  after shader creation) — see `docs/DEVICE_BRINGUP.md`.
 
 ### Menu SWF pipeline (works on host)
 
