@@ -312,7 +312,9 @@ static void stats_bounds(GeomStats *g, const Path *p) {
     }
 }
 
-static void path_finish(PathSink *sink, GeomStats *g, Path *p) {
+static void path_finish(PathSink *sink, GeomStats *g, Path *p,
+                        const MenuSwfShapeSink *events, void *user) {
+    if (p->active && events && events->end_path) events->end_path(user);
     if (!p->active || p->segments == 0) {
         p->active = 0;
         return;
@@ -340,13 +342,15 @@ static void path_finish(PathSink *sink, GeomStats *g, Path *p) {
     g->point_count += p->points;
     g->segment_count += p->segments;
     stats_bounds(g, p);
-    if (*sink->stored == 0) *sink->first = *sink->used;
-    if (*sink->used < sink->cap) {
-        sink->pool[*sink->used] = out;
-        ++*sink->used;
-        ++*sink->stored;
-    } else {
-        *sink->truncated = 1;
+    if (sink->cap) {
+        if (*sink->stored == 0) *sink->first = *sink->used;
+        if (*sink->used < sink->cap) {
+            sink->pool[*sink->used] = out;
+            ++*sink->used;
+            ++*sink->stored;
+        } else {
+            *sink->truncated = 1;
+        }
     }
     p->active = 0;
 }
@@ -355,8 +359,10 @@ static void path_finish(PathSink *sink, GeomStats *g, Path *p) {
  * glyph SHAPE has no FILLSTYLEARRAY/LINESTYLEARRAY. */
 static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
                          int shape_type, int glyph_mode, StyleState *styles,
-                         GeomStats *g, PathSink *sink, uint32_t max_segments,
-                         char *reason, size_t reason_cap) {
+                         GeomStats *g, PathSink *sink,
+                         const MenuSwfShapeSink *events, void *user,
+                         uint32_t max_segments, char *reason,
+                         size_t reason_cap) {
     Bits b = {p, len, start_byte * 8};
     uint32_t fill_bits, line_bits;
     if (bt_bits(&b, 4, &fill_bits) || bt_bits(&b, 4, &line_bits)) return -1;
@@ -374,7 +380,7 @@ static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
                 bt_bits(&b, 1, &f1) || bt_bits(&b, 1, &f0) ||
                 bt_bits(&b, 1, &mv)) return -1;
             if (!newstyles && !ls && !f1 && !f0 && !mv) {
-                path_finish(sink, g, &path);
+                path_finish(sink, g, &path, events, user);
                 return 0;
             }
             int32_t dx = 0, dy = 0;
@@ -432,8 +438,10 @@ static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
             if (styles_changed) ++g->style_changes;
             fill0 = nf0; fill1 = nf1; line = nl;
             if (split) {
-                path_finish(sink, g, &path);
+                path_finish(sink, g, &path, events, user);
                 path_start(&path, dx, dy, fill0, fill1, line);
+                if (events && events->begin_path)
+                    events->begin_path(user, dx, dy, fill0, fill1, line);
                 x = dx; y = dy;
             } else if (path.active) {
                 if (styles_changed) {
@@ -448,7 +456,11 @@ static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
         } else {
             uint32_t straight, nbits;
             if (bt_bits(&b, 1, &straight) || bt_bits(&b, 4, &nbits)) return -1;
-            if (!path.active) path_start(&path, x, y, fill0, fill1, line);
+            if (!path.active) {
+                path_start(&path, x, y, fill0, fill1, line);
+                if (events && events->begin_path)
+                    events->begin_path(user, x, y, fill0, fill1, line);
+            }
             if (straight) {
                 uint32_t general;
                 int32_t dx = 0, dy = 0;
@@ -469,6 +481,7 @@ static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
                 y += dy;
                 path_point(&path, x, y);
                 ++path.segments;
+                if (events && events->line_to) events->line_to(user, x, y);
             } else {
                 int32_t cdx, cdy, adx, ady;
                 if (bt_signed(&b, nbits + 2, &cdx) ||
@@ -479,6 +492,8 @@ static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
                 int32_t ex = cx + adx, ey = cy + ady;
                 path_point(&path, cx, cy);
                 path_point(&path, ex, ey);
+                if (events && events->curve_to)
+                    events->curve_to(user, cx, cy, ex, ey);
                 x = ex; y = ey;
                 path.has_curve = 1;
                 ++path.segments;
@@ -494,14 +509,17 @@ static int parse_records(const uint8_t *p, size_t len, size_t start_byte,
 }
 
 static int parse_shape_tag(const uint8_t *p, size_t len, uint8_t tag_code,
-                           MenuSwfShapeResult *out, char *reason,
-                           size_t reason_cap) {
+                           MenuSwfShapeResult *out,
+                           const MenuSwfShapeSink *events, void *user,
+                           char *reason, size_t reason_cap) {
     int shape_type = tag_code == 2 ? 1 : tag_code == 22 ? 2 : tag_code == 32 ? 3 : 4;
     Reader r = {p, len, 0};
     MenuSwfShapeSummary shape;
     memset(&shape, 0, sizeof shape);
     if (rd_u16(&r, &shape.shape_id)) return -1;
     shape.tag_code = tag_code;
+    if (events && events->begin_shape)
+        events->begin_shape(user, shape.shape_id, tag_code);
 
     Bits b = {p, len, r.off * 8};
     if (read_rect(&b, &shape.bounds)) return -1;
@@ -529,11 +547,27 @@ static int parse_shape_tag(const uint8_t *p, size_t len, uint8_t tag_code,
 
     GeomStats g;
     memset(&g, 0, sizeof g);
-    PathSink sink = {out->shape_paths, MENU_SWF_SHAPE_MAX_PATHS,
-                     &out->shape_path_used, &shape.path_first,
-                     &shape.stored_paths, &shape.truncated};
+    uint32_t walk_used = 0, walk_first = 0, walk_stored = 0;
+    int walk_truncated = 0;
+    PathSink sink;
+    if (out) {
+        sink.pool = out->shape_paths;
+        sink.cap = MENU_SWF_SHAPE_MAX_PATHS;
+        sink.used = &out->shape_path_used;
+        sink.first = &shape.path_first;
+        sink.stored = &shape.stored_paths;
+        sink.truncated = &shape.truncated;
+    } else {
+        sink.pool = NULL;
+        sink.cap = 0;
+        sink.used = &walk_used;
+        sink.first = &walk_first;
+        sink.stored = &walk_stored;
+        sink.truncated = &walk_truncated;
+    }
     rc = parse_records(p, len, r.off, shape_type, 0, &styles, &g, &sink,
-                       MENU_SWF_SHAPE_MAX_SEGMENTS, reason, reason_cap);
+                       events, user, MENU_SWF_SHAPE_MAX_SEGMENTS, reason,
+                       reason_cap);
     if (rc) return rc;
 
     shape.fill_count = styles.fill_count;
@@ -549,6 +583,8 @@ static int parse_shape_tag(const uint8_t *p, size_t len, uint8_t tag_code,
     shape.segment_count = g.segment_count;
     shape.style_changes = g.style_changes;
 
+    if (events && events->end_shape) events->end_shape(user);
+    if (!out) return 0;
     if (out->stored_shapes >= MENU_SWF_SHAPE_MAX_SHAPES) {
         set_reason(reason, reason_cap, "swf shape: shape limit %u exceeded",
                    MENU_SWF_SHAPE_MAX_SHAPES);
@@ -643,8 +679,8 @@ static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
                              &out->glyph_path_used, &glyph.path_first,
                              &glyph.stored_paths, &glyph.truncated};
             int rc = parse_records(p, end, start, 3, 1, &styles, &g, &sink,
-                                   MENU_SWF_SHAPE_MAX_SEGMENTS, reason,
-                                   reason_cap);
+                                   NULL, NULL, MENU_SWF_SHAPE_MAX_SEGMENTS,
+                                   reason, reason_cap);
             if (rc) return rc;
             glyph.path_count = g.path_count;
             glyph.point_count = g.point_count;
@@ -664,7 +700,9 @@ static int parse_font_tag(const uint8_t *p, size_t len, uint8_t tag_code,
 }
 
 typedef struct {
-    MenuSwfShapeResult *out;
+    MenuSwfShapeResult *out; /* NULL while streaming geometry only */
+    const MenuSwfShapeSink *events;
+    void *user;
     uint32_t tags_seen;
 } ShapeContext;
 
@@ -710,9 +748,10 @@ static MenuSwfStatus walk_tags(ShapeContext *ctx, const uint8_t *p, size_t len,
             return MENU_SWF_OK;
         }
         if (code == 2 || code == 22 || code == 32 || code == 83) {
-            ++ctx->out->shape_total;
+            if (ctx->out) ++ctx->out->shape_total;
             int rc = parse_shape_tag(payload, tlen, (uint8_t)code, ctx->out,
-                                     reason, reason_cap);
+                                     ctx->events, ctx->user, reason,
+                                     reason_cap);
             if (rc == -2) return MENU_SWF_ERR_NOTIMPL;
             if (rc == -3) return MENU_SWF_ERR_BUDGET;
             if (rc) {
@@ -736,7 +775,7 @@ static MenuSwfStatus walk_tags(ShapeContext *ctx, const uint8_t *p, size_t len,
             MenuSwfStatus st = walk_tags(ctx, payload + 4, tlen - 4, depth + 1,
                                          reason, reason_cap);
             if (st != MENU_SWF_OK) return st;
-        } else if (code == 48 || code == 75) {
+        } else if ((code == 48 || code == 75) && ctx->out) {
             int rc = parse_font_tag(payload, tlen, (uint8_t)code, ctx->out,
                                     reason, reason_cap);
             if (rc == -3) return MENU_SWF_ERR_BUDGET;
@@ -747,11 +786,11 @@ static MenuSwfStatus walk_tags(ShapeContext *ctx, const uint8_t *p, size_t len,
                                "swf shape: malformed font tag %u", code);
                 return MENU_SWF_ERR_FORMAT;
             }
-        } else if (code == 91) {
+        } else if (ctx->out && code == 91) {
             set_reason(reason, reason_cap,
                        "swf shape: DefineFont4 is E_NOTIMPL");
             return MENU_SWF_ERR_NOTIMPL;
-        } else if (code == 82) {
+        } else if (ctx->out && code == 82) {
             set_reason(reason, reason_cap,
                        "swf shape: DoABC/AVM2 is E_NOTIMPL");
             return MENU_SWF_ERR_NOTIMPL;
@@ -768,6 +807,30 @@ const MenuSwfShapeSummary *menu_swf_shape_find(const MenuSwfShapeResult *result,
     for (uint32_t i = 0; i < result->stored_shapes; ++i)
         if (result->shapes[i].shape_id == shape_id) return &result->shapes[i];
     return NULL;
+}
+
+MenuSwfStatus menu_swf_shape_walk(const uint8_t *data, size_t size,
+                                  const MenuSwfShapeSink *sink, char *reason,
+                                  size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!sink) {
+        set_reason(reason, reason_cap,
+                   "swf shape: geometry walk needs a sink");
+        return MENU_SWF_ERR_ARGUMENT;
+    }
+
+    MenuSwfView view;
+    MenuSwfStatus st = menu_swf_view_open(data, size, &view, reason, reason_cap);
+    if (st != MENU_SWF_OK) return st;
+
+    ShapeContext ctx;
+    memset(&ctx, 0, sizeof ctx);
+    ctx.events = sink;
+    ctx.user = sink->user;
+    st = walk_tags(&ctx, view.body + view.tag_offset,
+                   view.body_len - view.tag_offset, 0, reason, reason_cap);
+    menu_swf_view_close(&view);
+    return st;
 }
 
 MenuSwfStatus menu_swf_shape_summary(const uint8_t *data, size_t size,

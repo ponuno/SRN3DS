@@ -191,6 +191,12 @@ read stage without fake successes. *Not met.*
       1,712 segments / 2,362 points, selected-sprite shape bounds, and 243
       DefineFont3 glyph outlines (241 non-empty, 5,292 segments). No
       tessellation, rasterisation or atlas. See `docs/MENU_SWF.md`.
+- [x] Bounded SWF path tessellation: even-odd and non-zero fill rules, adaptive
+      quadratic-curve flattening, style-tagged triangles plus separate stroke
+      segments, caller-owned buffers with named overflow refusals. Real
+      StartMenu: 27/27 shapes, 71,605 vertices, 35,759 triangles, 11 lines,
+      3,118 curve segments. CPU geometry only; no raster, atlas or draw.
+      See `docs/MENU_SWF.md`.
 - [ ] Skyrim main menu.
 
 ## M5 — Real D3D9 → PICA200 renderer

@@ -14,11 +14,13 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 |---|---|
 | `source/menu_swf.h` / `.c` | FWS/CWS container handling, exact single-zlib-stream inflate, SWF frame header, tag walk (including DefineSprite nesting), bounded summary |
 | `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 + RemoveObject display state, per-ShowFrame snapshots, sprite summaries, selected-sprite frames, DefineFont2/3 metrics |
-| `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, and DefineFont2/3 glyph SHAPE contours/bounds |
+| `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, streaming geometry sink, and DefineFont2/3 glyph SHAPE contours/bounds |
+| `source/menu_swf_tess.h` / `.c` | Bounded even-odd/non-zero tessellation of one shape into caller-owned vertex/index/triangle-style pools plus separate stroked line segments |
 | `tests/menu_swf_smoke.c` | Synthetic FWS/CWS fixtures, short/long tags, truncation/overflow, bad zlib, declared mismatch, ZWS, missing End; optional real StartMenu read-only check |
 | `tests/menu_swf_display_smoke.c` | Synthetic PlaceObject2/3, RemoveObject2, sprite, ShowFrame and DefineFont3 fixtures; optional real display/font summary |
 | `tests/menu_swf_shape_smoke.c` | Synthetic rectangle/curve/two-style/glyph shapes plus truncation, bitmap-id, segment-limit and AVM2/DefineFont4 refusals; optional real shape/glyph summary |
-| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display` and `menu_swf_shape`; `menu_bsa` now links `menu_swf.c` |
+| `tests/menu_swf_tess_smoke.c` | Synthetic square in both orientations, even-odd hole, non-zero star/nested contours, curve, multiple styles, stroked square, empty contour, overflow and missing-shape refusals; optional real tessellation summary |
+| `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_display`, `menu_swf_shape` and `menu_swf_tess`; `menu_bsa` now links `menu_swf.c` |
 | `source/bsa_reader.h` / `.c` | Adds `bsa_inflate_zlib_exact()` for one complete zlib stream with exact output length and no trailing compressed bytes |
 
 The SWF header types/parser moved from `menu_bsa_runtime` into `menu_swf`, so
@@ -202,34 +204,77 @@ the two empty glyphs are recorded honestly with zero paths.  The first non-empty
 glyph is code 33 (`!`), whose shape offset is 514 and whose bounds include the
 tall bar (`y=-15440..250` in Font3 20x units).
 
-No tessellation, fill rule evaluation, rasterisation or atlas upload occurs.
+The shape layer itself does not tessellate, evaluate fill rules, rasterise or
+upload an atlas.  It exposes `menu_swf_shape_walk()` to stream the decoded
+contours to the next layer.
 
-## 7. Tests
+## 7. Path tessellation
+
+`menu_swf_tess_shape()` consumes one shape character through
+`menu_swf_shape_walk()` and writes triangles and stroked segments into buffers
+supplied by the caller.  The tessellator performs no allocation; the shared SWF
+view may still decompress a CWS body into its existing temporary buffer.
+
+* Fill rules: `MENU_SWF_TESS_EVEN_ODD` toggles at every crossing;
+  `MENU_SWF_TESS_NON_ZERO` accumulates the contour direction winding.
+  Concentric contours therefore support holes, and same-direction nested
+  contours fill under non-zero.
+* Straight edges are used as-is.  Quadratic curves are flattened adaptively by
+  recursive midpoint subdivision until the second difference is at most 2
+  twips, with a depth cap of 8 (at most 256 segments per curve).
+* Paths are closed implicitly for filling.  Stroked lines are emitted only for
+  edges actually present in the shape, never for the implicit fill closure.
+* Contours are grouped by their non-zero `fill0`/`fill1` style indices.  Each
+  group is tessellated independently, so a shape with several fills produces
+  triangles tagged with each style.  Stroke segments carry their `line` style.
+* The tessellator uses a bounded scan-line band decomposition.  Vertices are
+  emitted per band interval (not deduplicated), so counts describe a
+  render-ready triangle list and not a welded mesh.
+* Limits: 65,536 vertices, 196,608 indices, 65,536 triangles, 65,536 lines,
+  65,536 scratch edges, 131,072 bands and 4,096 contours per shape.  Any hard
+  limit or caller capacity overflow is a named `E_BUDGET`; a missing character
+  is `E_ARGUMENT`.
+
+Measured real tessellation (read-only `Update.bsa` winner, even-odd):
+
+```text
+real: tess shapes=27/27 vertices=71605 triangles=35759 lines=11
+      curve_segments=3118
+real: shape2 tess bounds=0,522,0,520
+```
+
+Shape 2's declared `ShapeBounds` is `2..522,0..520`; the tessellated contour
+extents are `0..522,0..520`, because the declared rectangle is slightly padded.
+The 27 shapes produce 35,759 triangles and 11 stroke segments.  Triangles are
+emitted with positive signed area in stored coordinates; there is no
+rasterisation, glyph tessellation, atlas upload or frame.
+
+## 8. Tests
 
 Synthetic-only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: `menu_swf_shape` **28 checks, 0 failures**; `menu_swf_display` **38
-checks, 0 failures**; `menu_swf` **86 checks, 0 failures**; `menu_bsa` **277
-checks, 0 failures**.
+Result: `menu_swf_tess` **47 checks, 0 failures**; `menu_swf_shape` **28
+checks, 0 failures**; `menu_swf_display` **38 checks, 0 failures**; `menu_swf`
+**86 checks, 0 failures**; `menu_bsa` **277 checks, 0 failures**.
 
 Real read-only:
 
 ```powershell
 $env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
+  -Only menu_swf_tess,menu_swf_shape,menu_swf_display,menu_swf,menu_bsa `
   -Python C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe
 ```
 
-Result: `menu_swf_shape` **40 checks, 0 failures**; `menu_swf_display` **57
-checks, 0 failures**; `menu_swf` **102 checks, 0 failures**; `menu_bsa` **286
-checks, 0 failures**.
+Result: `menu_swf_tess` **55 checks, 0 failures**; `menu_swf_shape` **40
+checks, 0 failures**; `menu_swf_display` **57 checks, 0 failures**; `menu_swf`
+**102 checks, 0 failures**; `menu_bsa` **286 checks, 0 failures**.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
 long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
@@ -242,36 +287,43 @@ clip-action presence, sprite frames, DefineFont3 codes/advances/bounds and the
 named DefineFont4/AVM2/filter-then-field refusals.  The shape test adds a
 two-style closed rectangle, a quadratic curve, Shape4 edge bounds, a glyph
 outline, truncation, bitmap fill without id, unsupported fill type, segment
-limit and AVM2/DefineFont4 refusals.
+limit and AVM2/DefineFont4 refusals.  The tessellation test adds a 4-vertex /
+2-triangle square in both contour orientations, an even-odd hole, a non-zero
+star and same-direction nested contours, an adaptive curve, two fill styles, a
+stroked square, an empty contour, vertex/index/edge overflow and a missing
+shape; the real check tessellates all 27 shapes.
 
 Full host suite with the main-tree generated slice and IR container:
-**83 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_shape`
-contributes 28 synthetic checks, `menu_swf_display` 38 and `menu_swf` 86; no
-real-data checks are run in that suite.
+**87 passed, 1 diagnostic (`tesv_slice`), 0 failed**.  `menu_swf_tess`
+contributes 47 synthetic checks, `menu_swf_shape` 28,
+`menu_swf_display` 38 and `menu_swf` 86; no real-data checks are run in that
+suite.
 
-## 8. What remains
+## 9. What remains
 
-1. **Renderable display list** — the bounded state and shape geometry exist, but
-   this is not a GFx display list: sprite/movie-clip materialisation, nested
-   transforms, masks, clipping layers, button states and frame scripts remain.
+1. **Renderable display list** — bounded state, shape geometry and triangle
+   tessellation exist, but this is not a GFx display list: sprite/movie-clip
+   materialisation, nested transforms, masks, clipping layers, button states and
+   frame scripts remain.
 2. **AVM/AS2** — action blocks, constants, function calls, event handlers and
    the menu's script behaviour.  `DoAction`/clip-action payloads are not
    executed.
-3. **Fonts raster/atlas** — `fonts_en.swf`/`fonts_console.swf`,
-   `FontConfig.txt`, glyph layout/rasterisation and atlas upload.  Shape
-   outlines and metrics are parsed, but no glyph is rendered.
+3. **Raster and atlas** — glyph tessellation/rasterisation, `fonts_en.swf`/
+   `fonts_console.swf`, `FontConfig.txt`, glyph layout and atlas upload.  Shape
+   triangles exist as CPU data only; no triangle or glyph has been rasterised.
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
 5. **Draw path** — GFx batch contract, dynamic vertex buffer/FVF,
    `SetTextureStageState`, TEV/PICA submission and the first real frame.
 
-## 9. Integration
+## 10. Integration
 
 ```c
 /* r came from menu_bsa_resolve_startmenu(&heap, ...). */
 MenuSwfSummary summary;
 MenuSwfDisplaySummary display; /* ~53 KiB; caller-owned, can live on heap */
 MenuSwfShapeResult shapes;     /* ~113 KiB; caller-owned, can live on heap */
+MenuSwfTessMesh tess;          /* buffers and capacities are caller-owned */
 char reason[BSA_REASON_MAX];
 const uint8_t *bytes = guest_ptr(heap.memory, r.guest_address, r.size);
 MenuSwfStatus st = menu_swf_summary(bytes, r.size, &summary, reason,
@@ -282,18 +334,23 @@ if (st == MENU_SWF_OK)
 if (st == MENU_SWF_OK)
     st = menu_swf_shape_summary(bytes, r.size, &shapes, reason,
                                 sizeof reason);
+/* After the caller supplies vertex/index/style/line/scratch buffers: */
+if (st == MENU_SWF_OK)
+    st = menu_swf_tess_shape(bytes, r.size, shape_id,
+                             MENU_SWF_TESS_NON_ZERO, &tess, reason,
+                             sizeof reason);
 if (st == MENU_SWF_OK) {
     /* Gate the future GFx loader with display.top, display.sprites[],
-     * display.fonts[].glyphs and shapes/ shape_paths. Do not report this as a
-     * rendered movie. */
+     * display.fonts[].glyphs, shapes/ shape_paths and tess/ triangles.
+     * Do not report this as a rendered movie. */
 }
 heap_free(&heap, r.guest_address);
 ```
 
-The summary/display/shape structures are metadata and geometry only.  They must
-not be reported as a parsed movie, renderable display list or frame.
+The summary/display/shape/tess structures are metadata and CPU geometry only.
+They must not be reported as a parsed movie, renderable display list or frame.
 
-## 10. Honest claim
+## 11. Honest claim
 
 * StartMenu.swf is validated as one CWS/zlib stream with the declared size,
   frame header and complete top-level tag stream through End.
@@ -304,5 +361,8 @@ not be reported as a parsed movie, renderable display list or frame.
   bounds/kerning data.
 * The bounded shape model reports 27 shapes, 151 paths, 1,712 shape segments,
   2,362 shape points, 243 glyphs (241 non-empty) and 5,292 glyph segments.
+* The bounded tessellator turns all 27 shapes into 71,605 vertices / 35,759
+  triangles / 11 line segments, with 3,118 flattened curve segments under the
+  even-odd rule; shape 2's actual contour bounds are `0..522,0..520`.
 * No AVM action is executed, no glyph is rasterised, no atlas or renderable
   display list is built, and no frame/pixel/Azahar/hardware result is claimed.

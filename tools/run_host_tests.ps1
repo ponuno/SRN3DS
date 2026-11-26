@@ -284,6 +284,7 @@ Add-Test "menu_bsa" $common @("source/bsa_reader.c", "source/menu_swf.c", "sourc
 Add-Test "menu_swf" $common @("source/bsa_reader.c", "source/menu_swf.c", "tests/menu_swf_smoke.c") @()
 Add-Test "menu_swf_display" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "tests/menu_swf_display_smoke.c") @()
 Add-Test "menu_swf_shape" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "tests/menu_swf_shape_smoke.c") @()
+Add-Test "menu_swf_tess" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "tests/menu_swf_tess_smoke.c") @()
 Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "tests/d3d9_capture_smoke.c") @()
 $irPilotGen = Join-Path $root "pilot_out_mult\D3DXMatrixMultiply\gen"
 if ((Test-Path (Join-Path $irPilotGen "pilot_00.c")) -and (Test-Path (Join-Path $irPilotGen "pilot_table.c"))) {

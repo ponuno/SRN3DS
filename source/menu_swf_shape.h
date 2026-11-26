@@ -97,9 +97,34 @@ typedef struct {
     int truncated;
 } MenuSwfShapeResult;
 
+/* Streaming geometry sink for menu_swf_shape_walk().  Every coordinate is in
+ * twips.  A path starts at its absolute move-to position and keeps the
+ * fill0/fill1/line style indices active at that point.  Curves give the
+ * absolute control point and absolute anchor.  The callback must copy data it
+ * wants to retain; pointers are only valid during the call. */
+typedef struct {
+    void *user;
+    void (*begin_shape)(void *user, uint16_t shape_id, uint8_t tag_code);
+    void (*end_shape)(void *user);
+    void (*begin_path)(void *user, int32_t x, int32_t y, uint16_t fill0,
+                       uint16_t fill1, uint16_t line);
+    void (*line_to)(void *user, int32_t x, int32_t y);
+    void (*curve_to)(void *user, int32_t cx, int32_t cy, int32_t ax,
+                     int32_t ay);
+    void (*end_path)(void *user);
+} MenuSwfShapeSink;
+
 /* Find a parsed shape by character id (NULL when absent). */
 const MenuSwfShapeSummary *menu_swf_shape_find(const MenuSwfShapeResult *result,
                                                uint16_t shape_id);
+
+/* Stream shape geometry to `sink` without building a summary.  Only
+ * DefineShape/2/3/4 tags are decoded; glyph and font tags are skipped.  The
+ * same tag, style, record, segment and nesting refusals as the summary apply.
+ * Callbacks are optional individually, but `sink` itself must be non-NULL. */
+MenuSwfStatus menu_swf_shape_walk(const uint8_t *data, size_t size,
+                                  const MenuSwfShapeSink *sink,
+                                  char *reason, size_t reason_cap);
 
 /* Parse all top-level and nested DefineShape tags and all DefineFont2/3 glyph
  * shapes.  Named refusals: unsupported fill/line type, bitmap fill without id,
