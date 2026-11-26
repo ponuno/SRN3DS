@@ -199,6 +199,11 @@ read stage without fake successes. *Not met.*
       is rejected by name. A structural menu-light matcher plus five-stage TEV
       prototype covers 6 additional retail logo signatures; automatic selection
       still requires the material/normal/tangent preconditions. The bounded
+      first-menu runtime selector now accepts only the exact `p1200005` SHA-256
+      and the 184-byte menu copy (plus explicit fixed fog/tint contracts),
+      refuses everything else by name, and keeps VS/PS 2.0 with zero SM3 slots.
+      `vs_3_0`, the material-precondition source and two PICA texture units are
+      the next layers. The bounded
       first-menu runtime selector is now connected: exact-hash
       `menu.logo.ps`/`menu.composite.ps` plans plus fixed fog/tint contract
       plans, with named precondition/backend draw refusals
