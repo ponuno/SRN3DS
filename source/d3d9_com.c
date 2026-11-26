@@ -45,7 +45,7 @@ static void capture_present_event(void);
 #define USAGE_DYNAMIC 0x0200u
 #define USAGE_VB_MASK (USAGE_WRITEONLY|USAGE_DYNAMIC)
 #define SURFACE_FORMAT(f) ((f)==D9_X8R8G8B8||(f)==D9_A8R8G8B8)
-enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,KIND_COUNT};
+enum {FACTORY=1,DEVICE,VB,IB,TEX,VS,PS,DECL,SURFACE,CUBE,VOLUME,QUERY,KIND_COUNT};
 typedef struct {uint32_t x,y,width,height,minz,maxz;} D9Viewport9;
 typedef struct Obj {
     unsigned kind,refs,deferred;uint32_t guest;D9Handle handle;
@@ -54,6 +54,10 @@ typedef struct Obj {
     uint32_t lock_guest;unsigned lock_bytes,readonly,lock_level,lock_face,lock_rows,lock_pitch,lock_row_bytes;void *lock_host;
     unsigned lock_slices,lock_slice_pitch,lock_front,volume_depth;
     unsigned lock_x,lock_y,lock_w,lock_h;
+    /* IDirect3DQuery9 state.  The bridge is synchronous, so EVENT is the only
+     * accepted type; query_type stores the D3DQUERYTYPE, query_issued is set
+     * by Issue and never cleared by GetData. */
+    unsigned query_type,query_issued;
     uint8_t *pixels;
     /* Explicit depth-stencil surface: a descriptor for the single PICA depth
      * attachment, not an LDR colour surface. */
@@ -144,7 +148,7 @@ static const char *interface_name(unsigned kind){
     static const char *names[]={"unknown object","IDirect3D9","IDirect3DDevice9","IDirect3DVertexBuffer9",
         "IDirect3DIndexBuffer9","IDirect3DTexture9","IDirect3DVertexShader9","IDirect3DPixelShader9",
         "IDirect3DVertexDeclaration9","IDirect3DSurface9","IDirect3DCubeTexture9",
-        "IDirect3DVolumeTexture9"};
+        "IDirect3DVolumeTexture9","IDirect3DQuery9"};
     return kind<sizeof names/sizeof *names?names[kind]:"D3D9 object";
 }
 static Obj *obj(uint32_t addr,unsigned kind){
@@ -180,6 +184,7 @@ static void destroy_obj(Obj *o){
     }
     else if(o->kind==VS||o->kind==PS){free(o->code);o->code=NULL;parent=g.dev;}
     else if(o->kind==DECL){free(o->declaration);o->declaration=NULL;parent=g.dev;}
+    else if(o->kind==QUERY)parent=g.dev;
     else if(o->kind==SURFACE){
         if(o->is_depth){
             if(g.depth==o){g.depth=NULL;if(g.device)(void)d9_set_depth_surface(g.device,0);}
@@ -300,9 +305,11 @@ static const uint8_t guids[][16]={
     {0x5d,0xc0,0xee,0x05,0x7d,0x8f,0x62,0x43,0xb9,0x99,0xd1,0xba,0xf3,0x57,0xc7,4},
     {0x7e,0xa8,0x0c,0x58,0x3c,0x1d,0x54,0x4d,0x99,0x1d,0xb7,0xd3,0xe3,0xc2,0x98,0xce},
     {0x81,0x2f,0xf3,0xff,0x53,0xd9,0x3a,0x47,0x92,0x23,0x93,0xd6,0x52,0xab,0xa9,0x3f},
-    {0x6c,0x52,0x18,0x25,0x89,0xe7,0x11,0x41,0xa7,0xb9,0x47,0xef,0x32,0x8d,0x13,0xe6}};
+    {0x6c,0x52,0x18,0x25,0x89,0xe7,0x11,0x41,0xa7,0xb9,0x47,0xef,0x32,0x8d,0x13,0xe6},
+    {0x60,0x14,0x77,0xd9,0x95,0xa6,0x26,0x4f,0xbb,0xd3,0x27,0xb8,0x40,0xb5,0x41,0xcc}};
 static void query(CPU *c){Obj *o=obj(A(0),0);const void *iid=ptr(A(1),16);uint32_t out=A(2);if(!o||!iid||!ptr(out,4))RET(INVALID,3);
-    const uint8_t *concrete=o->kind==CUBE?guids[12]:o->kind==VOLUME?guids[13]:guids[o->kind];
+    const uint8_t *concrete=o->kind==CUBE?guids[12]:o->kind==VOLUME?guids[13]:
+        o->kind==QUERY?guids[14]:guids[o->kind];
     M32(out)=0;if(memcmp(iid,guids[0],16)&&memcmp(iid,concrete,16)&&
         !((o->kind>=VB&&o->kind<=TEX||o->kind==SURFACE||o->kind==CUBE||o->kind==VOLUME)&&!memcmp(iid,guids[10],16))&&
         !((o->kind==TEX||o->kind==CUBE||o->kind==VOLUME)&&!memcmp(iid,guids[11],16)))RET(NOINTERFACE,3);
@@ -1035,6 +1042,83 @@ static void validate_device(CPU *c){
     }
     M32(out)=passes;g.last_diagnostic[0]=0;
     RET(OK,2);
+}
+/* ---- IDirect3DQuery9 ---------------------------------------------------- */
+/* The backend is synchronous: EVENT is always already complete.  Occlusion,
+ * resource-manager, timestamp and timing queries need GPU counters this bridge
+ * does not expose and are refused by name rather than returning invented data. */
+static const char *query_type_name(unsigned type){
+    switch(type){
+    case 4:return "D3DQUERYTYPE_VCACHE";
+    case 5:return "D3DQUERYTYPE_RESOURCEMANAGER";
+    case 6:return "D3DQUERYTYPE_VERTEXSTATS";
+    case 8:return "D3DQUERYTYPE_EVENT";
+    case 9:return "D3DQUERYTYPE_OCCLUSION";
+    case 10:return "D3DQUERYTYPE_TIMESTAMP";
+    case 11:return "D3DQUERYTYPE_TIMESTAMPDISJOINT";
+    case 12:return "D3DQUERYTYPE_TIMESTAMPFREQ";
+    case 13:return "D3DQUERYTYPE_PIPELINETIMINGS";
+    case 14:return "D3DQUERYTYPE_INTERFACETIMINGS";
+    case 15:return "D3DQUERYTYPE_VERTEXTIMINGS";
+    case 16:return "D3DQUERYTYPE_PIXELTIMINGS";
+    case 17:return "D3DQUERYTYPE_BANDWIDTHTIMINGS";
+    case 18:return "D3DQUERYTYPE_CACHEUTILIZATION";
+    case 19:return "D3DQUERYTYPE_MEMORYPRESSURE";
+    default:return "unknown query type";
+    }
+}
+static void create_query(CPU *c){
+    uint32_t out=A(2);
+    if(!obj(A(0),DEVICE)||!ptr(out,4)){d3d_log("CreateQuery","invalid device or output pointer");RET(INVALID,3);}
+    M32(out)=0;
+    unsigned type=A(1);
+    if(type!=8u){
+        char why[192];
+        snprintf(why,sizeof why,
+                 "%s (%u) is not implemented; only D3DQUERYTYPE_EVENT is available on the synchronous backend",
+                 query_type_name(type),type);
+        d3d_fail("CreateQuery",why,UNAVAILABLE);RET(UNAVAILABLE,3);
+    }
+    if(g.next>=MAX_OBJECTS)RET(OUTMEM,3);
+    Obj *o=new_obj(QUERY);
+    if(!o)RET(OUTMEM,3);
+    o->query_type=type;o->query_issued=0;retain(g.dev);
+    M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,3);
+}
+static void query_get_device(CPU *c){
+    if(!obj(A(0),QUERY)||!ptr(A(1),4))RET(INVALID,2);
+    retain(g.dev);M32(A(1))=g.dev?g.dev->guest:0;RET(OK,2);
+}
+static void query_get_type(CPU *c){
+    Obj *o=obj(A(0),QUERY);
+    if(!o||!ptr(A(1),4))RET(INVALID,2);
+    M32(A(1))=o->query_type;RET(OK,2);
+}
+static void query_get_data_size(CPU *c){
+    if(!obj(A(0),QUERY)||!ptr(A(1),4))RET(INVALID,2);
+    M32(A(1))=4;RET(OK,2);
+}
+static void query_issue(CPU *c){
+    Obj *o=obj(A(0),QUERY);
+    if(!o)RET(INVALID,2);
+    if(A(1)!=1u){ /* D3DISSUE_END */
+        d3d_fail("Issue","EVENT queries accept only D3DISSUE_END",INVALID);RET(INVALID,2);
+    }
+    o->query_issued=1;g.last_diagnostic[0]=0;RET(OK,2);
+}
+static void query_get_data(CPU *c){
+    Obj *o=obj(A(0),QUERY);uint32_t data=A(1),size=A(2),flags=A(3);
+    if(!o||!ptr(data,4)||size<4u){
+        d3d_fail("GetData","EVENT query needs a readable 4-byte BOOL destination",INVALID);RET(INVALID,4);
+    }
+    if(flags&~1u){
+        d3d_fail("GetData","only D3DGETDATA_FLUSH is recognized",INVALID);RET(INVALID,4);
+    }
+    if(!o->query_issued){
+        d3d_fail("GetData","query has not been issued",INVALID);RET(INVALID,4);
+    }
+    /* The synchronous bridge has already completed the work Issue covered. */
+    M32(data)=1;g.last_diagnostic[0]=0;RET(OK,4);
 }
 static void direct3d(CPU *c){if(!obj(A(0),DEVICE)||!g.factory||!ptr(A(1),4))RET(INVALID,2);retain(g.factory);M32(A(1))=g.factory->guest;RET(OK,2);}
 static void resource_device(CPU *c){Obj *o=obj(A(0),0);if(!o||o->kind<VB||!g.dev||!ptr(A(1),4))RET(INVALID,2);retain(g.dev);M32(A(1))=g.dev->guest;RET(OK,2);}
@@ -2483,7 +2567,8 @@ static void draw_indexed_up(CPU *c){
  X(get_transform) X(multiply_transform) X(set_material) X(get_material) X(set_light) X(get_light) X(light_enable) X(get_light_enable) \
  X(stream) X(indices) X(texture) X(get_texture) X(draw_primitive) X(draw_indexed) X(draw_primitive_up) X(draw_indexed_up) X(create_vs) X(create_ps) X(set_vs) X(set_ps) X(get_vs) X(get_ps) X(set_vs_const) X(get_vs_const) \
  X(set_vs_const_i) X(get_vs_const_i) X(set_vs_const_b) X(get_vs_const_b) \
- X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(shader_function) \
+ X(set_ps_const_f) X(get_ps_const_f) X(set_ps_const_i) X(get_ps_const_i) X(set_ps_const_b) X(get_ps_const_b) X(create_query) \
+ X(query_get_device) X(query_get_type) X(query_get_data_size) X(query_issue) X(query_get_data) X(shader_function) \
  X(set_render) X(get_render) X(set_sampler) X(get_sampler) X(get_texture_stage_state) X(set_texture_stage_state) X(texture_get_surface_level) X(texture_add_dirty_rect) X(create_decl) X(set_decl) X(get_decl) X(declaration_data) X(get_stream) X(stream_freq) X(get_stream_freq) X(get_indices) \
  X(reset_device) X(device_display_mode) X(creation_parameters) X(get_back_buffer) X(number_swap_chains) X(create_render_target) X(create_depth_stencil) \
  X(create_offscreen) X(set_render_target) X(get_render_target) X(stretch_rect) X(update_surface) X(update_texture) X(color_fill) X(get_render_target_data) X(get_front_buffer_data) X(set_depth_stencil) X(get_depth_stencil) X(set_viewport) X(get_viewport) \
@@ -2545,7 +2630,8 @@ static const char *const slot_names[KIND_COUNT][MAX_SLOTS]={
     [VOLUME]={
         "QueryInterface","AddRef","Release","GetDevice","SetPrivateData","GetPrivateData","FreePrivateData","SetPriority",
         "GetPriority","PreLoad","GetType","SetLOD","GetLOD","GetLevelCount","SetAutoGenFilterType","GetAutoGenFilterType",
-        "GenerateMipSubLevels","GetLevelDesc","GetVolumeLevel","LockBox","UnlockBox","AddDirtyBox"}
+        "GenerateMipSubLevels","GetLevelDesc","GetVolumeLevel","LockBox","UnlockBox","AddDirtyBox"},
+    [QUERY]={"QueryInterface","AddRef","Release","GetDevice","GetType","GetDataSize","Issue","GetData"}
 };
 static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
     const char *name=slot_names[kind][slot];if(!name)name="Unimplemented";
@@ -2587,7 +2673,8 @@ static void com_dispatch(unsigned kind,unsigned slot,CPU *c){
  X(CUBE,16) X(CUBE,17) X(CUBE,18) X(CUBE,19) X(CUBE,20) X(CUBE,21) \
  X(VOLUME,0) X(VOLUME,1) X(VOLUME,2) X(VOLUME,3) X(VOLUME,4) X(VOLUME,5) X(VOLUME,6) X(VOLUME,7) \
  X(VOLUME,8) X(VOLUME,9) X(VOLUME,10) X(VOLUME,11) X(VOLUME,12) X(VOLUME,13) X(VOLUME,14) X(VOLUME,15) \
- X(VOLUME,16) X(VOLUME,17) X(VOLUME,18) X(VOLUME,19) X(VOLUME,20) X(VOLUME,21)
+ X(VOLUME,16) X(VOLUME,17) X(VOLUME,18) X(VOLUME,19) X(VOLUME,20) X(VOLUME,21) \
+ X(QUERY,0) X(QUERY,1) X(QUERY,2) X(QUERY,3) X(QUERY,4) X(QUERY,5) X(QUERY,6) X(QUERY,7)
 #define COM_ENUM(k,s) I_com_##k##_##s,
 #define COM_ENTRY(k,s) {THUNK+(I_COUNT+I_com_##k##_##s)*4,com_##k##_##s},
 #define COM_WRAP(k,s) static void com_##k##_##s(CPU *c){com_dispatch(k,s,c);}
@@ -2603,10 +2690,10 @@ static const FnEntry all_entries[]={FUNCTIONS(ENTRY) COM_SLOTS(COM_ENTRY)};
 #undef ENTRY
 #undef COM_ENTRY
 #undef COM_SLOTS
-static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201,218,240};
+static const unsigned com_offsets[KIND_COUNT]={0,0,17,136,150,164,186,191,196,201,218,240,262};
 #define SLOT(k,s,f) do{g.handlers[k][s]=(f);uint32_t target=g.trace?THUNK+(I_COUNT+com_offsets[k]+(s))*4:THUNK+I_##f*4;guest_write32(g.mem,table_addr(k)+(s)*4,target);}while(0)
 static void init_tables(void){
-    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17,22,22};
+    const unsigned counts[]={0,17,119,14,14,22,5,5,5,17,22,22,8};
     for(unsigned k=1;k<KIND_COUNT;++k){for(unsigned i=0;i<counts[k];++i)SLOT(k,i,unsupported);SLOT(k,0,query);SLOT(k,1,addref);SLOT(k,2,release_fn);}
     SLOT(FACTORY,3,register_software);SLOT(FACTORY,4,adapter_count);SLOT(FACTORY,5,adapter_identifier);
     SLOT(FACTORY,6,adapter_mode_count);SLOT(FACTORY,7,enum_modes);SLOT(FACTORY,8,display_mode);
@@ -2640,6 +2727,9 @@ static void init_tables(void){
     SLOT(DEVICE,109,set_ps_const_f);SLOT(DEVICE,110,get_ps_const_f);
     SLOT(DEVICE,111,set_ps_const_i);SLOT(DEVICE,112,get_ps_const_i);
     SLOT(DEVICE,113,set_ps_const_b);SLOT(DEVICE,114,get_ps_const_b);
+    SLOT(DEVICE,118,create_query);
+    SLOT(QUERY,3,query_get_device);SLOT(QUERY,4,query_get_type);SLOT(QUERY,5,query_get_data_size);
+    SLOT(QUERY,6,query_issue);SLOT(QUERY,7,query_get_data);
     for(unsigned k=VB;k<=TEX;++k){SLOT(k,3,resource_device);SLOT(k,10,resource_type);}
     for(unsigned k=VB;k<=IB;++k){SLOT(k,11,buffer_lock);SLOT(k,12,buffer_unlock);SLOT(k,13,buffer_desc);}
     SLOT(TEX,13,level_count);SLOT(TEX,17,texture_desc);SLOT(TEX,18,texture_get_surface_level);
