@@ -11,8 +11,9 @@ typedef uint32_t D9Handle;
 typedef struct {float x,y,z,u,v;} D9Vertex; /* D3DFVF_XYZ | D3DFVF_TEX1 */
 /* Extended vertex used only when a declaration/FVF supplies COLOR0.  Colour is
  * kept as normalized RGBA so a PICA attribute of GPU_FLOAT/4 is a direct copy;
- * no tint is ever dropped on the floor. */
-typedef struct {float x,y,z,u,v;float r,g,b,a;} D9ColorVertex;
+ * no tint is ever dropped on the floor.  w is the third TEXCOORD0 component for
+ * a volume draw; it is zero for every 2D/FVF vertex. */
+typedef struct {float x,y,z,u,v;float r,g,b,a;float w;} D9ColorVertex;
 typedef struct {float m[4][4];} D9Matrix; /* D3D row-vector convention */
 enum {D9_TRIANGLELIST=4,D9_TRIANGLESTRIP=5,D9_TRIANGLEFAN=6,D9_A8R8G8B8=21,D9_X8R8G8B8=22,
       D9_A8=28,D9_D24S8=75,D9_D24X8=77,D9_INDEX16=101,D9_INDEX32=102};
@@ -121,6 +122,23 @@ typedef struct {
     size_t level_pitch[D9_CUBE_MAX_LEVELS];
     size_t level_bytes[D9_CUBE_MAX_LEVELS];
 } D9CubeView;
+
+/* Read-only volume-texture view passed to an optional draw_volume backend
+ * callback.  The core owns width x height x depth slices for every mip level as
+ * CPU pixels in level-major order: level offset, then z plane, then y row.
+ * level_pitch is one row in bytes; level_plane_bytes is one z slice. */
+enum {D9_VOLUME_MAX_LEVELS=11};
+typedef struct {
+    void *native;
+    unsigned w,h,depth,levels,format;
+    const uint8_t *pixels;
+    unsigned level_w[D9_VOLUME_MAX_LEVELS];
+    unsigned level_h[D9_VOLUME_MAX_LEVELS];
+    unsigned level_depth[D9_VOLUME_MAX_LEVELS];
+    size_t level_pitch[D9_VOLUME_MAX_LEVELS];
+    size_t level_plane_bytes[D9_VOLUME_MAX_LEVELS];
+    size_t level_bytes[D9_VOLUME_MAX_LEVELS];
+} D9VolumeView;
 
 /* Result of a backend target_blit() call.  Negative values are rejections and
  * must not leave a partially written destination. */
@@ -274,11 +292,11 @@ typedef struct {
                                  void **native);
     int (*texture_upload_format)(void *ctx,void *native,unsigned level,
                                  const void *data,size_t bytes);
-    /* Optional indexed menu submission, appended last so all existing
-     * positional initializers keep their meaning.  Used for the certified
-     * fixed-function menu-text plan when the caller supplied 16-bit indices;
-     * vertices are the compact D9ColorVertex stream and indices index it
-     * directly (all values <= 65535).  A NULL callback keeps the older
+    /* Optional indexed menu submission, appended after the format pair so all
+     * existing positional initializers keep their meaning.  Used for the
+     * certified fixed-function menu-text plan when the caller supplied 16-bit
+     * indices; vertices are the compact D9ColorVertex stream and indices index
+     * it directly (all values <= 65535).  A NULL callback keeps the older
      * expanded draw_menu / draw_colored path, which is limited to
      * MAX_DRAW_VERTICES output vertices per call. */
     int (*draw_menu_indexed)(void *ctx,const D9ColorVertex *vertices,
@@ -287,6 +305,15 @@ typedef struct {
                              void *tex0,void *tex1,
                              const D9DrawState *state,
                              const float (*constants)[4]);
+    /* Optional volume-texture draw.  Appended after draw_menu_indexed so every
+     * existing positional initializer keeps its meaning.  vertices[i].w is
+     * TEXCOORD0.z; the core requires a 3-component TEXCOORD0 before calling
+     * this and has already rejected volume sampling on stage 1, with a pixel
+     * shader, or with an incomplete mip chain.  NULL means volume sampling is
+     * refused by name and never substituted with a 2D slice. */
+    int (*draw_volume)(void *ctx,const D9ColorVertex *vertices,size_t count,
+                       const D9Matrix *clip,const D9VolumeView *volume,
+                       const D9DrawState *state);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);

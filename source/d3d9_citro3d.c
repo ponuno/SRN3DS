@@ -757,4 +757,9 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
     target_create,target_delete,target_bind,target_clear,target_read,target_blit,draw_colored,draw_color_stages,
     target_write,depth_clear,target_viewport,draw_menu,target_texture,
     cube_create,cube_upload,target_viewport_scaled,NULL,NULL,draw_cube,cube_delete,
-    cube_face_create,cube_face_delete,tex_create_format,tex_upload_format,draw_menu_indexed};return &ops;}
+    cube_face_create,cube_face_delete,tex_create_format,tex_upload_format,draw_menu_indexed,
+    /* draw_volume: citro3d/libctru exposes GPU_TEX_2D, CUBE_MAP, SHADOW_2D,
+     * PROJECTION and SHADOW_CUBE only; there is no 3D texture mode, so volume
+     * sampling is refused by name and the PICA backend also has no
+     * texture_create_volume callback. */
+    NULL};return &ops;}

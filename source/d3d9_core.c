@@ -1421,8 +1421,12 @@ int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
                 if(rr)return rr;
             }
         }
-        if(!v->native||!v->level[0].uploaded){
+        if(!v->native){
             set_diagnosis(d,"volume texture native is missing and cannot be rehydrated");
+            return D9_INVALID;
+        }
+        if(!v->level[0].uploaded){
+            set_diagnosis(d,"volume texture level 0 has not been uploaded");
             return D9_INVALID;
         }
         D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
@@ -2550,7 +2554,7 @@ static void positiont_matrix(D9Matrix *m,unsigned w,unsigned h){
 static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9ColorVertex *col,float normal[3]){
     if(!d->decl_active){
         memcpy(out,s[0].data+(size_t)index*s[0].stride,sizeof *out);
-        *col=(D9ColorVertex){out->x,out->y,out->z,out->u,out->v,1.0f,1.0f,1.0f,1.0f};
+        *col=(D9ColorVertex){out->x,out->y,out->z,out->u,out->v,1.0f,1.0f,1.0f,1.0f,0.0f};
         normal[0]=normal[1]=normal[2]=0.0f;
     }else{const D9Decl *decl=&d->declaration;float pos[4],uv[4]={0,0,0,1},rgba[4]={1,1,1,1},nrm[4]={0,0,0,1};
         const D9VertexElement *p=&decl->elements[decl->position];
@@ -2562,11 +2566,11 @@ static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9
         if(decl->color!=UINT32_MAX){p=&decl->elements[decl->color];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),rgba))return D9_INVALID;}
         if(decl->normal!=UINT32_MAX){p=&decl->elements[decl->normal];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),nrm))return D9_INVALID;}
         *out=(D9Vertex){pos[0],pos[1],pos[2],uv[0],uv[1]};
-        *col=(D9ColorVertex){pos[0],pos[1],pos[2],uv[0],uv[1],rgba[0],rgba[1],rgba[2],rgba[3]};
+        *col=(D9ColorVertex){pos[0],pos[1],pos[2],uv[0],uv[1],rgba[0],rgba[1],rgba[2],rgba[3],uv[2]};
         normal[0]=nrm[0];normal[1]=nrm[1];normal[2]=nrm[2];
     }
     return isfinite(out->x)&&isfinite(out->y)&&isfinite(out->z)&&isfinite(out->u)&&isfinite(out->v)&&
-           isfinite(col->r)&&isfinite(col->g)&&isfinite(col->b)&&isfinite(col->a)&&
+           isfinite(col->r)&&isfinite(col->g)&&isfinite(col->b)&&isfinite(col->a)&&isfinite(col->w)&&
            isfinite(normal[0])&&isfinite(normal[1])&&isfinite(normal[2])?D9_OK:D9_INVALID;
 }
 static size_t triangle_index(unsigned type,size_t i){size_t t=i/3,c=i%3;
@@ -2629,6 +2633,27 @@ static void fill_cube_view(D9CubeView *view,const CubeTexture *c){
         view->level_pitch[i]=c->level[i].pitch;
         view->level_bytes[i]=c->level[i].bytes;
     }
+}
+static void fill_volume_view(D9VolumeView *view,const VolumeTexture *v){
+    memset(view,0,sizeof *view);
+    view->native=v->native;view->w=v->w;view->h=v->h;view->depth=v->depth;
+    view->levels=v->levels;view->format=v->format;view->pixels=v->pixels;
+    for(unsigned i=0;i<v->levels&&i<D9_VOLUME_MAX_LEVELS;++i){
+        view->level_w[i]=v->level[i].w;
+        view->level_h[i]=v->level[i].h;
+        view->level_depth[i]=v->level[i].depth;
+        view->level_pitch[i]=v->level[i].pitch;
+        view->level_plane_bytes[i]=v->level[i].plane_bytes;
+        view->level_bytes[i]=v->level[i].bytes;
+    }
+}
+/* Volume mip sampling needs every level resident; point sampling only needs
+ * level zero.  A volume whose level 0 is missing is never drawable. */
+static int volume_levels_ready(const VolumeTexture *v){
+    if(!v)return 0;
+    for(unsigned level=0;level<v->levels;++level)
+        if(!v->level[level].uploaded)return 0;
+    return 1;
 }
 /* Keep the core's fixed-function text route free of a hard link dependency on
  * d3d9_tev.c (many small tests link the core alone).  This mirrors the
@@ -2717,12 +2742,13 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         return D9_UNSUPPORTED;
     }
     CubeTexture *ct=NULL;int cube_mode=0,cube_mips=0;
+    VolumeTexture *vt=NULL;int volume_mode=0,volume_mips=0;
     if(d->cube_texture1){
         set_diagnosis(d,"cube-map sampling on texture stage 1 is not implemented; bind the cube to stage 0");
         return D9_UNSUPPORTED;
     }
-    if(d->volume_texture||d->volume_texture1){
-        set_diagnosis(d,"volume sampling is not implemented; bind a 2D texture for this draw");
+    if(d->volume_texture1){
+        set_diagnosis(d,"volume sampling on texture stage 1 is not implemented; bind the volume to stage 0");
         return D9_UNSUPPORTED;
     }
     if(d->cube_texture){
@@ -2765,6 +2791,55 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
             return D9_UNSUPPORTED;
         }
         cube_mode=1;
+    }
+    if(d->volume_texture){
+        vt=volume_texture(d,d->volume_texture);
+        if(!vt||vt->cpu_only||!vt->native||!vt->pixels||!vt->level[0].uploaded){
+            set_diagnosis(d,"volume draw requires an uploaded GPU-resident volume texture");
+            return D9_INVALID;
+        }
+        if(vt->format!=D9_A8R8G8B8&&vt->format!=D9_X8R8G8B8){
+            set_diagnosis(d,"volume sampling supports only A8R8G8B8/X8R8G8B8 volume storage");
+            return D9_UNSUPPORTED;
+        }
+        if(!d->ops.draw_volume){
+            set_diagnosis(d,"volume sampling requires a backend draw_volume callback; "
+                            "this backend cannot sample 3D textures");
+            return D9_UNSUPPORTED;
+        }
+        if(d->pixel_shader){
+            set_diagnosis(d,"volume sampling with a pixel shader is not implemented");
+            return D9_UNSUPPORTED;
+        }
+        if(d->texture1||d->second.stage_colorop!=D9_TOP_DISABLE){
+            set_diagnosis(d,"volume sampling supports only texture stage 0");
+            return D9_UNSUPPORTED;
+        }
+        if(d->state.stage_colorop==D9_TOP_DISABLE){
+            set_diagnosis(d,"volume sampling requires an active stage-0 colour operation");
+            return D9_UNSUPPORTED;
+        }
+        if(d->state.stage_texcoordindex!=0){
+            set_diagnosis(d,"volume sampling requires texcoord0 on stage 0");
+            return D9_UNSUPPORTED;
+        }
+        if(!d->decl_active||d->declaration.uv==UINT32_MAX||
+           d9_decl_components(d->declaration.elements[d->declaration.uv].type)<3){
+            set_diagnosis(d,"volume sampling requires a 3-component TEXCOORD0; 2D vertices are refused");
+            return D9_UNSUPPORTED;
+        }
+        if(vt->levels>1&&d->state.mip_filter!=0){
+            volume_mips=1;
+            if(!volume_levels_ready(vt)){
+                set_diagnosis(d,"volume mip sampling requires all mip levels resident");
+                return D9_UNSUPPORTED;
+            }
+        }
+        if(d->tnl_proto&&d->tnl.lighting&&!(d->decl_active&&d->declaration.position_t)){
+            set_diagnosis(d,"volume sampling with CPU T&L lighting is not implemented");
+            return D9_UNSUPPORTED;
+        }
+        volume_mode=1;
     }
     if(up&&(!up->vertices||!up->stride||(up->indices&&up->index_size!=2&&up->index_size!=4)))return D9_INVALID;
     const uint8_t *ixdata=NULL;size_t ixbytes=0;unsigned step=2;
@@ -2897,6 +2972,16 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         state.resident_mips=cube_mips?ct->levels:1;
         if(d->ops.draw_cube(d->ctx,d->color_scratch,n,d->cube_faces,&clip,&view,&state)){
             set_diagnosis(d,"cube-map draw rejected by the backend");
+            return D9_BACKEND;
+        }
+        set_diagnosis(d,"");
+        return D9_OK;
+    }
+    if(volume_mode){
+        D9VolumeView view;fill_volume_view(&view,vt);
+        state.resident_mips=volume_mips?vt->levels:1;
+        if(d->ops.draw_volume(d->ctx,d->color_scratch,n,&clip,&view,&state)){
+            set_diagnosis(d,"volume draw rejected by the backend");
             return D9_BACKEND;
         }
         set_diagnosis(d,"");
@@ -3151,9 +3236,33 @@ int d9_validate_device(D9Device *d,unsigned *passes){
             return D9_UNSUPPORTED;
         }
     }
-    if(d->cube_texture||d->cube_texture1||d->volume_texture||d->volume_texture1){
-        set_diagnosis(d,"ValidateDevice: cube/volume sampling has no draw path in this bridge");
+    if(d->cube_texture1||d->volume_texture1){
+        set_diagnosis(d,"ValidateDevice: cube/volume sampling on texture stage 1 has no draw path");
         return D9_UNSUPPORTED;
+    }
+    if(d->cube_texture){
+        CubeTexture *c=cube_texture(d,d->cube_texture);
+        if(!d->ops.draw_cube||!c||c->cpu_only||!c->native||
+           c->level[0].face_mask!=((1u<<D9_CUBE_FACES)-1u)){
+            set_diagnosis(d,"ValidateDevice: the bound cube is incomplete or the backend has no draw_cube");
+            return D9_UNSUPPORTED;
+        }
+    }
+    if(d->volume_texture){
+        VolumeTexture *v=volume_texture(d,d->volume_texture);
+        if(!d->ops.draw_volume||!v||v->cpu_only||!v->native||!v->level[0].uploaded){
+            set_diagnosis(d,"ValidateDevice: the bound volume is not uploaded or the backend has no draw_volume");
+            return D9_UNSUPPORTED;
+        }
+        if(v->levels>1&&d->state.mip_filter!=0&&!volume_levels_ready(v)){
+            set_diagnosis(d,"ValidateDevice: volume mip sampling requires all mip levels resident");
+            return D9_UNSUPPORTED;
+        }
+        if(!d->decl_active||d->declaration.uv==UINT32_MAX||
+           d9_decl_components(d->declaration.elements[d->declaration.uv].type)<3){
+            set_diagnosis(d,"ValidateDevice: volume sampling requires a 3-component TEXCOORD0");
+            return D9_UNSUPPORTED;
+        }
     }
     *passes=1;
     set_diagnosis(d,"");

@@ -60,6 +60,11 @@ typedef struct {
     unsigned last_cube_count;
     unsigned last_cube_faces[3];
     uint32_t last_cube_samples[3];
+    /* Volume sampling: the last draw's sampled ARGB texels and TEXCOORD0.z. */
+    unsigned volume_draws,volume_vertices;
+    unsigned last_volume_count;
+    uint32_t last_volume_samples[3];
+    float last_volume_w[3];
 } D9NullStats;
 
 const D9Backend *d9_null_backend(void);

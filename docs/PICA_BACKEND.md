@@ -1354,6 +1354,52 @@ indexed_indices=86232`.
 
 This is host-contract and compile-time evidence only; no GPU execution, pixel
 result or frame is claimed.
+## 5.9 Volume sampling (2026-11-26)
+
+`D9Backend.draw_volume` was appended after
+`texture_create_format/texture_upload_format`.  The core passes a read-only
+`D9VolumeView` (level-major CPU slices, per-level dimensions, pitch and plane
+size) plus vertices carrying TEXCOORD0.z in `D9ColorVertex.w`.  The draw gate is
+the volume analogue of the cube gate:
+
+- stage 0 only, one texture, no pixel shader, an active stage-0 colour
+  operation and texcoord0;
+- an uploaded GPU-resident A8R8G8B8/X8R8G8B8 volume;
+- a 3-component TEXCOORD0 (explicit declaration).  FVF 2D texcoords are refused
+  by name, not interpreted as a slice;
+- mip filtering additionally requires every mip level uploaded; point sampling
+  needs only level 0.  Unuploaded volumes, incomplete mips and backends without
+  `draw_volume` are named refusals.
+
+The null backend implements real point sampling of the core's level-0 slices:
+the nearest voxel is selected from `(u,v,w)` and its ARGB is recorded in
+`D9NullStats` (`volume_draws`, `last_volume_samples`, `last_volume_w`).  There
+are no texture-coordinate derivatives, so mip selection remains level 0 even
+with a resident chain; this is documented point behavior, not a trilinear
+claim.  `D3DSAMP_ADDRESSW` is not modelled, so W follows the V address mode.
+
+PICA cannot sample 3D textures.  libctru/citro3d's texture modes are
+`GPU_TEX_2D`, `GPU_TEX_CUBE_MAP`, `GPU_TEX_SHADOW_2D`, `GPU_TEX_PROJECTION` and
+`GPU_TEX_SHADOW_CUBE`; there is no 3D mode or `C3D_TexInit3D`.  The PICA backend
+therefore has neither `texture_create_volume` nor `draw_volume`, and both
+creation and a volume-bound draw fail by name with the missing callback in the
+diagnostic.  No 2D slice is substituted, and DevCaps stay `0x00082000`.
+
+`tests/volume_sampling_smoke.c` samples a 4x4x4 volume with one colour per z
+slice at `w=0.125/0.375/0.625/0.875`, then checks the named refusals for an
+unuploaded volume, 2D texcoords, an incomplete two-level chain, stage 1 and a
+PICA-shaped backend without `draw_volume`.
+
+- Targeted `volume_sampling,d3dx_volume_texture_shims,
+  cube_volume_residency,cube_volume_rehydration,cube_sampling,
+  cube_rt_sampling,com`: **17 passed, 0 diagnostic, 0 failed**.
+- Full suite: **133 passed, 0 diagnostic, 0 failed**.
+- ARM `-Mode com`: `.elf` 6,283,772 B SHA256
+  `50aee76f2ec2cc9a4e8d78e49d7b8f420985e2cc5388976d633cf292d0c01a1b`;
+  `.3dsx` 937,032 B SHA256
+  `a3543c2bd988453e7e4cd138f505b83e03485f09ac30093666550ad5e21e5adc`;
+  `.text` 918,412 B.  Build-only evidence; no Azahar/hardware run or frame
+  claimed.
 
 ## 6. Deliberate non-goals
 
@@ -1361,6 +1407,7 @@ result or frame is claimed.
 - No second/third texture unit or sampler.
 - No vertex-colour or fragment-varying routing.
 - No VPOS/VFACE support.
-- No MRT, depth-output, volume sampler, or non-TEV fragment operation.
+- No MRT, depth-output or non-TEV fragment operation.
+- No PICA volume sampler; volume draws are refused by name (section 5.9).
 - No claim that the wider translator subset is renderable by this backend.
 - No claim of a real Skyrim frame or pixel-equivalent PICA rendering.

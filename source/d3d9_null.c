@@ -279,6 +279,56 @@ static int null_draw_cube(void *ctx,const D9ColorVertex *v,size_t n,
     for(size_t i=0;i<n;++i)++s->cube_face_counts[faces[i]];
     return 0;
 }
+/* Volume sampling for the null backend: point-sample the nearest voxel from
+ * the core's level-0 CPU slice store.  D3DSAMP_ADDRESSW is not modelled; W uses
+ * the same wrap/mirror/clamp policy as V.  There is no derivative-based LOD, so
+ * mip selection is level 0 even when the mip chain is resident. */
+static int null_volume_texel(const D9VolumeView *vol,float u,float v,float w,
+                             unsigned address_u,unsigned address_v,uint32_t *out){
+    if(!vol||!vol->pixels||!vol->levels||!out)return -1;
+    if(vol->format!=D9_A8R8G8B8&&vol->format!=D9_X8R8G8B8)return -1;
+    unsigned width=vol->level_w[0],height=vol->level_h[0],depth=vol->level_depth[0];
+    size_t pitch=vol->level_pitch[0],plane=vol->level_plane_bytes[0];
+    if(!width||!height||!depth||pitch<(size_t)width*4u||plane<pitch*height)return -1;
+    int x=cube_coord((int)floorf(u*(float)width),(unsigned)width,address_u);
+    int y=cube_coord((int)floorf(v*(float)height),(unsigned)height,address_v);
+    int z=cube_coord((int)floorf(w*(float)depth),(unsigned)depth,address_v);
+    const uint8_t *p=vol->pixels+(size_t)z*plane+(size_t)y*pitch+(size_t)x*4u;
+    *out=(uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|
+         ((uint32_t)(vol->format==D9_X8R8G8B8?255u:p[3])<<24);
+    return 0;
+}
+static int null_draw_volume(void *ctx,const D9ColorVertex *v,size_t n,
+                            const D9Matrix *clip,const D9VolumeView *vol,
+                            const D9DrawState *st){
+    D9NullStats *s=stats(ctx);
+    if(!s->scene){null_log("DrawPrimitive","no scene is active");return -1;}
+    if(!v||!n||n%3||!vol||!clip||!st){
+        null_log("DrawPrimitive","volume draw is missing vertices, view, clip or state");return -1;
+    }
+    if(!vol->pixels||vol->levels<1||!vol->native){
+        null_log("DrawPrimitive","volume view has no CPU pixels or GPU native");return -1;
+    }
+    uint32_t samples[3]={0};float ws[3]={0};
+    for(size_t i=0;i<n;++i){
+        if(!isfinite(v[i].w)){
+            null_log("DrawPrimitive","non-finite volume texture coordinate");return -1;
+        }
+        uint32_t texel=0;
+        if(null_volume_texel(vol,v[i].u,v[i].v,v[i].w,st->address_u,st->address_v,&texel)){
+            null_log("DrawPrimitive","volume texel sample failed");return -1;
+        }
+        if(i<3){samples[i]=texel;ws[i]=v[i].w;}
+    }
+    if(null_draw_colored(ctx,v,n,clip,NULL,st))return -1;
+    ++s->volume_draws;s->volume_vertices+=n;
+    s->last_volume_count=n<3?n:3;
+    for(unsigned i=0;i<s->last_volume_count;++i){
+        s->last_volume_samples[i]=samples[i];
+        s->last_volume_w[i]=ws[i];
+    }
+    return 0;
+}
 static int null_draw(void *ctx,const D9Vertex *vertices,size_t count,const D9Matrix *pica_clip,void *texture,const D9DrawState *st){
     D9NullStats *s=stats(ctx);(void)texture;
     if(!s->scene){null_log("DrawPrimitive","no scene is active");return -1;}
@@ -539,7 +589,8 @@ static const D9Backend backend={null_texture_create,null_texture_upload,null_tex
     null_cube_create,null_cube_upload,null_target_viewport_scaled,
     null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete,
     null_cube_face_create,null_cube_face_delete,
-    null_texture_create_format,null_texture_upload_format,null_draw_menu_indexed};
+    null_texture_create_format,null_texture_upload_format,null_draw_menu_indexed,
+    null_draw_volume};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

@@ -325,6 +325,40 @@ GPU-only and never retain the container. MANAGED token eviction/rehydrate,
 Reset handle preservation, dynamic DISCARD, and automatic disposable guest drop
 remain pending.
 
+### 5.6 Volume sampling in a draw
+
+Volume textures can now be sampled by a draw through the append-only
+`D9Backend.draw_volume(ctx, vertices, count, clip, D9VolumeView, state)`
+callback:
+
+* The core passes `vertices[i].w` (TEXCOORD0.z) and a `D9VolumeView` with the
+  level-major CPU slice store, per-level width/height/depth, pitch, plane size
+  and native handle.  `D9ColorVertex` gained a trailing `w` field; every 2D/FVF
+  vertex leaves it zero.
+* A volume draw is stage 0 only, needs an active stage-0 colour operation, and
+  refuses a pixel shader or a second texture stage by name.  It requires an
+  uploaded GPU-resident volume with A8R8G8B8/X8R8G8B8 slices and a 3-component
+  TEXCOORD0; 2D vertices (including FVF `XYZ|TEX1`) are a named refusal, never a
+  slice-0 fallback.  Mip filtering requires every mip level uploaded; point
+  sampling only needs level 0.
+* The null backend point-samples the nearest voxel of level 0 and records the
+  first three ARGB texels and `w` values in `D9NullStats`.  There is no
+  derivative-based LOD, so mip selection stays at level 0 even when the chain is
+  resident (documented point behavior, not a trilinear claim).  `ADDRESSW` is
+  not modelled; W uses the V wrap/mirror/clamp policy.
+* PICA does not implement volume sampling.  libctru/citro3d exposes
+  `GPU_TEX_2D`, `GPU_TEX_CUBE_MAP`, `GPU_TEX_SHADOW_2D`, `GPU_TEX_PROJECTION`
+  and `GPU_TEX_SHADOW_CUBE` but no 3D texture mode, and the PICA backend has no
+  `texture_create_volume`/`draw_volume`.  Volume creation and a volume-bound draw
+  are therefore named `D3DERR_NOTAVAILABLE` refusals with the missing callback in
+  the diagnostic; no 2D slice is substituted.
+
+`tests/volume_sampling_smoke.c` uses a 4x4x4 A8R8G8B8 volume with a distinct
+colour per z slice and verifies `(u,v,w)` across all four layers, plus named
+refusals for an unuploaded volume, 2D texcoords, an incomplete mip chain, stage 1
+and a backend without `draw_volume` (the PICA shape).  DevCaps stay
+`0x00082000`.  No hardware run or frame is claimed.
+
 ## 5.1 UpdateTexture / UpdateSurface / ColorFill
 
 Device slots 31/30/35 are implemented for CPU-backed stores; no GPU copy is

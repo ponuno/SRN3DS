@@ -272,7 +272,7 @@ int main(void){
      assert(d9_begin_scene_ex(dev,0,0)==D9_OK);
      assert(d9_bind_volume_texture(dev,0,v)==D9_OK);
      assert(d9_draw_primitive(dev,D9_TRIANGLELIST,0,1)==D9_UNSUPPORTED);
-     assert(strstr(d9_last_draw_diagnostic(dev),"volume sampling is not implemented"));
+     assert(strstr(d9_last_draw_diagnostic(dev),"3-component TEXCOORD0"));
      assert(d9_end_scene(dev)==D9_OK);
      assert(d9_release_volume_texture(dev,v)==D9_OK);
      d9_destroy_device(dev);}
