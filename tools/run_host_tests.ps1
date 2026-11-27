@@ -19,6 +19,7 @@ param(
     [string]$PilotGen = "",
     [string]$PilotDll = "C:\Windows\SysWOW64\D3DX9_42.dll",
     [string]$OutDir = "",
+    [switch]$CleanOutDir,
     [string]$TesvSliceGen = "",
     [string]$TesvIrc = "",
     [string]$TesvExe = "E:\skyr\TESV.exe",
@@ -90,13 +91,19 @@ try {
     $headerSha.Dispose()
 }
 
-$outDir = if ($OutDir) { $OutDir } else { Join-Path $root "build_host" }
+$defaultOut = -not $OutDir
+$outDir = if ($OutDir) { $OutDir } else { Join-Path $env:TEMP "srn3ds_host" }
 # TEMP/TMP must be absolute: relative paths break the CRT's tmpfile_s in the
 # steam/registry smokes. Resolve a relative -OutDir against the caller's cwd.
 if (-not [System.IO.Path]::IsPathRooted($outDir)) {
     $outDir = Join-Path (Get-Location).Path $outDir
 }
 $outDir = [System.IO.Path]::GetFullPath($outDir)
+# A single reusable run directory keeps the tree clean; explicit -OutDir is
+# never wiped unless -CleanOutDir is passed.
+if (($defaultOut -or $CleanOutDir) -and (Test-Path $outDir)) {
+    Remove-Item -Recurse -Force $outDir -ErrorAction SilentlyContinue
+}
 $logDir = Join-Path $outDir "logs"
 $tmpDir = Join-Path $outDir "tmp"
 New-Item -ItemType Directory -Force -Path $outDir, $logDir, $tmpDir | Out-Null
