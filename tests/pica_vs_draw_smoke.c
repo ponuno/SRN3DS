@@ -91,10 +91,10 @@ static void fill_triangle(SkinVertex v[3]) {
         v[i].y = 20.0f + (float)i;
         v[i].z = 30.0f + (float)i;
         for (unsigned j = 0; j < 4; ++j) v[i].weight[j] = 0.1f * (float)(i + 1) + 0.01f * (float)j;
-        v[i].index[0] = (uint8_t)(4 * i + 1);
-        v[i].index[1] = (uint8_t)(4 * i + 2);
-        v[i].index[2] = (uint8_t)(4 * i + 3);
-        v[i].index[3] = (uint8_t)(4 * i + 4);
+        v[i].index[0] = (uint8_t)(i % 4);
+        v[i].index[1] = (uint8_t)((i + 1) % 4);
+        v[i].index[2] = (uint8_t)((i + 2) % 4);
+        v[i].index[3] = (uint8_t)((i + 3) % 4);
     }
 }
 
@@ -223,23 +223,45 @@ int main(void) {
     }
 
     /* --- packed vertex layout -------------------------------------------- */
-    CHECK(d9_pica_vs_vertex_stride(&pdecl) == 32u, "packed stride is 32 bytes");
+    CHECK(d9_pica_vs_vertex_stride(&pdecl) == 44u, "packed stride is 44 bytes");
     CHECK(d9_pica_vs_bufinfo_permutation(&pdecl) == 0x210u, "attribute permutation is 0x210");
     {
         D9SkinVertex sv;
         memset(&sv, 0, sizeof sv);
         sv.x = 1.5f; sv.y = 2.5f; sv.z = 3.5f;
         for (unsigned i = 0; i < 4; ++i) sv.weight[i] = 0.25f * (float)(i + 1);
-        sv.index[0] = 9; sv.index[1] = 8; sv.index[2] = 7; sv.index[3] = 6;
-        uint8_t packed[32];
+        sv.index[0] = 0; sv.index[1] = 1; sv.index[2] = 2; sv.index[3] = 3;
+        uint8_t packed[44];
         memset(packed, 0xa5, sizeof packed);
         CHECK(d9_pica_vs_pack_vertex(&pdecl, &sv, packed) == 0, "pack succeeds");
-        float pos[3], weight[4];
+        float pos[3], weight[4], index[4];
         memcpy(pos, packed, sizeof pos);
         memcpy(weight, packed + 12, sizeof weight);
+        memcpy(index, packed + 28, sizeof index);
         CHECK(pos[0] == 1.5f && pos[1] == 2.5f && pos[2] == 3.5f, "packed position matches");
         CHECK(weight[0] == 0.25f && weight[3] == 1.0f, "packed weights match");
-        CHECK(packed[28] == 9 && packed[31] == 6, "packed indices match");
+        CHECK(index[0] == 0.0f && index[1] == 1.0f / 255.0f &&
+              index[2] == 2.0f / 255.0f && index[3] == 3.0f / 255.0f,
+              "UBYTE4N indices are packed as normalised floats [0,1,2,3]");
+    }
+
+    /* A declaration with padding and a different element order still maps by
+     * usage; the native pack stays in emitted-program loader order. */
+    {
+        D9VertexElement e[4] = {{0}};
+        e[0] = (D9VertexElement){0, 0, D9_DECL_UBYTE4N, 0, D9_USAGE_BLENDINDICES, 0};
+        e[1] = (D9VertexElement){0, 8, D9_DECL_FLOAT3, 0, D9_USAGE_POSITION, 0};
+        e[2] = (D9VertexElement){0, 24, D9_DECL_FLOAT4, 0, D9_USAGE_BLENDWEIGHT, 0};
+        D9Decl padded;
+        CHECK(d9_decl_init_why(&padded, e, 3, why, sizeof why) == 0, why);
+        D9PicaVsDecl pdecl2;
+        CHECK(d9_pica_vs_declare(program, &padded, &pdecl2, why, sizeof why) == 0, why);
+        CHECK(pdecl2.count == 3u, "padded reordered declaration maps three loaders");
+        CHECK(pdecl2.loader[0].offset == 8u && pdecl2.loader[1].offset == 24u &&
+              pdecl2.loader[2].offset == 0u,
+              "loaders carry the declaration's real offsets");
+        CHECK(d9_pica_vs_vertex_stride(&pdecl2) == 44u,
+              "native packed stride is independent of declaration padding");
     }
 
     /* --- decode + backend submit ----------------------------------------- */
@@ -254,7 +276,7 @@ int main(void) {
         CHECK(ctx.vertex[0].r == 1.0f && ctx.vertex[0].a == 1.0f, "missing colour defaults to white");
         CHECK(ctx.vertex[2].weight[0] == 0.3f || fabsf(ctx.vertex[2].weight[0] - 0.3f) < 1e-6f,
               "BLENDWEIGHT0 decodes as float4");
-        CHECK(ctx.vertex[2].index[0] == 9 && ctx.vertex[2].index[3] == 12,
+        CHECK(ctx.vertex[2].index[0] == 2 && ctx.vertex[2].index[3] == 1,
               "BLENDINDICES0 is quantised back to bytes");
         CHECK(ctx.draw.program == program || ctx.draw.program->shbin == program->shbin,
               "callback receives the program");
@@ -262,6 +284,27 @@ int main(void) {
               "callback receives declaration and bank");
         CHECK(ctx.draw.row_mask[180u >> 5] != 0u, "callback receives the dirty mask");
     }
+
+    /* A BLENDINDICES byte outside the 4-bone window is a named refusal before
+     * the backend sees the stream. */
+    {
+        SkinVertex bad[3];
+        memcpy(bad, tri, sizeof bad);
+        bad[1].index[2] = D9_PICA_VS_BONES;
+        CHECK(d9_draw_primitive_up(d, D9_TRIANGLELIST, 1, bad, sizeof bad[0]) == D9_UNSUPPORTED,
+              "bone index 4 is refused");
+        CHECK(strstr(d9_last_draw_diagnostic(d), "4-bone") != NULL,
+              d9_last_draw_diagnostic(d));
+        CHECK(ctx.pica_calls == 1, "refused bone index does not reach the backend");
+    }
+
+    /* The last vertex is valid; one past it is rejected. */
+    CHECK(d9_draw_primitive(d, D9_TRIANGLELIST, 0, 1) == D9_OK,
+          "triangle starting at vertex 0 reaches the last triangle");
+    CHECK(ctx.pica_calls == 2, "last in-range triangle submits");
+    CHECK(d9_draw_primitive(d, D9_TRIANGLELIST, 1, 1) == D9_INVALID,
+          "one vertex past the buffer is rejected");
+    CHECK(ctx.pica_calls == 2, "out-of-range triangle does not submit");
 
     /* A bank row that was wiped must stop the draw before any submit. */
     d9_clear_vs_constants_f(d);
@@ -275,7 +318,7 @@ int main(void) {
           "missing WVP rows refuse the draw");
     CHECK(strstr(d9_last_draw_diagnostic(d), "c180") != NULL,
           d9_last_draw_diagnostic(d));
-    CHECK(ctx.pica_calls == 1, "refused draw does not reach the backend");
+    CHECK(ctx.pica_calls == 2, "refused draw does not reach the backend");
 
     /* Missing BLENDWEIGHT0 is a named refusal. */
     upload_bank(d);
@@ -308,6 +351,49 @@ int main(void) {
               d9_last_draw_diagnostic(d2));
         CHECK(ctx2.draw_calls == 0, "no legacy draw fallback");
         d9_destroy_device(d2);
+    }
+
+    /* A bound fragment stage has no contract on the VS-only submit. */
+    {
+        CHECK(d9_set_vertex_declaration(d, &decl) == D9_OK, "full skin declaration rebinds");
+        CHECK(d9_set_pixel_shader(d, (const D9TevProgram *)(const void *)program) == D9_OK,
+              "unsupported PS records");
+        CHECK(d9_draw_primitive(d, D9_TRIANGLELIST, 0, 1) == D9_UNSUPPORTED,
+              "PICA VS with an unsupported PS is refused");
+        CHECK(strstr(d9_last_draw_diagnostic(d), "fragment-stage") != NULL,
+              d9_last_draw_diagnostic(d));
+        CHECK(d9_set_pixel_shader(d, NULL) == D9_OK, "PS unbinds");
+    }
+
+    /* Switching between two emitted programs and back to the ordinary VS. */
+    {
+        const D9PicaVsProgram *q = d9_pica_vs_lookup(
+            "60dbd11a23ffbf74517f1256edaadadb62441fe1ed120d413540b220b9833407");
+        CHECK(q != NULL, "second emitted program is present");
+        if (q) {
+            D9VertexElement e[5] = {{0}};
+            e[0] = (D9VertexElement){0, 0, D9_DECL_FLOAT3, 0, D9_USAGE_POSITION, 0};
+            e[1] = (D9VertexElement){0, 12, D9_DECL_FLOAT2, 0, D9_USAGE_TEXCOORD, 0};
+            e[2] = (D9VertexElement){0, 20, D9_DECL_COLOR, 0, D9_USAGE_COLOR, 0};
+            e[3] = (D9VertexElement){0, 24, D9_DECL_FLOAT4, 0, D9_USAGE_BLENDWEIGHT, 0};
+            e[4] = (D9VertexElement){0, 40, D9_DECL_UBYTE4N, 0, D9_USAGE_BLENDINDICES, 0};
+            D9Decl qdecl;
+            D9PicaVsDecl qloaders;
+            D9PicaVsBank qbank;
+            CHECK(d9_decl_init_why(&qdecl, e, 5, why, sizeof why) == 0, why);
+            CHECK(d9_pica_vs_declare(q, &qdecl, &qloaders, why, sizeof why) == 0, why);
+            CHECK(d9_pica_vs_bank(q, &qbank, why, sizeof why) == 0, why);
+            CHECK(d9_set_pica_vs(d, q, &qloaders, &qbank) == D9_OK,
+                  "second emitted program records");
+            CHECK(d9_set_pica_vs(d, program, &pdecl, &bank) == D9_OK,
+                  "first emitted program records again");
+        }
+        CHECK(d9_set_pica_vs(d, NULL, NULL, NULL) == D9_OK, "ordinary VS records");
+        CHECK(d9_pica_vs_active(d) == 0, "ordinary VS is not the PICA VS path");
+        CHECK(d9_draw_primitive(d, D9_TRIANGLELIST, 0, 1) == D9_OK,
+              "ordinary VS draw succeeds");
+        CHECK(ctx.draw_calls == 1 && ctx.pica_calls == 2,
+              "ordinary VS goes through the legacy draw path");
     }
 
     d9_destroy_device(d);

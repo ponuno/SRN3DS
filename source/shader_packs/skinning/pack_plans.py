@@ -115,8 +115,15 @@ def _emitter_verified() -> dict:
     if not os.path.exists(EMITTER_REPORT):
         return {}
     report = _load(EMITTER_REPORT)
+    # emitted-verified needs a real numeric run and a real picasso output;
+    # samples=0 or a skipped assembler is never a proof.
     return {entry["sha256"]: entry for entry in report.get("entries", [])
-            if entry.get("status") == "pass"}
+            if entry.get("status") == "pass"
+            and entry.get("samples", 0) > 0
+            and entry.get("picasso") == "pass"
+            and entry.get("shbin_bytes", 0) > 0
+            and isinstance(entry.get("shbin_sha256"), str)
+            and len(entry.get("shbin_sha256", "")) == 64}
 
 
 def _uniform_map(rows: int) -> list:
@@ -519,7 +526,7 @@ def emit_runtime(doc: dict) -> dict:
         table.extend(rows)
         table.append("        },")
         table.append("    },")
-        blobs.append("static const uint8_t %s[%u] = {" % (symbol, len(blob)))
+        blobs.append("_Alignas(4) static const uint8_t %s[%u] = {" % (symbol, len(blob)))
         for start in range(0, len(blob), 16):
             row = ",".join("0x%02x" % byte for byte in blob[start:start + 16])
             blobs.append("    %s," % row)

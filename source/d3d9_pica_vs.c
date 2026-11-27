@@ -146,15 +146,37 @@ int d9_pica_vs_validate(const D9PicaVsProgram *program,
         return -1;
     }
     uint32_t dvle = le32(b + 8);
-    if (dvle < 0x10u || dvle + 4u > size || memcmp(b + dvle, "DVLE", 4) != 0) {
+    if (size < 0x30u || dvle > size - 0x30u || dvle < 0x10u ||
+        memcmp(b + dvle, "DVLE", 4) != 0) {
         if (why && why_size)
             snprintf(why, why_size, "plan %s: .shbin DVLE offset 0x%x is invalid",
                      program->id, (unsigned)dvle);
         return -1;
     }
-    if (memcmp(b + 0x0c, "DVLP", 4) != 0) {
+    /* DVLE sub-tables are offsets relative to the DVLE start.  Check the
+     * constant (12-byte), output (8-byte) and uniform (8-byte) tables before
+     * letting DVLB_ParseFile or the GPU walk them. */
+    {
+        static const unsigned table_off[3] = {0x18u, 0x20u, 0x28u};
+        static const unsigned table_size[3] = {12u, 8u, 8u};
+        for (unsigned t = 0; t < 3; ++t) {
+            uint32_t off = le32(b + dvle + table_off[t]);
+            uint32_t count = le32(b + dvle + table_off[t] + 4u);
+            uint32_t avail = size - dvle;
+            if (off > avail || count > (avail - off) / table_size[t]) {
+                if (why && why_size)
+                    snprintf(why, why_size,
+                             "plan %s: .shbin DVLE table %u is out of bounds",
+                             program->id, t);
+                return -1;
+            }
+        }
+    }
+    /* DVLP is inline at 0x0c in picasso output; its main word count lives at
+     * DVLP+0x0c.  Both reads must stay inside the image. */
+    if (size < 0x1cu || memcmp(b + 0x0c, "DVLP", 4) != 0) {
         if (why && why_size)
-            snprintf(why, why_size, "plan %s: .shbin has no DVLP program block",
+            snprintf(why, why_size, "plan %s: .shbin has no complete DVLP program block",
                      program->id);
         return -1;
     }
@@ -186,6 +208,20 @@ int d9_pica_vs_validate(const D9PicaVsProgram *program,
             snprintf(why, why_size, "plan %s: uniform/attribute contract is inconsistent",
                      program->id);
         return -1;
+    }
+    uint32_t seen = 0;
+    for (unsigned a = 0; a < program->attr_count; ++a) {
+        const D9PicaVsAttr *attr = &program->attrs[a];
+        if (attr->reg >= 16u || !attr->components || attr->components > 4u ||
+            attr->decl_type == 0 || attr->format > D9_PICA_VS_FMT_UBYTE_NORM ||
+            attr->attr > D9_PICA_VS_ATTR_COLOR || (seen & (1u << attr->reg))) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "plan %s: attribute %u has an invalid register/format",
+                         program->id, a);
+            return -1;
+        }
+        seen |= 1u << attr->reg;
     }
     return 0;
 }
@@ -288,12 +324,19 @@ int d9_pica_vs_declare(const D9PicaVsProgram *program, const D9Decl *decl,
             return -1;
         }
         if (found->type != attr->decl_type) {
-            if (why && why_size)
-                snprintf(why, why_size,
-                         "plan %s: %s element type %u != required %u",
-                         program->id, attr_name(attr), found->type,
-                         attr->decl_type);
-            return -1;
+            /* COLOR0 is D3DDECLTYPE_D3DCOLOR in retail declarations; it is
+             * the same normalised 4-byte colour as UBYTE4N for this path. */
+            int color_alias = attr->attr == D9_PICA_VS_ATTR_COLOR &&
+                              attr->decl_type == D9_DECL_UBYTE4N &&
+                              found->type == D9_DECL_COLOR;
+            if (!color_alias) {
+                if (why && why_size)
+                    snprintf(why, why_size,
+                             "plan %s: %s element type %u != required %u",
+                             program->id, attr_name(attr), found->type,
+                             attr->decl_type);
+                return -1;
+            }
         }
         if (found->offset & 3u) {
             if (why && why_size)
@@ -368,7 +411,7 @@ int d9_pica_vs_bank(const D9PicaVsProgram *program, D9PicaVsBank *out,
 int d9_pica_vs_bank_ready(const D9PicaVsBank *bank, const uint32_t *mask,
                           unsigned words, char *why, size_t why_size) {
     if (why && why_size) why[0] = 0;
-    if (!bank || !bank->rows) {
+    if (!bank || !bank->rows || bank->rows > D9_PICA_VS_MAX_ROWS) {
         if (why && why_size) snprintf(why, why_size, "no uniform bank");
         return -1;
     }
@@ -445,8 +488,11 @@ int d9_pica_vs_gate(const D9PicaVsProgram *program, const D9Decl *decl,
 /* --- packed skinned vertex ------------------------------------------------ */
 
 static unsigned attr_component_size(uint8_t format, unsigned components) {
-    if (format == D9_PICA_VS_FMT_FLOAT) return components * 4u;
-    if (format == D9_PICA_VS_FMT_UBYTE_NORM) return components;
+    /* Both loader formats are submitted as GPU_FLOAT: PICA vertex loaders do
+     * not normalise integer attributes, and the emitted shader consumes the
+     * D3D UBYTE4N contract (indices in [0,1], colour in [0,1]). */
+    if (format == D9_PICA_VS_FMT_FLOAT || format == D9_PICA_VS_FMT_UBYTE_NORM)
+        return components * 4u;
     return 0;
 }
 
@@ -490,8 +536,14 @@ int d9_pica_vs_pack_vertex(const D9PicaVsDecl *decl, const D9SkinVertex *v,
         unsigned n = loader->components;
         if (!n || n > 4u) return -1;
         if (loader->format == D9_PICA_VS_FMT_UBYTE_NORM) {
+            /* D3D UBYTE4N feeds the shader a normalised float.  The PICA
+             * loader has no normalised integer variant, so decode here and
+             * submit GPU_FLOAT components. */
             if (loader->attr == D9_PICA_VS_ATTR_BLENDINDICES) {
-                for (unsigned c = 0; c < n; ++c) dst[offset + c] = v->index[c];
+                for (unsigned c = 0; c < n; ++c) {
+                    float f = (float)v->index[c] / 255.0f;
+                    memcpy(dst + offset + c * 4u, &f, sizeof f);
+                }
             } else {
                 const float *src = attr_source(loader, v);
                 if (!src) return -1;
@@ -499,10 +551,10 @@ int d9_pica_vs_pack_vertex(const D9PicaVsDecl *decl, const D9SkinVertex *v,
                     float f = src[c];
                     if (!(f >= 0.0f)) f = 0.0f; /* NaN and negatives clamp */
                     if (f > 1.0f) f = 1.0f;
-                    dst[offset + c] = (uint8_t)(f * 255.0f + 0.5f);
+                    memcpy(dst + offset + c * 4u, &f, sizeof f);
                 }
             }
-            offset += n;
+            offset += n * 4u;
         } else if (loader->format == D9_PICA_VS_FMT_FLOAT) {
             const float *src = attr_source(loader, v);
             if (!src) return -1;
@@ -517,10 +569,6 @@ int d9_pica_vs_pack_vertex(const D9PicaVsDecl *decl, const D9SkinVertex *v,
 
 
 #ifdef __3DS__
-
-static GPU_FORMATS pica_format(uint8_t format) {
-    return format == D9_PICA_VS_FMT_UBYTE_NORM ? GPU_UNSIGNED_BYTE : GPU_FLOAT;
-}
 
 int d9_pica_vs_device_open(D9PicaVsDevice *device,
                            const D9PicaVsProgram *program,
@@ -553,6 +601,7 @@ int d9_pica_vs_device_open(D9PicaVsDevice *device,
         d9_pica_vs_device_close(device);
         return -1;
     }
+    device->loaded_program = program;
     device->open = 1;
     return 0;
 }
@@ -564,14 +613,35 @@ void d9_pica_vs_device_close(D9PicaVsDevice *device) {
     memset(device, 0, sizeof *device);
 }
 
+static GPU_FORMATS pica_format(uint8_t format) {
+    /* PICA integer loaders are not normalised; pack_vertex() has already
+     * decoded UBYTE4N into floats. */
+    (void)format;
+    return GPU_FLOAT;
+}
+
 int d9_pica_vs_device_bind(D9PicaVsDevice *device,
                            const D9PicaVsProgram *program,
                            const D9PicaVsDecl *decl,
-                           const float (*rows)[4], unsigned row_count,
-                           char *why, size_t why_size) {
+                           const float (*rows)[4], const uint32_t *row_mask,
+                           unsigned row_count,
+                           const void *packed, size_t vertex_count,
+                           size_t stride, char *why, size_t why_size) {
     if (why && why_size) why[0] = 0;
-    if (!device || !device->open || !program || !decl || !rows) {
+    if (!device || !device->open || !program || !program->shbin ||
+        !decl || !rows || !row_mask || !packed || !vertex_count) {
         if (why && why_size) snprintf(why, why_size, "PICA VS device is not loaded");
+        return -1;
+    }
+    /* A bind may not mix a program from another device/open with this
+     * declaration or bank.  All checks happen before any GPU state changes. */
+    if (device->loaded_program != program ||
+        program->attr_count != decl->count ||
+        !decl->count || decl->count > D9_PICA_VS_MAX_ATTRS) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "PICA VS program %s does not match the loaded device/declaration",
+                     program->id);
         return -1;
     }
     if (row_count < program->uniform_rows) {
@@ -580,18 +650,71 @@ int d9_pica_vs_device_bind(D9PicaVsDevice *device,
                      program->id, row_count, program->uniform_rows);
         return -1;
     }
+    unsigned packed_stride = d9_pica_vs_vertex_stride(decl);
+    if (!packed_stride || packed_stride != stride) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "plan %s: packed stride %u != declaration stride %u",
+                     program->id, (unsigned)stride, packed_stride);
+        return -1;
+    }
+    unsigned seen_offsets[D9_PICA_VS_MAX_ATTRS];
+    for (unsigned i = 0; i < decl->count; ++i) {
+        const D9PicaVsLoader *loader = &decl->loader[i];
+        if (!loader->components || loader->components > 4u ||
+            loader->format > D9_PICA_VS_FMT_UBYTE_NORM ||
+            loader->reg >= 16u || (loader->offset & 3u)) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "plan %s: loader %u has an invalid offset/format/register",
+                         program->id, i);
+            return -1;
+        }
+        for (unsigned j = 0; j < i; ++j)
+            if (seen_offsets[j] == loader->offset) {
+                if (why && why_size)
+                    snprintf(why, why_size,
+                             "plan %s: two loaders share declaration offset %u",
+                             program->id, loader->offset);
+                return -1;
+            }
+        seen_offsets[i] = loader->offset;
+    }
     C3D_BindProgram(&device->program);
     C3D_AttrInfo *attr = C3D_GetAttrInfo();
     AttrInfo_Init(attr);
     for (unsigned i = 0; i < decl->count; ++i) {
         const D9PicaVsLoader *loader = &decl->loader[i];
-        AttrInfo_AddLoader(attr, (int)loader->reg, pica_format(loader->format),
-                           (int)loader->components);
+        if (AttrInfo_AddLoader(attr, (int)loader->reg, pica_format(loader->format),
+                               (int)loader->components) < 0) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "plan %s: AttrInfo_AddLoader rejected v%u",
+                         program->id, loader->reg);
+            return -1;
+        }
     }
-    for (unsigned row = 0; row < program->uniform_rows; ++row)
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, row, rows[row][0], rows[row][1],
-                      rows[row][2], rows[row][3]);
-    (void)decl;
+    C3D_BufInfo *buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    if (BufInfo_Add(buf, (void *)packed, (ptrdiff_t)stride, (int)decl->count,
+                    d9_pica_vs_bufinfo_permutation(decl)) < 0) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "plan %s: BufInfo_Add rejected the packed stream",
+                     program->id);
+        return -1;
+    }
+    D9PicaVsBank bank;
+    if (d9_pica_vs_bank(program, &bank, why, why_size) ||
+        d9_pica_vs_bank_ready(&bank, row_mask, 8u, why, why_size))
+        return -1;
+    for (unsigned row = 0; row < bank.rows; ++row) {
+        unsigned reg = bank.d3d_reg[row];
+        if ((row_mask[reg >> 5] >> (reg & 31u) & 1u) == 0) continue;
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, (int)row, rows[reg][0], rows[reg][1],
+                      rows[reg][2], rows[reg][3]);
+    }
+    (void)vertex_count;
     return 0;
 }
 

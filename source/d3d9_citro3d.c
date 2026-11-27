@@ -15,9 +15,10 @@
 #define FRAME_VERTICES 16384u
 #define FRAME_INDICES 262144u
 /* Verified PICA VS batches are bounded by the core's 4,096-vertex scratch and
- * packed in loader order (at most five attributes, 44 bytes today). */
+ * packed in loader order (at most five attributes, all submitted as floats:
+ * 5 * 4 components * 4 B = 80 B). */
 #define FRAME_SKIN_VERTICES 4096u
-#define FRAME_SKIN_STRIDE 64u
+#define FRAME_SKIN_STRIDE 80u
 #define FRAME_SKIN_BYTES (FRAME_SKIN_VERTICES*FRAME_SKIN_STRIDE)
 /* Indexed menu batches may use the full 16-bit vertex range.  Keep the older
  * 16k arena policy for ordinary/cube colour draws, but give the compact menu
@@ -557,9 +558,6 @@ static int draw_menu_indexed(void *ctx,const D9ColorVertex *vertices,size_t coun
     if(!indices||!clip)return -1;
     return draw_menu_ex(ctx,vertices,count,clip,texture0,texture1,state,constants,indices,index_count);
 }
-static GPU_FORMATS skin_format(uint8_t format){
-    return format==D9_PICA_VS_FMT_UBYTE_NORM?GPU_UNSIGNED_BYTE:GPU_FLOAT;
-}
 /* Verified PICA VS submit: pack the decoded skin stream in declaration order,
  * bind the emitted program, upload only dirty uniform rows, then one
  * C3D_DrawElements over a per-frame 16-bit index list. */
@@ -592,26 +590,13 @@ static int draw_pica_vs(void *ctx,const D9SkinVertex *vertices,size_t count,
     uint16_t *indices=c->arena_index+c->cursor_index;
     for(size_t i=0;i<count;++i)indices[i]=(uint16_t)i;
     GSPGPU_FlushDataCache(indices,count*sizeof *indices);
-    C3D_BindProgram(&c->pica_vs.program);
-    C3D_AttrInfo *attr=C3D_GetAttrInfo();AttrInfo_Init(attr);
-    for(unsigned i=0;i<draw->decl->count;++i){
-        const D9PicaVsLoader *loader=&draw->decl->loader[i];
-        AttrInfo_AddLoader(attr,(int)loader->reg,skin_format(loader->format),
-                           (int)loader->components);
-    }
-    C3D_BufInfo *buf=C3D_GetBufInfo();BufInfo_Init(buf);
-    if(BufInfo_Add(buf,dst,(ptrdiff_t)stride,(int)draw->decl->count,
-                   d9_pica_vs_bufinfo_permutation(draw->decl))<0){
-        fprintf(stderr,"[d3d9-citro] draw_pica_vs: BufInfo_Add rejected the packed stream\n");
+    char why[192];
+    if(d9_pica_vs_device_bind(&c->pica_vs,program,draw->decl,draw->rows,
+                              draw->row_mask,draw->bank->rows,dst,count,
+                              stride,why,sizeof why)){
+        fprintf(stderr,"[d3d9-citro] draw_pica_vs: %s\n",why);
         prepare_draw(c);
         return -1;
-    }
-    /* Only rows the guest really wrote may reach the PICA uniform bank. */
-    for(unsigned row=0;row<draw->bank->rows;++row){
-        unsigned reg=draw->bank->d3d_reg[row];
-        if((draw->row_mask[reg>>5]>>(reg&31u)&1u)==0)continue;
-        const float *r=draw->rows[reg];
-        C3D_FVUnifSet(GPU_VERTEX_SHADER,(int)row,r[0],r[1],r[2],r[3]);
     }
     C3D_DrawElements(GPU_TRIANGLES,(int)count,C3D_UNSIGNED_SHORT,indices);
     c->cursor_skin+=bytes;

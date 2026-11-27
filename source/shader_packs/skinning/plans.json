@@ -1253,14 +1253,14 @@
       "usage_name": "blendindices"
      }
     ],
-    "instructions": 37,
+    "instructions": 55,
     "max_abs_position": 0.0,
     "max_abs_varying": 0.0,
     "picasso": "pass",
     "samples": 256,
     "shbin": "generated/skin.vs.20f4db07.shbin",
-    "shbin_bytes": 420,
-    "shbin_sha256": "5e88c3740892ad06e87caea201df3222650906460272b7f91dfb6b560b6d67e2",
+    "shbin_bytes": 532,
+    "shbin_sha256": "4cf5fa9563a14c12f9537100415b84b0da223990d0e012e95d107747a2324267",
     "tolerance": 0.0001,
     "uniform_rows": 16,
     "uniforms": [
@@ -3456,14 +3456,14 @@
       "usage_name": "blendindices"
      }
     ],
-    "instructions": 39,
+    "instructions": 57,
     "max_abs_position": 0.0,
     "max_abs_varying": 0.0,
     "picasso": "pass",
     "samples": 256,
     "shbin": "generated/skin.vs.60dbd11a.shbin",
-    "shbin_bytes": 444,
-    "shbin_sha256": "1c006e5b91806ce43d051e018402410ea3f45deab60d7bd1c8d99c343f22bdbf",
+    "shbin_bytes": 548,
+    "shbin_sha256": "17a69895b516421018ab344193576f8a032addb18436be1e485e2440e125e928",
     "tolerance": 0.0001,
     "uniform_rows": 17,
     "uniforms": [
@@ -8155,14 +8155,14 @@
       "usage_name": "blendindices"
      }
     ],
-    "instructions": 35,
+    "instructions": 53,
     "max_abs_position": 0.0,
     "max_abs_varying": 0.0,
     "picasso": "pass",
     "samples": 256,
     "shbin": "generated/skin.vs.f8ffaecd.shbin",
-    "shbin_bytes": 388,
-    "shbin_sha256": "d36e7611442339ad8e110524453324e74d752536d62e08587f5e297833bc8143",
+    "shbin_bytes": 500,
+    "shbin_sha256": "2ad9eb779ced69bccbc544645620145e0cefa29ae5d2eef19600d4f7d15159b4",
     "tolerance": 0.0001,
     "uniform_rows": 16,
     "uniforms": [

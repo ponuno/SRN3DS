@@ -58,14 +58,18 @@ PICA text on 256 deterministic samples.
 
 | plan | varyings | palette | uniform rows | emitted ins | max abs pos | max abs varying | picasso |
 |---|---|---:|---:|---:|---:|---:|---|
-| `skin.vs.f8ffaecd` | position | 4 bones | 16 | 35 | 0 | 0 | pass |
-| `skin.vs.20f4db07` | position + UV1 | 4 bones | 16 | 37 | 0 | 0 | pass |
-| `skin.vs.60dbd11a` | position + UV0 + UV2 | 4 bones | 17 | 39 | 0 | 0 | pass |
+| `skin.vs.f8ffaecd` | position | 4 bones | 16 | 53 | 0 | 0 | pass |
+| `skin.vs.20f4db07` | position + UV1 | 4 bones | 16 | 55 | 0 | 0 | pass |
+| `skin.vs.60dbd11a` | position + UV0 + UV2 | 4 bones | 17 | 57 | 0 | 0 | pass |
 
-Tolerance is `1e-4`; all three measure `0.0` on 256 samples.  These entries
-carry `codegen: emitted-verified`, `emitted_asm`, and an `emitter` block with
-the measured error.  `emitter_report.json` is the machine-readable proof; the
-asm lives in `generated/`.
+Tolerance is `1e-4`; all three measure `0.0` on 256 samples.  The emitted
+epilogue remaps D3D9 clip space to the backend's rotated PICA convention
+(`x'=y, y'=-x, z'=z-w, w'=w`, the same map as `d9_pica_transform()`), and the
+four blend influences select their own `a0` component with a `mova` before each
+indexed row (the retail address token is `a0.x/y/z/w`, not always `a0.x`).
+Uniform rows other than the palette (including c184) are filled with distinct
+random values during verification, so a skipped UV transform cannot pass as
+`0 == 0`.
 
 Emitter policy found by compiling the real assembly:
 
@@ -82,10 +86,11 @@ Emitter policy found by compiling the real assembly:
 ### Why the other 80 stay `codegen: pending`
 
 The emitter is shape-specific on purpose: outputs must map to
-`position`/`texcoord0..2`/`color0`, relative constants to `c0..c2`, and the
-body to the six supported opcodes.  The other 80 contracts use texcoord3-5,
-colour-carry outputs, different constant groups or extra opcodes; each needs
-its own mapping and its own 256-sample proof.  No claim is made for them.
+`position`/`texcoord0..2`/`color0`, relative constants to `c0..c2` with an
+`a0.x/y/z/w` address token, and the body to the six supported opcodes.  The
+other 80 contracts use texcoord3-5, colour-carry outputs, different constant
+groups or extra opcodes; each needs its own mapping and its own 256-sample
+proof.  No claim is made for them.
 The 22 eight/nine-varying hashes remain named refusals: no normal output
 exists in this pack to pack, and an octant/hemisphere encoding was not
 adopted without a measured error bound.
@@ -113,11 +118,15 @@ PICA uniform row map).  `tools/shaders/plan_verify.py` mirrors the rule, and
   `shaderProgramSetVsh`, `AttrInfo_AddLoader` and `C3D_FVUnifSet`.
 
 The draw gate in `d3d9_com.c` runs every one of those checks per draw and
-names the first missing piece.  What is still missing for a real skinned
-frame: the D3D9 VS constant window is `c0..c8` (the emitted program reads
-`c0..c11` and `c180..c183`), and the skinned vertex fetch / stream submit is
-not wired into `d3d9_core.c`/`d3d9_citro3d.c`.  Until both land, the gate
-refuses by name; it never falls back to the fixed-function clip shader.
+names the first missing piece.  The skinned stream is wired: `d3d9_core.c`
+decodes only BLENDWEIGHT/BLENDINDICES vertices into `D9SkinVertex`, refuses any
+bone index outside the 4-bone window by name, and submits through
+`draw_pica_vs`; the emitted shader never passes through the ordinary fixed
+fetch/T&L path.  UBYTE4N attributes are decoded to normalised floats before
+submission because PICA integer loaders do not normalise.  The draw is still
+gated by the declaration, the full uniform bank (including c184 for the 17-row
+program), the backend callback and the fragment-stage refusal; no frame is
+claimed here.
 
 ## Named refusals (`refusals.json`)
 

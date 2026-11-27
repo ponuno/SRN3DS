@@ -36,7 +36,7 @@ static D9VertexElement entry(unsigned stream, unsigned offset, unsigned type,
 }
 
 static void skin_decl(D9Decl *decl, unsigned index_type) {
-    D9VertexElement elements[4];
+    D9VertexElement elements[4] = {{0}};
     elements[0] = entry(0, 0, D9_DECL_FLOAT3, D9_USAGE_POSITION, 0);
     elements[1] = entry(0, 12, D9_DECL_FLOAT4, 1 /* blendweight */, 0);
     elements[2] = entry(0, 28, index_type, 2 /* blendindices */, 0);
@@ -58,15 +58,15 @@ int main(void) {
         CHECK(p != NULL, "entry is readable");
         if (!p) continue;
         CHECK(d9_pica_vs_validate(p, why, sizeof why) == 0, why);
-        CHECK(p->shbin_size == 388u || p->shbin_size == 420u ||
-              p->shbin_size == 444u, "shbin size is the emitter's");
+        CHECK(p->shbin_size == 500u || p->shbin_size == 532u ||
+              p->shbin_size == 548u, "shbin size is the emitter's");
         CHECK(p->shbin[0] == 'D' && p->shbin[1] == 'V', "DVLB magic");
         CHECK(strlen(p->shbin_sha256) == 64, "pinned shbin SHA-256 present");
     }
 
     const D9PicaVsProgram *p = d9_pica_vs_lookup(SKIN_F8FFAECD_SHA);
     CHECK(p != NULL, "exact-hash lookup hits f8ffaecd");
-    CHECK(p && p->instructions == 35u, "f8ffaecd has 35 emitted instructions");
+    CHECK(p && p->instructions == 53u, "f8ffaecd has 53 emitted instructions");
     CHECK(p && p->uniform_rows == 16u, "f8ffaecd uses c0..c15");
     CHECK(p && p->attr_count == 3u, "f8ffaecd declares position/weight/index");
     CHECK(d9_pica_vs_lookup(SKIN_60DBD11A_SHA) != NULL, "60dbd11a is present");
@@ -135,6 +135,40 @@ int main(void) {
     mask[184u >> 5] |= 1u << (184u & 31u);
     why[0] = 0;
     CHECK(d9_pica_vs_bank_ready(&bank, mask, 8, why, sizeof why) == 0, why);
+    /* c184 carries the UV transform; it must be a real row, not an implicit
+     * zero.  Dropping it is a named refusal. */
+    mask[184u >> 5] &= ~(1u << (184u & 31u));
+    why[0] = 0;
+    CHECK(d9_pica_vs_bank_ready(&bank, mask, 8, why, sizeof why) != 0,
+          "missing c184 is a named refusal");
+    CHECK(strstr(why, "c184") != NULL, why);
+    mask[184u >> 5] |= 1u << (184u & 31u);
+
+    /* A program's attr_count/registers are part of the validated contract. */
+    {
+        D9PicaVsProgram bad = *p;
+        bad.attrs[0].reg = 16u;
+        why[0] = 0;
+        CHECK(d9_pica_vs_validate(&bad, why, sizeof why) != 0,
+              "attribute register 16 is rejected");
+        CHECK(strstr(why, "attribute") != NULL, why);
+        bad = *p;
+        bad.attr_count = 0;
+        why[0] = 0;
+        CHECK(d9_pica_vs_validate(&bad, why, sizeof why) != 0,
+              "attr_count=0 is rejected");
+    }
+    /* A DVLE offset that would overflow the old dvle+4 check is rejected. */
+    {
+        D9PicaVsProgram bad = *p;
+        uint8_t blob[512];
+        memcpy(blob, p->shbin, p->shbin_size);
+        blob[8] = 0xff; blob[9] = 0xff; blob[10] = 0xff; blob[11] = 0x7f;
+        bad.shbin = blob;
+        why[0] = 0;
+        CHECK(d9_pica_vs_validate(&bad, why, sizeof why) != 0,
+              "huge DVLE offset is rejected without overflow");
+    }
 
     if (failures) {
         printf("%d/%d checks failed\n", failures, checks);

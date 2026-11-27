@@ -10,30 +10,43 @@
 .proc main
     mul r0, d185.xxxx, v4.zyxw
     flr r0, r0
-    mova a0, r0
+    mov r12, r0
+    mova a0, r12.xxxx
+    mova a0, r12.yyyy
     mul r0, c0[a0.x], v3.yyyy
+    mova a0, r12.xxxx
     mul r14, c0[a0.x], v3.xxxx
     add r0, r14, r0
+    mova a0, r12.zzzz
     mul r14, c0[a0.x], v3.zzzz
     add r0, r14, r0
+    mova a0, r12.wwww
     mul r14, c0[a0.x], v3.wwww
     add r0, r14, r0
     mov r15, d185.zzzy
     mad r1, v0.xyzx, d185.yyyz, r15
     dp4 r0.x, r1, r0
+    mova a0, r12.yyyy
     mul r2, c1[a0.x], v3.yyyy
+    mova a0, r12.xxxx
     mul r14, c1[a0.x], v3.xxxx
     add r2, r14, r2
+    mova a0, r12.zzzz
     mul r14, c1[a0.x], v3.zzzz
     add r2, r14, r2
+    mova a0, r12.wwww
     mul r14, c1[a0.x], v3.wwww
     add r2, r14, r2
     dp4 r0.y, r1, r2
+    mova a0, r12.yyyy
     mul r2, c2[a0.x], v3.yyyy
+    mova a0, r12.xxxx
     mul r14, c2[a0.x], v3.xxxx
     add r2, r14, r2
+    mova a0, r12.zzzz
     mul r14, c2[a0.x], v3.zzzz
     add r2, r14, r2
+    mova a0, r12.wwww
     mul r14, c2[a0.x], v3.wwww
     add r2, r14, r2
     dp4 r0.z, r1, r2
@@ -46,5 +59,10 @@
     mad outtc0.xy, v1, c16.zwzw, r15
     mov outtc0.zw, d185.yyyy
     mov outtc2.x, v2.wwww
+    mov r15, outpos
+    mov outpos.x, r15.yyyy
+    mov outpos.y, -r15.xxxx
+    add outpos.z, r15.zzzz, -r15.wwww
+    mov outpos.w, r15.wwww
     end
 .end

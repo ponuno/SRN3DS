@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import sys
 import unittest
 
@@ -106,6 +107,98 @@ class EmitterCatalogTest(unittest.TestCase):
 
 
 class EmitterNumericTest(unittest.TestCase):
+    def test_four_weights_use_four_distinct_bone_indices(self):
+        """The retail idiom writes all four a0 components and the address token
+        selects one per influence.  a0.x-only lowering collapses them onto the
+        first bone; this test makes the four matrices distinguishable."""
+        plans = E.load_plans()
+        plan = plans["skin.vs.f8ffaecd"]
+        try:
+            ir = E.find_ir(plan["sha256"])
+        except E.Refusal:
+            self.skipTest("retail archive absent")
+        text = E.emit(plan, ir)
+        # a0.x = v2.z, a0.y = v2.y, a0.z = v2.x, a0.w = v2.w (zyxw swizzle).
+        inputs = {
+            0: [1.0, 2.0, 3.0, 1.0],
+            1: [0.4, 0.3, 0.2, 0.1],
+            2: [2 / 255.0, 1 / 255.0, 0 / 255.0, 3 / 255.0],
+        }
+        d3d = {i: [0.0] * 4 for i in range(256)}
+        pica = {}
+        for bone in range(4):
+            rows = [[1.0 + bone, 0.1 * bone, 0.0, 2.0 * bone],
+                    [0.0, 1.0 + 2.0 * bone, 0.0, 3.0 * bone],
+                    [0.0, 0.0, 1.0 + 3.0 * bone, 4.0 * bone]]
+            for r in range(3):
+                d3d[3 * bone + r] = list(rows[r])
+                pica[3 * bone + r] = list(rows[r])
+        wvp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0],
+               [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+        for i in range(4):
+            d3d[180 + i] = list(wvp[i])
+            pica[12 + i] = list(wvp[i])
+        defs = {184: tuple(ir.defs[184])}
+        d3d[184] = list(defs[184])
+        ref = E.interpret_ir(ir, inputs, d3d, defs)
+        emitted = E.interpret_pica(text, inputs, pica,
+                                   {"d184": list(defs[184])})
+        expected = E.pica_clip(ref[0])
+        got = emitted["outpos"]
+        self.assertLess(max(abs(expected[i] - got[i]) for i in range(4)), 1e-5)
+        # A model that uses bone 0 for every weight must disagree, otherwise the
+        # sample does not distinguish the four indices.
+        pos = [1.0, 2.0, 3.0, 1.0]
+        wrong = []
+        for r in range(3):
+            row = d3d[r]
+            wrong.append(sum(row[c] * pos[c] for c in range(4)))
+        wrong = E.pica_clip(wrong + [1.0])
+        self.assertGreater(max(abs(expected[i] - wrong[i]) for i in range(4)),
+                           1e-3)
+        for comp in ("xxxx", "yyyy", "zzzz", "wwww"):
+            self.assertIn("mova a0, r12.%s" % comp, text)
+
+    def test_c184_is_a_real_uniform_row(self):
+        """The 17-row program's UV transform lives in c184.  It must be filled
+        with a non-zero value, otherwise a shader that drops the transform
+        still compares as 0 == 0."""
+        plans = E.load_plans()
+        plan = plans["skin.vs.60dbd11a"]
+        try:
+            ir = E.find_ir(plan["sha256"])
+        except E.Refusal:
+            self.skipTest("retail archive absent")
+        abs_rows, rows = E._d3d_const_rows(ir, E.BONES)
+        self.assertIn(184, abs_rows)
+        self.assertEqual(rows, 17)
+        defs = {ins.dst.index: tuple(ins.literal) for ins in ir.body
+                if ins.opcode == 0x51 and ins.dst is not None}
+        rng = random.Random(7)
+        d3d, pica = E.build_constants(rng, E.BONES, defs, abs_rows)
+        self.assertTrue(any(abs(v) > 1e-6 for v in pica[abs_rows[184]]),
+                        "c184 must carry the UV transform")
+        inputs = E.build_sample(rng, plan, E.BONES)
+        text = E.emit(plan, ir)
+        emitted = E.interpret_pica(text, inputs, pica,
+                                   {"d%d" % k: list(v)
+                                    for k, v in defs.items()})
+        self.assertTrue(any(abs(v) > 1e-6 for v in emitted["outtc0"]),
+                        "UV output must not be the zero default")
+
+    def test_empty_or_unassembled_run_is_not_verified(self):
+        plans = E.load_plans()
+        plan = plans["skin.vs.f8ffaecd"]
+        try:
+            ir = E.find_ir(plan["sha256"])
+        except E.Refusal:
+            self.skipTest("retail archive absent")
+        empty, _ = E.verify(plan, ir, samples=0)
+        self.assertEqual(empty["status"], "fail")
+        unassembled, _ = E.verify(plan, ir, samples=4, compile_asm=False)
+        self.assertEqual(unassembled["status"], "fail")
+        self.assertEqual(unassembled["picasso"], "skipped")
+
     def test_three_plans_regenerate_and_match(self):
         try:
             data = E.find_data()

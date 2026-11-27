@@ -3105,6 +3105,16 @@ static int draw_skinned(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
                 "PICA VS skinned vertex decode failed");
             return rc;
         }
+        /* The emitted program indexes the 4-bone palette window.  Any larger
+         * BLENDINDICES byte would silently read c12+ (the WVP rows) instead of
+         * a bone matrix, so it is a named refusal, not a wrap. */
+        for(unsigned j=0;j<4;++j){
+            if(d->skin_scratch[i].index[j]>=D9_PICA_VS_BONES){
+                set_diagnosis(d,"PICA VS skinned draw: BLENDINDICES references a "
+                                "bone outside the 4-bone palette window");
+                return D9_UNSUPPORTED;
+            }
+        }
     }
     d->skin_scratch_count=(unsigned)n;
     D9PicaVsDraw draw;
