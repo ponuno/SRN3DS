@@ -468,6 +468,9 @@ Add-Test "menu_swf_mask_batch" $common @("source/bsa_reader.c", "source/menu_swf
 Add-Test "menu_swf_partial_mask" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "source/menu_swf_clip.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_batch.c", "tests/menu_swf_partial_mask_smoke.c") @()
 Add-Test "menu_swf_gradient" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_batch.c", "tests/menu_swf_gradient_smoke.c") @()
 Add-Test "menu_swf_html" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "source/menu_swf_batch.c", "tests/menu_swf_html_smoke.c") @()
+# One diagnostic StartMenu.swf frame -> RGBA8 (NOT an engine frame) on a
+# synthetic movie, so the renderer runs in CI without retail bytes.
+Add-Test "menu_swf_frame_probe" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "source/menu_swf_font.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "source/menu_swf_raster.c", "source/menu_swf_atlas.c", "source/menu_swf_batch.c", "tests/menu_swf_frame_probe.c") @("--self-test")
 Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "tests/d3d9_capture_smoke.c") @()
 $irPilotGen = Join-Path $root "pilot_out_mult\D3DXMatrixMultiply\gen"
 if ((Test-Path (Join-Path $irPilotGen "pilot_00.c")) -and (Test-Path (Join-Path $irPilotGen "pilot_table.c"))) {
@@ -665,7 +668,7 @@ foreach ($name in $tests.Keys) {
 }
 
 Write-Log "PYTHON tests"
-$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/shader_plan_merge_test.py", "tests/deploy_device_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py")
+$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/menu_swf_probe_test.py", "tests/shader_plan_merge_test.py", "tests/deploy_device_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py")
 if ($SkipPython) {
     $pyTests = @()
 } else {
