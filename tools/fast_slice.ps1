@@ -96,12 +96,18 @@ while (-not $p.HasExited) {
         break
     }
     Start-Sleep -Milliseconds 400
-    if (-not $faultSeen -and (Test-Path $log)) {
-        $hit = Select-String -Path $log -Pattern 'Guest fault|unmapped addr|no terminator|unknown function|block has no' -Quiet
+    if (-not $faultSeen) {
+        $hit = $false
+        foreach ($f in @($log, "$log.err")) {
+            if ((Test-Path $f) -and (Select-String -Path $f -Pattern 'Guest fault|unmapped addr|no terminator|unknown function|block has no' -Quiet)) { $hit = $true; break }
+        }
         if ($hit) { $faultSeen = Get-Date }
     }
-    if ($StopAfterDraw -and (Test-Path $log)) {
-        $draw = Select-String -Path $log -Pattern 'DrawPrimitive|DrawIndexed' -Quiet
+    if ($StopAfterDraw) {
+        $draw = $false
+        foreach ($f in @($log, "$log.err")) {
+            if ((Test-Path $f) -and (Select-String -Path $f -Pattern 'DrawPrimitive|DrawIndexed' -Quiet)) { $draw = $true; break }
+        }
         if ($draw) { Write-Host "[fast] draw seen, stopping"; try { $p.Kill() } catch {}; break }
     }
     if ($faultSeen -and ((Get-Date) - $faultSeen).TotalSeconds -ge 2) {
