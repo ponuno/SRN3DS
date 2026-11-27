@@ -264,5 +264,40 @@
    "chunks": 6090
   }
  },
- "note": "Form labels are pack-local derived metadata.  The census class column is the phase-1 planner's first refusal, not a shape."
+ "note": "Form labels are pack-local derived metadata.  The census class column is the phase-1 planner's first refusal, not a shape.",
+ "plans": {
+  "translated": 107,
+  "draw_enabled": 0,
+  "refused": 4884,
+  "exact_full_contract": 5,
+  "approx": 100,
+  "approx_classes": {
+   "backlight": {
+    "hashes": 5,
+    "chunks": 25
+   },
+   "envmap": {
+    "hashes": 8,
+    "chunks": 50
+   },
+   "other": {
+    "hashes": 5,
+    "chunks": 23
+   },
+   "point": {
+    "hashes": 59,
+    "chunks": 69
+   },
+   "specular": {
+    "hashes": 15,
+    "chunks": 75
+   },
+   "subsurface": {
+    "hashes": 8,
+    "chunks": 55
+   }
+  },
+  "loop_truncated": 24,
+  "rcp_rsq_sampled": 83
+ }
 }

@@ -6,7 +6,7 @@ lit material shaders, deferred/shadow passes and particle/effect shaders
 
 * census families: `lighting/deferred/shadows`, `particles/effects`
 * chunks: **7459** / unique hashes: **4991**
-* coverage: 34 translated, 0 draw-enabled, 4957 refused
+* coverage: 107 translated, 0 draw-enabled, 4884 refused
 * first step: split the normal/basis dp4 prebake out of the PS plan
 
 `manifest.json` lists every bytecode SHA-256 in this pack together with its

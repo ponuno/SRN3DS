@@ -222,3 +222,45 @@ approximation error is not a draw claim; it is an offline measurement of the
 declared reduced specification.
 
 No core/TEV file, `docs/shader_plans.json` entry or runtime slot was changed.
+
+## 6. Phase 3: breadth pass, 107 translated (+73)
+
+Status is unchanged in the two places that matter: `DevCaps` is not touched and
+**no frame is claimed**.  `draw_enabled` stays 0 for every pack row and the
+runtime slot count stays 0.
+
+`plans.json` now has **105 pack rows / 323 chunks**: **5 full-contract exact**
+rows (26 chunks) and **100 measured approximations** (297 chunks).  With the two
+rows owned by the shared catalog (`menu.logo.ps`, `game.ps`) lighting coverage
+is **107 translated / 0 draw-enabled / 4,884 refused** (was 34 / 0 / 4,957).
+The added hashes split by approximation class as: point 59, specular 15,
+envmap 8, subsurface 8, backlight 5, other 5.
+
+Full contract (stage list + symbolic/contract verification, `contract: "full"`):
+
+| recipe | stages | note |
+|---|---:|---|
+| `base_lit`, `base_lit_shadow` | 6 / 5 | existing material-contract recipes |
+| `base_lit_contract` x2 | 6 | p1200005 decode and explicit tangent-basis `dp3`/`nrm` prebaked; `verify()` max error `1.1e-16` |
+| `direct_4_stage` | 4 | generic `compile.plan_ps` accepted the SSA-renamed IR symbolically |
+
+Approximation policy in this pass:
+
+* **def literals outside [0,1]** are recorded in `approximation.def_literals`;
+  the normal-decode pair `{2,-1,1,0}` / `{-0.5,1,0,0}` is folded into the
+  prebaked normal asset, everything else is moved to a scaled uniform register.
+* **rcp/rsq** are fitted over a declared positive domain (64 samples) with the
+  better of a constant and a least-squares line; each row records coefficients,
+  domain, `max_abs_error` and `mean_abs_error`.
+* **cmp** is treated as a branchless select; **ifc** takes the then arm and is
+  recorded as `branchless_select`; 10 selected loop hashes contain an `ifc`.
+* **rep/loop** bodies are truncated to 2 iterations (`loop_truncated_to: 2`);
+  24 selected rows are loop-truncated.
+* every row keeps `quality: "approx"`, `approximation.lost_terms/reason`,
+  measured `approx_error` (32 samples, mean <= 0.098) and `draw_enabled: 0`.
+
+Pack-local files changed: `plans.json`, `coverage.json`, `refusals.json`
+(new, 4,884 rows / 7,130 refused chunks), `manifest.json`, `test_lighting_plans.py`.
+Shared generated files were refreshed (`docs/shader_coverage.json`,
+`source/shader_packs/index.json`); no C file, shared plan row, `DevCaps` value or
+runtime slot changed.

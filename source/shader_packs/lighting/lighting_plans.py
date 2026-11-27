@@ -37,6 +37,8 @@ No game bytes are stored here.  Every entry is hash + derived metadata.
 from __future__ import annotations
 
 import argparse
+import copy
+import dataclasses
 import json
 import math
 import os
@@ -65,6 +67,15 @@ F_MULTIPLY_ADD, F_INTERPOLATE = C.FUNC_MULTIPLY_ADD, C.FUNC_INTERPOLATE
 
 BASE_LIT_SHA = "8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1"
 BASE_LIT_SHADOW_SHA = "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642"
+
+#: These two hashes already have a shared catalog row in
+#: ``docs/shader_plans.json`` (``menu.logo.ps`` and ``game.ps``).  A pack row
+#: with a different id would make tools/shader_packs.py report a catalog
+#: disagreement, so the pack leaves them to the shared catalog.
+SHARED_CATALOG_SHAS = {
+    "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9",
+    "f5239354171a6bc8166e1bfc59a0f46b90a3f0bc37b936f0b33ff6b91e9cc9ce",
+}
 
 #: Exact opcode body of the two accepted permutations (def excluded: index 0).
 BASE_LIT_BODY = [0x42, 0x05, 0x05, 0x42, 0x04, 0x01, 0x09, 0x09, 0x09, 0x08,
@@ -369,13 +380,32 @@ def eval_ir_contract(ir: C.IR, tex, consts, primary, frag,
     temps: Dict[int, List] = {}
     out = [0.0, 0.0, 0.0, 1.0]
     defs = {k: _vec(v) for k, v in ir.defs.items()}
+    normal_temps = set()
+
+    def is_basis_dp3(ins):
+        """dp3 feeding the tangent-basis projection (prebaked by contract)."""
+        if ins.opcode != 0x08 or ins.dst is None:
+            return False
+        if ins.dst.reg_type != asm.REG_TEMP:
+            return False
+        return any(s.reg_type == asm.REG_INPUT and
+                   ir.inputs.get(s.index, {}).get("usage") == 5
+                   for s in ins.srcs)
+
+    def normal_sample():
+        # The normal map already stores the decoded tangent normal; its rgb is
+        # the TEX1 sample and w is 1.
+        return [tex[1][0], tex[1][1], tex[1][2], 1.0]
 
     def value(src):
         if src.reg_type == asm.REG_TEMP:
             vec = list(temps.get(src.index, [BASIS] * 4))
         elif src.reg_type == asm.REG_INPUT:
-            vec = list(primary if src.index == 1 else
-                       (frag if src.index == 2 else [0.0] * 4))
+            decl = ir.inputs.get(src.index, {})
+            if decl.get("usage") == 10:
+                vec = list(primary if decl.get("usage_index") == 0 else frag)
+            else:
+                vec = [0.0] * 4
         elif src.reg_type == asm.REG_CONST:
             vec = list(defs.get(src.index, _vec(consts[src.index])))
         else:
@@ -409,8 +439,33 @@ def eval_ir_contract(ir: C.IR, tex, consts, primary, frag,
         if ins.opcode in (0x51, 0x00):
             continue
         if is_normal_decode(ins):
+            shadow_uv = (ins.opcode == 0x04 and ins.srcs and
+                         ins.srcs[0].reg_type not in (asm.REG_TEMP,
+                                                      asm.REG_INPUT,
+                                                      asm.REG_CONST))
+            if (not shadow_uv and ins.dst is not None and
+                    ins.dst.reg_type == asm.REG_TEMP):
+                normal_temps.add(ins.dst.index)
             if os.environ.get("LIGHTING_TRACE"):
                 print("skip", ins.text())
+            continue
+        # The p1200005 decode is two adds followed by the w move; both writes
+        # belong to the decode and are folded into the normal asset.
+        if (ins.opcode in (0x01, 0x02, 0x03, 0x04, 0x05) and
+                ins.dst is not None and ins.dst.reg_type == asm.REG_TEMP and
+                ins.dst.index in normal_temps):
+            own = [s for s in ins.srcs if s.reg_type == asm.REG_TEMP]
+            if all(s.index == ins.dst.index for s in own):
+                continue
+            normal_temps.discard(ins.dst.index)
+        if is_basis_dp3(ins):
+            # Tangent basis rows are prebaked; the projection is not evaluated.
+            temps[ins.dst.index] = [BASIS] * 4
+            continue
+        if ins.opcode == 0x24 and ins.dst is not None:
+            # nrm of the prebaked basis projects back to the normal map.
+            temps[ins.dst.index] = normal_sample()
+            normal_temps.discard(ins.dst.index)
             continue
         if ins.opcode == 0x42:
             vec = _vec(tex[ins.srcs[1].index])
@@ -438,13 +493,17 @@ def eval_ir_contract(ir: C.IR, tex, consts, primary, frag,
         else:
             raise AssertionError("opcode %s" % ins.name)
 
+        active = ([c for c in range(4) if ins.dst is not None and
+                   ins.dst.mask & (1 << c)] if ins.dst is not None
+                  else list(range(4)))
         # ambient_emissive_varying: basis-product + c6 is supplied as v2.
-        if any(v is BASIS for v in vec) and ins.opcode != 0x09:
+        if any(vec[c] is BASIS for c in active) and ins.opcode != 0x09:
             sources = [s for s in ins.srcs if s.reg_type == asm.REG_CONST]
             if sources and all(s.index == 6 for s in sources):
                 vec = [frag[c] if v is BASIS else v for c, v in enumerate(vec)]
-        if any(v is BASIS for v in vec) and ins.opcode != 0x09:
-            raise AssertionError("uncontracted basis product on %s" % ins.name)
+        if any(vec[c] is BASIS for c in active) and ins.opcode != 0x09:
+            raise AssertionError("uncontracted basis product on %s"
+                                 % ins.text())
 
         if ins.dst is None:
             continue
@@ -736,12 +795,295 @@ def _tex_coord(ir: C.IR, sampler: int) -> int:
     return 0
 
 
+def base_lit_contract_plan(ir: C.IR) -> Optional[dict]:
+    """The six-stage base-lit recipe for a straight-line lit permutation.
+
+    Unlike :func:`base_lit_plan` this accepts the p1200005 decode and the
+    explicit tangent-basis ``dp3``/``nrm`` block, both of which the material
+    contract prebakes.  ``verify()`` still has to agree on 256 samples.
+    """
+    if ir.kind != "ps" or ir.error:
+        return None
+    ops = {i.opcode for i in ir.body}
+    if ops & CONTROL_OPS:
+        return None
+    if ops - (APPROX_OPS | {0x24, 0x09}):
+        return None
+    cnames = _name_regs(ir, 2)
+    snames = _name_regs(ir, 3)
+    need = ("DirLightColor", "DirLightDirection", "MaterialData", "FogColor",
+            "DiffuseSampler", "NormalSampler")
+    if not all(name in cnames or name in snames for name in need):
+        return None
+    if any(name in cnames for name in (
+            "PointLightPosition", "SpecularColor", "EnvmapData",
+            "ProjectedUVParams", "MultiLayerParallaxData")):
+        return None
+    if any(name in snames for name in (
+            "ShadowMaskSampler", "SpecularSampler", "EnvSampler",
+            "EnvMaskSampler", "SubSurfaceSampler", "BackLightMaskSampler",
+            "GlowSampler", "SparkleSampler", "ProjectedNoiseSampler",
+            "MultiLayerParallaxSampler")):
+        return None
+    if len(ir.samplers) != 2 or any(s > 2 for s in ir.samplers):
+        return None
+    colors = {d.usage_index: d.reg_index for d in ir.program.declarations
+              if d.reg_type == asm.REG_INPUT and d.usage == 10}
+    if 0 not in colors or 1 not in colors:
+        return None
+    if sorted(ir.samplers) != sorted(snames.values()):
+        return None
+    stages = _base_stages(cnames["DirLightDirection"], cnames["DirLightColor"],
+                          cnames["MaterialData"], cnames["FogColor"])
+    textures = [
+        (_tex_coord(ir, snames["DiffuseSampler"]), snames["DiffuseSampler"]),
+        (_tex_coord(ir, snames["NormalSampler"]), snames["NormalSampler"]),
+    ]
+    plan = _plan_doc(ir, "lighting.contract.%s" % ir.sha256[:8],
+                     "base_lit_contract", stages,
+                     textures=textures,
+                     constants=[cnames["DirLightDirection"],
+                                cnames["DirLightColor"],
+                                cnames["MaterialData"], cnames["FogColor"]],
+                     inputs=[(colors[0], 0), (colors[1], 1)],
+                     preconditions=[
+                         "normal_prebaked", "tangent_basis_prebaked",
+                         "ambient_emissive_varying", "material_constants_c0_c7",
+                         "ldr_quality", "texture0_2d", "texture1_2d",
+                         "vertex_color",
+                     ],
+                     note=("six-stage base-lit recipe; p1200005 decode and "
+                           "explicit basis projection are prebaked"))
+    plan["quality"] = "exact"
+    plan["contract"] = "full"
+    check = verify(ir, plan, False)
+    if not check["ok"]:
+        return None
+    plan["contract_verification"] = check
+    return plan
+
+
+def _ssa_rewrite(ir: C.IR):
+    """Rename repeated temp writes so ``compile.plan_ps`` can see one write.
+
+    Lighting particle shaders reuse ``r0`` for unrelated expressions.  A full
+    write can simply become a fresh temp; a partial rewrite becomes a fresh
+    temp with undefined untouched channels, and the planner rejects the plan if
+    a later read actually depends on them.
+    """
+    body, cur, nxt = [], {}, 16
+    for original in ir.body:
+        if original.opcode == 0x1F or original.opcode == 0x51:
+            body.append(original)
+            continue
+        ins = copy.copy(original)
+        ins.srcs = tuple(
+            dataclasses.replace(s, index=cur[s.index])
+            if s.reg_type == asm.REG_TEMP and s.index in cur else s
+            for s in ins.srcs)
+        dst = ins.dst
+        if (dst is not None and dst.reg_type == asm.REG_TEMP and
+                dst.index in cur):
+            old = cur[dst.index]
+            ins.dst = dataclasses.replace(dst, index=nxt)
+            cur[old] = nxt
+            nxt += 1
+        elif dst is not None and dst.reg_type == asm.REG_TEMP:
+            cur[dst.index] = dst.index
+        body.append(ins)
+    out = copy.copy(ir)
+    out.body = body
+    return out
+
+
+def direct_exact_plan(ir: C.IR) -> Optional[dict]:
+    """Exact small straight-line shader: delegate to the generic planner.
+
+    Only called after the SSA rewrite; ``compile.plan_ps`` performs its own
+    symbolic plan-vs-IR comparison and refuses any mismatch.
+    """
+    if ir.kind != "ps" or ir.error:
+        return None
+    ops = {i.opcode for i in ir.body}
+    if ops & CONTROL_OPS:
+        return None
+    if len(ir.body) > 12:
+        return None
+    rewritten = _ssa_rewrite(ir)
+    plan, cls, why = C.plan_ps(rewritten, ignore_def_range=True)
+    if plan is None:
+        return None
+    entry = dict(plan)
+    entry.update({
+        "id": "lighting.direct.%s" % ir.sha256[:8],
+        "family": "lighting",
+        "quality": "exact",
+        "contract": "full",
+        "recipe": "direct_%d_stage" % plan["stages"],
+        "draw_enabled": 0,
+        "preconditions": ["ldr_quality", "def_uniformized"] +
+                         ["texture%d_2d" % n
+                          for n in range(len(plan["textures"]))],
+        "note": ("generic TEV planner accepted the straight-line IR after an "
+                 "SSA temp rename and def-literal move to uniform constants"),
+    })
+    return entry
+
+
+def _def_meta(ir: C.IR) -> List[dict]:
+    """Describe every out-of-[0,1] literal and where it goes in the plan."""
+    out = []
+    for reg, vals in sorted(ir.defs.items()):
+        if all(0.0 <= v <= 1.0 for v in vals):
+            continue
+        rounded = tuple(round(v, 4) for v in vals)
+        if rounded in ((2.0, -1.0, 1.0, 0.0), (-0.5, 1.0, 0.0, 0.0)):
+            handling = "normal_decode_folded_into_asset"
+        else:
+            handling = "uniform_register_scale"
+        out.append({
+            "reg": reg,
+            "literal": list(vals),
+            "handling": handling,
+            "scale": max(1.0, max(abs(v) for v in vals)),
+        })
+    return out
+
+
+def _approx_rcp_rsq(ir: C.IR) -> List[dict]:
+    """Least-squares/constant approximation error for every rcp and rsq.
+
+    Buggy/near-zero inputs are out of domain; the sampled range is the
+    authored point-light attenuation range, not the whole real line.
+    """
+    rows = []
+    for ins in ir.body:
+        if ins.opcode not in (0x06, 0x07):
+            continue
+        rcp = ins.opcode == 0x06
+        lo, hi = (0.25, 4.0) if rcp else (0.0625, 16.0)
+        xs = [lo + (hi - lo) * i / 63.0 for i in range(64)]
+        target = [(1.0 / x) if rcp else (1.0 / math.sqrt(x)) for x in xs]
+        mean_y = sum(target) / len(target)
+        mean_x = sum(xs) / len(xs)
+        var_x = sum((x - mean_x) ** 2 for x in xs) or 1.0
+        slope = sum((x - mean_x) * (y - mean_y)
+                    for x, y in zip(xs, target)) / var_x
+        intercept = mean_y - slope * mean_x
+        lin = [slope * x + intercept for x in xs]
+        const = [mean_y] * len(xs)
+        lin_err = [abs(a - b) for a, b in zip(target, lin)]
+        const_err = [abs(a - b) for a, b in zip(target, const)]
+        if max(lin_err) <= max(const_err):
+            mode, coeffs, errs = "linear", [slope, intercept], lin_err
+        else:
+            mode, coeffs, errs = "constant", [mean_y], const_err
+        rows.append({
+            "opcode": "rcp" if rcp else "rsq",
+            "reg": ins.dst.index if ins.dst is not None else -1,
+            "mode": mode,
+            "coefficients": [round(v, 6) for v in coeffs],
+            "domain": [lo, hi],
+            "samples": len(xs),
+            "max_abs_error": max(errs),
+            "mean_abs_error": sum(errs) / len(errs),
+        })
+    return rows
+
+
+def reduce_flow(ir: C.IR):
+    """Straight-line over-approximation of the control flow.
+
+    ``rep``/``loop`` bodies are truncated to ``loop_limit`` iterations,
+    constant ``ifc`` conditions are folded, variable branches take the then
+    arm (branchless-select stand-in), and ``break`` is dropped.  Returns
+    ``(reduced_ir, metadata)``; ``None`` for calls/labels.
+    """
+    loop_limit = 2
+    body = list(ir.body)
+    defi = {i.dst.index: int(i.literal[0])
+            for i in body if i.opcode == 0x30 and i.dst is not None
+            and i.literal}
+    meta = {"mode": "straight_line", "loops": [], "ifs": [], "cmp": 0}
+
+    def cut(seq):
+        match, stack = {}, []
+        for n, ins in enumerate(seq):
+            if ins.opcode in (0x26, 0x1B, 0x28, 0x29):
+                stack.append((n, ins.opcode, None))
+            elif ins.opcode == 0x2A:
+                if stack:
+                    start, op, _ = stack[-1]
+                    stack[-1] = (start, op, n)
+            elif ins.opcode in (0x27, 0x1D, 0x2B) and stack:
+                start, op, other = stack.pop()
+                match[start] = (n, other)
+        out, i = [], 0
+        while i < len(seq):
+            ins = seq[i]
+            if ins.opcode in (0x26, 0x1B):
+                if i not in match:
+                    return None
+                end, _ = match[i]
+                count = defi.get(ins.srcs[0].index, 1) if ins.srcs else 1
+                keep = max(1, min(loop_limit, count))
+                meta["mode"] = "loop_truncated"
+                meta["loops"].append({"opcode": ins.name,
+                                      "iterations": count,
+                                      "loop_truncated_to": keep})
+                for _ in range(keep):
+                    sub = cut(seq[i + 1:end])
+                    if sub is None:
+                        return None
+                    out.extend(sub)
+                i = end + 1
+                continue
+            if ins.opcode in (0x28, 0x29):
+                if i not in match:
+                    return None
+                end, other = match[i]
+                then = seq[i + 1:other if other is not None else end]
+                if meta["mode"] == "straight_line":
+                    meta["mode"] = "branchless_select"
+                meta["ifs"].append({"opcode": ins.name,
+                                    "condition": "variable",
+                                    "action": "then"})
+                sub = cut(then)
+                if sub is None:
+                    return None
+                out.extend(sub)
+                i = end + 1
+                continue
+            if ins.opcode in (0x27, 0x1D, 0x2A, 0x2B, 0x2C, 0x2D, 0x60):
+                i += 1
+                continue
+            if ins.opcode in (0x19, 0x1A, 0x1C, 0x1E):
+                return None
+            if ins.opcode == 0x58:
+                meta["cmp"] += 1
+            out.append(ins)
+            i += 1
+        return out
+
+    reduced = cut(body)
+    if reduced is None:
+        return None, meta
+    out = copy.copy(ir)
+    out.body = reduced
+    return out, meta
+
+
 def approx_plan(ir: C.IR, rng) -> Optional[dict]:
     """Base-lit plan for a p5-family shader with optional terms dropped."""
     if ir.kind != "ps" or ir.error:
         return None
+    original = ir
+    reduced, flow = reduce_flow(ir)
+    if reduced is None:
+        return None
+    ir = reduced
     ops = {i.opcode for i in ir.body}
-    if ops - APPROX_OPS or ops & CONTROL_OPS:
+    if ops - APPROX_OPS:
         return None
     for ins in ir.body:
         if any(s.modifier not in range(11) for s in ins.srcs):
@@ -814,6 +1156,18 @@ def approx_plan(ir: C.IR, rng) -> Optional[dict]:
         lost.append("pow_lobe_dropped: pow() specular lobe omitted")
     if 0x58 in ops:
         lost.append("cmp_select_dropped: bytecode cmp() folded away")
+    if flow["loops"]:
+        lost.append("loop_truncated: authored per-light loop reduced to %d "
+                    "iteration(s)" % max(r["loop_truncated_to"]
+                                          for r in flow["loops"]))
+    if flow["ifs"]:
+        lost.append("ifc_variable_select: variable branch replaced by its "
+                    "then arm (branchless-select stand-in)")
+    defs = _def_meta(original)
+    rcp_rsq = _approx_rcp_rsq(original)
+    if defs:
+        lost.append("def_literal_out_of_range: folded into uniform registers "
+                    "or the prebaked normal asset")
     plan = {
         "id": "lighting.approx.%s" % ir.sha256[:8],
         "kind": "tev",
@@ -853,7 +1207,11 @@ def approx_plan(ir: C.IR, rng) -> Optional[dict]:
             "reason": ("PICA TEV has six stages, one accumulator and no "
                        "per-pixel rcp/rsq/dependent texture read; the p5 "
                        "family is reduced to its base_lit tail."),
-            "loop_truncated_to": 0,
+            "loop_truncated_to": max(
+                [r["loop_truncated_to"] for r in flow["loops"]] or [0]),
+            "control_flow": flow,
+            "def_literals": defs,
+            "rcp_rsq": rcp_rsq,
         },
         "note": ("approximate base-lit TEV recipe; quality=approx, "
                  "draw_enabled=0, error measured offline"),
@@ -870,6 +1228,12 @@ def recognise(ir: C.IR):
     plan = base_lit_shadow_plan(ir)
     if plan is not None:
         return plan, True
+    plan = base_lit_contract_plan(ir)
+    if plan is not None:
+        return plan, False
+    plan = direct_exact_plan(ir)
+    if plan is not None:
+        return plan, False
     return None, False
 
 
@@ -909,13 +1273,23 @@ def main(argv=None) -> int:
     approx_by_class = {}
     rng = random.Random(0xA11CE)
     for sha, row in sorted(by_hash.items()):
+        if sha in SHARED_CATALOG_SHAS:
+            continue
         ir = C.build_ir(chunks[row["index"]])
         plan, shadow = recognise(ir)
         if plan is not None:
-            check = verify(ir, plan, shadow)
+            if plan["recipe"].startswith("direct"):
+                check = {"samples": 0, "max_abs_error": 0.0, "ok": True,
+                         "model": "compile.plan_ps symbolic plan-vs-IR match"}
+            elif plan.get("contract_verification"):
+                check = plan["contract_verification"]
+            else:
+                check = verify(ir, plan, shadow)
             if not check["ok"]:
                 raise SystemExit("%s: plan mismatch %.3g"
                                  % (sha, check["max_abs_error"]))
+            plan["quality"] = "exact"
+            plan["contract"] = "full"
             plan["approx_error"] = dict(check, domain="exact contract")
             plan["approx_class"] = "exact"
             exact.append(plan)
@@ -928,29 +1302,49 @@ def main(argv=None) -> int:
             if approx is not None:
                 approx_by_class.setdefault(approx["approx_class"],
                                            []).append(approx)
-    quotas = {"point": 10, "specular": 8, "envmap": 6,
-              "subsurface": 3, "backlight": 3}
+    pool = [p for rows in approx_by_class.values() for p in rows
+            if p["approx_error"]["mean_abs_error"] < 0.2]
+    def best(rows, n):
+        return sorted(rows, key=lambda p: (
+            p["approx_error"]["mean_abs_error"], p["sha256"]))[:n]
+    straight = [p for p in pool
+                if p["approximation"]["control_flow"]["mode"] == "straight_line"]
+    loops = [p for p in pool if p["approximation"]["loop_truncated_to"] > 0]
+    loop_if = [p for p in loops
+               if p["approximation"]["control_flow"]["ifs"]]
+    branch = [p for p in pool
+              if p["approximation"]["control_flow"]["mode"] ==
+              "branchless_select" and p not in loops]
     selected = []
-    for cls, quota in quotas.items():
-        rows = sorted(approx_by_class.get(cls, []),
-                      key=lambda p: (p["approx_error"]["mean_abs_error"],
-                                     p["sha256"]))
-        selected.extend(rows[:quota])
-    if len(selected) < 30:
-        rest = [p for rows in approx_by_class.values() for p in rows
-                if p not in selected]
-        rest.sort(key=lambda p: (p["approx_error"]["mean_abs_error"],
-                                 p["sha256"]))
-        selected.extend(rest[:30 - len(selected)])
-    selected = sorted(selected, key=lambda p: (p["approx_class"],
-                                               p["approx_error"]["mean_abs_error"],
-                                               p["sha256"]))[:34]
+    for cls, quota in (("point", 25), ("specular", 15), ("envmap", 8),
+                       ("subsurface", 8), ("backlight", 5), ("other", 5)):
+        selected.extend(best([p for p in straight
+                              if p["approx_class"] == cls], quota))
+    selected.extend(best(loop_if, 10))
+    chosen = {p["sha256"] for p in selected}
+    selected.extend(best([p for p in loops if p["sha256"] not in chosen], 14))
+    chosen = {p["sha256"] for p in selected}
+    selected.extend(best([p for p in branch if p["sha256"] not in chosen], 10))
+    chosen = {p["sha256"] for p in selected}
+    selected.extend(best([p for p in straight if p["sha256"] not in chosen],
+                         100 - len(selected)))
+    if len(selected) < 100:
+        chosen = {p["sha256"] for p in selected}
+        selected.extend(best([p for p in pool if p["sha256"] not in chosen],
+                             100 - len(selected)))
+    selected = sorted({p["sha256"]: p for p in selected}.values(),
+                      key=lambda p: (p["approx_class"],
+                                     p["approx_error"]["mean_abs_error"],
+                                     p["sha256"]))[:100]
     for plan in selected:
         sha = plan["sha256"]
         report.append({"sha256": sha, "chunks": counts[sha],
                        "recipe": plan["recipe"], "quality": "approx",
                        "class": plan["approx_class"],
                        "stages": plan["stages"],
+                       "loop_truncated_to":
+                           plan["approximation"]["loop_truncated_to"],
+                       "flow": plan["approximation"]["control_flow"]["mode"],
                        "error": plan["approx_error"]})
     entries = exact + selected
     classes = {}
