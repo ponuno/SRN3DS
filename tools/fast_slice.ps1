@@ -21,7 +21,8 @@ param(
     [uint64]$Budget = 167772160,
     [int]$HangMs = 8000,
     [int]$TimeoutSec = 900,
-    [switch]$StopAfterDraw
+    [switch]$StopAfterDraw,
+    [switch]$NoShaderSkipProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,7 +67,7 @@ $env:N3DS_IRC_PATH = $Irc
 $env:TESV_MEMPROBE = '1'
 $env:TESV_D3D9_DEPTH_PAIR_PROBE = '1'
 $env:TESV_D3D9_HDR_LDR_FALLBACK = '1'
-$env:TESV_D3D9_SHADER_SKIP_PROBE = '1'
+if (-not $NoShaderSkipProbe) { $env:TESV_D3D9_SHADER_SKIP_PROBE = '1' } else { Remove-Item Env:TESV_D3D9_SHADER_SKIP_PROBE -ErrorAction SilentlyContinue }
 $env:TESV_D3D9_BUDGET_MB = '92'
 $env:TESV_D3D9_CAPS_PROBE = '1'
 $env:TESV_D3D9_SM3_GATE_PROBE = '1'
