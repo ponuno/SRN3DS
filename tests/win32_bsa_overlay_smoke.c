@@ -9,9 +9,10 @@
  *
  * GetFileAttributesExA must report FILE_ATTRIBUTE_ARCHIVE with the real size,
  * and CreateFileA/ReadFile must return exactly that many bytes.  The compressed
- * archive exercises bsa_read_range()'s BSA_ERR_UNSUPPORTED fallback through
- * bsa_read().  When a real E:\harness_skyrim install is present, the same path
- * is checked for Skyrim_English.STRINGS plus one NIF and one DDS.
+ * archive exercises the compressed range path (inflate once, bounded LRU);
+ * the overlay no longer needs the whole-record bsa_read() fallback.  When a
+ * real E:\harness_skyrim install is present, the same path is checked for
+ * Skyrim_English.STRINGS plus one NIF and one DDS.
  */
 #include "win32_shims.h"
 #include "n3ds_lift_runtime.h"
@@ -429,7 +430,8 @@ static void test_root(void) {
     CHECK(!memcmp(guest_ptr(g_mem, DATA + BUF0, 4), k_strings + 3, 4));
     close_handle(&cpu, h);
 
-    /* Compressed entry: attrs size, then the bsa_read() fallback path. */
+    /* Compressed entry: attrs size, then the range-read path (the reader
+     * inflates once into its bounded LRU; no whole-record fallback). */
     CHECK(get_attrs(&cpu, "Data\\meshes\\X.nif", &attr, &size));
     CHECK(attr == 0x20u && size == strlen(k_nif));
     h = open_read(&cpu, "Data\\meshes\\X.nif");
@@ -458,8 +460,8 @@ static void test_root(void) {
     CHECK(st.archives_failed >= 1u);
     CHECK(st.stat_resolves >= 2u);
     CHECK(st.open_resolves >= 2u);
-    CHECK(st.range_reads >= 2u);
-    CHECK(st.full_reads >= 1u);
+    CHECK(st.range_reads >= 3u);
+    CHECK(st.full_reads == 0u);
     CHECK(st.bytes_read >= strlen(k_nif));
     if (failures)
         fprintf(stderr, "overlay stats: archives=%u failed=%u stat=%llu open=%llu range=%llu full=%llu bytes=%llu\n",
