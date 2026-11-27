@@ -423,8 +423,11 @@ class SkyWaterPackTest(unittest.TestCase):
         self.assertEqual(self.refusals["coverage"]["refused"], 0)
 
     def test_draw_and_runtime_claims(self):
+        # Catalog-only phase: no row claims the shared runtime slot, so no row
+        # may claim draw_enabled either.  Promotion is a separate, measured
+        # step (see plans.json note and docs/MENU_SHADER_CLOSURE.md).
         for entry in self.plans["entries"]:
-            self.assertEqual(entry["draw_enabled"], 1, entry["id"])
+            self.assertEqual(entry["draw_enabled"], 0, entry["id"])
             self.assertEqual(entry.get("runtime", 0), 0, entry["id"])
             if entry["quality"] == "exact":
                 self.assertEqual(entry.get("contract"), "full", entry["id"])
@@ -432,7 +435,8 @@ class SkyWaterPackTest(unittest.TestCase):
                 self.assertEqual(entry.get("contract"), "lite", entry["id"])
                 self.assertTrue(entry["approximation"], entry["id"])
             self.assertEqual(entry["def_policy"]["clamped"], 0, entry["id"])
-        self.assertEqual(self.refusals["coverage"]["draw_enabled"], 45)
+        self.assertEqual(self.refusals["coverage"]["translated"], 45)
+        self.assertEqual(self.refusals["coverage"]["draw_enabled"], 0)
         self.assertEqual(self.refusals["coverage"]["refused"], 0)
 
     def test_plan_vs_ir(self):

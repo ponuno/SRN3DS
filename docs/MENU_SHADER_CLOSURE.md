@@ -22,6 +22,56 @@ The investigation artifacts live in `C:\Skyrim_N3DS_build\agent_work\sm3`.
 > bindings and no call before the SM3 gate; TESV uses precompiled FXP/bytecode,
 > and the SM3 work is in `CreatePixelShader`/`CreateVertexShader`.
 
+## 0. Plan → runtime path (audited 2026-11-27)
+
+`tools/shaders/runtime_audit.py` joins every `plans.json` row with the two
+runtime artifacts the build actually ships: the exact-hash PICA VS programs in
+`source/d3d9_pica_vs_*_table.inc` and the generated TEV descriptors in
+`source/d3d9_shader_plan_table.inc`.  A row with `draw_enabled: 1` that has no
+validated runtime row fails `tests/pica_runtime_audit_test.py` (registered in
+`tools/run_host_tests.ps1`).  The audit is static; it changes neither
+`GetDeviceCaps` nor `DevCaps` and claims no frame.
+
+| Plan set | Draw-enabled | Runtime path | Status |
+|---|---:|---:|---|
+| `d3d9_pica_vs_*_table.inc` VS programs | 16 | 16 | **match** |
+| TEV descriptors in `d3d9_shader_plan_table.inc` | 112 | 112 | **match** |
+| Total committed plans (docs + pack catalogs) | **128** | **128** | **0 unmatched** |
+| Census-visible draw-enabled hashes | **87** | **87** | coverage `87 / 6550 / 22` |
+
+Runtime-path details:
+
+| Artifact | Rows | Validation |
+|---|---:|---|
+| PICA VS catalog | 30 programs | DVLB/DVLE/DVLP, main word count, pinned SHA-256, bank ≤ c31, ≤5 attributes, ≤7 varyings, TEXCOORD usage |
+| TEV descriptors | 115 table rows (112 draw-enabled) | 1–6 stages, c0..c31 constants (≤8), ≤3 textures, passes[0] mirror, blend/depth_write ranges |
+
+What changed to make the counter honest:
+
+* **73 `ui.ps.*` rows with `runtime: 1` were never emitted** into the shared
+  table (the old 64-entry cap).  They are now merged into
+  `docs/shader_plans.json` and `d3d9_shader_plan_table.inc`
+  (`RUNTIME_MAX_ENTRIES` / `D9_SHADER_PLAN_MAX_ENTRIES` = 128).
+* **51 catalog-only rows** (45 `sky_water`, 6 `blit_post`) claimed
+  `draw_enabled: 1` while their own pack report says `runtime: 0` and "shared
+  table left untouched".  They are now `draw_enabled: 0` with that reason in
+  the note; they remain translated/coverage rows, not runtime draws.
+* **4 PICA VS rows** were demoted: `menu.gfx.vs.0975cc50` /
+  `73904d3f` write `color0+color1` but PICA has one primary colour output, and
+  `ui.vs.1d758c12` / `ea8333b7` ship a runtime `.shbin` whose SHA-256/size
+  differs from the numerically verified emitter block.
+
+Remaining work (tracked, not hidden):
+
+1. Re-emit the two UI VS programs so the runtime `.shbin` equals the verified
+   emitter bytes, then restore their draw bit.
+2. Promote the exact `sky_water` (3) / `blit_post` (6) recipes only after a
+   measured runtime-slot step; the 42 approximate water/sky recipes stay
+   catalog-only.
+3. Regenerate `tests/fxp_compile_test.py` expectations when the retail archive
+   is available (`--data`); the symbolic layer already merges the 73 runtime
+   rows.
+
 ## 1. Static gate trace
 
 The renderer init function is `0xc6dbf0`.

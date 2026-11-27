@@ -3,7 +3,7 @@
  "pack": "sky_water",
  "coverage": {
   "translated": 45,
-  "draw_enabled": 45,
+  "draw_enabled": 0,
   "refused": 0,
   "translated_chunks": 82,
   "refused_chunks": 0

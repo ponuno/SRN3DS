@@ -14,8 +14,8 @@
   "vs": 119
  },
  "coverage": {
-  "translated": 34,
-  "draw-enabled": 79,
+  "translated": 36,
+  "draw-enabled": 77,
   "refused": 0,
   "contract_only": 0
  },
@@ -140,7 +140,7 @@
   },
   {
    "id": "ui.vs.1d758c12",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "1d758c12d0197c1031d44d805d04185c5d0fc54eca0d6c8cef9910c1a7a6745f"
@@ -756,7 +756,7 @@
   },
   {
    "id": "ui.vs.ea8333b7",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "ea8333b798844292ef2a6e9e7e80edd8bc658d0dd7777d9910fe42d95edc4afc"

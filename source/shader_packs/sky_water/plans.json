@@ -23,7 +23,7 @@
   "chunks": 82,
   "exact": 3,
   "approx": 42,
-  "draw_enabled": 45,
+  "draw_enabled": 0,
   "runtime": 0,
   "refused": 0,
   "runtime_candidates": 45
@@ -39,7 +39,7 @@
    "sha1": "b0ff91ca8b0cfca875a58c6b18ff0e1443a52e0c",
    "version": "0xffff0300",
    "instructions": 3,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -105,7 +105,7 @@
    "quality": "exact",
    "approximation": "",
    "contract": "full",
-   "note": "one-stage sky sprite: texture x vertex colour plus scalar bias; alpha = texture.a x vertex.a rgb bias c0.y is a material scalar replicated into the TEV constant colour; no clamp is inserted. The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding.",
+   "note": "one-stage sky sprite: texture x vertex colour plus scalar bias; alpha = texture.a x vertex.a rgb bias c0.y is a material scalar replicated into the TEV constant colour; no clamp is inserted. The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "constant_bindings": {
     "7": {
      "rgb": "c0.y"
@@ -142,7 +142,7 @@
    "sha1": "9c48ce755fef0cecb51a3df89016bf02f8a0b99f",
    "version": "0xffff0300",
    "instructions": 4,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 2,
    "stage_data": [
@@ -240,7 +240,7 @@
    "quality": "exact",
    "approximation": "",
    "contract": "full",
-   "note": "sky sprite with scalar RGB bias and a separate alpha scale; two material constant slots the IR uses c0.x and c0.y from one register; the contract requires feeding two TEV constant slots, so no clamp or renormalisation is invented. The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding.",
+   "note": "sky sprite with scalar RGB bias and a separate alpha scale; two material constant slots the IR uses c0.x and c0.y from one register; the contract requires feeding two TEV constant slots, so no clamp or renormalisation is invented. The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "constant_bindings": {
     "7": {
      "rgb": "c0.y"
@@ -291,7 +291,7 @@
    "sha1": "b73f274ebabd82a14cc5681330ea7a7f70cfe79b",
    "version": "0xffff0300",
    "instructions": 4,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -356,7 +356,7 @@
    "quality": "approx",
    "approximation": "second-UV alpha fade (dcl_texcoord2 v1.x) dropped: alpha becomes texture.a x vertex.a; RGB scalar bias c0.y is kept in constant slot 0",
    "contract": "lite",
-   "note": "community sky sprite: texture x vertex colour + bias; per-vertex UV fade approximated away one TEV stage cannot read the second UV component as a scalar, so the fade is external.",
+   "note": "community sky sprite: texture x vertex colour + bias; per-vertex UV fade approximated away one TEV stage cannot read the second UV component as a scalar, so the fade is external. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [],
     "outside_unit_range": [],
@@ -375,7 +375,7 @@
    "sha1": "545983971f6362293c248044549c72f0843dcc2c",
    "version": "0xffff0300",
    "instructions": 5,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -440,7 +440,7 @@
    "quality": "approx",
    "approximation": "second-UV alpha fade (dcl_texcoord2 v1.x) dropped: alpha becomes texture.a x vertex.a; RGB scalar bias c0.y is kept in constant slot 0; RGB 1.5 gain (def c1.x) dropped to 1.0 because TEV scale is 1x/2x/4x/0.5x",
    "contract": "lite",
-   "note": "sky sprite with a 1.5 RGB gain and second-UV alpha fade; both approximated the gain is a named visual loss, not silently clamped to 2x.",
+   "note": "sky sprite with a 1.5 RGB gain and second-UV alpha fade; both approximated the gain is a named visual loss, not silently clamped to 2x. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      1.5,
@@ -464,7 +464,7 @@
    "sha1": "479ca47a0ae5428be231de0b2e95ff1f940492d1",
    "version": "0xffff0300",
    "instructions": 6,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 2,
    "stage_data": [
@@ -568,7 +568,7 @@
    "quality": "exact",
    "approximation": "",
    "contract": "full",
-   "note": "cloud/aurora two-texture lerp by c0.x, then vertex colour modulation and scalar bias TEV INTERPOLATE is (A-B)*C+B with C alpha, exactly D3D lrp; two constant slots hold c0.x (alpha) and c0.y (RGB). The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding.",
+   "note": "cloud/aurora two-texture lerp by c0.x, then vertex colour modulation and scalar bias TEV INTERPOLATE is (A-B)*C+B with C alpha, exactly D3D lrp; two constant slots hold c0.x (alpha) and c0.y (RGB). The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "constant_bindings": {
     "7": {
      "alpha": "c0.x"
@@ -619,7 +619,7 @@
    "sha1": "c73a58544b98bbcabb661166fca212107842e04b",
    "version": "0xffff0300",
    "instructions": 65,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -746,7 +746,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 3 textures + 3-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "note": "water surface, 3 textures + 3-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      -8192.0,
@@ -777,7 +777,7 @@
    "sha1": "d9f83d2c2f5da8836ed9dc727a53046ce23e24aa",
    "version": "0xffff0300",
    "instructions": 63,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -904,7 +904,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 3 textures + 2-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "note": "water surface, 3 textures + 2-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      -8192.0,
@@ -935,7 +935,7 @@
    "sha1": "e2116924e1b6428f39033e076339e7cb0df45426",
    "version": "0xffff0300",
    "instructions": 76,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -1062,7 +1062,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 4 textures and specular exponent in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "note": "water surface, 4 textures and specular exponent in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      -8192.0,
@@ -1098,7 +1098,7 @@
    "sha1": "7303ad2e757e543b220380f2f94d68b36a7b8578",
    "version": "0xffff0300",
    "instructions": 88,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -1225,7 +1225,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 6 texture declarations in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "note": "water surface, 6 texture declarations in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      -8192.0,
@@ -1259,7 +1259,7 @@
    "sha1": "069b88410060e15dfbb9972a9ee5379a615dcc20",
    "version": "0xffff0300",
    "instructions": 106,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -1386,7 +1386,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 5 textures in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "note": "water surface, 5 textures in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      -8192.0,
@@ -1423,7 +1423,7 @@
    "sha1": "9279dd08f86318ae35e7808a24328f6f9f566929",
    "version": "0xffff0300",
    "instructions": 63,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -1550,7 +1550,7 @@
    "quality": "approx",
    "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; a final REPLACE stage forces alpha to 1.",
    "contract": "lite",
-   "note": "water surface with cube reflection (s0) and normal map (s1) reflection is one cube sample, not a second render target.",
+   "note": "water surface with cube reflection (s0) and normal map (s1) reflection is one cube sample, not a second render target. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      -8192.0,
@@ -1584,7 +1584,7 @@
    "sha1": "5acefb8ab98d881e06ebaade1e91df0a1f208df8",
    "version": "0xffff0300",
    "instructions": 79,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -1711,7 +1711,7 @@
    "quality": "approx",
    "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; a final REPLACE stage forces alpha to 1.",
    "contract": "lite",
-   "note": "water surface with 2D scene texture and cube reflection (s1) reflection is one cube sample, not a second render target.",
+   "note": "water surface with 2D scene texture and cube reflection (s1) reflection is one cube sample, not a second render target. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      -8192.0,
@@ -1742,7 +1742,7 @@
    "sha1": "85c6885dcd6b469c49ed99af31df77571cec90ba",
    "version": "0xffff0300",
    "instructions": 14,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -1801,7 +1801,7 @@
    "quality": "approx",
    "approximation": "three-colour cmp-selected fog/gradient (c0..c5) replaced by one constant fog colour; the retail 0.9 texture/fog mix is kept exactly by TEV INTERPOLATE with constant alpha 0.9. texkill in the IR is left to an external alpha test.",
    "contract": "lite",
-   "note": "fog/gradient shader: cmp chain selects a 3-colour gradient from v1.x, then 90% texture over it one stage, one constant colour; no per-vertex gradient selection.",
+   "note": "fog/gradient shader: cmp chain selects a 3-colour gradient from v1.x, then 90% texture over it one stage, one constant colour; no per-vertex gradient selection. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      0.0,
@@ -1824,7 +1824,7 @@
    "sha1": "57bc18847393b0bd348e28c42459b7e35d22d4f6",
    "version": "0xffff0300",
    "instructions": 17,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -1884,7 +1884,7 @@
    "quality": "approx",
    "approximation": "three-colour cmp-selected fog/gradient (c0..c5) replaced by one constant fog colour; the retail 0.9 texture/fog mix is kept exactly by TEV INTERPOLATE with constant alpha 0.9. texkill in the IR is left to an external alpha test.",
    "contract": "lite",
-   "note": "fog/gradient shader with alpha-kill (texkill) plus the 3-colour cmp gradient one stage, one constant colour; no per-vertex gradient selection.",
+   "note": "fog/gradient shader with alpha-kill (texkill) plus the 3-colour cmp gradient one stage, one constant colour; no per-vertex gradient selection. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "def_policy": {
     "original_literals": [
      0.0,
@@ -1907,7 +1907,7 @@
    "sha1": "0f7ad51905bcd9f526444a5a756e2ee8dc7d41ac",
    "version": "0xffff0300",
    "instructions": 103,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -2035,7 +2035,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -2067,7 +2067,7 @@
    "sha1": "d766a68bf432da2efad9c379c11ac3678b638ba5",
    "version": "0xffff0300",
    "instructions": 97,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -2187,7 +2187,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -2230,7 +2230,7 @@
    "sha1": "97127546e369ec65b0b72d72f7bfc4ff1036f9cd",
    "version": "0xffff0300",
    "instructions": 130,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -2358,7 +2358,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -2396,7 +2396,7 @@
    "sha1": "c0e1b8424565d1dcd94339da2a48dfb3bc6cab70",
    "version": "0xffff0300",
    "instructions": 36,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -2517,7 +2517,7 @@
    "quality": "approx",
    "approximation": "ordered dither, texkill and the dependent 4-tap single-channel read are dropped. One base texture is modulated by a material fresnel constant and one additive sun highlight; reflection and normal perturbation are absent.",
    "contract": "lite",
-   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed.",
+   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -2543,7 +2543,7 @@
    "sha1": "d58af9476bfa2f7c2d1416cf257962bb02b9d010",
    "version": "0xffff0300",
    "instructions": 112,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -2671,7 +2671,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -2706,7 +2706,7 @@
    "sha1": "22f1a9788dfcb3e247653cd2fdd1f89481fc437e",
    "version": "0xffff0300",
    "instructions": 80,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -2826,7 +2826,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -2864,7 +2864,7 @@
    "sha1": "9e5b8becd8ae1c14060901419e843878a29f185a",
    "version": "0xffff0300",
    "instructions": 14,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -2913,7 +2913,7 @@
    "quality": "approx",
    "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
    "contract": "lite",
-   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -2945,7 +2945,7 @@
    "sha1": "0282abb118e204c845d6b834ee0cbd1fd09805d0",
    "version": "0xffff0300",
    "instructions": 121,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -3073,7 +3073,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -3108,7 +3108,7 @@
    "sha1": "9c3f715febbe9e608d957404842e3c6f2d015f0b",
    "version": "0xffff0300",
    "instructions": 79,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -3228,7 +3228,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -3263,7 +3263,7 @@
    "sha1": "de37fead7a9cbb8d6b771edf35135431dd8e8dc0",
    "version": "0xffff0300",
    "instructions": 8,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -3327,7 +3327,7 @@
    "quality": "approx",
    "approximation": "ordered dither (mad x255+0.5, frc, cmp) is dropped; the star texture is multiplied by the vertex tint. The dither quantisation is not emulated.",
    "contract": "lite",
-   "note": "sky star/detail sprite: texture x vertex tint, dither removed.",
+   "note": "sky star/detail sprite: texture x vertex tint, dither removed. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -3354,7 +3354,7 @@
    "sha1": "da6481b76c8666b3754f043543fa2ae7e3b1686a",
    "version": "0xffff0300",
    "instructions": 94,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -3474,7 +3474,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -3515,7 +3515,7 @@
    "sha1": "c8829e5590d28ed5a343f473867d45ff182a7945",
    "version": "0xffff0300",
    "instructions": 54,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -3643,7 +3643,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -3678,7 +3678,7 @@
    "sha1": "ba94aee9fe2449716d4930aaa444425a405a918e",
    "version": "0xffff0300",
    "instructions": 9,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -3727,7 +3727,7 @@
    "quality": "approx",
    "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
    "contract": "lite",
-   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -3755,7 +3755,7 @@
    "sha1": "66422be7541bbf00abbc2560bcdf9092d7f09d07",
    "version": "0xffff0300",
    "instructions": 94,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -3883,7 +3883,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -3915,7 +3915,7 @@
    "sha1": "bf155aa5a8bf966184158caab839691670e28e95",
    "version": "0xffff0300",
    "instructions": 77,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -4035,7 +4035,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -4070,7 +4070,7 @@
    "sha1": "53cdf92609d3acd57b0f1c8c79da46c3b0255dc5",
    "version": "0xffff0300",
    "instructions": 40,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -4191,7 +4191,7 @@
    "quality": "approx",
    "approximation": "ordered dither, texkill and the dependent 4-tap single-channel read are dropped. One base texture is modulated by a material fresnel constant and one additive sun highlight; reflection and normal perturbation are absent.",
    "contract": "lite",
-   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed.",
+   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -4217,7 +4217,7 @@
    "sha1": "19e2da67085ac16458e3dc77cda75c4ea7011a67",
    "version": "0xffff0300",
    "instructions": 13,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -4266,7 +4266,7 @@
    "quality": "approx",
    "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
    "contract": "lite",
-   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -4294,7 +4294,7 @@
    "sha1": "f32d5acba6d64af1e97bee69e69ed7c5a27d3020",
    "version": "0xffff0300",
    "instructions": 90,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -4414,7 +4414,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -4453,7 +4453,7 @@
    "sha1": "b6d5e2f7615058f6ea85003b7d78b6c5519ea816",
    "version": "0xffff0300",
    "instructions": 40,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -4574,7 +4574,7 @@
    "quality": "approx",
    "approximation": "ordered dither, texkill and the dependent 4-tap single-channel read are dropped. One base texture is modulated by a material fresnel constant and one additive sun highlight; reflection and normal perturbation are absent.",
    "contract": "lite",
-   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed.",
+   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -4600,7 +4600,7 @@
    "sha1": "0c74586107b21f050ce9aa674b44879bfcb944c2",
    "version": "0xffff0300",
    "instructions": 112,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -4728,7 +4728,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -4763,7 +4763,7 @@
    "sha1": "55dba206c7b4567bfa87b39cd31b554c3d8283e8",
    "version": "0xffff0300",
    "instructions": 51,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -4883,7 +4883,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -4915,7 +4915,7 @@
    "sha1": "b42aeb2bfe42694277bb0d3e74831715062fe3c2",
    "version": "0xffff0300",
    "instructions": 9,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 2,
    "stage_data": [
@@ -5015,7 +5015,7 @@
    "quality": "approx",
    "approximation": "ordered dither (mad x255+0.5, frc, cmp) is dropped. The two sky textures keep a fixed half lerp and the vertex tint; the dither quantisation is not emulated.",
    "contract": "lite",
-   "note": "sky cloud/star blend: two-texture half lerp + vertex tint; ordered dither removed.",
+   "note": "sky cloud/star blend: two-texture half lerp + vertex tint; ordered dither removed. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -5042,7 +5042,7 @@
    "sha1": "dd0259dc368da9c79b7c74435d0362a4d876018b",
    "version": "0xffff0300",
    "instructions": 103,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -5170,7 +5170,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -5205,7 +5205,7 @@
    "sha1": "a67e74a03676eb4d6f8f62a30ccfbf50874fb4bb",
    "version": "0xffff0300",
    "instructions": 83,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -5325,7 +5325,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -5365,7 +5365,7 @@
    "sha1": "298933da8b5a7c557b91c0b8214c48a47ed7e91b",
    "version": "0xffff0300",
    "instructions": 65,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -5485,7 +5485,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -5520,7 +5520,7 @@
    "sha1": "71b0208434d8a10f25127bbbaf6fc99c4a79649a",
    "version": "0xffff0300",
    "instructions": 121,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -5648,7 +5648,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -5686,7 +5686,7 @@
    "sha1": "10b3b2a2b3d39f6d676cbf9216d5518b8bc862bb",
    "version": "0xffff0300",
    "instructions": 68,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -5806,7 +5806,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -5840,7 +5840,7 @@
    "sha1": "79d574d3b3f713ce1b8e2fe204325b1bc7d88352",
    "version": "0xffff0300",
    "instructions": 82,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -5960,7 +5960,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -5997,7 +5997,7 @@
    "sha1": "0531951e6268263af27ab6e2f242f41c09390d7c",
    "version": "0xffff0300",
    "instructions": 76,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -6117,7 +6117,7 @@
    "quality": "approx",
    "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
    "contract": "lite",
-   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -6153,7 +6153,7 @@
    "sha1": "d3f28b80107aa64e28f30c95bac1081a8674a8dd",
    "version": "0xffff0300",
    "instructions": 18,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -6202,7 +6202,7 @@
    "quality": "approx",
    "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
    "contract": "lite",
-   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [
@@ -6234,7 +6234,7 @@
    "sha1": "96b373f7fa73f43738bb4040a51c867cd4cca397",
    "version": "0xffff0300",
    "instructions": 97,
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "runtime": 0,
    "stages": 3,
    "stage_data": [
@@ -6362,7 +6362,7 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped. Catalog-only: draw_enabled=0 because no shared runtime slot is claimed (runtime=0); promotion needs a measured runtime plan.",
    "source_package": "shadersfx\\shaders001.fxp",
    "def_policy": {
     "original_literals": [

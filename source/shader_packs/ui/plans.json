@@ -384,7 +384,7 @@
     4,
     5
    ],
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "emitted_asm": "generated/menu.gfx.vs.73904d3f.v.pica",
    "emitter": {
     "asm": "generated/menu.gfx.vs.73904d3f.v.pica",
@@ -468,7 +468,7 @@
    ],
    "instructions": 8,
    "kind": "pica_vs",
-   "note": "GFx menu VS emitted and verified against the declared simplified spec (PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied): 256 samples, max |dpos| 0.0e+00, picasso pass",
+   "note": "GFx menu VS emitted and verified against the declared simplified spec (PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied): 256 samples, max |dpos| 0.0e+00, picasso pass Draw disabled: PICA exposes one primary colour output; the plan writes colour0+colour1, so the emitted program drops colour1.",
    "objects": 1,
    "outputs": [
     {
@@ -502,7 +502,7 @@
    ],
    "prefix_sha256": "77bc67a86e38ea6565c82f95313185a48420430c4f4c7afa6144d144ce075376",
    "quality": "approx",
-   "runtime": 1,
+   "runtime": 0,
    "sha1": "d3a78ef432aeccc02bab262f86a917870351a316",
    "sha256": "73904d3f32bd5eec48ec5b758e1cd100d7e3f750a1cce98cbdb5c69679f3b610",
    "skinning": false,
@@ -525,7 +525,7 @@
     6,
     7
    ],
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "emitted_asm": "generated/menu.gfx.vs.0975cc50.v.pica",
    "emitter": {
     "asm": "generated/menu.gfx.vs.0975cc50.v.pica",
@@ -617,7 +617,7 @@
    ],
    "instructions": 10,
    "kind": "pica_vs",
-   "note": "GFx menu VS emitted and verified against the declared simplified spec (PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied): 256 samples, max |dpos| 0.0e+00, picasso pass",
+   "note": "GFx menu VS emitted and verified against the declared simplified spec (PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied): 256 samples, max |dpos| 0.0e+00, picasso pass Draw disabled: PICA exposes one primary colour output; the plan writes colour0+colour1, so the emitted program drops colour1.",
    "objects": 1,
    "outputs": [
     {
@@ -658,7 +658,7 @@
    ],
    "prefix_sha256": "ad97e55f922355acfd8f40e8d37f53ab122c8d3f7dbc5e2af1cc5e4adbe1f924",
    "quality": "approx",
-   "runtime": 1,
+   "runtime": 0,
    "sha1": "ef20631c6c684a230fb5ada056115d91dbedcf16",
    "sha256": "0975cc503f63d9b1a1a36f8886a34043742e9a13f4a351e203d5dbd33b3f95ce",
    "skinning": false,
@@ -23015,7 +23015,7 @@
     6,
     7
    ],
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "dropped_output_regs": [],
    "emitted_asm": "generated/ui.vs.1d758c12.v.pica",
    "emitter": {
@@ -23143,7 +23143,7 @@
    ],
    "instructions": 29,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified; runtime-enabled for the position/texcoord0/color identity-bank contract (256 samples, max |dpos| 1.8e-15, picasso pass)",
+   "note": "PICA VS emitted and numerically verified; runtime-enabled for the position/texcoord0/color identity-bank contract (256 samples, max |dpos| 1.8e-15, picasso pass) Draw disabled: Runtime catalog .shbin differs from the numerically verified emitter .shbin (532 vs 520 bytes).",
    "outputs": [
     {
      "d3d_usage": 0,
@@ -23185,7 +23185,7 @@
     "runtime_upload_path_pending"
    ],
    "quality": "exact",
-   "runtime": 1,
+   "runtime": 0,
    "sha1": "761caa2850e8def24156a39d7117417d5ea627f2",
    "sha256": "1d758c12d0197c1031d44d805d04185c5d0fc54eca0d6c8cef9910c1a7a6745f",
    "skinning": false,
@@ -30042,7 +30042,7 @@
     3,
     4
    ],
-   "draw_enabled": 1,
+   "draw_enabled": 0,
    "dropped_output_regs": [],
    "emitted_asm": "generated/ui.vs.ea8333b7.v.pica",
    "emitter": {
@@ -30145,7 +30145,7 @@
    ],
    "instructions": 7,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified; runtime-enabled for the position/texcoord0/color identity-bank contract (256 samples, max |dpos| 0.0e+00, picasso pass)",
+   "note": "PICA VS emitted and numerically verified; runtime-enabled for the position/texcoord0/color identity-bank contract (256 samples, max |dpos| 0.0e+00, picasso pass) Draw disabled: Runtime catalog .shbin differs from the numerically verified emitter .shbin (uniform rows 5 vs 4).",
    "outputs": [
     {
      "d3d_usage": 0,
@@ -30187,7 +30187,7 @@
     "runtime_upload_path_pending"
    ],
    "quality": "exact",
-   "runtime": 1,
+   "runtime": 0,
    "sha1": "d84b97943bd2fd72f748e298e507f66f647ead50",
    "sha256": "ea8333b798844292ef2a6e9e7e80edd8bc658d0dd7777d9910fe42d95edc4afc",
    "skinning": false,

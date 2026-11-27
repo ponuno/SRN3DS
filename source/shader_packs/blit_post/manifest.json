@@ -15,8 +15,8 @@
   "vs": 60
  },
  "coverage": {
-  "translated": 62,
-  "draw-enabled": 7,
+  "translated": 68,
+  "draw-enabled": 1,
   "refused": 0,
   "contract_only": 0
  },
@@ -186,14 +186,14 @@
   },
   {
    "id": "blit.ps.39f0dfdf",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "tev",
    "family": "blit_post",
    "sha256": "39f0dfdfc574d3e7f4c4ee0578bcc265b75ac05f1e0b9eb17087e52c6cc35d5a"
   },
   {
    "id": "blit.ps.4813dba3",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "tev",
    "family": "blit_post",
    "sha256": "4813dba351f7114f15a15a1d9c5308823e7fcfcbed2fe0dc1960662a2feca520"
@@ -256,7 +256,7 @@
   },
   {
    "id": "blit.ps.6628a644",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "tev",
    "family": "blit_post",
    "sha256": "6628a644b06721d0e5538d63bed3299bee56749ddb33af7300293cf38f3bbc6b"
@@ -319,7 +319,7 @@
   },
   {
    "id": "blit.ps.817340bf",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "tev",
    "family": "blit_post",
    "sha256": "817340bfabd9a9b175aadbbdc0af49258dd38f2772985b1a40ba48d3eb1bf10e"
@@ -340,14 +340,14 @@
   },
   {
    "id": "blit.ps.911297c9",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "tev",
    "family": "blit_post",
    "sha256": "911297c9666e388aab307d72feaad9761379287276405a17732958d8ca6a1b26"
   },
   {
    "id": "blit.ps.9d2692a9",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "tev",
    "family": "blit_post",
    "sha256": "9d2692a9640d3e1c9768fe5dfacc04a68ba13e5196d491ad6e905d3851cb4088"

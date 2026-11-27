@@ -2,7 +2,7 @@
  "counts": {
   "approx_translated": 53,
   "contract_only_vs": 8,
-  "exact_draw_enabled": 6,
+  "exact_draw_enabled": 0,
   "planned": 67,
   "refused": 0
  },

@@ -22,7 +22,7 @@
 
 #define D9_SHADER_PLAN_SHA256 65u
 #define D9_SHADER_PLAN_NOTE 160u
-#define D9_SHADER_PLAN_MAX_ENTRIES 64u
+#define D9_SHADER_PLAN_MAX_ENTRIES 128u
 /* Derived pixel-shader constants: a plan-level program that builds registers
  * the guest never uploads (for example c0.zwzw) from the c0..c7 bank. */
 #define D9_SHADER_PLAN_MAX_CONST_OPS 8u

@@ -37,7 +37,7 @@ RUNTIME_CERTIFIED = {
 }
 EXPECTED = {
     "planned": 67,
-    "exact_draw_enabled": 6,
+    "exact_draw_enabled": 0,
     "approx_translated": 53,
     "contract_only_vs": 8,
     "refused": 0,
@@ -136,8 +136,10 @@ class BlitPostCatalogTest(unittest.TestCase):
         self.assertEqual(refused, 0)
 
     def test_draw_plans_are_full_material_contracts(self):
+        # Catalog-only phase: exactness alone is not a runtime certification,
+        # so the pack claims no draw-enabled row.
         draw = [e for e in self.doc["entries"] if e["draw_enabled"] == 1]
-        self.assertEqual(len(draw), 6)
+        self.assertEqual(len(draw), 0)
         for entry in draw:
             self.assertEqual(entry["kind"], "tev")
             self.assertEqual(entry["stages"], 1)
@@ -224,7 +226,8 @@ class BlitPostCatalogTest(unittest.TestCase):
     def test_negative_runtime_without_certification(self):
         mutated = copy.deepcopy(self.doc)
         victim = next(e for e in mutated["entries"]
-                      if e["draw_enabled"] == 1)
+                      if e.get("quality") == "exact")
+        victim["draw_enabled"] = 1
         victim["runtime"] = 1
         errors = validate_catalog(mutated)
         self.assertTrue(any("runtime needs a separate certification" in e

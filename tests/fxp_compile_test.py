@@ -328,7 +328,7 @@ class RealArchiveTests(unittest.TestCase):
                 extras.append((path, json.load(handle)))
         manifest = fxp_compile.merge_extra_entries(manifest, extras,
                                                    runtime_only=True)
-        self.assertEqual(len(manifest["entries"]), 39)
+        self.assertEqual(len(manifest["entries"]), 115)
         entries = manifest["entries"]
         self.assertEqual(entries[0]["id"], "menu.logo.ps")
         self.assertEqual(entries[1]["id"], "menu.composite.ps")

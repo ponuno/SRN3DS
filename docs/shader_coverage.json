@@ -8,8 +8,8 @@
    "owner": "sm3-agent-ui",
    "chunks": 314,
    "unique_hashes": 113,
-   "translated": 34,
-   "draw_enabled": 79,
+   "translated": 36,
+   "draw_enabled": 77,
    "refused": 0,
    "contract_only": 0,
    "refused_classes": {},
@@ -20,8 +20,8 @@
    "owner": "sm3-agent-blit-post",
    "chunks": 131,
    "unique_hashes": 69,
-   "translated": 62,
-   "draw_enabled": 7,
+   "translated": 68,
+   "draw_enabled": 1,
    "refused": 0,
    "contract_only": 0,
    "refused_classes": {},
@@ -32,8 +32,8 @@
    "owner": "sm3-agent-sky-water",
    "chunks": 82,
    "unique_hashes": 45,
-   "translated": 0,
-   "draw_enabled": 45,
+   "translated": 45,
+   "draw_enabled": 0,
    "refused": 0,
    "contract_only": 0,
    "refused_classes": {},
@@ -84,19 +84,19 @@
  ],
  "extra_plans": {
   "plans": 43,
-  "draw_enabled": 43,
+  "draw_enabled": 41,
   "by_pack": {
    "ui": {
     "plans": 43,
-    "draw_enabled": 43,
+    "draw_enabled": 41,
     "exact": 15,
     "approx": 28
    }
   }
  },
  "total": {
-  "translated": 6497,
-  "draw-enabled": 140,
+  "translated": 6550,
+  "draw-enabled": 87,
   "refused": 22,
   "chunks": 10475,
   "unique_hashes": 6659
