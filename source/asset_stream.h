@@ -7,11 +7,11 @@
  * ``bsa_read_range()``.  It does not parse JSON, does not inflate and does
  * not allocate a copy of the whole record.
  *
- * Deliberately absent in phase 1 (see docs/STREAMING_IMPL.md):
- *   - prefetch queue, byte quanta and request owners;
- *   - range cache / eviction / GPU publication;
- *   - cell table paging (the header carries an empty table).
- * ``stream_mount_prefetch()`` refuses by name instead of pretending.
+ * Phase 2 adds a bounded prefetch queue (256 descriptors), byte-quantum
+ * executor with two 64 KiB staging buffers, a monotonic byte budget, dedup by
+ * (generation, source, id, lod), cancellation/deadlines, RAM readiness and LRU
+ * eviction.  Deliberately absent: GPU publication and cell-table paging (the
+ * header still carries an empty cell table).
  *
  * Layout: see the comment block at the top of tools/skyrim/stream_index.py.
  * All tables are little-endian; the loader validates magic, schema, entry
@@ -35,6 +35,18 @@
 #define STREAM_MAX_ARCHIVES 64u
 #define STREAM_MAX_RESOURCES 1000000u
 
+/* Phase 2 queue limits.  A request is a bounded prefix window, never the whole
+ * record: the executor stages at most `window_max_bytes` per descriptor. */
+#define STREAM_MAX_REQUESTS 256u
+#define STREAM_IO_BUFFERS 2u
+#define STREAM_IO_BUFFER_BYTES 65536u
+#define STREAM_QUANTUM_MIN 32768u
+#define STREAM_QUANTUM_MAX 65536u
+#define STREAM_WINDOW_MAX (256u * 1024u)
+#define STREAM_CACHE_LIMIT_DEFAULT (2u * 1024u * 1024u)
+#define STREAM_RATE_DEFAULT 7000000ull
+#define STREAM_MAX_ACCRUAL_QUANTA 2u
+
 typedef enum {
     STREAM_OK = 0,
     STREAM_ERR_ARGUMENT,
@@ -56,6 +68,7 @@ typedef struct {
     const uint8_t *sha256;        /* cooked payload digest (32 bytes) */
     const uint8_t *source_sha256; /* original winner digest (32 bytes) */
     const char *path;             /* points into the index blob */
+    uint32_t path_length;         /* stored length; the pool adds no NUL */
     uint32_t id;
     uint32_t archive_index;
     uint32_t payload_length;
@@ -107,9 +120,153 @@ typedef struct {
     uint64_t negative_hits;
     uint64_t physical_reads;   /* successful bsa_read_range calls */
     uint64_t archive_opens;
+    /* Phase 2.  `physical_reads`/`errors` continue to count executor reads. */
+    uint64_t prefetch_requests; /* accepted admissions, dedup included */
+    uint64_t dedup_hits;
+    uint64_t quanta;
+    uint64_t quantum_bytes;     /* actually read and charged to the budget */
+    uint64_t seeks;             /* archive change or non-adjacent offset */
+    uint64_t budget_denied;     /* pump found work but no byte tokens */
+    uint64_t cancelled;         /* explicit cancel and unreferenced P2 drops */
+    uint64_t expired;           /* deadline passed before the first quantum */
+    uint64_t evicted;
+    uint64_t evicted_bytes;
+    uint64_t verified;
+    uint64_t ready;
+    uint64_t request_errors;
+    uint64_t cache_hits;
+    uint64_t cache_hit_bytes;
+    uint64_t allocs;
+    uint64_t frees;
+    uint64_t bytes_allocated;
+    uint64_t bytes_freed;
+    uint32_t descriptors;       /* live descriptors, including terminal ones */
+    uint32_t cache_bytes;       /* live READY/QUEUED window bytes */
+    uint32_t peak_cache_bytes;
 } StreamMetrics;
 
 typedef struct StreamMount StreamMount;
+
+/* Ordering is strict: demand before P0 before P1 before P2. */
+typedef enum {
+    STREAM_PRIO_DEMAND = 0,
+    STREAM_PRIO_P0,
+    STREAM_PRIO_P1,
+    STREAM_PRIO_P2
+} StreamPriority;
+
+typedef enum {
+    STREAM_REQ_QUEUED = 0,
+    STREAM_REQ_READING,
+    STREAM_REQ_VERIFIED,
+    STREAM_REQ_READY,
+    STREAM_REQ_ERROR,
+    STREAM_REQ_CANCELLED
+} StreamRequestState;
+
+const char *stream_priority_name(StreamPriority priority);
+const char *stream_request_state_name(StreamRequestState state);
+
+/* Dedup key: mounting generation, winning source (archive), resource id, LOD. */
+typedef struct {
+    uint64_t generation;
+    uint32_t source;
+    uint32_t id;
+    uint32_t lod;
+} StreamRequestKey;
+
+typedef uint32_t StreamHandle;   /* 0 is never valid */
+
+typedef struct {
+    StreamRequestKey key;
+    StreamPriority priority;      /* current, possibly boosted */
+    StreamPriority requested_priority;
+    StreamRequestState state;
+    uint32_t target_bytes;        /* window staged for this request */
+    uint32_t fetched_bytes;
+    uint32_t payload_length;
+    uint32_t consumers;           /* demand subscribers; prefetch is zero */
+    int pinned;
+    int visible;
+    uint64_t deadline_ms;         /* 0 = none, else mount-monotonic ms */
+    uint64_t enqueued_ms;
+    uint64_t last_touch_ms;
+    uint32_t quanta;
+} StreamRequestInfo;
+
+typedef struct {
+    uint64_t rate_bytes_per_sec;  /* default 7,000,000 */
+    uint32_t quantum_bytes;       /* 32-64 KiB, default 64 KiB */
+    uint32_t window_max_bytes;    /* per descriptor, default 256 KiB */
+    uint32_t cache_limit_bytes;   /* staged bytes, default 2 MiB */
+    uint32_t max_accrual_quanta;  /* 1-2, default 2 */
+} StreamConfig;
+
+void stream_mount_config_default(StreamConfig *out);
+StreamStatus stream_mount_configure(StreamMount *mount,
+                                    const StreamConfig *config, char *reason,
+                                    size_t reason_cap);
+
+/* Monotonic clock in nanoseconds.  The default uses clock() so the module
+ * stays dependency-free; the device should install a tick-based clock and
+ * tests install an artificial one. */
+typedef uint64_t (*StreamClockFn)(void *ctx);
+void stream_mount_set_clock(StreamMount *mount, StreamClockFn clock, void *ctx);
+uint64_t stream_mount_now_ms(const StreamMount *mount);
+
+/* Optional digest/identity check once the full window is staged.  Returning
+ * non-zero turns the request into STREAM_REQ_ERROR and frees its bytes.  With
+ * no callback, `VERIFIED` means "the requested window was read completely";
+ * it does not claim a SHA-256 check. */
+typedef int (*StreamVerifyFn)(void *ctx, const StreamResource *res,
+                              const uint8_t *data, uint32_t len);
+void stream_mount_set_verify(StreamMount *mount, StreamVerifyFn verify,
+                             void *ctx);
+
+/* Enqueue a prefix window [0, min(n, payload_length, window_max)).  Prefetch
+ * priorities stage bytes without a subscriber; STREAM_PRIO_DEMAND adds a
+ * subscriber that must be released.  An identical live key returns the same
+ * handle and boosts priority/extent, so one resource is read once. */
+StreamStatus stream_mount_prefetch_ex(StreamMount *mount,
+                                      const StreamResource *res, uint32_t n,
+                                      uint32_t lod, StreamPriority priority,
+                                      uint64_t deadline_ms, StreamHandle *out,
+                                      char *reason, size_t reason_cap);
+
+/* Execute up to `max_quanta` 32-64 KiB reads under the byte budget.  One read
+ * is active at a time; the two 64 KiB buffers are rotated and copied into the
+ * request's bounded window.  `*out_quanta == 0` with live queued work means
+ * the budget is empty or memory/backpressure refused admission. */
+StreamStatus stream_mount_pump(StreamMount *mount, uint32_t max_quanta,
+                               uint32_t *out_quanta, char *reason,
+                               size_t reason_cap);
+
+StreamStatus stream_mount_request_info(const StreamMount *mount,
+                                       StreamHandle handle,
+                                       StreamRequestInfo *out);
+/* Copy from a READY window.  No archive I/O and no allocation. */
+StreamStatus stream_mount_request_copy(StreamMount *mount, StreamHandle handle,
+                                       uint32_t rel, void *dst, uint32_t n,
+                                       uint32_t *out_len, char *reason,
+                                       size_t reason_cap);
+
+StreamStatus stream_mount_pin(StreamMount *mount, StreamHandle handle,
+                              int pinned, char *reason, size_t reason_cap);
+StreamStatus stream_mount_mark_visible(StreamMount *mount, StreamHandle handle,
+                                       int visible, char *reason,
+                                       size_t reason_cap);
+/* Drop one demand subscriber.  The last one makes a READY window an eviction
+ * candidate; it is not freed until pressure or trim. */
+StreamStatus stream_mount_release(StreamMount *mount, StreamHandle handle,
+                                  char *reason, size_t reason_cap);
+/* Cancel a live request (buffer freed) or reclaim a terminal descriptor. */
+StreamStatus stream_mount_cancel(StreamMount *mount, StreamHandle handle,
+                                 char *reason, size_t reason_cap);
+/* Evict READY windows with no consumers that are not pinned/visible, oldest
+ * touch first, until cache_bytes <= target_bytes (or nothing is evictable). */
+StreamStatus stream_mount_trim(StreamMount *mount, uint32_t target_bytes,
+                               uint32_t *out_freed, char *reason,
+                               size_t reason_cap);
 
 /* `data_dir` is the directory holding the cooked archives named by the
  * index (usually ``.../Data``).  Archives are opened lazily on first use and

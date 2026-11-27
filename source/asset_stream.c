@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct {
     uint32_t name_off;
@@ -28,12 +29,91 @@ struct StreamIndex {
     uint64_t neg_generation;
 };
 
+typedef struct StreamRequest {
+    uint8_t used;
+    uint8_t state;
+    uint8_t priority;
+    uint8_t requested_priority;
+    uint8_t pinned;
+    uint8_t visible;
+    uint8_t entry_valid;
+    uint8_t pad;
+    uint16_t consumers;
+    uint32_t epoch;
+    uint32_t seq;
+    StreamRequestKey key;
+    StreamResource res;
+    BsaEntry entry;
+    uint8_t *data;
+    uint32_t target;
+    uint32_t fetched;
+    uint32_t quanta;
+    uint64_t deadline_ms;
+    uint64_t enqueued_ms;
+    uint64_t last_touch_ms;
+} StreamRequest;
+
 struct StreamMount {
     const StreamIndex *index;
     char *data_dir;
     BsaArchive **archives;
     StreamMetrics metrics;
+    StreamConfig config;
+    StreamClockFn clock;
+    void *clock_ctx;
+    StreamVerifyFn verify;
+    void *verify_ctx;
+    StreamRequest requests[STREAM_MAX_REQUESTS];
+    uint8_t *io[STREAM_IO_BUFFERS];
+    uint32_t io_cur;
+    uint32_t descriptors;
+    uint32_t cache_bytes;
+    uint32_t peak_cache_bytes;
+    uint64_t budget_bytes;
+    uint64_t budget_ns;
+    uint64_t seq;
+    int last_archive;
+    int last_tail_valid;
+    uint64_t last_tail;
 };
+
+static uint64_t default_clock_ns(void *ctx) {
+    (void)ctx;
+    clock_t now = clock();
+    if (now == (clock_t)-1) return 0;
+    return (uint64_t)now * 1000000000ull / (uint64_t)CLOCKS_PER_SEC;
+}
+
+const char *stream_priority_name(StreamPriority priority) {
+    switch (priority) {
+    case STREAM_PRIO_DEMAND: return "demand";
+    case STREAM_PRIO_P0: return "p0";
+    case STREAM_PRIO_P1: return "p1";
+    case STREAM_PRIO_P2: return "p2";
+    default: return "unknown";
+    }
+}
+
+const char *stream_request_state_name(StreamRequestState state) {
+    switch (state) {
+    case STREAM_REQ_QUEUED: return "queued";
+    case STREAM_REQ_READING: return "reading";
+    case STREAM_REQ_VERIFIED: return "verified";
+    case STREAM_REQ_READY: return "ready";
+    case STREAM_REQ_ERROR: return "error";
+    case STREAM_REQ_CANCELLED: return "cancelled";
+    default: return "unknown";
+    }
+}
+
+void stream_mount_config_default(StreamConfig *out) {
+    if (!out) return;
+    out->rate_bytes_per_sec = STREAM_RATE_DEFAULT;
+    out->quantum_bytes = STREAM_QUANTUM_MAX;
+    out->window_max_bytes = STREAM_WINDOW_MAX;
+    out->cache_limit_bytes = STREAM_CACHE_LIMIT_DEFAULT;
+    out->max_accrual_quanta = STREAM_MAX_ACCRUAL_QUANTA;
+}
 
 static void set_reason(char *reason, size_t cap, const char *fmt, ...) {
     if (!reason || cap == 0) return;
@@ -164,6 +244,7 @@ static StreamStatus fill_resource(const StreamIndex *index, uint32_t i,
                        (size_t)i * STREAM_INDEX_RESOURCE_ENTRY_SIZE;
     out->id = le32(p + 0);
     out->path = (const char *)(index->blob + index->pool_off + le32(p + 4));
+    out->path_length = le32(p + 8);
     out->archive_index = le32(p + 12);
     out->physical_offset = le64(p + 16);
     out->payload_length = le32(p + 24);
@@ -531,6 +612,19 @@ static uint64_t file_size_of(const char *path, int *exists) {
     return end > 0 ? (uint64_t)end : 0;
 }
 
+static StreamStatus resource_path_copy(const StreamResource *res, char *out,
+                                       size_t cap, char *reason,
+                                       size_t reason_cap) {
+    if (!res->path || !res->path_length || res->path_length >= cap) {
+        set_reason(reason, reason_cap, "resource path length %u is invalid",
+                   res->path ? res->path_length : 0u);
+        return STREAM_ERR_FORMAT;
+    }
+    memcpy(out, res->path, res->path_length);
+    out[res->path_length] = 0;
+    return STREAM_OK;
+}
+
 static StreamStatus mount_archive(StreamMount *mount, uint32_t slot,
                                   BsaArchive **out, char *reason,
                                   size_t reason_cap) {
@@ -540,9 +634,20 @@ static StreamStatus mount_archive(StreamMount *mount, uint32_t slot,
         *out = mount->archives[slot];
         return STREAM_OK;
     }
-    const char *name = NULL;
-    uint64_t bytes = 0;
-    stream_index_archive(mount->index, slot, &name, &bytes, NULL);
+    /* The pool concatenates names without terminators; use the record
+     * length instead of reading past the archive name. */
+    StreamArchiveRec rec = archive_rec(mount->index, slot);
+    char name[STREAM_PATH_MAX];
+    if (!rec.name_len || rec.name_len >= sizeof name ||
+        rec.name_off > mount->index->pool_len ||
+        rec.name_len > mount->index->pool_len - rec.name_off) {
+        set_reason(reason, reason_cap, "archive %u name is not bounded", slot);
+        return STREAM_ERR_BOUNDS;
+    }
+    memcpy(name, mount->index->blob + mount->index->pool_off + rec.name_off,
+           rec.name_len);
+    name[rec.name_len] = 0;
+    uint64_t bytes = rec.bytes;
     char path[STREAM_PATH_MAX * 2];
     int n = snprintf(path, sizeof path, "%s/%s", mount->data_dir, name);
     if (n <= 0 || (size_t)n >= sizeof path) {
@@ -586,7 +691,10 @@ StreamStatus stream_mount_open(const StreamIndex *index, const char *data_dir,
     mount->archives = (BsaArchive **)calloc(index->info.archive_count ?
                                             index->info.archive_count : 1,
                                             sizeof(BsaArchive *));
-    if (!mount->data_dir || !mount->archives) {
+    for (uint32_t i = 0; i < STREAM_IO_BUFFERS; ++i)
+        mount->io[i] = (uint8_t *)malloc(STREAM_IO_BUFFER_BYTES);
+    if (!mount->data_dir || !mount->archives || !mount->io[0] || !mount->io[1]) {
+        for (uint32_t i = 0; i < STREAM_IO_BUFFERS; ++i) free(mount->io[i]);
         free(mount->data_dir);
         free(mount->archives);
         free(mount);
@@ -598,12 +706,27 @@ StreamStatus stream_mount_open(const StreamIndex *index, const char *data_dir,
         mount->data_dir[--len] = 0;
     }
     mount->index = index;
+    stream_mount_config_default(&mount->config);
+    mount->clock = default_clock_ns;
+    mount->clock_ctx = NULL;
+    mount->last_archive = -1;
+    mount->budget_bytes = (uint64_t)mount->config.quantum_bytes *
+                          mount->config.max_accrual_quanta;
+    mount->budget_ns = mount->clock(mount->clock_ctx);
     *out = mount;
     return STREAM_OK;
 }
 
 void stream_mount_close(StreamMount *mount) {
     if (!mount) return;
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        if (mount->requests[i].used && mount->requests[i].data) {
+            free(mount->requests[i].data);
+            mount->requests[i].data = NULL;
+            ++mount->metrics.frees;
+        }
+    }
+    for (uint32_t i = 0; i < STREAM_IO_BUFFERS; ++i) free(mount->io[i]);
     if (mount->archives) {
         for (uint32_t i = 0; i < mount->index->info.archive_count; ++i)
             if (mount->archives[i]) bsa_close(mount->archives[i]);
@@ -627,6 +750,674 @@ StreamStatus stream_mount_find(StreamMount *mount, const char *path,
     return st;
 }
 
+/* ------------------------------------------------------------------ */
+/* Phase 2: queue, budget, executor, readiness and eviction            */
+
+static uint64_t mount_now_ns(const StreamMount *mount) {
+    if (!mount->clock) return 0;
+    return mount->clock(mount->clock_ctx);
+}
+
+static uint64_t mount_now_ms(const StreamMount *mount) {
+    return mount_now_ns(mount) / 1000000ull;
+}
+
+uint64_t stream_mount_now_ms(const StreamMount *mount) {
+    return mount ? mount_now_ms(mount) : 0;
+}
+
+void stream_mount_set_clock(StreamMount *mount, StreamClockFn clock, void *ctx) {
+    if (!mount) return;
+    mount->clock = clock ? clock : default_clock_ns;
+    mount->clock_ctx = clock ? ctx : NULL;
+    mount->budget_ns = mount_now_ns(mount);
+}
+
+void stream_mount_set_verify(StreamMount *mount, StreamVerifyFn verify,
+                             void *ctx) {
+    if (!mount) return;
+    mount->verify = verify;
+    mount->verify_ctx = ctx;
+}
+
+static StreamStatus config_apply(StreamMount *mount, const StreamConfig *cfg,
+                                 char *reason, size_t reason_cap) {
+    if (!cfg) return STREAM_ERR_ARGUMENT;
+    if (cfg->quantum_bytes < STREAM_QUANTUM_MIN ||
+        cfg->quantum_bytes > STREAM_QUANTUM_MAX) {
+        set_reason(reason, reason_cap, "quantum %u is outside %u..%u",
+                   cfg->quantum_bytes, STREAM_QUANTUM_MIN, STREAM_QUANTUM_MAX);
+        return STREAM_ERR_ARGUMENT;
+    }
+    if (cfg->window_max_bytes < cfg->quantum_bytes ||
+        cfg->window_max_bytes > 16u * 1024u * 1024u) {
+        set_reason(reason, reason_cap, "window %u is outside %u..16 MiB",
+                   cfg->window_max_bytes, cfg->quantum_bytes);
+        return STREAM_ERR_ARGUMENT;
+    }
+    if (cfg->cache_limit_bytes < cfg->quantum_bytes) {
+        set_reason(reason, reason_cap, "cache limit %u is below one quantum",
+                   cfg->cache_limit_bytes);
+        return STREAM_ERR_ARGUMENT;
+    }
+    if (!cfg->rate_bytes_per_sec) {
+        set_reason(reason, reason_cap, "byte rate must be non-zero");
+        return STREAM_ERR_ARGUMENT;
+    }
+    if (cfg->max_accrual_quanta < 1 ||
+        cfg->max_accrual_quanta > STREAM_MAX_ACCRUAL_QUANTA) {
+        set_reason(reason, reason_cap, "accrual %u is outside 1..%u",
+                   cfg->max_accrual_quanta, STREAM_MAX_ACCRUAL_QUANTA);
+        return STREAM_ERR_ARGUMENT;
+    }
+    mount->config = *cfg;
+    mount->budget_bytes = (uint64_t)cfg->quantum_bytes *
+                          cfg->max_accrual_quanta;
+    mount->budget_ns = mount_now_ns(mount);
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_configure(StreamMount *mount,
+                                    const StreamConfig *config, char *reason,
+                                    size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount || !config) return STREAM_ERR_ARGUMENT;
+    if (mount->descriptors) {
+        set_reason(reason, reason_cap,
+                   "cannot reconfigure while %u descriptors are live",
+                   mount->descriptors);
+        return STREAM_ERR_BUDGET;
+    }
+    return config_apply(mount, config, reason, reason_cap);
+}
+
+static int handle_decode(const StreamMount *mount, StreamHandle handle,
+                         StreamRequest **out) {
+    uint32_t slot = handle & 0xFFu;
+    uint32_t epoch = handle >> 8;
+    if (!handle || slot >= STREAM_MAX_REQUESTS || !epoch) return 0;
+    StreamRequest *req = (StreamRequest *)&mount->requests[slot];
+    if (!req->used || req->epoch != epoch) return 0;
+    *out = req;
+    return 1;
+}
+
+static StreamHandle handle_encode(const StreamRequest *req, uint32_t slot) {
+    return ((req->epoch & 0xFFFFFFu) << 8) | slot;
+}
+
+static void request_drop_data(StreamMount *mount, StreamRequest *req) {
+    if (!req->data) return;
+    free(req->data);
+    req->data = NULL;
+    ++mount->metrics.frees;
+    mount->metrics.bytes_freed += req->target;
+    if (mount->cache_bytes >= req->target) mount->cache_bytes -= req->target;
+    else mount->cache_bytes = 0;
+    mount->metrics.cache_bytes = mount->cache_bytes;
+}
+
+static void request_reclaim(StreamMount *mount, StreamRequest *req) {
+    request_drop_data(mount, req);
+    req->used = 0;
+    req->state = STREAM_REQ_QUEUED;
+    req->epoch = (req->epoch + 1u) & 0xFFFFFFu;
+    if (!req->epoch) req->epoch = 1;
+    if (mount->descriptors) --mount->descriptors;
+    mount->metrics.descriptors = mount->descriptors;
+}
+
+static StreamRequest *request_slot(StreamMount *mount) {
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (req->used) continue;
+        uint32_t epoch = req->epoch ? req->epoch : 1;
+        memset(req, 0, sizeof *req);
+        req->epoch = epoch;
+        req->used = 1;
+        ++mount->descriptors;
+        mount->metrics.descriptors = mount->descriptors;
+        return req;
+    }
+    /* Reclaim a terminal descriptor before refusing. */
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (req->used && (req->state == STREAM_REQ_ERROR ||
+                          req->state == STREAM_REQ_CANCELLED)) {
+            request_reclaim(mount, req);
+            return request_slot(mount);
+        }
+    }
+    return NULL;
+}
+
+static StreamRequest *request_find_key(StreamMount *mount,
+                                       const StreamRequestKey *key) {
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (!req->used) continue;
+        if (req->state > STREAM_REQ_READY) continue;
+        if (req->key.generation == key->generation &&
+            req->key.source == key->source && req->key.id == key->id &&
+            req->key.lod == key->lod)
+            return req;
+    }
+    return NULL;
+}
+
+static int request_lru_before(const StreamRequest *a, const StreamRequest *b) {
+    if (a->last_touch_ms != b->last_touch_ms)
+        return a->last_touch_ms < b->last_touch_ms;
+    return a->seq < b->seq;
+}
+
+static int evict_one(StreamMount *mount, const StreamRequest *except,
+                     uint32_t *out_freed) {
+    StreamRequest *best = NULL;
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (!req->used || req == except) continue;
+        if (req->state != STREAM_REQ_READY) continue;
+        if (req->consumers || req->pinned || req->visible) continue;
+        if (!best || request_lru_before(req, best)) best = req;
+    }
+    if (!best) return 0;
+    uint32_t freed = best->target;
+    request_drop_data(mount, best);
+    request_reclaim(mount, best);
+    ++mount->metrics.evicted;
+    mount->metrics.evicted_bytes += freed;
+    if (out_freed) *out_freed += freed;
+    return 1;
+}
+
+static int drop_unused_p2(StreamMount *mount, const StreamRequest *except,
+                          uint32_t *out_freed) {
+    StreamRequest *best = NULL;
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (!req->used || req == except) continue;
+        if (req->state != STREAM_REQ_QUEUED) continue;
+        if (req->priority != STREAM_PRIO_P2) continue;
+        if (req->consumers || req->pinned || req->visible) continue;
+        if (!best || request_lru_before(req, best)) best = req;
+    }
+    if (!best) return 0;
+    uint32_t freed = best->target;
+    request_drop_data(mount, best);
+    request_reclaim(mount, best);
+    ++mount->metrics.cancelled;
+    if (out_freed) *out_freed += freed;
+    return 1;
+}
+
+static StreamStatus make_room(StreamMount *mount, uint32_t need,
+                              const StreamRequest *except, char *reason,
+                              size_t reason_cap) {
+    uint64_t limit = mount->config.cache_limit_bytes;
+    while ((uint64_t)mount->cache_bytes + need > limit) {
+        if (drop_unused_p2(mount, except, NULL)) continue;
+        if (evict_one(mount, except, NULL)) continue;
+        set_reason(reason, reason_cap,
+                   "cache limit %u B: %u live + %u requested",
+                   mount->config.cache_limit_bytes, mount->cache_bytes, need);
+        return STREAM_ERR_BUDGET;
+    }
+    return STREAM_OK;
+}
+
+static StreamStatus request_reserve(StreamMount *mount, StreamRequest *req,
+                                    uint32_t target, char *reason,
+                                    size_t reason_cap) {
+    uint32_t old = req->data ? req->target : 0;
+    if (target <= old) return STREAM_OK;
+    StreamStatus st = make_room(mount, target - old, req, reason, reason_cap);
+    if (st != STREAM_OK) return st;
+    uint8_t *data = (uint8_t *)malloc(target);
+    if (!data) {
+        set_reason(reason, reason_cap, "cannot allocate %u-byte window", target);
+        return STREAM_ERR_NOMEM;
+    }
+    if (req->data) {
+        memcpy(data, req->data, req->fetched < old ? req->fetched : old);
+        free(req->data);
+        ++mount->metrics.frees;
+        mount->metrics.bytes_freed += old;
+        mount->cache_bytes -= old;
+    }
+    req->data = data;
+    req->target = target;
+    ++mount->metrics.allocs;
+    mount->metrics.bytes_allocated += target;
+    mount->cache_bytes += target;
+    mount->metrics.cache_bytes = mount->cache_bytes;
+    if (mount->cache_bytes > mount->peak_cache_bytes) {
+        mount->peak_cache_bytes = mount->cache_bytes;
+        mount->metrics.peak_cache_bytes = mount->peak_cache_bytes;
+    }
+    return STREAM_OK;
+}
+
+static void budget_refill(StreamMount *mount, uint64_t now_ns) {
+    uint64_t cap = (uint64_t)mount->config.quantum_bytes *
+                   mount->config.max_accrual_quanta;
+    if (mount->budget_bytes > cap) mount->budget_bytes = cap;
+    if (now_ns <= mount->budget_ns) {
+        mount->budget_ns = now_ns;
+        return;
+    }
+    uint64_t delta = now_ns - mount->budget_ns;
+    mount->budget_ns = now_ns;
+    uint64_t rate = mount->config.rate_bytes_per_sec;
+    uint64_t add = (delta / 1000000000ull) * rate +
+                   ((delta % 1000000000ull) * rate) / 1000000000ull;
+    if (add >= cap - mount->budget_bytes) mount->budget_bytes = cap;
+    else mount->budget_bytes += add;
+}
+
+static void expire_requests(StreamMount *mount, uint64_t now_ms) {
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (!req->used) continue;
+        if (req->state != STREAM_REQ_QUEUED && req->state != STREAM_REQ_READING)
+            continue;
+        if (req->priority == STREAM_PRIO_DEMAND || !req->deadline_ms)
+            continue;
+        if (req->consumers || req->pinned || req->visible) continue;
+        if (now_ms <= req->deadline_ms) continue;
+        request_drop_data(mount, req);
+        req->state = STREAM_REQ_CANCELLED;
+        ++mount->metrics.expired;
+        ++mount->metrics.cancelled;
+    }
+}
+
+static int request_better(const StreamRequest *a, const StreamRequest *b) {
+    if (a->priority != b->priority) return a->priority < b->priority;
+    uint64_t ad = a->deadline_ms ? a->deadline_ms : UINT64_MAX;
+    uint64_t bd = b->deadline_ms ? b->deadline_ms : UINT64_MAX;
+    if (ad != bd) return ad < bd;
+    if (a->key.source != b->key.source) return a->key.source < b->key.source;
+    if (a->res.physical_offset != b->res.physical_offset)
+        return a->res.physical_offset < b->res.physical_offset;
+    return a->seq < b->seq;
+}
+
+static StreamRequest *next_request(StreamMount *mount) {
+    StreamRequest *best = NULL;
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (!req->used || req->state != STREAM_REQ_QUEUED) continue;
+        if (req->fetched >= req->target) continue;
+        if (!best || request_better(req, best)) best = req;
+    }
+    return best;
+}
+
+static StreamStatus request_verify(StreamMount *mount, StreamRequest *req) {
+    req->state = STREAM_REQ_VERIFIED;
+    if (mount->verify &&
+        mount->verify(mount->verify_ctx, &req->res, req->data, req->target)) {
+        request_drop_data(mount, req);
+        req->state = STREAM_REQ_ERROR;
+        ++mount->metrics.request_errors;
+        return STREAM_ERR_FORMAT;
+    }
+    req->state = STREAM_REQ_READY;
+    req->last_touch_ms = mount_now_ms(mount);
+    ++mount->metrics.verified;
+    ++mount->metrics.ready;
+    return STREAM_OK;
+}
+
+/* Run one quantum.  `*issued` is set when bsa_read_range was called. */
+static StreamStatus request_quantum(StreamMount *mount, StreamRequest *req,
+                                    int *issued, char *reason,
+                                    size_t reason_cap) {
+    uint32_t remain = req->target - req->fetched;
+    uint32_t quantum = mount->config.quantum_bytes;
+    if (quantum > remain) quantum = remain;
+    if (mount->budget_bytes < quantum) {
+        ++mount->metrics.budget_denied;
+        set_reason(reason, reason_cap, "byte budget has %llu B, needs %u",
+                   (unsigned long long)mount->budget_bytes, quantum);
+        return STREAM_ERR_BUDGET;
+    }
+    BsaArchive *archive = NULL;
+    StreamStatus st = mount_archive(mount, req->res.archive_index, &archive,
+                                    reason, reason_cap);
+    if (st != STREAM_OK) {
+        request_drop_data(mount, req);
+        req->state = STREAM_REQ_ERROR;
+        ++mount->metrics.request_errors;
+        ++mount->metrics.errors;
+        return st;
+    }
+    if (!req->entry_valid) {
+        BsaMatch match;
+        char want[STREAM_PATH_MAX];
+        StreamStatus pst = resource_path_copy(&req->res, want, sizeof want,
+                                              reason, reason_cap);
+        if (pst != STREAM_OK) {
+            request_drop_data(mount, req);
+            req->state = STREAM_REQ_ERROR;
+            ++mount->metrics.request_errors;
+            ++mount->metrics.errors;
+            return pst;
+        }
+        BsaStatus bs = bsa_find(archive, want, &match);
+        if (bs != BSA_OK) {
+            request_drop_data(mount, req);
+            req->state = STREAM_REQ_ERROR;
+            ++mount->metrics.request_errors;
+            ++mount->metrics.errors;
+            set_reason(reason, reason_cap,
+                       "archive directory lost '%s'", want);
+            return STREAM_ERR_FORMAT;
+        }
+        if (match.entry.offset != req->res.entry_offset ||
+            match.entry.stored_size != req->res.stored_size) {
+            request_drop_data(mount, req);
+            req->state = STREAM_REQ_ERROR;
+            ++mount->metrics.request_errors;
+            ++mount->metrics.errors;
+            set_reason(reason, reason_cap,
+                       "directory record for '%s' changed", want);
+            return STREAM_ERR_FORMAT;
+        }
+        req->entry = match.entry;
+        req->entry_valid = 1;
+    }
+    uint64_t tail = req->res.physical_offset + req->fetched;
+    if (mount->last_archive != (int)req->res.archive_index ||
+        !mount->last_tail_valid || mount->last_tail != tail)
+        ++mount->metrics.seeks;
+    uint32_t buf = mount->io_cur;
+    uint32_t got = 0;
+    uint32_t rel = req->fetched;
+    req->state = STREAM_REQ_READING;
+    BsaStatus bs = bsa_read_range(archive, &req->entry, rel, mount->io[buf],
+                                  quantum, &got, reason, reason_cap);
+    *issued = 1;
+    if (bs != BSA_OK || got != quantum) {
+        request_drop_data(mount, req);
+        req->state = STREAM_REQ_ERROR;
+        ++mount->metrics.request_errors;
+        ++mount->metrics.errors;
+        if (bs == BSA_OK)
+            set_reason(reason, reason_cap, "short prefetch quantum %u/%u", got,
+                       quantum);
+        return STREAM_ERR_IO;
+    }
+    memcpy(req->data + req->fetched, mount->io[buf], got);
+    req->fetched += got;
+    ++req->quanta;
+    ++mount->metrics.quanta;
+    mount->metrics.quantum_bytes += got;
+    ++mount->metrics.physical_reads;
+    if (mount->budget_bytes >= got) mount->budget_bytes -= got;
+    else mount->budget_bytes = 0;
+    mount->last_archive = (int)req->res.archive_index;
+    mount->last_tail = tail + got;
+    mount->last_tail_valid = 1;
+    mount->io_cur ^= 1u;
+    req->last_touch_ms = mount_now_ms(mount);
+    if (req->fetched >= req->target) {
+        st = request_verify(mount, req);
+        if (st != STREAM_OK) return st;
+    } else {
+        req->state = STREAM_REQ_QUEUED;
+    }
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_pump(StreamMount *mount, uint32_t max_quanta,
+                               uint32_t *out_quanta, char *reason,
+                               size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount || !out_quanta) return STREAM_ERR_ARGUMENT;
+    *out_quanta = 0;
+    uint64_t now_ns = mount_now_ns(mount);
+    expire_requests(mount, now_ns / 1000000ull);
+    for (uint32_t i = 0; i < max_quanta; ++i) {
+        budget_refill(mount, now_ns);
+        StreamRequest *req = next_request(mount);
+        if (!req) break;
+        int issued = 0;
+        StreamStatus st = request_quantum(mount, req, &issued, reason,
+                                          reason_cap);
+        if (issued) ++*out_quanta;
+        if (st == STREAM_ERR_BUDGET) break;
+        /* A failed request frees its bytes and the pump moves on. */
+    }
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_prefetch_ex(StreamMount *mount,
+                                      const StreamResource *res, uint32_t n,
+                                      uint32_t lod, StreamPriority priority,
+                                      uint64_t deadline_ms, StreamHandle *out,
+                                      char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (out) *out = 0;
+    if (!mount || !res || !out) return STREAM_ERR_ARGUMENT;
+    if ((unsigned)priority > STREAM_PRIO_P2) {
+        set_reason(reason, reason_cap, "invalid priority %d", (int)priority);
+        return STREAM_ERR_ARGUMENT;
+    }
+    uint32_t target = res->payload_length;
+    if (n && n < target) target = n;
+    if (target > mount->config.window_max_bytes)
+        target = mount->config.window_max_bytes;
+    if (!target) {
+        set_reason(reason, reason_cap, "'%s' has no stageable payload",
+                   res->path ? res->path : "?");
+        return STREAM_ERR_ARGUMENT;
+    }
+    StreamRequestKey key;
+    key.generation = mount->index->info.generation;
+    key.source = res->archive_index;
+    key.id = res->id;
+    key.lod = lod;
+    uint64_t now = mount_now_ms(mount);
+    StreamRequest *req = request_find_key(mount, &key);
+    if (req) {
+        if (priority < req->priority) req->priority = (uint8_t)priority;
+        if (priority < req->requested_priority)
+            req->requested_priority = (uint8_t)priority;
+        if (deadline_ms && (!req->deadline_ms || deadline_ms < req->deadline_ms))
+            req->deadline_ms = deadline_ms;
+        if (priority == STREAM_PRIO_DEMAND) ++req->consumers;
+        if (target > req->target) {
+            int was_ready = req->state == STREAM_REQ_READY;
+            StreamStatus st = request_reserve(mount, req, target, reason,
+                                              reason_cap);
+            if (st != STREAM_OK) {
+                if (priority == STREAM_PRIO_DEMAND && req->consumers)
+                    --req->consumers;
+                return st;
+            }
+            if (was_ready) req->state = STREAM_REQ_QUEUED;
+        }
+        req->last_touch_ms = now;
+        ++mount->metrics.prefetch_requests;
+        ++mount->metrics.dedup_hits;
+        *out = handle_encode(req, (uint32_t)(req - mount->requests));
+        return STREAM_OK;
+    }
+    req = request_slot(mount);
+    if (!req) {
+        /* Descriptor pressure: drop an unused P2 before refusing. */
+        if (!drop_unused_p2(mount, NULL, NULL)) {
+            set_reason(reason, reason_cap,
+                       "all %u request descriptors are in use",
+                       STREAM_MAX_REQUESTS);
+            return STREAM_ERR_BUDGET;
+        }
+        req = request_slot(mount);
+        if (!req) return STREAM_ERR_BUDGET;
+    }
+    req->res = *res;
+    req->key = key;
+    req->priority = (uint8_t)priority;
+    req->requested_priority = (uint8_t)priority;
+    req->state = STREAM_REQ_QUEUED;
+    req->target = 0;
+    req->fetched = 0;
+    req->quanta = 0;
+    req->deadline_ms = deadline_ms;
+    req->enqueued_ms = now;
+    req->last_touch_ms = now;
+    req->seq = (uint32_t)(++mount->seq);
+    if (priority == STREAM_PRIO_DEMAND) req->consumers = 1;
+    StreamStatus st = request_reserve(mount, req, target, reason, reason_cap);
+    if (st != STREAM_OK) {
+        request_reclaim(mount, req);
+        return st;
+    }
+    ++mount->metrics.prefetch_requests;
+    *out = handle_encode(req, (uint32_t)(req - mount->requests));
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_prefetch(StreamMount *mount, const StreamResource *res,
+                                   uint32_t n, char *reason,
+                                   size_t reason_cap) {
+    StreamHandle handle = 0;
+    return stream_mount_prefetch_ex(mount, res, n, 0, STREAM_PRIO_P1, 0,
+                                    &handle, reason, reason_cap);
+}
+
+StreamStatus stream_mount_request_info(const StreamMount *mount,
+                                       StreamHandle handle,
+                                       StreamRequestInfo *out) {
+    if (!mount || !out) return STREAM_ERR_ARGUMENT;
+    StreamRequest *req = NULL;
+    if (!handle_decode(mount, handle, &req)) return STREAM_ERR_NOT_FOUND;
+    memset(out, 0, sizeof *out);
+    out->key = req->key;
+    out->priority = (StreamPriority)req->priority;
+    out->requested_priority = (StreamPriority)req->requested_priority;
+    out->state = (StreamRequestState)req->state;
+    out->target_bytes = req->target;
+    out->fetched_bytes = req->fetched;
+    out->payload_length = req->res.payload_length;
+    out->consumers = req->consumers;
+    out->pinned = req->pinned;
+    out->visible = req->visible;
+    out->deadline_ms = req->deadline_ms;
+    out->enqueued_ms = req->enqueued_ms;
+    out->last_touch_ms = req->last_touch_ms;
+    out->quanta = req->quanta;
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_request_copy(StreamMount *mount, StreamHandle handle,
+                                       uint32_t rel, void *dst, uint32_t n,
+                                       uint32_t *out_len, char *reason,
+                                       size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount || (!dst && n) || !out_len) return STREAM_ERR_ARGUMENT;
+    *out_len = 0;
+    StreamRequest *req = NULL;
+    if (!handle_decode(mount, handle, &req)) {
+        set_reason(reason, reason_cap, "stale request handle");
+        return STREAM_ERR_NOT_FOUND;
+    }
+    if (req->state != STREAM_REQ_READY) {
+        set_reason(reason, reason_cap, "request is %s, not ready",
+                   stream_request_state_name((StreamRequestState)req->state));
+        return STREAM_ERR_UNSUPPORTED;
+    }
+    if (rel > req->fetched || n > req->fetched - rel) {
+        set_reason(reason, reason_cap,
+                   "copy %u+%u is outside the %u-byte window", rel, n,
+                   req->fetched);
+        return STREAM_ERR_BOUNDS;
+    }
+    if (n) memcpy(dst, req->data + rel, n);
+    *out_len = n;
+    req->last_touch_ms = mount_now_ms(mount);
+    mount->metrics.cache_hits++;
+    mount->metrics.cache_hit_bytes += n;
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_pin(StreamMount *mount, StreamHandle handle,
+                              int pinned, char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount) return STREAM_ERR_ARGUMENT;
+    StreamRequest *req = NULL;
+    if (!handle_decode(mount, handle, &req)) {
+        set_reason(reason, reason_cap, "stale request handle");
+        return STREAM_ERR_NOT_FOUND;
+    }
+    req->pinned = pinned ? 1 : 0;
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_mark_visible(StreamMount *mount, StreamHandle handle,
+                                       int visible, char *reason,
+                                       size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount) return STREAM_ERR_ARGUMENT;
+    StreamRequest *req = NULL;
+    if (!handle_decode(mount, handle, &req)) {
+        set_reason(reason, reason_cap, "stale request handle");
+        return STREAM_ERR_NOT_FOUND;
+    }
+    req->visible = visible ? 1 : 0;
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_release(StreamMount *mount, StreamHandle handle,
+                                  char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount) return STREAM_ERR_ARGUMENT;
+    StreamRequest *req = NULL;
+    if (!handle_decode(mount, handle, &req)) {
+        set_reason(reason, reason_cap, "stale request handle");
+        return STREAM_ERR_NOT_FOUND;
+    }
+    if (req->consumers) --req->consumers;
+    if (req->state == STREAM_REQ_ERROR || req->state == STREAM_REQ_CANCELLED)
+        request_reclaim(mount, req);
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_cancel(StreamMount *mount, StreamHandle handle,
+                                 char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount) return STREAM_ERR_ARGUMENT;
+    StreamRequest *req = NULL;
+    if (!handle_decode(mount, handle, &req)) {
+        set_reason(reason, reason_cap, "stale request handle");
+        return STREAM_ERR_NOT_FOUND;
+    }
+    if (req->state == STREAM_REQ_ERROR || req->state == STREAM_REQ_CANCELLED) {
+        request_reclaim(mount, req);
+        return STREAM_OK;
+    }
+    request_drop_data(mount, req);
+    req->state = STREAM_REQ_CANCELLED;
+    req->consumers = 0;
+    ++mount->metrics.cancelled;
+    return STREAM_OK;
+}
+
+StreamStatus stream_mount_trim(StreamMount *mount, uint32_t target_bytes,
+                               uint32_t *out_freed, char *reason,
+                               size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount) return STREAM_ERR_ARGUMENT;
+    uint32_t freed = 0;
+    while (mount->cache_bytes > target_bytes) {
+        if (!evict_one(mount, NULL, &freed)) break;
+    }
+    if (out_freed) *out_freed = freed;
+    return STREAM_OK;
+}
+
 StreamStatus stream_mount_read(StreamMount *mount, const StreamResource *res,
                                uint32_t rel, void *dst, uint32_t n,
                                uint32_t *out_len, char *reason,
@@ -637,6 +1428,22 @@ StreamStatus stream_mount_read(StreamMount *mount, const StreamResource *res,
     *out_len = 0;
     ++mount->metrics.requests;
     mount->metrics.bytes_requested += n;
+    /* A demand read that is already staged is served without archive I/O. */
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (!req->used || req->state != STREAM_REQ_READY) continue;
+        if (req->key.generation != mount->index->info.generation ||
+            req->key.source != res->archive_index || req->key.id != res->id)
+            continue;
+        if (rel > req->fetched || n > req->fetched - rel) continue;
+        if (n) memcpy(dst, req->data + rel, n);
+        *out_len = n;
+        req->last_touch_ms = mount_now_ms(mount);
+        mount->metrics.bytes_returned += n;
+        mount->metrics.cache_hits++;
+        mount->metrics.cache_hit_bytes += n;
+        return STREAM_OK;
+    }
     BsaArchive *archive = NULL;
     StreamStatus st = mount_archive(mount, res->archive_index, &archive,
                                     reason, reason_cap);
@@ -644,21 +1451,27 @@ StreamStatus stream_mount_read(StreamMount *mount, const StreamResource *res,
         ++mount->metrics.errors;
         return st;
     }
+    char want[STREAM_PATH_MAX];
+    st = resource_path_copy(res, want, sizeof want, reason, reason_cap);
+    if (st != STREAM_OK) {
+        ++mount->metrics.errors;
+        return st;
+    }
     BsaMatch match;
-    BsaStatus bs = bsa_find(archive, res->path, &match);
+    BsaStatus bs = bsa_find(archive, want, &match);
     if (bs != BSA_OK) {
         ++mount->metrics.misses;
         ++mount->metrics.errors;
         set_reason(reason, reason_cap,
                    "archive directory lost '%s' since the index was written",
-                   res->path);
+                   want);
         return bs == BSA_ERR_NOT_FOUND ? STREAM_ERR_FORMAT : STREAM_ERR_IO;
     }
     if (match.entry.offset != res->entry_offset ||
         match.entry.stored_size != res->stored_size) {
         ++mount->metrics.errors;
         set_reason(reason, reason_cap,
-                   "directory record for '%s' changed (offset/size)", res->path);
+                   "directory record for '%s' changed (offset/size)", want);
         return STREAM_ERR_FORMAT;
     }
     uint32_t got = 0;
@@ -679,16 +1492,4 @@ void stream_mount_metrics(const StreamMount *mount, StreamMetrics *out) {
     if (!out) return;
     if (mount) *out = mount->metrics;
     else memset(out, 0, sizeof *out);
-}
-
-StreamStatus stream_mount_prefetch(StreamMount *mount, const StreamResource *res,
-                                   uint32_t n, char *reason,
-                                   size_t reason_cap) {
-    (void)mount; (void)res; (void)n;
-    /* TODO(streaming phase 2): queue, byte quanta, owners, prefetch,
-     * eviction and GPU publication.  No silent no-op: callers must see the
-     * refusal and keep using synchronous stream_mount_read(). */
-    set_reason(reason, reason_cap,
-               "prefetch queue is not implemented in streaming phase 1");
-    return STREAM_ERR_UNSUPPORTED;
 }
