@@ -15,6 +15,7 @@ formats, bounds and hook points.
 | `source/d3d9_capture.h` | Snapshot schema, limits, options and public API. |
 | `source/d3d9_capture.c` | Validation, FNV-1a hashing, text/binary writers, no-overwrite naming. |
 | `tools/capture_raster.py` | Read-only, standard-library CPU rasterizer; writes RGBA PNG without a GPU. |
+| `tools/capture_info.py` | Read-only text/JSON overview of the `.txt` capture snapshots (draws, presents, state, paired `.bin`). |
 | `tests/d3d9_capture_smoke.c` | Host test: first draw, bounds/truncation, bad guest pointer, no-overwrite, unique signatures. |
 | `tests/capture_raster_test.py` | Synthetic parser/raster/PNG tests for primitives, indices, colour, texture, blend and viewport. |
 | `docs/FIRST_DRAW_CAPTURE.md` | This document. |
@@ -868,3 +869,37 @@ early captures contain only the blue Bink placeholder geometry, not the menu.
 * A Present event has `pixels.captured=0`; it cannot be used as a screenshot.
 * Draws must target the same dimensions when composed. Clear colour is known,
   but a non-default clear depth/stencil value is not captured.
+
+## Capture metadata overview
+
+`tools/capture_info.py` is the text/JSON companion to the rasterizer. It reads
+only the `.txt` snapshots, so it works even where the `.bin` payload is absent
+or corrupt; the `BIN` column merely reports whether a sibling `.bin` exists.
+All `*firstdraw*.txt` files below the given directory are scanned, recursively
+by default (`--no-recursive` limits the scan to one level). A single `.txt` path
+is also accepted. Standard library only, no writes to the capture directory.
+
+```powershell
+# Table: one row per file, plus per-directory totals.
+python tools/capture_info.py -Dir E:\menu_capture\run_tesv_slice_8260
+python tools/capture_info.py E:\menu_draw\          # positional -Dir also works
+
+# Structured output for scripts: "summary" and "files" with raw fields and names.
+python tools/capture_info.py -Dir E:\menu_draw\ --json
+```
+
+The table lists the file, draw type, primitives, indexed flag, the raw D3D9
+`draw.vertex_count` versus the actually captured `vertices.count`
+(`VCOUNT/CAPT` - the former is often `0` for `DrawPrimitiveUP` while the latter
+is the payload length), viewport, and short z/blend/cull/alpha state labels.
+Present files are reported separately and never participate in draw totals.
+The summary counts draws/presents, primitives, captured vertices/indices and
+files with a `.bin` sibling. Type, cull and blend names follow
+`source/d3d9_core.h` (`D9_TRIANGLELIST=4`, `D9_TRIANGLESTRIP=5`,
+`D9_TRIANGLEFAN=6`).
+
+Typical workflow: run `capture_info.py` first to see which snapshots exist and
+which states/geometry they carry, then feed the selected `.bin` files to
+`capture_raster.py` as shown in *Usage* above. For example, a Present file has
+no pixels (`pixels.captured=0`), so it should be skipped when choosing PNG
+inputs, while draws sharing one viewport can be composed in argument order.
