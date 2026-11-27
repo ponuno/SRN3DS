@@ -272,7 +272,7 @@ $liftCommon = @("-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-fwrapv", "-
 if ($env:N3DS_WATCH_STORE_CHECKS -eq '1') { $liftCommon += '-DN3DS_WATCH_STORE_CHECKS' }
 if ($Sanitize) { $liftCommon = $common + @("-Istaged", "-fwrapv", "-fno-strict-aliasing") }
 
-$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", "staged/fpu.c", "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c")
+$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", "staged/fpu.c", "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/asset_stream.c", "source/stream_cell.c")
 $comSources = $legacySources + @("source/guest_process.c", "source/n3ds_boot.c")
 $d3dSources = @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c")
 $d3dFull = $d3dSources + @("source/d3d9_shader.c", "source/d3d9_tev.c")
@@ -487,7 +487,7 @@ Add-Test "stream_cell" $common @("source/bsa_reader.c", "source/asset_stream.c",
 # is set.  It links the generated stage headers like win32_bsa_overlay, so a
 # source-only worktree simply does not register it.
 if (Test-Path (Join-Path $root "staged/rt_table.h")) {
-    Add-Test "stream_cell_real" $liftCommon ($legacySources + @("source/asset_stream.c", "source/stream_cell.c", "tests/stream_cell_real_smoke.c")) @()
+    Add-Test "stream_cell_real" $liftCommon ($legacySources + @("tests/stream_cell_real_smoke.c")) @()
 } else {
     Write-Log "stream_cell_real: staged/rt_table.h is absent; real-index overlay test not registered"
 }
