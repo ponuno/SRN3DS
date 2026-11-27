@@ -238,7 +238,17 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
         /* Headless software backend on host; real PICA200 on 3DS when init
          * succeeded.  Registration happens before the guest CreateDevice. */
 #ifdef __3DS__
-        if(backend&&d9_com_set_backend(backend,backend_ctx,4u<<20))printf("d3d9: PICA200 backend installed\n");
+        /* The 4 MiB default is below the measured renderer's target set.  Host
+         * runs override it with TESV_D3D9_BUDGET_MB; the device flag file in
+         * main() sets the same variable before this call. */
+        size_t res_mib = 4;
+        const char *rmb = getenv("TESV_D3D9_BUDGET_MB");
+        if (rmb && *rmb) {
+            unsigned long v = strtoul(rmb, NULL, 10);
+            if (v >= 8 && v <= 128) res_mib = (size_t)v;
+        }
+        if(backend&&d9_com_set_backend(backend,backend_ctx,res_mib<<20))
+            printf("d3d9: PICA200 backend installed (%zu MiB resource budget)\n", res_mib);
         else
 #endif
         if (d9_null_register() != 0) printf("d3d9: null backend not installed\n");
@@ -450,6 +460,32 @@ int main(void) {
     }
     if (access("sdmc:/Skyrim/tesv_depth_pair_probe.flag", F_OK) == 0)
         setenv("TESV_D3D9_DEPTH_PAIR_PROBE", "1", 1);
+    /* Device-only diagnostics: the 3DS process cannot inherit host environment
+     * variables, so a flag file on the virtual SD enables the same traces that
+     * host runs set with TESV_MENU_TRACE / TESV_DRAW_PROBE.  The full
+     * TESV_D3D9_TRACE is deliberately not enabled: it logs every COM call. */
+    if (access("sdmc:/Skyrim/tesv_trace.flag", F_OK) == 0) {
+        setenv("TESV_MENU_TRACE", "1", 1);
+        setenv("TESV_DRAW_PROBE", "1", 1);
+        fprintf(stderr, "[probe] trace flag present: menu + draw probes\n");
+    }
+    /* The 4 MiB default texture cache is too small for the real menu path;
+     * host runs override it with TESV_D3D9_BUDGET_MB.  The device cannot
+     * inherit host variables, so the same value comes from a one-line file. */
+    {
+        FILE *bf = fopen("sdmc:/Skyrim/tesv_d3d9_budget.txt", "r");
+        if (bf) {
+            char mb[16] = {0};
+            if (fgets(mb, sizeof mb, bf)) {
+                mb[strcspn(mb, "\r\n")] = 0;
+                if (mb[0] >= '1' && mb[0] <= '9') {
+                    setenv("TESV_D3D9_BUDGET_MB", mb, 1);
+                    fprintf(stderr, "[probe] TESV_D3D9_BUDGET_MB=%s from flag file\n", mb);
+                }
+            }
+            fclose(bf);
+        }
+    }
     if (n3ds) run("sdmc:/Skyrim/TESV.exe", "sdmc:/Skyrim", TESV_ARM_STEPS, budget, "sdmc:/Skyrim_N3DS_tesv.log",
                   gpu?d9_citro_backend():NULL,gpu);
     else puts("New Nintendo 3DS required");
