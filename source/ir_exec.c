@@ -30,6 +30,11 @@ void rt_int3(CPU *c, uint32_t addr) __attribute__((noreturn));
 void rt_cpuid(CPU *c, uint32_t *a, uint32_t *b, uint32_t *cc, uint32_t *d);
 uint64_t rt_rdtsc(void);
 void n3ds_lift_set_ir_ip(uint32_t ip);
+/* Diagnostic hook (TESV_A43F_TRACE); a no-op unless the env is set. */
+void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                         int is_irc);
+void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                           uint32_t next, int is_irc);
 
 /* ---------------------------------------------------------------- state */
 
@@ -1385,7 +1390,9 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
         if (n3ds_ir_fetch_block(c, ip, func_end, &b))
             rt_unimpl(c, ip, "IR: block does not fit the decode cache");
         uint32_t next = 0;
+        n3ds_a43f_trace_pre(c, b.start, addr, 0);
         if (exec_block(c, &b, &f, addr, func_end, &next)) return;
+        n3ds_a43f_trace_block(c, b.start, addr, next, 0);
         ip = next;
     }
 }

@@ -37,6 +37,19 @@ uint32_t n3ds_lift_current_ip(void);
 uint32_t n3ds_lift_last_call(void);
 void n3ds_lift_dump_recent_calls(FILE *f);
 void n3ds_lift_dump_stream(FILE *f);
+/* Diagnostic only: TESV_A43F_TRACE=1 counts entries to the buffered-window
+ * translate 0xa43f80, its success (0xa43fb5) and reject (0xa43fd3) blocks,
+ * sampled registers/effective addresses and a once-per-second summary.
+ * The block hooks are called by both IR executors. With the env unset every
+ * hook returns after one cached-flag test and the guest sees no change. */
+void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                         int is_irc);
+void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                           uint32_t next, int is_irc);
+void n3ds_a43f_trace_dispatch(CPU *c, uint32_t addr);
+void n3ds_a43f_trace_aot_pre(CPU *c);
+void n3ds_a43f_trace_aot_post(CPU *c);
+void n3ds_a43f_trace_periodic(CPU *c);
 /* Measurement-only dump for the NiDX9TextureBufferData descriptor slot. */
 void n3ds_cube_desc_probe(uint32_t arg, uint32_t index, uint32_t base, uint32_t slot);
 /* Measurement-only fill for f_CECDC0's uninitialised base local.

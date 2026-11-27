@@ -12,6 +12,12 @@ extern int tesv_cecdc0_source_decide(GuestMemory *m, uint32_t frame,
                                       uint32_t index, uint32_t ebx,
                                       uint32_t *new_base, uint32_t *new_desc)
     __attribute__((weak));
+/* Entry hook that some measurement-generated slices call from the BSA reader.
+ * A weak no-op keeps such a table linkable without changing guest semantics;
+ * a strong definition in the measurement build overrides it. */
+__attribute__((weak)) void rt_bsa_trace(CPU *c, uint32_t addr) {
+    (void)c; (void)addr;
+}
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -65,13 +71,17 @@ void n3ds_lift_dump_stream(FILE *f) {
  * 0x00ac6c10 (the menu reader retry-loop callee) and its vtable. */
 static void stream_trace(CPU *c) {
     static unsigned n;
-    if (!c || n >= 12) return;
+    static unsigned long long total;
+    if (!c) return;
+    /* Counters advance on every entry; only the detail print is limited. */
+    ++total;
+    g_stream_obj = c->r[1];
+    if (n >= 12) return;
     ++n;
     uint32_t obj = c->r[1], ret = 0;
-    g_stream_obj = obj;
     if (memory) (void)guest_read32(memory, c->r[4], &ret);
-    fprintf(stderr, "[stream] obj=%08x ret=%08x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x\n",
-            (unsigned)obj, (unsigned)ret, (unsigned)c->r[0], (unsigned)c->r[3],
+    fprintf(stderr, "[stream] entry#%llu obj=%08x ret=%08x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x\n",
+            total, (unsigned)obj, (unsigned)ret, (unsigned)c->r[0], (unsigned)c->r[3],
             (unsigned)c->r[1], (unsigned)c->r[2], (unsigned)c->r[6],
             (unsigned)c->r[7], (unsigned)c->r[4]);
     if (!obj || !memory) return;
@@ -95,6 +105,216 @@ static void stream_trace(CPU *c) {
 #define RT_CALL_RING 12u
 static struct { uint32_t addr, from; } g_call_ring[RT_CALL_RING];
 static unsigned g_call_ring_n;
+
+/* ---- TESV_A43F_TRACE: buffered-window translate 0xa43f80 ----------------
+ * Leaf 64-bit interval test. With A={+0xc:+8} and B={+0x14:+0x10} it accepts
+ * want in [A,B) and writes
+ *   *out0 = [+0x24] + (want_lo - A_lo)   (file offset of the window hit)
+ *   *out1 = B_lo - want_lo               (bytes left in the window)
+ * otherwise it writes *out1=0 and returns false. Blocks: entry 80,
+ * mid 93/95/99/fa1/fa7/fab/faf/fb1, success fb5, reject fd3.
+ * AOT keeps its registers in c->r[] and runs every block inside one C call, so
+ * that tier is counted at dispatch and classified after the call from the
+ * caller's out1 slot; IR/IRC are counted per block. Every hook returns after a
+ * cached flag test unless TESV_A43F_TRACE is set, so default behaviour and
+ * guest memory are untouched. */
+#define A43F_ENTRY 0x00a43f80u
+#define A43F_OK    0x00a43fb5u
+#define A43F_FAIL  0x00a43fd3u
+#define A43F_READ  0x00ac6c10u   /* BufferedStream::Read, the retry callee */
+#define A43F_RAW   0x00ac6380u   /* its raw read */
+#define A43F_NBLK  11
+
+typedef struct {
+    int state;                    /* 0 untested, 1 off, 2 on */
+    unsigned long long vis[2], ok[2], fail[2];      /* [0]=AOT, [1]=IR/IRC */
+    unsigned long long blk[2][A43F_NBLK];
+    unsigned long long rep[2], rep_max[2];
+    uint32_t last_obj[2], last_lo[2], last_hi[2];
+    unsigned long long reads, bytes, raws;
+    unsigned tick;                /* dispatches since the last clock() probe */
+    double t0, last_t;
+    unsigned long long tv[2], tok[2], tfail[2], treads, tbytes;
+} A43fTrace;
+static A43fTrace g_a43f;
+
+static int a43f_on(void) {
+    if (!g_a43f.state) {
+        const char *v = getenv("TESV_A43F_TRACE");
+        g_a43f.state = (v && v[0] && strcmp(v, "0")) ? 2 : 1;
+        if (g_a43f.state == 2) {
+            g_a43f.t0 = g_a43f.last_t = (double)clock() / (double)CLOCKS_PER_SEC;
+            fprintf(stderr, "[a43f] trace on entry=%08x ok=%08x fail=%08x "
+                    "reader=%08x raw=%08x\n", A43F_ENTRY, A43F_OK, A43F_FAIL,
+                    A43F_READ, A43F_RAW);
+        }
+    }
+    return g_a43f.state == 2;
+}
+static const char *a43f_tier(int t) { return t ? "irc" : "aot"; }
+static int a43f_blk_index(uint32_t ip) {
+    static const uint32_t starts[A43F_NBLK] = {
+        0x00a43f80u, 0x00a43f93u, 0x00a43f95u, 0x00a43f99u,
+        0x00a43fa1u, 0x00a43fa7u, 0x00a43fabu, 0x00a43fafu,
+        0x00a43fb1u, 0x00a43fb5u, 0x00a43fd3u };
+    for (int i = 0; i < A43F_NBLK; ++i) if (starts[i] == ip) return i;
+    return -1;
+}
+/* Exact branch decision of the leaf from the fields it already loaded:
+ * reject iff A > B, want < A, or want >= B. */
+static int a43f_reject(uint32_t lo_a, uint32_t hi_a, uint32_t lo_b,
+                       uint32_t hi_b, uint32_t wlo, uint32_t whi) {
+    if (hi_a > hi_b || (hi_a == hi_b && lo_a >= lo_b)) return 1; /* ja / jae */
+    if (hi_a > whi || (hi_a == whi && lo_a > wlo)) return 2;     /* ja */
+    if (whi > hi_b || (whi == hi_b && wlo >= lo_b)) return 3;    /* jae */
+    return 0;
+}
+/* Sampled visit: TEB, guest registers, the five object fields and four stack
+ * arguments with their effective addresses, then the Jcc outcome. */
+static void a43f_dump(CPU *c, int t, unsigned long long n, const char *tag) {
+    uint32_t ret = 0, o0p = 0, o1p = 0, wlo = 0, whi = 0;
+    uint32_t f[10] = {0};
+    uint32_t obj = c->r[1], esp = c->r[4];
+    (void)guest_read32(memory, esp, &ret);
+    (void)guest_read32(memory, esp + 4u, &o0p);
+    (void)guest_read32(memory, esp + 8u, &o1p);
+    (void)guest_read32(memory, esp + 0xcu, &wlo);
+    (void)guest_read32(memory, esp + 0x10u, &whi);
+    for (unsigned i = 0; i < 10; ++i)
+        if (guest_read32(memory, obj + 4u * i, &f[i])) f[i] = 0xdeadbeefu;
+    int rej = a43f_reject(f[2], f[3], f[4], f[5], wlo, whi);
+    uint32_t hit_off = f[9] + (wlo - f[2]);
+    uint32_t hit_len = f[4] - wlo;
+    fprintf(stderr,
+            "[a43f] #%llu %s tier=%s teb=%08x ret=%08x ecx=%08x esp=%08x "
+            "eax=%08x ebx=%08x edx=%08x esi=%08x edi=%08x\n",
+            n, tag, a43f_tier(t), (unsigned)c->fs_base, ret, obj, esp,
+            (unsigned)c->r[0], (unsigned)c->r[3], (unsigned)c->r[2],
+            (unsigned)c->r[6], (unsigned)c->r[7]);
+    fprintf(stderr,
+            "[a43f]   [ecx+08]=%08x:%08x [ecx+0c]=%08x:%08x [ecx+10]=%08x:%08x "
+            "[ecx+14]=%08x:%08x [ecx+24]=%08x:%08x\n",
+            obj + 8u, f[2], obj + 0xcu, f[3], obj + 0x10u, f[4], obj + 0x14u,
+            f[5], obj + 0x24u, f[9]);
+    fprintf(stderr,
+            "[a43f]   [esp+0c]=%08x:%08x [esp+10]=%08x:%08x A=%08x.%08x "
+            "B=%08x.%08x want=%08x.%08x out0=%08x out1=%08x edge=%s\n",
+            esp + 0xcu, wlo, esp + 0x10u, whi, f[3], f[2], f[5], f[4], whi, wlo,
+            o0p, o1p, rej ? "REJECT" : "ACCEPT");
+    if (!rej)
+        fprintf(stderr, "[a43f]   predicted *out0=%08x *out1=%08x "
+                "(base %08x + want_lo %08x - A_lo %08x)\n",
+                hit_off, hit_len, f[9], wlo, f[2]);
+    else
+        fprintf(stderr, "[a43f]   predicted *out1=0 (reject check %d)\n", rej);
+}
+static void a43f_periodic(int force) {
+    double now = (double)clock() / (double)CLOCKS_PER_SEC;
+    if (!force && now - g_a43f.last_t < 1.0) return;
+    g_a43f.last_t = now;
+    for (int t = 0; t < 2; ++t) {
+        fprintf(stderr,
+                "[a43f] t=%.3f tier=%s vis=%llu ok=%llu fail=%llu rep=%llu/%llu "
+                "| window dvis=%llu dok=%llu dfail=%llu\n",
+                now - g_a43f.t0, a43f_tier(t), g_a43f.vis[t], g_a43f.ok[t],
+                g_a43f.fail[t], g_a43f.rep[t], g_a43f.rep_max[t],
+                g_a43f.vis[t] - g_a43f.tv[t], g_a43f.ok[t] - g_a43f.tok[t],
+                g_a43f.fail[t] - g_a43f.tfail[t]);
+        g_a43f.tv[t] = g_a43f.vis[t];
+        g_a43f.tok[t] = g_a43f.ok[t];
+        g_a43f.tfail[t] = g_a43f.fail[t];
+    }
+    fprintf(stderr, "[a43f] t=%.3f reader reads=%llu bytes=%llu raw=%llu "
+            "| window dreads=%llu dbytes=%llu\n", now - g_a43f.t0, g_a43f.reads,
+            g_a43f.bytes, g_a43f.raws, g_a43f.reads - g_a43f.treads,
+            g_a43f.bytes - g_a43f.tbytes);
+    g_a43f.treads = g_a43f.reads;
+    g_a43f.tbytes = g_a43f.bytes;
+    if (g_stream_obj && memory) {
+        uint32_t o = g_stream_obj, p[11] = {0};
+        for (unsigned i = 0; i < 11; ++i) (void)guest_read32(memory, o + 4u * i, &p[i]);
+        fprintf(stderr, "[a43f]   stream obj=%08x win=%08x.%08x..%08x.%08x "
+                "pos=%08x.%08x base=%08x.%08x buf=%08x flags=%08x\n",
+                o, p[3], p[2], p[5], p[4], p[7], p[6], p[9], p[8], p[4], p[10]);
+    }
+}
+void n3ds_a43f_trace_periodic(CPU *c) { (void)c; if (a43f_on()) a43f_periodic(0); }
+/* Reader-side counters, driven from the dispatcher for every tier. */
+void n3ds_a43f_trace_dispatch(CPU *c, uint32_t addr) {
+    if (!a43f_on() || !c || !memory) return;
+    if (addr == A43F_READ) {
+        uint32_t len = 0;
+        ++g_a43f.reads;
+        g_stream_obj = c->r[1];
+        if (!guest_read32(memory, c->r[4] + 8u, &len)) g_a43f.bytes += len;
+    } else if (addr == A43F_RAW) {
+        ++g_a43f.raws;
+    }
+    /* clock() is not free: probe it once per 4096 dispatches. */
+    if ((++g_a43f.tick & 0xfffu) == 0) a43f_periodic(0);
+}
+/* AOT tier: the body keeps esp on the guest stack, so after its `ret 0x10`
+ * the caller's out1 slot is the dword at esp+4. */
+void n3ds_a43f_trace_aot_pre(CPU *c) {
+    uint32_t wlo = 0, whi = 0;
+    ++g_a43f.vis[0];
+    (void)guest_read32(memory, c->r[4] + 0xcu, &wlo);
+    (void)guest_read32(memory, c->r[4] + 0x10u, &whi);
+    if (c->r[1] == g_a43f.last_obj[0] && wlo == g_a43f.last_lo[0] &&
+        whi == g_a43f.last_hi[0]) {
+        if (++g_a43f.rep[0] > g_a43f.rep_max[0]) g_a43f.rep_max[0] = g_a43f.rep[0];
+    } else {
+        g_a43f.rep[0] = 0;
+        g_a43f.last_obj[0] = c->r[1];
+        g_a43f.last_lo[0] = wlo;
+        g_a43f.last_hi[0] = whi;
+    }
+    unsigned long long n = g_a43f.vis[0];
+    if (n <= 4 || (n & (n - 1)) == 0) a43f_dump(c, 0, n, "aot");
+}
+void n3ds_a43f_trace_aot_post(CPU *c) {
+    uint32_t out1 = 0;
+    (void)guest_read32(memory, c->r[4] + 4u, &out1);
+    if (out1) ++g_a43f.ok[0]; else ++g_a43f.fail[0];
+}
+/* IR/IRC tier, before the block runs: true entry state (registers, TEB, args)
+ * for the entry block, plus the identical-(this,want) run detector. */
+void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                         int is_irc) {
+    if (!a43f_on() || !c || block_ip != A43F_ENTRY || func_addr != A43F_ENTRY)
+        return;
+    int t = is_irc ? 1 : 0;
+    uint32_t wlo = 0, whi = 0;
+    ++g_a43f.vis[t];
+    if (memory) {
+        (void)guest_read32(memory, c->r[4] + 0xcu, &wlo);
+        (void)guest_read32(memory, c->r[4] + 0x10u, &whi);
+    }
+    if (c->r[1] == g_a43f.last_obj[t] && wlo == g_a43f.last_lo[t] &&
+        whi == g_a43f.last_hi[t]) {
+        if (++g_a43f.rep[t] > g_a43f.rep_max[t]) g_a43f.rep_max[t] = g_a43f.rep[t];
+    } else {
+        g_a43f.rep[t] = 0;
+        g_a43f.last_obj[t] = c->r[1];
+        g_a43f.last_lo[t] = wlo;
+        g_a43f.last_hi[t] = whi;
+    }
+    unsigned long long n = g_a43f.vis[t];
+    if (n <= 4 || (n & (n - 1)) == 0) a43f_dump(c, t, n, "entry");
+}
+/* IR/IRC tier, after the block runs: block and accept/reject edge counters. */
+void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                           uint32_t next, int is_irc) {
+    if (!a43f_on()) return;
+    if (func_addr != A43F_ENTRY) return;   /* periodic runs from the dispatcher */
+    int t = is_irc ? 1 : 0;
+    int bi = a43f_blk_index(block_ip);
+    if (bi >= 0) ++g_a43f.blk[t][bi];
+    if (block_ip == A43F_OK) ++g_a43f.ok[t];
+    else if (block_ip == A43F_FAIL) ++g_a43f.fail[t];
+    (void)c; (void)next;
+}
+
 void n3ds_lift_set_ir_ip(uint32_t ip){g_ir_ip=ip;}
 uint32_t n3ds_lift_current_ip(void){return g_ir_ip;}
 uint32_t n3ds_lift_last_call(void){return g_last_call;}
@@ -205,6 +425,10 @@ int n3ds_lift_container_stats(N3dsIrcStats *out) {
 
 static int container_aot_pred(void *user, uint32_t addr) {
     (void)user;
+    /* TESV_A43F_TRACE: run the traced leaf through the container's exact
+     * predecoded blocks instead of the AOT body so every block and edge is
+     * countable. Measurement only; the two tiers are semantically identical. */
+    if (addr == 0x00a43f80u && a43f_on()) return 0;
     return lookup(addr) != NULL;
 }
 
@@ -609,6 +833,17 @@ void rt_int3(CPU *c,uint32_t addr) {rt_unimpl(c,addr,"int3");}
 int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return 0;
     if (addr == 0x00ac6c10u && getenv("TESV_STREAM_TRACE")) stream_trace(c);
+    if (a43f_on()) {
+        n3ds_a43f_trace_dispatch(c, addr);
+        /* TESV_A43F_TRACE: measurement-only. Run the traced leaf and the
+         * reader through the container/AOT dispatch every time so the AOT
+         * inline call cache cannot bypass the counters. The container
+         * predicate sends 0xa43f80 to its exact IR record and leaves the two
+         * reader addresses on AOT. */
+        if (addr == 0x00a43f80u || addr == 0x00ac6c10u || addr == 0x00ac6380u) {
+            if (container_dispatch(c, addr) == 0) return 0;
+        }
+    }
     g_last_call=addr; g_last_cpu=c;
     uint32_t from=0;
     if(memory&&c) (void)guest_read32(memory,c->r[4],&from);
@@ -616,7 +851,14 @@ int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     g_call_ring[g_call_ring_n%RT_CALL_RING].from=from;
     ++g_call_ring_n;
     const FnEntry *e=lookup(addr);
-    if(e){e->fn(c);return 0;}
+    if(e){
+        if(a43f_on()&&addr==0x00a43f80u){
+            n3ds_a43f_trace_aot_pre(c);
+            e->fn(c);
+            n3ds_a43f_trace_aot_post(c);
+        } else e->fn(c);
+        return 0;
+    }
     int slice = n3ds_ir_has(addr) != 0;
     if (slice && container_has_preentry(addr)) {
         if (!container_dispatch(c, addr)) return 0;

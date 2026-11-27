@@ -15,6 +15,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Diagnostic hook (TESV_A43F_TRACE); a no-op unless the env is set. */
+void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                         int is_irc);
+void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
+                           uint32_t next, int is_irc);
+
 #if defined(__3DS__)
 #include <3ds.h>
 #elif defined(_WIN32)
@@ -738,7 +744,9 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
             rt_unimpl(c, ip, what);
         }
         uint32_t next = 0;
+        n3ds_a43f_trace_pre(c, b.start, addr, 1);
         if (exec_block(c, &b, &f, frame_start, func_end, &next)) return;
+        n3ds_a43f_trace_block(c, b.start, addr, next, 1);
         ip = next;
     }
 }
