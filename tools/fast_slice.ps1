@@ -27,11 +27,14 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 
 function Find-Slice {
-    $hit = Get-ChildItem $OutDir -Recurse -Filter tesv_slice.exe -ErrorAction SilentlyContinue |
+    if (-not (Test-Path -LiteralPath $OutDir)) { return $null }
+    $hit = Get-ChildItem -LiteralPath $OutDir -Recurse -Filter tesv_slice.exe -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($hit) { return $hit.FullName }
     return $null
 }
+
+if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
 
 $slice = Find-Slice
 if ($Reslice -or -not $slice) {
