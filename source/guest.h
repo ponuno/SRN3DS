@@ -76,6 +76,10 @@ void guest_watch_configure(uint32_t addr, uint32_t value);
 void guest_watch_set_pc(uint32_t pc, unsigned thread);
 uint32_t guest_watch_last_pc(void);
 void guest_pc_ring_dump(FILE *f);
+/* Per-thread block ring with registers at block entry (N3DS_PC_RING=1). */
+void guest_pc_ring_note(uint32_t pc, unsigned thread, uint32_t esp,
+                        uint32_t ecx, uint32_t eax);
+void guest_pc_ring_dump_thread(FILE *f, unsigned thread);
 void guest_watch_check(GuestMemory *m, const char *source);
 void guest_watch_check_active(const char *source);
 void guest_watch_check_host(const void *p, size_t n, const char *source);
