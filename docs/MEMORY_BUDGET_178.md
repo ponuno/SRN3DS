@@ -75,37 +75,116 @@ On-disk (SD, not RAM) for reference: `tesv.irc` is **64,445,696 B = 61.5 MiB**
 Nothing in the tree shrinks or evicts the BSA index today, and the IRC record
 cache is a fixed 4 MiB.
 
-## 5. GPU-visible memory (linear heap), 8 MiB
+## 5. GPU-visible memory: VRAM (6 MiB) and linear heap (8 MiB)
 
-`C3D_TexInitWithParams` and `C3D_RenderTargetCreate*` allocate through
-`linearAlloc`, i.e. the **linear heap**, not the 6 MiB VRAM pool.
-`vramSpaceFree()` is only logged (`source/d3d9_citro3d.c:242,254,268,297,972,…`).
-Treat **8 MiB as the effective GPU ceiling** until measured on hardware
-**[unverified]**; on N3DS the linear heap can be enlarged, the VRAM split cannot.
+citro3d splits GPU memory explicitly. `C3D_TexInitParams` ends with `onVram`
+(`C:\devkitPro\libctru\include\c3d\texture.h:44-51`):
 
-Measured/derived consumers of those 8 MiB:
+| Call site | `onVram` | Lives in |
+|---|---|---|
+| `d3d9_citro3d.c:177` (A8 texture) | `true` | **VRAM** |
+| `d3d9_citro3d.c:969` (explicit target colour) | `true` | **VRAM** |
+| `d3d9_citro3d.c:376,405,447` (game textures, cube, ETC1) | `false` | **linear heap** |
+| `C3D_RenderTargetCreate*` framebuffers/depth | — | allocator is inside citro3d, source not in this tree **[unverified]** |
+
+So the 6 MiB VRAM and the 8 MiB linear heap are **two separate ceilings**, and
+`vramSpaceFree()` only describes the first. Today `vramSpaceFree()` is logged
+(`d3d9_citro3d.c:242,254,268,297,972,…`) but there is no `linearSpaceFree()`
+accounting anywhere.
+
+Linear-heap consumers:
 
 | Consumer | Size | Basis |
 |---|---:|---|
-| 9 explicit LDR targets, 256×256 colour + depth | **4.5 MiB** | `source/d3d9_core.c:7-12` (5×1024 + 4×512 logical → nine 256×256; 9 × (256 KiB + 256 KiB)) |
-| Retained back buffer 240×400 + D24S8 | ~0.6 MiB | `d3d9_citro3d.c:310` |
-| PICA-SR scene (128×256 RGBA8) | 128 KiB | `docs/PICA_SR.md` (scale 0.53) |
-| PICA-SR depth (D16) | 64 KiB | same |
-| PICA-SR scratch | 128 KiB | same |
-| Vertex/index arenas (`FRAME_*`) | `linearAlloc`, sizes in `d3d9_citro3d.c:317-330` | — |
-| **All game textures** | remainder | ETC1/ETC1A4 at 4 bpp (`d3d9_texture_data.c`, `d3d9_citro3d.c:445-449`) |
+| Vertex arena `FRAME_VERTICES` × 20 B | **320 KiB** | `d3d9_citro3d.c:317` |
+| Colour arena `FRAME_MENU_VERTICES` × 40 B | **2.5 MiB** | `:322` (`D9ColorVertex` = 40 B) |
+| Cube arena `FRAME_VERTICES` × 40 B | **640 KiB** | `:327` |
+| Index arena `FRAME_INDICES` × 2 B | **512 KiB** | `:328` |
+| Skin arena `FRAME_SKIN_VERTICES` × 80 B | **320 KiB** | `:329` |
+| **Arenas subtotal** | **≈ 4.35 MiB** | derived from the four constants above |
+| All game textures | remainder | ETC1 4 bpp, **ETC1A4 8 bpp** (`d3d9_citro3d.c:445-449`) |
+| Depth attachments of explicit targets | — | citro3d-internal **[unverified]** |
 
-Consequence: after targets, ~3.5 MiB is left for every texture in the frame.
-Texture uploads are already 4 bpp (DXT1/3/5 and BC5/BC4 → ETC1/ETC1A4); RGBA8
-uploads (A8R8G8B8, R8G8B8 once shipped, L8) cost 8× per pixel-mip.
+The 4.35 MiB of arenas alone consume over half of the 8 MiB linear heap before a
+single texture is uploaded. That is the strongest argument for the 24 MiB linear
+target below. Note ETC1A4 is **8 bpp**, not 4: a 512×512 alpha texture is 256 KiB,
+not 128 KiB, and every mip level counts.
 
-**There is no texture budget today**: `d9_texcache_init(...,0,0)` at
-`source/d3d9_core.c:320` passes `guest_limit=0, gpu_limit=0`, i.e. unlimited.
-`d9_texcache_set_limits()` exists (`d3d9_texcache.c:162`) and the cache has LRU
-trim/`budget_trim_evictions`/`evictions_gpu` accounting (`d3d9_texcache.h:118-124`),
-but nothing sets a limit in the slice.
+The nine-target 4.5 MiB figure (`d3d9_core.c:7-12`) is an estimate of
+colour+depth pairs that are *simultaneously live*; exact placement must be
+measured per target. There is **no texture budget today**:
+`d9_texcache_init(...,0,0)` at `source/d3d9_core.c:320` passes
+`guest_limit=0, gpu_limit=0`, i.e. unlimited. `d9_texcache_set_limits()` exists
+(`d3d9_texcache.c:162`) with LRU trim/`budget_trim_evictions`/`evictions_gpu`
+accounting (`d3d9_texcache.h:118-124`), but nothing sets a limit in the slice.
 
-## 6. Levers, with trade-offs
+## 6. Target profile (2026-11-27 review): 120 MiB newlib + 24 MiB linear
+
+Proposed experiment profile. **96/8 stays the default** until a device route
+proves 120/24. The remaining **34 MiB** of the 178 MiB region must hold code,
+static data, stacks and every other non-heap cost; that is a precondition, not a
+measured result.
+
+CPU budget inside newlib:
+
+| Item | Target MiB | Basis |
+|---|---:|---|
+| Guest physical memory | **92** | keep the current cap (engine pages + guest-side asset allocations) |
+| IRC index | 3.5 | 90,900 × 40 B |
+| IRC record cache | 4 | keep until miss rate is measured |
+| Decoded-IR cache | 4 | `n3ds_ir_cache_init(4u << 20)` |
+| Resident BSA index | **2** | target after paging the index to SD; measured today ≈ 17.5 |
+| Stream staged cache | 2 | current default |
+| Other host allocations and temporary copies | 8.5 | D3D CPU copies, decode, metadata, load peaks — needs measurement |
+| Untouchable newlib reserve | **4** | check at the cell-transition peak |
+| **Total** | **120** | |
+
+Consequence: with today's BSA index the same layout loses 15.5 MiB → 76.5 MiB
+left for guest under 120 MiB, 52.5 MiB under the current 96 MiB. That is a
+simultaneous-peak estimate, not an observed high-water mark, and it explains why
+raising `guest_budget` alone does not help. **The first change to make is the BSA
+index**: keep an archive catalog and a bounded page cache in RAM, page the rest
+from SD, and verify lookup equivalence against the current overlay including mod
+priority.
+
+GPU budget for 24 MiB linear:
+
+| Item | Target MiB |
+|---|---:|
+| Resident game textures (upper bound) | **8** |
+| Minimum free linear reserve | **2** |
+| Frame arenas, backend resources, linear targets, upload buffers | 14 |
+
+The texture limit must drop below 8 MiB if measured peaks of the other items
+exceed 14 MiB. Enforce it through `d9_texcache_set_limits()`, and keep any
+resource referenced by already-submitted GPU commands pinned until those commands
+retire.
+
+Removed from the plan: **160 MiB physical guest RAM**. With 24 MiB linear it
+already exceeds the region. The engine has three different numbers — 42.12 MiB
+(gate pass), 4.63 MiB (backed at the fixed start point), 100.25 MiB (promised
+commit) — and none of them is a cell working set. If the engine touches the whole
+commit, a 92 MiB cap is short by at least 8.25 MiB; passing `AvailPageFile` does
+not remove that deficit.
+
+### Device route to accept or reject the profile
+
+1. Run the same route on **96/8**, **104/16**, **120/24**: cold start → menu →
+   first exterior cell → neighbour cell → return. Same archives, settings,
+   scenario. Record whether each heap initialised.
+2. Sample peaks **at allocation time**, including cell transitions: guest
+   backed/peak, live/peak for BSA and both IR caches, minimum free
+   newlib/linear/VRAM, largest free block where the allocator reports it, and the
+   size of every failed request. For streaming: queued bytes, staged bytes, and
+   wait time for a mandatory resource. A periodic post-load snapshot misses the
+   moment when the old asset, the new copy and the upload buffer are all live.
+3. Accept 120/24 only by route result: both heaps created, mandatory allocations
+   pass, ≥4 MiB newlib and ≥2 MiB linear free at the peak, resident set plateaus
+   on a repeat run. If linear runs out first, reduce mip levels and measure reload
+   time. If newlib runs out first, the log must show what evicts guest: BSA, CPU
+   copies, or the guest pages themselves.
+
+## 7. Levers, with trade-offs
 
 1. **Raise the linear heap** 8 → 32/48 MiB and lower the newlib heap to
    64/48 MiB. The engine needs ~42 MiB guest at startup, so this is feasible for
