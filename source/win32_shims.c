@@ -72,6 +72,12 @@ static char root[512];
 static char cwd[512];
 static uint32_t last_error;
 static uint64_t start_tick;
+/* Measurement-only clock shaping (TESV_TIME_OFFSET_MS / TESV_TIME_SCALE).
+ * The menu fade is driven by guest time; a stuck fade can be either real
+ * "still loading" or a dead clock.  Shifting/scaling the guest-visible clock
+ * lets us distinguish those without touching renderer state. */
+static uint64_t time_offset_ticks;
+static uint64_t time_scale_num = 1000, time_scale_den = 1000;
 
 /* ---- allocation accounting (diagnostic) ----------------------------------------
  * Answers the memory question with a measurement: how much does the guest
@@ -237,6 +243,42 @@ static uint64_t freq(void) {
     return 1000000000u;
 #endif
 }
+/* Measurement-only: TESV_TIME_OFFSET_MS adds a constant to the guest clock at
+ * start, TESV_TIME_SCALE=<factor> (e.g. 4 or 0.25) scales elapsed time.  Both
+ * default to the honest clock and are logged once when they differ. */
+static void time_env_init(void){
+    const char *off = getenv("TESV_TIME_OFFSET_MS");
+    const char *scale = getenv("TESV_TIME_SCALE");
+    if (off && *off) {
+        long long ms = atoll(off);
+        if (ms > 0) time_offset_ticks = (uint64_t)ms * freq() / 1000u;
+    }
+    if (scale && *scale) {
+        double s = atof(scale);
+        if (s > 0.0 && s < 1000.0) {
+            time_scale_num = (uint64_t)(s * 1000.0 + 0.5);
+            if (time_scale_num != 1000u)
+                fprintf(stderr, "[time] measurement-only scale=%s offset_ms=%lld\n",
+                        scale, off ? atoll(off) : 0LL);
+        }
+    }
+    if (time_offset_ticks)
+        fprintf(stderr, "[time] measurement-only offset_ms=%lld (ticks=%llu)\n",
+                off ? atoll(off) : 0LL, (unsigned long long)time_offset_ticks);
+}
+/* Guest-visible monotonic ticks (QPC units). */
+static uint64_t vtime_ticks(void){
+    uint64_t base = start_tick ? start_tick : tick();
+    uint64_t t = tick() - start_tick;
+    if (time_scale_num != time_scale_den)
+        t = t / time_scale_den * time_scale_num + (t % time_scale_den) * time_scale_num / time_scale_den;
+    return base + t + time_offset_ticks;
+}
+static uint32_t vtime_ms(void){
+    uint64_t t = vtime_ticks() - start_tick;
+    uint64_t f = freq();
+    return (uint32_t)((t / f) * 1000u + (t % f) * 1000u / f);
+}
 static void va_shutdown(void);
 static void mappings_shutdown(void);
 static int mapping_close(uint32_t h);
@@ -253,6 +295,7 @@ int win32_init(GuestMemory *m,uint32_t bytes,const char *game_root) {
         root[--root_len]=0;
     }
     strcpy(cwd,root);last_error=0;start_tick=tick();
+    time_env_init();
     memset(tls_used,0,sizeof tls_used);memset(tls_values,0,sizeof tls_values);
     if(win32_user_init(m)){mem=NULL;return -1;}
     if(win32_thread_init(m)){win32_user_shutdown();mem=NULL;return -1;}
@@ -657,8 +700,8 @@ static void s_VirtualFree(CPU *c){
     }
     FAIL(ERR_INVALID_PARAMETER,0,3);
 }
-static void s_GetTickCount(CPU *c){uint64_t t=tick()-start_tick;RET((t/freq())*1000+(t%freq())*1000/freq(),0);}
-static void s_QueryPerformanceCounter(CPU *c){uint64_t v=tick();if(!guest_ptr(mem,A(0),8))FAIL(ERR_INVALID_PARAMETER,0,1);M64(A(0))=v;RET(1,1);}
+static void s_GetTickCount(CPU *c){win32_input_auto_enter_poll();RET(vtime_ms(),0);}
+static void s_QueryPerformanceCounter(CPU *c){win32_input_auto_enter_poll();uint64_t v=vtime_ticks();if(!guest_ptr(mem,A(0),8))FAIL(ERR_INVALID_PARAMETER,0,1);M64(A(0))=v;RET(1,1);}
 static void s_QueryPerformanceFrequency(CPU *c){if(!guest_ptr(mem,A(0),8))FAIL(ERR_INVALID_PARAMETER,0,1);M64(A(0))=freq();RET(1,1);}
 static void s_GetCurrentProcessId(CPU *c){RET(1,0);}
 static void s_GetCurrentThreadId(CPU *c){RET(win32_thread_current_id(),0);}
@@ -1691,6 +1734,21 @@ static void s_DeleteFileA(CPU *c){
 /* Access mask bits we understand: GENERIC_READ/WRITE plus SYNCHRONIZE (all of
  * our handles are synchronous). Anything else is rejected, not ignored. */
 #define ACCESS_ALLOWED 0xC0100000u
+/* Measurement-only file tracing (TESV_FILE_TRACE=1): every open and every
+ * read of a .bsa/.swf/.gfx file with the guest path, host path, caller VA,
+ * handle, offset and byte count.  Used to answer "did the guest ever ask for
+ * Interface\StartMenu.swf, and if so which archive range did it read?" */
+static int file_trace_on(void){
+    static int v=-1;
+    if(v<0){const char *e=getenv("TESV_FILE_TRACE");v=e&&*e;}
+    return v;
+}
+static uint32_t file_caller(CPU *c){uint32_t r=0;if(mem&&c)(void)guest_read32(mem,c->r[4],&r);return r;}
+static int file_trace_path(const char *p){
+    if(!p)return 0;
+    return strstr(p,".bsa")||strstr(p,".BSA")||strstr(p,".swf")||strstr(p,".SWF")||
+           strstr(p,".gfx")||strstr(p,".GFX")||strstr(p,".gft")||strstr(p,".GFT");
+}
 static void create_file(CPU *c,const char *name){
     uint32_t access=A(1),share=A(2),disp=A(4),flags=A(5);
     if((access&~ACCESS_ALLOWED) || share>3 || disp<1 || disp>5 || (flags&0x40000000u) || A(6))
@@ -1715,11 +1773,20 @@ static void create_file(CPU *c,const char *name){
         uint32_t e=errno_error();
         if(disp==1 && errno==EEXIST)e=ERR_FILE_EXISTS;
         fprintf(stderr,"[file] FAIL %s errno=%d\n",path,errno);
+        if(file_trace_on() && file_trace_path(name))
+            fprintf(stderr,"[filetrace] open FAIL '%s' host='%s' errno=%d caller=%08x\n",
+                    name,path,errno,file_caller(c));
         FAIL(e,INVALID_HANDLE,7);
     }
     if(disp==5 && set_end_of_file(f,0)){fclose(f);FAIL(ERR_ACCESS_DENIED,INVALID_HANDLE,7);}
     files[i]=f;file_can_read[i]=(uint8_t)rd;file_can_write[i]=(uint8_t)wr;
     snprintf(file_path[i],sizeof file_path[i],"%s",path);
+    if(file_trace_on() && file_trace_path(name)){
+        int64_t old=file_tell(f),sz=-1;
+        if(old>=0 && !file_seek(f,0,SEEK_END)){sz=file_tell(f);file_seek(f,old,SEEK_SET);}
+        fprintf(stderr,"[filetrace] open '%s' host='%s' handle=%03x size=%lld caller=%08x\n",
+                name,path,0x100+i,(long long)sz,file_caller(c));
+    }
     set_error(c,0);RET(0x100+i,7);
 }
 static void s_CreateFileA(CPU *c){
@@ -1735,6 +1802,18 @@ static void s_ReadFile(CPU *c){
     if(A(4) || !bytes || !guest_ptr(mem,bytes,4) || (n&&!guest_ptr(mem,A(1),n)))FAIL(ERR_INVALID_PARAMETER,0,5);
     M32(bytes)=0;size_t read=n?fread(guest_ptr(mem,A(1),n),1,n,f):0;M32(bytes)=(uint32_t)read;
     if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] read %lu bytes -> %lu\n",(unsigned long)n,(unsigned long)read);}}
+    if(file_trace_on()){
+        uint32_t hi=A(0)-0x100;
+        if(hi<MAX_FILES && file_trace_path(file_path[hi])){
+            static unsigned logged;
+            int64_t after=file_tell(f);
+            if(logged<6000u){++logged;
+                fprintf(stderr,"[filetrace] read h=%03x off=%lld n=%lu got=%lu caller=%08x path=%s\n",
+                        (unsigned)A(0),(long long)(after-(int64_t)read),(unsigned long)n,
+                        (unsigned long)read,file_caller(c),file_path[hi]);
+            }
+        }
+    }
     if(ferror(f))FAIL(ERR_READ_FAULT,0,5);
     set_error(c,0);RET(1,5);
 }
@@ -2313,8 +2392,7 @@ static void s_GetTempPathA(CPU *c){
 
 /* ---- emulated media/version helpers used by legacy installers ------------------- */
 static void s_timeGetTime(CPU *c){
-    uint64_t t=tick()-start_tick;set_error(c,0);
-    RET((uint32_t)((t/freq())*1000+(t%freq())*1000/freq()),0);
+    win32_input_auto_enter_poll();set_error(c,0);RET(vtime_ms(),0);
 }
 static void s_timeBeginPeriod(CPU *c){(void)A(0);set_error(c,0);RET(0,1);}
 static void s_timeEndPeriod(CPU *c){(void)A(0);set_error(c,0);RET(0,1);}

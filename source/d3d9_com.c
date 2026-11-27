@@ -2360,9 +2360,25 @@ static int draw_probe_enabled(void){static int v=-1;if(v<0){const char*e=getenv(
 static void draw_probe(CPU *c,const char *method){
     if(!draw_probe_enabled())return;
     uint32_t caller=M32(c->r[4]);
-    if(caller<0xf874c0u||caller>0xf87e60u)return;
-    static unsigned logged;
-    if(logged>=48)return;++logged;
+    int is_draw=!strncmp(method,"Draw",4);
+    if(!is_draw && (caller<0xf874c0u||caller>0xf87e60u))return;
+    static unsigned logged,draws,frame;
+    if(is_draw){
+        if(draws>=32)return;
+        ++draws;
+        fprintf(stderr,"[drawprobe] %s caller=%08x a1=%08x a2=%08x a3=%08x\n",
+                method,(unsigned)caller,(unsigned)M32(c->r[4]+4),
+                (unsigned)M32(c->r[4]+8),(unsigned)M32(c->r[4]+0xc));
+        return;
+    }
+    if(++frame%120u==0u){
+        uint32_t sing=0,flag=0,view=0,obj=0;
+        if(g.mem){ (void)guest_read32(g.mem,0x1b3fc98u,&sing); (void)guest_read32(g.mem,0x1b3fc94u,&flag);
+                 if(sing){ (void)guest_read32(g.mem,sing+8,&view); if(view)(void)guest_read32(g.mem,view+0x10,&obj); } }
+        fprintf(stderr,"[menustate] frame=%u singleton=%08x flag94=%u view=%08x view+10=%08x\n",
+                frame,(unsigned)sing,(unsigned)(flag&0xffu),(unsigned)view,(unsigned)obj);
+    }
+    if(logged>=64)return;++logged;
     uint32_t ebp=c->r[5];
     uint32_t arg0=M32(c->r[4]+0xbc),wrapper_ret=M32(c->r[4]+0xb8);
     fprintf(stderr,"[drawprobe] %s caller=%08x wr=%08x this=%08x m28=%u arg0=%08x "
@@ -3696,14 +3712,14 @@ static uint32_t shader_gate(const char *method){
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: shader state rejected",method);
     return hr(rc);
 }
-static void draw_primitive(CPU *c){
+static void draw_primitive(CPU *c){draw_probe(c,"DrawPrimitive");
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf))RET(INVALID,4);
     uint32_t gate=shader_gate("DrawPrimitive");if(gate!=OK)RET(gate,4);
     int rc=d9_draw_primitive(g.device,A(1),A(2),A(3));
     if(rc==D9_OK)capture_draw(A(1),A(2),A(3),0,0,0,0,0);
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitive: %s",d9_last_draw_diagnostic(g.device));
     RET(hr(rc),4);}
-static void draw_indexed(CPU *c){
+static void draw_indexed(CPU *c){draw_probe(c,"DrawIndexedPrimitive");
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!A(4))RET(INVALID,7);
     uint32_t gate=shader_gate("DrawIndexedPrimitive");if(gate!=OK)RET(gate,7);
     int rc=d9_draw_indexed_range(g.device,A(1),(int32_t)A(2),A(3),A(4),A(5),A(6));
@@ -3726,7 +3742,7 @@ static int indexed_up_geometry(unsigned type,unsigned primitives,unsigned *verti
 }
 /* DrawPrimitiveUP borrows stream zero; it does not change the bound stream,
  * index buffer, transforms, texture or render state. */
-static void draw_primitive_up(CPU *c){
+static void draw_primitive_up(CPU *c){draw_probe(c,"DrawPrimitiveUP");
     unsigned type=A(1),primitives=A(2),stride=A(4),vertices=0;
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
        up_geometry(type,primitives,&vertices)||!stride||stride>4096u){
@@ -3741,7 +3757,7 @@ static void draw_primitive_up(CPU *c){
     if(rc==D9_OK)capture_draw(type,0,primitives,0,0,0,0,0);
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitiveUP: %s",d9_last_draw_diagnostic(g.device));
     RET(hr(rc),5);}
-static void draw_indexed_up(CPU *c){
+static void draw_indexed_up(CPU *c){draw_probe(c,"DrawIndexedPrimitiveUP");
     unsigned type=A(1),min=A(2),count=A(3),primitives=A(4),fmt=A(6),stride=A(8),indices=0,used,isize;
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
        indexed_up_geometry(type,primitives,&indices)||!count||min>UINT32_MAX-count||
@@ -4063,3 +4079,4 @@ uint32_t d9_com_resolve(const PeImport *e,void *ctx){(void)ctx;
     return 0;
 }
 FnModule d9_com_module(void){return (FnModule){"d3d9-host",all_entries,I_COUNT+I_COM_COUNT};}
+

@@ -24,8 +24,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifdef __3DS__
 #include <3ds.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 #define IN_MEM_BASE 0x1e100000u
@@ -274,8 +278,56 @@ static void sample_3ds(void) {
 #endif
 }
 /* Recompute per-key edges and signal DirectInput events on any change. */
+/* Measurement-only synthetic Enter (TESV_AUTO_ENTER_MS=<n>): after n ms of
+ * host wall time hold VK_RETURN for 120 ms once.  This is a real key state
+ * change through the same g.down[] path the pad uses, not a faked draw. */
+static int g_auto_enter_active;
+static int refresh(void);
+static uint64_t input_now_ms(void) {
+#ifdef __3DS__
+    return (uint64_t)svcGetSystemTick() * 1000u / SYSCLOCK_ARM11;
+#elif defined(_WIN32)
+    LARGE_INTEGER f, n;
+    if (!QueryPerformanceFrequency(&f) || !f.QuadPart) return 0;
+    QueryPerformanceCounter(&n);
+    return (uint64_t)n.QuadPart * 1000u / (uint64_t)f.QuadPart;
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts)) return 0;
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+#endif
+}
+static void auto_enter_apply(void) {
+    static int phase;
+    static uint64_t start;
+    const char *e = getenv("TESV_AUTO_ENTER_MS");
+    if (!e || !*e) return;
+    if (!phase) { start = input_now_ms(); phase = 1; }
+    uint64_t now = input_now_ms();
+    long long at = atoll(e);
+    if (at < 0) at = 0;
+    uint64_t uat = (uint64_t)at;
+    if (phase == 1 && now >= uat) {
+        g.down[0x0D] = 1;
+        fprintf(stderr, "[input] auto Enter down at %llu ms (target %llu)\n",
+                (unsigned long long)now, (unsigned long long)uat);
+        phase = 2;
+    } else if (phase == 2 && now >= uat + 120u) {
+        g.down[0x0D] = 0;
+        fprintf(stderr, "[input] auto Enter up at %llu ms\n", (unsigned long long)now);
+        phase = 3;
+    }
+}
+void win32_input_auto_enter_poll(void) {
+    if (g_auto_enter_active) return;
+    g_auto_enter_active = 1;
+    auto_enter_apply();
+    refresh();
+    g_auto_enter_active = 0;
+}
 static int refresh(void) {
     sample_3ds();
+    if (!g_auto_enter_active) auto_enter_apply();
     g.down[VK_LBUTTON] = g.mb[0] ? 1 : 0;
     g.down[VK_RBUTTON] = g.mb[1] ? 1 : 0;
     g.down[VK_MBUTTON] = g.mb[2] ? 1 : 0;

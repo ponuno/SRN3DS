@@ -77,6 +77,9 @@ void win32_input_map_pad(Win32InputProfile profile, uint32_t pad_mask,
  * since last call" bit and signal a DirectInput event set with
  * SetEventNotification. `buttons` bit 0 = left, 1 = right, 2 = middle. */
 void win32_input_set_key(unsigned vk, int down);
+/* Measurement-only: TESV_AUTO_ENTER_MS=<n> holds VK_RETURN for 120 ms once
+ * after n host milliseconds.  Polled from the guest clock shims. */
+void win32_input_auto_enter_poll(void);
 void win32_input_set_mouse(int32_t x, int32_t y, int32_t dx, int32_t dy, unsigned buttons);
 void win32_input_set_controller(int connected, unsigned buttons,
                                 unsigned char left_trigger, unsigned char right_trigger,

@@ -102,6 +102,64 @@ static void stream_trace(CPU *c) {
                 (unsigned)m24);
     }
 }
+/* ---- TESV_MENU_TRACE: retail StartMenu state machine --------------------
+ * Diagnostic only. Logs the WinMain->0x876f60->0x876fc0->0x876b90->
+ * 0xa60c80->0xa60c10 open chain, the 0x8779d0 message switch (with the
+ * message word and first fields), 0x877a50 (GFx FadeInMenu), 0x8765f0
+ * (fadeOutStarted) and [0x1b3fc98]/[0x1b3fc94]. Merged with the file-opener
+ * URL log so a missing StartMenu.swf and a guest message/fade stall can be
+ * told apart. Never changes dispatch. */
+static int menu_trace_on(void){
+    static int v=-1;
+    if(v<0){const char *e=getenv("TESV_MENU_TRACE");v=e&&*e&&strcmp(e,"0");}
+    return v;
+}
+static uint32_t menu_rd32(uint32_t a){uint32_t v=0;if(memory)(void)guest_read32(memory,a,&v);return v;}
+static void menu_trace(CPU *c,uint32_t addr){
+    if(!menu_trace_on()||!c)return;
+    static const uint32_t va[]={
+        0x0069de08u,0x00876f60u,0x00876fc0u,0x00876b90u,0x00a60c80u,0x00a60c10u,
+        0x00a5eaa0u,0x00a5ed20u,0x008779d0u,0x00877a50u,0x008765f0u,0x00876bf0u,
+        0x00876a50u,0x00a64ba0u,0x00a64940u};
+    unsigned i,n=sizeof va/sizeof va[0];
+    for(i=0;i<n&&va[i]!=addr;++i);
+    if(i==n)return;
+    static unsigned seen[sizeof va/sizeof va[0]];
+    unsigned cap=(addr==0x008779d0u)?24u:6u;
+    if(seen[i]>=cap)return;
+    ++seen[i];
+    uint32_t from=menu_rd32(c->r[4]);
+    uint32_t sing=menu_rd32(0x1b3fc98u),flag94=menu_rd32(0x1b3fc94u);
+    uint32_t a0=menu_rd32(c->r[4]+4),a1=menu_rd32(c->r[4]+8);
+    fprintf(stderr,"[menu] enter %08x from=%08x singleton=%08x flag94=%u a0=%08x a1=%08x ecx=%08x\n",
+            (unsigned)addr,(unsigned)from,(unsigned)sing,(unsigned)(flag94&0xffu),
+            (unsigned)a0,(unsigned)a1,(unsigned)c->r[1]);
+    if(addr==0x00a5ed20u){
+        char name[256];name[0]=0;
+        if(a0&&memory){
+            for(unsigned k=0;k<sizeof name-1;k++){
+                const char *p=guest_ptr(memory,a0+k,1);
+                if(!p)break;
+                name[k]=*p;
+                if(!*p)break;
+                name[k+1]=0;
+            }
+            name[sizeof name-1]=0;
+        }
+        fprintf(stderr,"[menu] opener url='%s'\n",name);
+    }
+    if(addr==0x008779d0u){
+        fprintf(stderr,"[menu] msg=%08x type=%u d4=%08x d8=%08x dc=%08x\n",
+                (unsigned)a0,(unsigned)(a0?menu_rd32(a0)&0xffu:0xffffffffu),
+                (unsigned)(a0?menu_rd32(a0+4):0),(unsigned)(a0?menu_rd32(a0+8):0),
+                (unsigned)(a0?menu_rd32(a0+0xc):0));
+    }
+    if(addr==0x00877a50u){
+        uint32_t obj=sing?menu_rd32(sing+8):0;
+        fprintf(stderr,"[menu] FadeInMenu menu=%08x menu+8=%08x [[menu+8]+10]=%08x\n",
+                (unsigned)sing,(unsigned)obj,(unsigned)(obj?menu_rd32(obj+0x10):0));
+    }
+}
 #define RT_CALL_RING 12u
 static struct { uint32_t addr, from; } g_call_ring[RT_CALL_RING];
 static unsigned g_call_ring_n;
