@@ -106,8 +106,21 @@ void guest_watch_configure(uint32_t address, uint32_t value) {
     fprintf(stderr, "[watch] armed field=%08x target=%08x\n", address, value);
 }
 
+static uint32_t g_pc_ring[96];
+static unsigned g_pc_n;
+void guest_pc_ring_dump(FILE *f) {
+    if (!f) return;
+    unsigned cnt = g_pc_n < 96u ? g_pc_n : 96u;
+    fprintf(f, "[guest] pc ring (%u, oldest first):", cnt);
+    for (unsigned i = 0; i < cnt; ++i)
+        fprintf(f, " %08x", (unsigned)g_pc_ring[(g_pc_n - cnt + i) % 96u]);
+    fputc('\n', f);
+}
+uint32_t guest_watch_last_pc(void) { return guest_watch.last_pc; }
+
 void guest_watch_set_pc(uint32_t pc, unsigned thread) {
-    if (!guest_watch.active) return;
+    g_pc_ring[g_pc_n++ % (sizeof g_pc_ring / sizeof g_pc_ring[0])] = pc;
+    if (!guest_watch.active) { guest_watch.last_pc = pc; guest_watch.last_thread = thread; return; }
     /* A changed value is attributed to the instruction that just finished. */
     if (guest_watch.last_pc) guest_watch_record(NULL, "post-guest");
     guest_watch.last_pc = pc;

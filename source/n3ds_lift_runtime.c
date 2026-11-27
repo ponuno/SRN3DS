@@ -717,6 +717,8 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
                             (unsigned)c->r[0],(unsigned)c->r[3],(unsigned)ecx,
                             (unsigned)c->r[2],(unsigned)c->r[6],(unsigned)c->r[7],
                             (unsigned)c->r[5],(unsigned)esp,(unsigned)g_last_call);
+                    fprintf(stderr,"[guest] last_block_pc=%08x\n",(unsigned)guest_watch_last_pc());
+                    guest_pc_ring_dump(stderr);
                     if(memory){
                         const uint8_t *p40=guest_ptr(memory,ecx+0x40,4);
                         const uint8_t *p8=guest_ptr(memory,ecx+8,4);

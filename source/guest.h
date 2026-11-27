@@ -1,6 +1,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define GUEST_MAX_REGIONS 64
 #define GUEST_PAGE_SIZE 4096u
@@ -73,6 +74,8 @@ int guest_write32(GuestMemory *m, uint32_t addr, uint32_t value);
 /* Optional diagnostic watchpoint. Disabled unless N3DS_WATCH_ADDR is set. */
 void guest_watch_configure(uint32_t addr, uint32_t value);
 void guest_watch_set_pc(uint32_t pc, unsigned thread);
+uint32_t guest_watch_last_pc(void);
+void guest_pc_ring_dump(FILE *f);
 void guest_watch_check(GuestMemory *m, const char *source);
 void guest_watch_check_active(const char *source);
 void guest_watch_check_host(const void *p, size_t n, const char *source);
