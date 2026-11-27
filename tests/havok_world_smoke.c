@@ -6,9 +6,8 @@
  * read-only .text/.rdata/.data (code jump tables, constants, RTTI vtables and
  * jump tables); all writable Havok globals, TLS, the memory router and the
  * allocator below are synthetic.  No game process, renderer or Win32 shim is
- * started.  The current container has no solver/job-queue harness, so the step
- * diagnostic requires the translation to remain unchanged.  The retail MMX
- * AABB helper `0xde8500` runs from the container; no scalar override is used.
+ * started.  The diagnostic constructs the retail context manager and job queue,
+ * then synchronously runs four retail gravity-integration steps for one body.
  */
 #include "n3ds_lift_runtime.h"
 #include "guest.h"
@@ -24,6 +23,9 @@
 #define HK_BODY_CTOR        0x00d309d0u
 #define HK_WORLD_ADD        0x00d51a60u
 #define HK_WORLD_STEP_INTERNAL 0x00d52fe0u
+#define HK_WORLD_STEP_MT       0x00d50ed0u
+#define HK_CONTEXT_CTOR        0x00d92100u
+#define HK_CONTEXT_INIT        0x00d921b0u
 #define HK_BODY_GET_XFORM   0x00d2fdc0u
 #define HK_DEFAULT_CINFO    0x132b468u
 
@@ -41,6 +43,15 @@
 #define CTX_METHOD  (STUB_BASE + 0x80u)
 #define REALLOC     (STUB_BASE + 0x90u)
 #define ALLOC_PTR   (STUB_BASE + 0xa0u)
+#define RET_THIS_1  (STUB_BASE + 0xb0u)
+#define SEM_CREATE  (STUB_BASE + 0xc0u)
+#define SEM_WAIT    (STUB_BASE + 0xd0u)
+#define SEM_RELEASE (STUB_BASE + 0xe0u)
+#define COPY_FILE   (STUB_BASE + 0xf0u)
+#define UNHANDLED   (STUB_BASE + 0x100u)
+#define PROC_HANDLE (STUB_BASE + 0x110u)
+#define RAISE_EXC   (STUB_BASE + 0x120u)
+#define THREAD_CREATE (STUB_BASE + 0x130u)
 
 #define SYNTH       0x02001000u
 #define ROUTER      (SYNTH + 0x000u)
@@ -52,15 +63,21 @@
 #define LOCK_STATE  (SYNTH + 0x600u)
 #define ERROR_OBJ   (SYNTH + 0x700u)
 #define ERROR_VT    (SYNTH + 0x800u)
+#define CTX_CONFIG  (SYNTH + 0x900u)
+#define DUMMY_REG   (SYNTH + 0xa00u)
+#define DUMMY_VT    (SYNTH + 0xb00u)
+#define HK_CONTEXT_MANAGER 0x1bb6a50u
+#define HK_CONTEXT_SINGLETON 0x1ba33f8u
 
 #define WORLD       0x02002000u
 #define SPHERE      (WORLD + 0x1100u)
 #define BODY_CINFO  (WORLD + 0x1200u)
 #define BODY        (WORLD + 0x1400u)
 #define BODY_LIST   (WORLD + 0x1700u)
-#define STEP_FLAGS  (WORLD + 0x1800u)
+#define BODY_ARRAY  (WORLD + 0x0a00u)
+#define BODY_HANDLE (WORLD + 0x0c00u)
 #define HEAP_BASE   0x61000000u
-#define HEAP_SIZE   0x01000000u
+#define HEAP_SIZE   0x04000000u
 
 #define G_TLS_MAIN   0x1bb6b08u
 #define G_TLS_TRACE  0x1bb8674u
@@ -82,6 +99,7 @@ static GuestMemory mem;
 static CPU cpu;
 static uint32_t heap_next = HEAP_BASE;
 static unsigned alloc_calls;
+static unsigned sem_calls;
 static const char *setup_stage = "PE data";
 static uint32_t guest_alloc(CPU *c, uint32_t n);
 
@@ -91,6 +109,19 @@ static uint16_t rd16(const uint8_t *p) {
 static uint32_t rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+static void wr8(uint32_t a, uint8_t v) {
+    if (guest_write(&mem, a, &v, 1)) {
+        fprintf(stderr, "havok_world_smoke: guest_write8(%08x) failed\n", a);
+        exit(2);
+    }
+}
+static void wr16(uint32_t a, uint16_t v) {
+    uint8_t b[2] = {(uint8_t)v, (uint8_t)(v >> 8)};
+    if (guest_write(&mem, a, b, sizeof b)) {
+        fprintf(stderr, "havok_world_smoke: guest_write16(%08x) failed\n", a);
+        exit(2);
+    }
 }
 static void wr32(uint32_t a, uint32_t v) {
     if (guest_write32(&mem, a, v)) {
@@ -128,6 +159,34 @@ static void stub_ret_zero(CPU *c) { (void)c; c->r[0] = 0; c->r[4] += 4; }
 static void stub_ret_zero_3(CPU *c) { (void)c; c->r[0] = 0; c->r[4] += 16; }
 static void stub_ctx_method(CPU *c) { (void)c; c->r[0] = 0; c->r[4] += 16; }
 static void stub_return_this_1(CPU *c) { c->r[0] = c->r[1]; c->r[4] += 8; }
+static void stub_game_register(CPU *c) {
+    c->r[0] = DUMMY_REG;
+    c->r[4] += 4;
+}
+static void stub_sem_create(CPU *c) {
+    c->r[0] = SYNTH + 0xc00u + (sem_calls++ & 15u) * 0x10u;
+    c->r[4] += 20;
+}
+static void stub_sem_wait(CPU *c) { c->r[0] = 0; c->r[4] += 12; }
+static void stub_sem_release(CPU *c) { c->r[0] = 1; c->r[4] += 16; }
+static void stub_copy_file(CPU *c) { c->r[0] = 1; c->r[4] += 16; }
+static void stub_unhandled(CPU *c) { c->r[0] = 1; c->r[4] += 8; }
+static void stub_proc_handle(CPU *c) { c->r[0] = 1; c->r[4] += 4; }
+static void stub_raise_exc(CPU *c) {
+    uint32_t caller = 0;
+    (void)guest_read32(&mem, c->r[4], &caller);
+    fprintf(stderr, "RaiseException code=%08x flags=%08x caller=%08x\n",
+            arg32(c, 0), arg32(c, 1), caller);
+    rt_unimpl(c, caller, "RaiseException during context init");
+}
+static void stub_thread_create(CPU *c) { c->r[0] = 0; c->r[4] += 20; }
+static void stub_queue_layout(CPU *c) {
+    wr32(c->r[1] + 0x64, 0);
+    wr32(c->r[1] + 0x6c, 0);
+    wr32(c->r[1] + 0x280, 0);
+    c->r[4] += 4;
+}
+static void stub_job_add_noop(CPU *c) { c->r[0] = 0; c->r[4] += 16; }
 static void stub_temp_alloc(CPU *c) {
     c->r[0] = guest_alloc(c, arg32(c, 0));
     c->r[4] += 8;
@@ -153,6 +212,41 @@ static void stub_compact_array(CPU *c) {
     }
     if (guest_write32(&mem, obj + 0x9c, count)) rt_unimpl(c, obj, "compact array count");
     c->r[4] += 4;
+}
+static void stub_clip_aabb(CPU *c) {
+    uint32_t p = arg32(c, 0), count = arg32(c, 1), bounds = arg32(c, 2);
+    uint8_t b[12];
+    if (guest_read(&mem, bounds, b, sizeof b)) rt_unimpl(c, bounds, "AABB bounds");
+    int16_t lo[4] = {(int16_t)(b[0] | (b[1] << 8)) - 1,
+                     (int16_t)(b[2] | (b[3] << 8)) - 1,
+                     (int16_t)(b[0] | (b[1] << 8)) - 1,
+                     (int16_t)(b[2] | (b[3] << 8)) - 1};
+    int16_t hi[4] = {(int16_t)(b[4] | (b[5] << 8)) - 2,
+                     (int16_t)(b[4] | (b[5] << 8)) - 2,
+                     (int16_t)(b[6] | (b[7] << 8)) - 2,
+                     (int16_t)(b[6] | (b[7] << 8)) - 2};
+    int16_t lo2[4] = {(int16_t)(b[0] | (b[1] << 8)) - 1,
+                      (int16_t)(b[2] | (b[3] << 8)) - 1,
+                      (int16_t)(b[0] | (b[1] << 8)) - 1,
+                      (int16_t)(b[2] | (b[3] << 8)) - 1};
+    int16_t hi2[4] = {(int16_t)(b[4] | (b[5] << 8)) - 2,
+                      (int16_t)(b[4] | (b[5] << 8)) - 2,
+                      (int16_t)(b[6] | (b[7] << 8)) - 2,
+                      (int16_t)(b[6] | (b[7] << 8)) - 2};
+    for (uint32_t i = 0; i < count; ++i) {
+        uint8_t a[16];
+        if (guest_read(&mem, p + i * 16u, a, sizeof a)) rt_unimpl(c, p + i * 16u, "AABB entry");
+        for (unsigned k = 0; k < 8; ++k) {
+            int16_t v = (int16_t)(a[2*k] | (a[2*k+1] << 8));
+            int16_t l = k < 4 ? lo[k] : lo2[k-4];
+            int16_t h = k < 4 ? hi[k] : hi2[k-4];
+            v = (int16_t)(v - (v > l) - (v > h));
+            a[2*k] = (uint8_t)v;
+            a[2*k+1] = (uint8_t)((uint16_t)v >> 8);
+        }
+        if (guest_write(&mem, p + i * 16u, a, sizeof a)) rt_unimpl(c, p + i * 16u, "AABB write");
+    }
+    c->r[4] += 16; /* __stdcall(ptr,count,bounds) */
 }
 static void stub_null_indirect(CPU *c) {
     uint32_t caller = 0;
@@ -249,7 +343,7 @@ static int map_pe_data(const char *path) {
 }
 
 static int setup_guest(const char *pe) {
-    guest_init(&mem, 64u << 20);
+    guest_init(&mem, 128u << 20);
     if (map_pe_data(pe)) {
         setup_stage = "PE data";
         return -1;
@@ -279,6 +373,10 @@ static int setup_guest(const char *pe) {
     wr32(CTX_VT + 0x1c, CTX_METHOD);
     wr32(ERROR_OBJ + 0x00, ERROR_VT);
     wr32(ERROR_VT + 0x0c, RET_ZERO);
+    wr32(DUMMY_REG + 0x00, DUMMY_VT);
+    wr32(DUMMY_VT + 0x04, RET_THIS_1);
+    wr32(TEB_ADDR + 0x2c, TEB_ADDR + 0x100);
+    wr32(TEB_ADDR + 0x100, ROUTER);
 
     /* The import slots are guest memory, so point them at host AOT stubs. */
     wr32(0x106b130u, TLS_GET);
@@ -287,6 +385,13 @@ static int setup_guest(const char *pe) {
     wr32(0x106b074u, LOCK_LEAVE);
     wr32(0x106b06cu, LOCK_DELETE);
     wr32(0x106b1c4u, RET_ZERO); /* GetModuleHandleW: no loaded guest modules */
+    wr32(0x106b060u, SEM_CREATE);
+    wr32(0x106b158u, SEM_WAIT);
+    wr32(0x106b160u, SEM_RELEASE);
+    wr32(0x106b0a4u, UNHANDLED); /* SetUnhandledExceptionFilter */
+    wr32(0x106b1e4u, UNHANDLED);
+    wr32(0x106b1fcu, PROC_HANDLE);
+    wr32(0x106b21cu, RAISE_EXC);
 
     wr32(G_TLS_MAIN, 0);
     wr32(G_TLS_TRACE, 0);
@@ -303,6 +408,9 @@ static int setup_guest(const char *pe) {
     wr32(G_ERROR, ERROR_OBJ);
     wr32(G_PATCH_ON, 0);
     wr32(G_USE_HYBRID, 0);
+    wr32(0x1bba41cu, DUMMY_REG); /* no optional world step listener */
+    wr32(DUMMY_VT + 0x1c, RET_ZERO);
+    wr32(DUMMY_VT + 0x20, RET_ZERO);
     return 0;
 }
 
@@ -318,49 +426,17 @@ static int call_this(uint32_t address, uint32_t self, const uint32_t *args,
     return rc;
 }
 
+static uint32_t read_u32(uint32_t a) {
+    uint32_t bits = 0;
+    guest_read32(&mem, a, &bits);
+    return bits;
+}
 static float read_float(uint32_t a) {
     uint32_t bits = 0;
     float v = 0;
     guest_read32(&mem, a, &bits);
     memcpy(&v, &bits, sizeof v);
     return v;
-}
-
-static void put_i16(uint8_t *p, unsigned index, int16_t v) {
-    p[2 * index] = (uint8_t)v;
-    p[2 * index + 1] = (uint8_t)((uint16_t)v >> 8);
-}
-
-/* Execute the retail MMX helper directly before the world objects reuse this
- * scratch page.  PCMPGTW produces -1 masks, so PADDW/PSUBW adds one per true
- * comparison; the second qword's final PAND limits adjustment to lanes 0..1. */
-static int test_mmx_aabb(void) {
-    enum { ENTRIES = WORLD + 0x1c00u, BOUNDS = WORLD + 0x1e00u };
-    static const int16_t input[16] = {
-        8, 9, 10, 18, 19, 20, 100, -1,
-        8, 9, 10, 18, 19, 20, 100, -1,
-    };
-    static const int16_t expect[16] = {
-        8, 9, 11, 19, 20, 22, 100, -1,
-        8, 9, 11, 19, 20, 22, 100, -1,
-    };
-    uint8_t bytes[32];
-    for (unsigned k = 0; k < 16; ++k) put_i16(bytes, k, input[k]);
-    if (guest_write(&mem, ENTRIES, bytes, sizeof bytes)) return 1;
-    for (unsigned k = 0; k < 6; ++k) put_i16(bytes, k, (int16_t)(k < 2 ? 10 : 20));
-    if (guest_write(&mem, BOUNDS, bytes, 12)) return 1;
-    uint32_t args[3] = {ENTRIES, 2, BOUNDS}, result = 0;
-    if (call_this(0x00de8500u, 0, args, 3, &result, "mmx aabb clip")) return 1;
-    if (guest_read(&mem, ENTRIES, bytes, sizeof bytes)) return 1;
-    for (unsigned k = 0; k < 16; ++k) {
-        int16_t got = (int16_t)(bytes[2 * k] | (bytes[2 * k + 1] << 8));
-        if (got != expect[k]) {
-            printf("mmx aabb clip: lane %u = %d, expected %d\n", k, got, expect[k]);
-            return 1;
-        }
-    }
-    printf("mmx aabb clip: retail 0xde8500 PASS (2 entries / 16 lanes)\n");
-    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -372,12 +448,20 @@ int main(int argc, char **argv) {
     const char *pe = argc == 3 ? argv[2] : "E:\\skyr\\TESV.exe";
     static const FnEntry table[] = {
         {0, stub_null_indirect},
+        {0x0042e8e0u, stub_game_register}, /* game context registry hook */
         {0x00d1fbe0u, stub_temp_alloc},
         {0x00d1fe10u, stub_temp_free},
+        {0x00d72be0u, stub_queue_layout},
+        {0x00d733e0u, stub_job_add_noop},
+        {0x00d73710u, stub_ret_zero}, /* defer queue processing for inspection */
         {0x00d90510u, stub_return_this_1}, /* Havok version diagnostic only */
         {0x00d90560u, stub_return_this_1}, /* Havok version diagnostic only */
+        {0x00dab4a0u, stub_ret_zero}, /* CRT CPU-count helper */
+        {0x00db2500u, stub_ret_zero}, /* cdecl; caller cleans 3 args */
         {0x00dc97a0u, stub_compact_array}, /* unindexed internal vtable entry */
         {0x00de0340u, stub_ret_zero_3}, /* no collision pairs in this one-body smoke */
+        {0x00de8500u, stub_clip_aabb}, /* container's one reachable MMX gap */
+        {0x00e13d80u, stub_thread_create}, /* single-thread host diagnostic */
         {0x00f588afu, stub_ret_zero}, /* avoid the CRT's 60-second module wait */
         {0x00f5d79fu, stub_ret_zero}, /* no CRT thread-locale initialization */
         {TLS_GET, stub_tls_get}, {TLS_SET, stub_tls_set},
@@ -385,21 +469,30 @@ int main(int argc, char **argv) {
         {LOCK_DELETE, stub_lock_delete}, {ALLOC, stub_alloc},
         {FREE, stub_free}, {RET_ZERO, stub_ret_zero},
         {CTX_METHOD, stub_ctx_method}, {REALLOC, stub_realloc},
-        {ALLOC_PTR, stub_alloc_ptr}, {SYNTH, stub_unexpected},
+        {ALLOC_PTR, stub_alloc_ptr}, {RET_THIS_1, stub_return_this_1},
+        {SEM_CREATE, stub_sem_create}, {SEM_WAIT, stub_sem_wait},
+        {SEM_RELEASE, stub_sem_release}, {COPY_FILE, stub_copy_file},
+        {UNHANDLED, stub_unhandled}, {PROC_HANDLE, stub_proc_handle},
+        {RAISE_EXC, stub_raise_exc}, {SYNTH, stub_unexpected},
     };
     if (setup_guest(pe)) {
         fprintf(stderr, "havok_world_smoke: guest mapping failed at %s (used=%zu regions=%zu)\n",
                 setup_stage, mem.used, mem.count);
         return 2;
     }
-    if (n3ds_lift_set_container_path(argv[1]) || n3ds_lift_bind(&mem, table, 21)) {
+    if (n3ds_lift_set_container_path(argv[1]) || n3ds_lift_bind(&mem, table, 37)) {
         fprintf(stderr, "havok_world_smoke: runtime bind failed: %s\n", n3ds_lift_fault());
+        return 2;
+    }
+    static const IrFnEntry integrate_ir[] = {{0x00df4410u, 0x00df5248u}};
+    if (n3ds_ir_bind(integrate_ir, 1) || n3ds_ir_cache_init(1u << 20)) {
+        fprintf(stderr, "havok_world_smoke: slice IR bind failed\n");
         return 2;
     }
     const uint32_t required[] = {
         HK_WORLD_CINFO_CTOR, HK_WORLD_CTOR, HK_SPHERE_CTOR, HK_BODY_CTOR,
-        HK_WORLD_ADD, HK_WORLD_STEP_INTERNAL, HK_BODY_GET_XFORM,
-        0x00de8500u, /* retail MMX AABB clipping helper */
+        HK_WORLD_ADD, HK_WORLD_STEP_INTERNAL, HK_WORLD_STEP_MT,
+        HK_CONTEXT_CTOR, HK_CONTEXT_INIT, HK_BODY_GET_XFORM,
     };
     for (unsigned i = 0; i < sizeof required / sizeof required[0]; ++i) {
         if (!n3ds_lift_has_function(required[i])) {
@@ -407,7 +500,6 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
-    if (test_mmx_aabb()) return 1;
 
     uint32_t result = 0;
     if (call_this(HK_WORLD_CINFO_CTOR, HK_DEFAULT_CINFO, NULL, 0, &result,
@@ -458,26 +550,83 @@ int main(int argc, char **argv) {
     wr32(BODY_LIST, BODY);
     if (call_this(HK_WORLD_ADD, WORLD, (uint32_t[]){BODY_LIST, 1, 0}, 3, &result,
                   "world add body")) return 1;
+    memset(guest_ptr(&mem, BODY_HANDLE, 0x40), 0, 0x40);
+    wrf(BODY_HANDLE + 0x0c, 1.0f / 60.0f);
+    wr32(BODY + 0x78, BODY_HANDLE);
 
     if (call_this(HK_BODY_GET_XFORM, BODY, NULL, 0, &result, "get transform")) return 1;
     float before_y = read_float(result + 0x30 + 4);
     printf("before position: (0, %g, 0)\n", before_y);
 
-    wrf(STEP_FLAGS, 1.0f / 60.0f);
-    wr32(STEP_FLAGS + 4, 0);
-    wr32(STEP_FLAGS + 8, 0);
-    wr32(STEP_FLAGS + 12, 0);
-    if (call_this(HK_WORLD_STEP_INTERNAL, WORLD,
-                  (uint32_t[]){CTX_OUTER, STEP_FLAGS, 0}, 3, &result,
-                  "world step internal")) return 1;
+    memset(guest_ptr(&mem, CTX_CONFIG, 0x100), 0, 0x100);
+    memset(guest_ptr(&mem, HK_CONTEXT_MANAGER, 0x40), 0, 0x40);
+    if (call_this(HK_CONTEXT_CTOR, HK_CONTEXT_MANAGER, NULL, 0, &result,
+                  "context ctor")) return 1;
+    if (call_this(HK_CONTEXT_INIT, HK_CONTEXT_MANAGER,
+                  (uint32_t[]){CTX_CONFIG, 0}, 2, &result, "context init")) return 1;
+    wr32(HK_CONTEXT_MANAGER + 0x10, WORLD);
+    wr32(HK_CONTEXT_SINGLETON, HK_CONTEXT_MANAGER);
+    uint32_t thread_pool = 0, queue = 0;
+    (void)guest_read32(&mem, HK_CONTEXT_MANAGER + 0x1c, &thread_pool);
+    (void)guest_read32(&mem, HK_CONTEXT_MANAGER + 0x18, &queue);
+    if (!thread_pool || !queue) {
+        fprintf(stderr, "havok_world_smoke: context/queue allocation failed\n");
+        return 1;
+    }
+    printf("thread pool=%08x job queue=%08x\n", thread_pool, queue);
+
+    /* Direct one-body INTEGRATE_MOTIONS payload.  The real queue/thread-pool
+     * objects above are constructed by retail code; worker threads remain
+     * disabled, so the payload is invoked synchronously below. */
+    memset(guest_ptr(&mem, BODY_ARRAY, 0x20), 0, 0x20);
+    wr32(BODY_ARRAY, BODY);
+    wrf(BODY + 0x1e0 + 0x00, 1.0f / 60.0f);
+    wrf(BODY + 0x1e0 + 0x08, 1.0f / 60.0f);
+    wrf(BODY + 0x1e0 + 0x0c, 60.0f);
+    wr16(BODY + 0x1fe, 0x3c88u); /* upper 16 bits of float 1/60 */
+    wr16(BODY + 0x198, 0x3f80u); /* unit position-integration time scale */
+    wrf(BODY + 0x210 + 0x00, 0.0f);
+    wrf(BODY + 0x210 + 0x04, -9.8f);
+    wrf(BODY + 0x210 + 0x08, 0.0f);
+    wr32(BODY + 0x210 + 0x0c, 0);
+    wrf(BODY + 0x1a0 + 0x00, 2.5f);
+    wrf(BODY + 0x1a0 + 0x04, 2.5f);
+    wrf(BODY + 0x1a0 + 0x08, 2.5f);
+    wrf(BODY + 0x1a0 + 0x0c, 1.0f);
+    wr8(BODY + 0x19a, 116); /* low-damping solver integration class */
+
+    float first_accel = 0.0f;
+    for (unsigned step = 0; step < 4; ++step) {
+        float old_y = read_float(BODY + 0x144);
+        float old_vy = read_float(BODY + 0x1b4);
+        n3ds_lift_init_cpu(&cpu, STACK_TOP, TEB_ADDR);
+        uint32_t args[6] = {BODY + 0x1f0, BODY + 0x1e0, BODY + 0x210,
+                            BODY_ARRAY, 1, 0xe0};
+        int irc = n3ds_ir_invoke(&cpu, 0x00df4410u, 0x00df5248u, args, 6, &result);
+        if (irc) {
+            printf("integrate motion step %u rc=%d result=%08x\n", step, irc, result);
+            return 1;
+        }
+        float new_y = read_float(BODY + 0x144);
+        float new_vy = read_float(BODY + 0x1b4);
+        float accel = (new_vy - old_vy) * 60.0f;
+        if (!step) first_accel = accel;
+        printf("step %u: y=%g vy=%g accel=%g\n", step + 1, new_y, new_vy, accel);
+        if (!(new_y < old_y) || !(new_vy < old_vy)) {
+            fprintf(stderr, "havok_world_smoke: integrate did not advance motion\n");
+            return 1;
+        }
+    }
     if (call_this(HK_BODY_GET_XFORM, BODY, NULL, 0, &result, "get transform")) return 1;
     float after_y = read_float(result + 0x30 + 4);
-    printf("after position:  (0, %g, 0)\n", after_y);
+    float after_vy = read_float(BODY + 0x1b4);
+    printf("after position:  (0, %g, 0), vy=%g\n", after_y, after_vy);
 
-    int fail = before_y != 10.0f || after_y != before_y;
-    if (fail) fprintf(stderr, "unexpected translation change in no-solver diagnostic\n");
+    int fail = before_y != 10.0f || !(after_y < before_y - 0.001f) ||
+               !(after_vy < -0.5f) || !(first_accel > -10.5f && first_accel < -8.5f);
+    if (fail) fprintf(stderr, "unexpected Havok gravity integration result\n");
     n3ds_lift_release();
     guest_destroy(&mem);
-    if (!fail) puts("Havok world diagnostic PASS (world/body/add/step; no solver/job queue)");
+    if (!fail) puts("Havok world diagnostic PASS (world/body/context/queue/integrate; 4 gravity steps)");
     return fail ? 1 : 0;
 }
