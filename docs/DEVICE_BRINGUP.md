@@ -4,6 +4,72 @@ This note records what the port actually does when launched as a `.3dsx` in
 Azahar with the real game data on `sdmc:/Skyrim`. It is not a playable build
 and no frame or pixel result is claimed.
 
+## CIA build
+
+`tools/build_cia.ps1` packages a finished TESV-mode ELF into an installable
+CIA for New 3DS. It is a packaging step only: the ELF is built by
+`tools/build.ps1 -Mode tesv`, and no game logic, shader or menu source is
+touched.
+
+### Requirements
+
+- devkitPro with `makerom` and `bannertool` in `%DEVKITPRO%\tools\bin`
+  (verified with makerom 0.19.0). The script falls back to
+  `C:\devkitPro\tools\bin` and then `PATH`; override with `-Tools <dir>`.
+- Windows PowerShell 5.1 (`System.Drawing` is used for the generated icon and
+  banner).
+- `staged/` (regenerate with `python tools/stage_upstream.py ../Skyrim_Android staged`)
+  and a lifted TESV generator directory containing `tesv_table.c`.
+- The ELF at `dist/Skyrim_N3DS_tesv/Skyrim_N3DS_tesv.elf`.
+
+### Exact commands
+
+```powershell
+cd <repo>
+python tools/stage_upstream.py ../Skyrim_Android staged
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
+    -Mode tesv -TesvGen E:\Skyrim_N3DS_build\live_arm_check2\gen -Jobs 8
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_cia.ps1
+```
+
+`build_cia.ps1` accepts `-Elf`, `-Out`, `-Rsf`, `-WorkDir` and `-Tools`; all
+have defaults, so the bare command above reproduces the artifact.
+
+### Artifact and checks
+
+- CIA: `build_cia/Skyrim_N3DS_tesv.cia`
+- Manifest: `build_cia/cia_manifest.json` (sizes, SHA256 for ELF/RSF/CIA,
+  title ID, tool paths)
+- Verification report: `build_cia/cia_info.txt`
+- Title ID: `000400000F0D5900` (`TitleInfo/UniqueId: 0xF0D59` in
+  `tools/cia/template.rsf`)
+- Exheader: `SystemMode 96MB`, `SystemModeExt 178MB`, `CpuSpeed 804MHz`,
+  `EnableL2Cache true`, `CanAccessCore2 true` — New 3DS only.
+
+makerom 0.19 has no `-i` inspector, so the script parses the CIA itself: it
+checks the `0x2020` header and section sizes, locates the embedded `NCCH`
+block, and requires the NCCH partition ID to equal the RSF-derived title ID.
+It also requires the `SMDH` meta block (icon/banner) to be present. The build
+is made with `-target t` (test keys, production certs) and `-exefslogo`.
+
+### Installing
+
+- **Azahar**: `File > Install CIA...` and pick
+  `build_cia/Skyrim_N3DS_tesv.cia`. Azahar's CLI has no headless install, so
+  this must be done in the GUI. Only the structure was verified here; no CIA
+  boot in Azahar is claimed.
+- **Hardware (New 3DS with CFW, e.g. Luma3DS)**: copy the `.cia` to
+  `sdmc:/cia/`, open FBI (or GodMode9's CIA installer) and install it. Luma
+  patches signature checks, so the test-signed CIA installs without a
+  Nintendo signature. Old 3DS cannot run it because of `SystemModeExt 178MB`
+  and `CpuSpeed 804MHz`.
+- Game data is still expected at `sdmc:/Skyrim` (IR container at
+  `sdmc:/Skyrim/ir/tesv.irc`), exactly as for the `.3dsx` runs.
+
+Do not distribute the CIA: it contains generated code derived from locally
+owned game files. No frame, pixel or playability result is claimed for the
+CIA build; `DevCaps` is unchanged.
+
 ## Boot path reached on the device
 
 1. CIA/3DSX starts, PICA200 backend opens, D3DX shims register, the IR

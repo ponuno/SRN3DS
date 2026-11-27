@@ -38,6 +38,16 @@ def stage(upstream, out):
 #define TS8(a,v) (M8(a)=(v))
 #define TS16(a,v) (M16(a)=(v))
 #define TS32(a,v) (M32(a)=(v))
+/* Partial spill masks used by the current lifter and by
+   tools/instrument_cecdc0.py (bit i selects CPU.r[i]). */
+#define SPILLN(m) do { if ((m) & 1u) c->r[0] = eax; if ((m) & 2u) c->r[1] = ecx; \\
+    if ((m) & 4u) c->r[2] = edx; if ((m) & 8u) c->r[3] = ebx; \\
+    if ((m) & 16u) c->r[4] = esp; if ((m) & 32u) c->r[5] = ebp; \\
+    if ((m) & 64u) c->r[6] = esi; if ((m) & 128u) c->r[7] = edi; } while (0)
+#define RELOADN(m) do { if ((m) & 1u) eax = c->r[0]; if ((m) & 2u) ecx = c->r[1]; \\
+    if ((m) & 4u) edx = c->r[2]; if ((m) & 8u) ebx = c->r[3]; \\
+    if ((m) & 16u) esp = c->r[4]; if ((m) & 32u) ebp = c->r[5]; \\
+    if ((m) & 64u) esi = c->r[6]; if ((m) & 128u) edi = c->r[7]; } while (0)
 '''
     lift = (tools / 'lift.py').read_text(encoding='utf-8')
     lift = change(lift, '(%s *)(MEM + %s)', 'N3DS_PTR(%s, %s)', 3)
