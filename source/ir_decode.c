@@ -264,7 +264,7 @@ static int x87_form_ok(unsigned op, unsigned modrm) {
                           reg == 5 || reg == 7;
         case 0xdd: return reg != 5;
         case 0xdf: return reg == 0 || reg == 1 || reg == 2 || reg == 3 ||
-                          reg == 5 || reg == 7;
+                          reg == 5 || reg == 6 || reg == 7;
         default: return 0;
         }
     }
@@ -272,6 +272,7 @@ static int x87_form_ok(unsigned op, unsigned modrm) {
     case 0xd8: return 1;
     case 0xd9:
         if (reg == 0 || reg == 1) return 1;
+        if (modrm >= 0xd8 && modrm <= 0xdf) return 1;   /* fstp st(i) */
         switch (modrm) {
         case 0xd0: case 0xe0: case 0xe1: case 0xe4: case 0xe5: case 0xe8:
         case 0xe9: case 0xea: case 0xeb: case 0xec: case 0xed: case 0xee:
@@ -304,6 +305,8 @@ static int sse_supported(unsigned op2, unsigned pfx) {
     case 0x16: case 0x17: case 0x50: case 0x54: case 0x55: case 0x56:
     case 0x57: case 0xc6:
         return pfx == 0 || pfx == 1;
+    case 0x2b:                                  /* movntps / movntpd */
+        return pfx == 0 || pfx == 1;
     case 0x2e: case 0x2f:
         return pfx == 0 || pfx == 1;
     case 0x2a: case 0x2c: case 0x2d:
@@ -312,13 +315,20 @@ static int sse_supported(unsigned op2, unsigned pfx) {
         return pfx == 0 || pfx == 3;
     case 0x5a:
         return pfx == 0 || pfx == 2 || pfx == 3;
+    case 0x5b:                                  /* cvtdq2ps / cvtps2dq / cvttps2dq */
+        return pfx == 0 || pfx == 1 || pfx == 3;
+    case 0x60: case 0x61: case 0x62: case 0x63:
+    case 0x67: case 0x68: case 0x69: case 0x6a:
+    case 0x6b: case 0x6c: case 0x6d:
+        return pfx == 1;                        /* packed interleave/pack */
+    case 0xd8: case 0xd9: case 0xda: case 0xdc:
+    case 0xdd: case 0xde:
+        return pfx == 1;                        /* unsigned saturating add/sub */
     case 0x58: case 0x59: case 0x5c: case 0x5d: case 0x5e: case 0x5f:
         return 1;
     case 0x6e: case 0x7e: case 0xd6:
         return pfx == 1 || pfx == 3;
     case 0x6f: case 0x7f:
-        return pfx == 1 || pfx == 3;
-    case 0x5b:
         return pfx == 1 || pfx == 3;
     case 0x70: case 0x71: case 0x72: case 0x73:
     case 0x74: case 0x75: case 0x76: case 0x64: case 0x65:

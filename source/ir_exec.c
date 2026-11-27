@@ -310,6 +310,7 @@ static void x87_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
             case 2: M16(ea) = (uint16_t)fist16(c, ST(0)); break;
             case 3: M16(ea) = (uint16_t)fist16(c, ST(0)); fpop(c); break;
             case 5: fpush(c, (double)(int64_t)M64(ea)); break;
+            case 6: fbstp_store(ea, ST(0)); fpop(c); break;
             default: M64(ea) = (uint64_t)fist64(c, ST(0)); fpop(c); break;
             }
             break;
@@ -335,6 +336,7 @@ static void x87_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
         if (reg == 0) { double v = ST(s); fpush(c, v); }
         else if (reg == 1) { double v = ST(0); ST(0) = ST(s); ST(s) = v; }
         else if (modrm == 0xd0) { /* fnop */ }
+        else if (modrm >= 0xd8 && modrm <= 0xdf) { ST(s) = ST(0); fpop(c); } /* fstp st(i) */
         else {
             switch (modrm) {
             case 0xe0: ST(0) = -ST(0); break;
@@ -474,7 +476,7 @@ static void sse_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
 
     switch (op2) {
     case 0x28: LOAD16(); *d = s; break;
-    case 0x29:
+    case 0x29: case 0x2b:   /* movaps/movdqa ; movntps/movntpd */
         if (has_mem) { memcpy(n3ds_guest_ptr(ea, 16), d, 16); IR_WATCH("ir-sse-store"); } else *srcr = *d;
         break;
     case 0x10:
@@ -624,6 +626,45 @@ static void sse_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
         }
         break;
     }
+    case 0x60: case 0x61: case 0x62: case 0x68: case 0x69: case 0x6a:
+    case 0x6c: case 0x6d: {
+        LOAD16();
+        Xmm o = *d;
+        if (op2 == 0x6c) { d->q[0] = o.q[0]; d->q[1] = s.q[0]; break; }
+        if (op2 == 0x6d) { d->q[0] = o.q[1]; d->q[1] = s.q[1]; break; }
+        unsigned n = (op2 == 0x60 || op2 == 0x68) ? 8u :
+                     (op2 == 0x61 || op2 == 0x69) ? 4u : 2u;
+        unsigned h = (op2 == 0x68 || op2 == 0x69 || op2 == 0x6a) ? n : 0u;
+        if (n == 8) for (unsigned k = 0; k < n; ++k) {
+            d->b[2 * k] = o.b[h + k]; d->b[2 * k + 1] = s.b[h + k];
+        } else if (n == 4) for (unsigned k = 0; k < n; ++k) {
+            d->w[2 * k] = o.w[h + k]; d->w[2 * k + 1] = s.w[h + k];
+        } else for (unsigned k = 0; k < n; ++k) {
+            d->u[2 * k] = o.u[h + k]; d->u[2 * k + 1] = s.u[h + k];
+        }
+        break;
+    }
+    case 0x63: case 0x67: case 0x6b: {
+        LOAD16();
+        Xmm o = *d;
+        if (op2 == 0x6b) {
+            for (unsigned k = 0; k < 4; ++k) {
+                int32_t a = o.i[k], b = s.i[k];
+                d->w[k] = (uint16_t)(a > 32767 ? 32767 : a < -32768 ? -32768 : a);
+                d->w[k + 4] = (uint16_t)(b > 32767 ? 32767 : b < -32768 ? -32768 : b);
+            }
+        } else {
+            int uns = op2 == 0x67;
+            for (unsigned k = 0; k < 8; ++k) {
+                int32_t a = uns ? o.w[k] : (int16_t)o.w[k];
+                int32_t b = uns ? s.w[k] : (int16_t)s.w[k];
+                int32_t lo = uns ? 0 : -128, hi = uns ? 255 : 127;
+                d->b[k] = (uint8_t)(a > hi ? hi : a < lo ? lo : a);
+                d->b[k + 8] = (uint8_t)(b > hi ? hi : b < lo ? lo : b);
+            }
+        }
+        break;
+    }
     case 0x6f:
         if (has_mem) { Xmm t = n3ds_xmm_read(ea); *d = t; } else *d = *srcr;
         break;
@@ -648,6 +689,24 @@ static void sse_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
         if (op2 == 0x64) for (unsigned k = 0; k < 16; ++k) d->b[k] = (int8_t)d->b[k] > (int8_t)s.b[k] ? 0xff : 0;
         else if (op2 == 0x65) for (unsigned k = 0; k < 8; ++k) d->w[k] = (int16_t)d->w[k] > (int16_t)s.w[k] ? 0xffff : 0;
         else for (unsigned k = 0; k < 4; ++k) d->u[k] = d->i[k] > s.i[k] ? ~0u : 0;
+        break;
+    }
+    case 0xd8: case 0xd9: case 0xda: case 0xdc: case 0xdd: case 0xde: {
+        LOAD16();
+        if (op2 == 0xd8) for (unsigned k = 0; k < 16; ++k)
+            d->b[k] = d->b[k] > s.b[k] ? (uint8_t)(d->b[k] - s.b[k]) : 0;
+        else if (op2 == 0xd9) for (unsigned k = 0; k < 8; ++k)
+            d->w[k] = d->w[k] > s.w[k] ? (uint16_t)(d->w[k] - s.w[k]) : 0;
+        else if (op2 == 0xda) for (unsigned k = 0; k < 16; ++k)
+            d->b[k] = d->b[k] < s.b[k] ? d->b[k] : s.b[k];
+        else if (op2 == 0xdc) for (unsigned k = 0; k < 16; ++k) {
+            unsigned v = (unsigned)d->b[k] + s.b[k];
+            d->b[k] = (uint8_t)(v > 255 ? 255 : v);
+        } else if (op2 == 0xdd) for (unsigned k = 0; k < 8; ++k) {
+            unsigned v = (unsigned)d->w[k] + s.w[k];
+            d->w[k] = (uint16_t)(v > 65535 ? 65535 : v);
+        } else for (unsigned k = 0; k < 16; ++k)
+            d->b[k] = d->b[k] > s.b[k] ? d->b[k] : s.b[k];
         break;
     }
     case 0xdb: case 0xdf: case 0xeb: case 0xef: {
@@ -701,8 +760,9 @@ static void sse_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
         break;
     case 0x5b:
         LOAD16();
-        if (pfx == 1) for (unsigned k = 0; k < 4; ++k) d->f[k] = (float)s.i[k];
-        else for (unsigned k = 0; k < 4; ++k) d->i[k] = cvt_f2i(truncf(s.f[k]));
+        if (pfx == 0)      for (unsigned k = 0; k < 4; ++k) d->f[k] = (float)s.i[k];
+        else if (pfx == 1) for (unsigned k = 0; k < 4; ++k) d->i[k] = cvt_f2i(nearbyintf(s.f[k]));
+        else               for (unsigned k = 0; k < 4; ++k) d->i[k] = cvt_f2i(truncf(s.f[k]));
         break;
     case 0xd7: {
         LOAD16();

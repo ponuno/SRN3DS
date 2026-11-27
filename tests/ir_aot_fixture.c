@@ -18,23 +18,16 @@ void f_5014B0(CPU *c);
 void f_501510(CPU *c);
 void f_501560(CPU *c);
 void f_5015B0(CPU *c);
-void f_501620(CPU *c);
-void f_501670(CPU *c);
-void f_501730(CPU *c);
-void f_501780(CPU *c);
-void f_5017E0(CPU *c);
-void f_501840(CPU *c);
+void f_501630(CPU *c);
+void f_501680(CPU *c);
+void f_501760(CPU *c);
+void f_5017B0(CPU *c);
+void f_501810(CPU *c);
+void f_501870(CPU *c);
 
 
 void f_501000(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -57,16 +50,16 @@ L_50101B:
     ecx = (uint32_t)(sub32(ecx, edx, &f));
 L_50101D:
     eax = (uint32_t)(adc32(eax, TL32((uint32_t)(edi + 0x10u)), &f));
-    ecx = (uint32_t)((uint32_t)(ecx - TL32((uint32_t)(edi + 0x14u)) - (uint32_t)f.cf));
+    ecx = (uint32_t)(sbb32(ecx, TL32((uint32_t)(edi + 0x14u)), &f));
     (void)sub32(eax, ecx, &f);
     if ((f.sf != f.of)) goto L_501029;
     goto L_501027;
 L_501027:
-    edx = (uint32_t)((uint32_t)(0 - edx));
+    edx = (uint32_t)(neg32(edx, &f));
 L_501029:
-    ebx = (uint32_t)((uint32_t)(ebx + 1));
-    edx = (uint32_t)((uint32_t)(edx - 1));
-    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)ecx; eax = (uint32_t)(r_); }
+    ebx = (uint32_t)(inc32(ebx, &f));
+    edx = (uint32_t)(dec32(edx, &f));
+    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)ecx; eax = (uint32_t)(r_); f.cf = f.of = r_ != (int32_t)r_; }
     eax = (uint32_t)(add32(eax, edx, &f));
     if (!ecx) goto L_501035;
     goto L_501032;
@@ -91,19 +84,12 @@ L_501035:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501060(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -119,17 +105,19 @@ L_501060:
     ecx = (uint32_t)(TL32((uint32_t)(edi + 0x4u)));
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
-    eax = (uint32_t)((uint32_t)(eax & ebx));
-    ecx = (uint32_t)((uint32_t)(ecx | eax));
-    edx = (uint32_t)(0);
+    eax = (uint32_t)(logic32((uint32_t)(eax & ebx), &f));
+    ecx = (uint32_t)(logic32((uint32_t)(ecx | eax), &f));
+    edx = (uint32_t)(logic32(0, &f));
     (void)logic32((uint32_t)(eax & ecx), &f);
     if (!f.zf) goto L_501084;
     goto L_501081;
 L_501081:
     edx = (uint32_t)(logic32((uint32_t)(edx | (uint32_t)0x1u), &f));
 L_501084:
-    (void)(eax >> (ecx & 31));
+    f.cf = (eax >> (ecx & 31)) & 1;
+    f.cf = (ebx >> ((uint8_t)0x3u & 31)) & 1;
     ebx = (uint32_t)(ebx | (1u << ((uint8_t)0x3u & 31)));
+    f.cf = (ecx >> ((uint8_t)0x5u & 31)) & 1;
     ecx = (uint32_t)(ecx & ~(1u << ((uint8_t)0x5u & 31)));
     f.cf = (edx >> ((uint8_t)0x7u & 31)) & 1;
     edx = (uint32_t)(edx ^ (1u << ((uint8_t)0x7u & 31)));
@@ -155,19 +143,12 @@ L_501084:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_5010D0(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -183,11 +164,11 @@ L_5010D0:
     ecx = (uint32_t)(TL32((uint32_t)(edi + 0x4u)));
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
-    eax = (uint32_t)((uint32_t)(eax << 3));
-    ecx = (uint32_t)((uint32_t)(ecx >> 2));
+    eax = (uint32_t)(shl32(eax, (uint8_t)0x3u, &f));
+    ecx = (uint32_t)(shr32(ecx, (uint8_t)0x2u, &f));
     eax = (uint32_t)(sar32(eax, ((uint8_t)ecx), &f));
-    ecx = (uint32_t)((uint32_t)((ecx << 5) | (ecx >> 27)));
-    eax = (uint32_t)((uint32_t)((eax >> 7) | (eax << 25)));
+    ecx = (uint32_t)(rol32(ecx, (uint8_t)0x5u, &f));
+    eax = (uint32_t)(ror32(eax, (uint8_t)0x7u, &f));
     eax = (uint32_t)(shld32(eax, ecx, (uint8_t)0x4u, &f));
     ecx = (uint32_t)(shrd32(ecx, eax, (uint8_t)0x6u, &f));
     eax = (uint32_t)(rcl32(eax, (uint8_t)0x1u, &f));
@@ -211,19 +192,12 @@ L_5010D0:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501130(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -240,19 +214,19 @@ L_501130:
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
     ecx = (uint32_t)(TL32((uint32_t)(edi + 0x4u)));
-    ecx = (uint32_t)((uint32_t)(ecx & (uint32_t)0x7FFFFFFFu));
-    ecx = (uint32_t)((uint32_t)(ecx | (uint32_t)0x1u));
+    ecx = (uint32_t)(logic32((uint32_t)(ecx & (uint32_t)0x7FFFFFFFu), &f));
+    ecx = (uint32_t)(logic32((uint32_t)(ecx | (uint32_t)0x1u), &f));
     eax = (uint32_t)(TL32((uint32_t)(edi)));
-    edx = (uint32_t)(0);
+    edx = (uint32_t)(logic32(0, &f));
     { uint64_t n_ = ((uint64_t)edx << 32) | eax; uint32_t d_ = ecx; eax = (uint32_t)(n_ / d_); edx = (uint32_t)(n_ % d_); }
     eax = (uint32_t)(TL32((uint32_t)(edi)));
     edx = (uint32_t)((int32_t)eax >> 31);
     { int64_t n_ = (int64_t)(((uint64_t)edx << 32) | eax); int32_t d_ = (int32_t)ecx; eax = (uint32_t)(int32_t)(n_ / d_); edx = (uint32_t)(int32_t)(n_ % d_); }
     eax = (uint32_t)(TL32((uint32_t)(edi)));
-    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)ecx; eax = (uint32_t)r_; edx = (uint32_t)(r_ >> 32); }
+    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)ecx; eax = (uint32_t)r_; edx = (uint32_t)(r_ >> 32); f.cf = f.of = r_ != (int32_t)r_; }
     eax = (uint32_t)(TL32((uint32_t)(edi)));
-    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)ecx; eax = (uint32_t)(r_); }
-    { int64_t r_ = (int64_t)(int32_t)ecx * (int32_t)(uint32_t)0x7u; eax = (uint32_t)(r_); }
+    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)ecx; eax = (uint32_t)(r_); f.cf = f.of = r_ != (int32_t)r_; }
+    { int64_t r_ = (int64_t)(int32_t)ecx * (int32_t)(uint32_t)0x7u; eax = (uint32_t)(r_); f.cf = f.of = r_ != (int32_t)r_; }
     eax = (uint32_t)(TL32((uint32_t)(edi)));
     edx = (uint32_t)(logic32(0, &f));
     { uint64_t r_ = (uint64_t)eax * ecx; eax = (uint32_t)r_; edx = (uint32_t)(r_ >> 32); f.cf = f.of = edx != 0; }
@@ -276,19 +250,12 @@ L_501130:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_5011A0(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -305,21 +272,21 @@ L_5011A0:
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
     eax = (eax & 0xFFFFFF00u) | (uint8_t)(add8(((uint8_t)eax), ((uint8_t)ebx), &f));
-    eax = (eax & 0xFFFF00FFu) | ((uint32_t)(uint8_t)((uint8_t)(((uint8_t)(eax >> 8)) + ((uint8_t)(ebx >> 8)) + (uint32_t)f.cf)) << 8);
-    eax = (eax & 0xFFFF0000u) | (uint16_t)((uint16_t)(((uint16_t)eax) - ((uint16_t)ebx)));
+    eax = (eax & 0xFFFF00FFu) | ((uint32_t)(uint8_t)(adc8(((uint8_t)(eax >> 8)), ((uint8_t)(ebx >> 8)), &f)) << 8);
+    eax = (eax & 0xFFFF0000u) | (uint16_t)(sub16(((uint16_t)eax), ((uint16_t)ebx), &f));
     (void)sub8(((uint8_t)eax), (uint8_t)0x7Fu, &f);
     ecx = (ecx & 0xFFFFFF00u) | (uint8_t)((!f.zf && f.sf == f.of));
     edx = (uint32_t)(((uint8_t)eax));
     ebx = (uint32_t)((uint32_t)(int8_t)((uint8_t)ebx));
     edx = (edx & 0xFFFFFF00u) | (uint8_t)(add8(((uint8_t)edx), ((uint8_t)(ecx >> 8)), &f));
-    ecx = (ecx & 0xFFFF0000u) | (uint16_t)((uint16_t)(((uint16_t)ecx) - ((uint16_t)edx) - (uint32_t)f.cf));
+    ecx = (ecx & 0xFFFF0000u) | (uint16_t)(sbb16(((uint16_t)ecx), ((uint16_t)edx), &f));
     (void)logic8((uint8_t)(((uint8_t)eax) & ((uint8_t)eax)), &f);
     if (f.sf) { edx = (uint32_t)(ebx); }
     { uint32_t t_ = ebx; ebx = (uint32_t)(eax); eax = (uint32_t)(t_); }
     eax = (uint32_t)(__builtin_bswap32(eax));
     ecx = (uint32_t)(~ecx);
     edx = (edx & 0xFFFF0000u) | (uint16_t)(neg16(((uint16_t)edx), &f));
-    ecx = (ecx & 0xFFFFFF00u) | (uint8_t)((uint8_t)(((uint8_t)ecx) - 1));
+    ecx = (ecx & 0xFFFFFF00u) | (uint8_t)(dec8(((uint8_t)ecx), &f));
     ecx = (ecx & 0xFFFF00FFu) | ((uint32_t)(uint8_t)(inc8(((uint8_t)(ecx >> 8)), &f)) << 8);
     TS32((uint32_t)(esi), (uint32_t)(eax));
     TS32((uint32_t)(esi + 0x4u), (uint32_t)(ecx));
@@ -339,19 +306,12 @@ L_5011A0:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501210(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -402,20 +362,13 @@ L_501210:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 
 void f_501280(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -465,19 +418,12 @@ L_501280:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_5012F0(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -494,7 +440,7 @@ L_5012F0:
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
     esp -= 4; M32(esp) = f.cf | 2 | (f.pf << 2) | (f.zf << 6) | (f.sf << 7) | (c->df << 10) | (f.of << 11) | 0x200 | c->eflags_hi;
-    eax = (uint32_t)((uint32_t)(eax + (uint32_t)0x1u));
+    eax = (uint32_t)(add32(eax, (uint32_t)0x1u, &f));
     { uint32_t v_ = M32(esp); esp += 4; f.cf = v_ & 1; f.pf = (v_ >> 2) & 1; f.zf = (v_ >> 6) & 1; f.sf = (v_ >> 7) & 1; c->df = (v_ >> 10) & 1; f.of = (v_ >> 11) & 1; c->eflags_hi = v_ & 0x00200000u; }
     if (!f.cf) goto L_501311;
     goto L_50130E;
@@ -507,6 +453,7 @@ L_501311:
     esp -= 4; M32(esp) = f.cf | 2 | (f.pf << 2) | (f.zf << 6) | (f.sf << 7) | (c->df << 10) | (f.of << 11) | 0x200 | c->eflags_hi;
     { uint32_t v_ = M32(esp); esp += 4; ecx = (uint32_t)(v_); }
     eax = (uint32_t)(logic32((uint32_t)(eax ^ ecx), &f));
+    f.cf = 0;
     f.cf = 1;
     c->df = 0;
     c->df = 1;
@@ -529,19 +476,12 @@ L_501311:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501350(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -557,6 +497,7 @@ L_501350:
     ecx = (uint32_t)(TL32((uint32_t)(edi + 0x4u)));
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
+    f.cf = 0;
     f.cf = 1;
     f.cf = !f.cf;
     TS32((uint32_t)(esi), (uint32_t)(eax));
@@ -577,19 +518,12 @@ L_501350:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_5013A0(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -607,7 +541,7 @@ L_5013A0:
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
     ecx = (uint32_t)((uint32_t)0x5u);
 L_5013BC:
-    eax = (uint32_t)((uint32_t)(eax + (uint32_t)0x3u));
+    eax = (uint32_t)(add32(eax, (uint32_t)0x3u, &f));
     if (--ecx) goto L_5013BC;
     goto L_5013C1;
 L_5013C1:
@@ -615,7 +549,7 @@ L_5013C1:
     if (!ecx) goto L_5013CB;
     goto L_5013C8;
 L_5013C8:
-    ebx = (uint32_t)((uint32_t)(ebx - (uint32_t)0x1u));
+    ebx = (uint32_t)(sub32(ebx, (uint32_t)0x1u, &f));
 L_5013CB:
     (void)sub32(eax, ebx, &f);
     if (!f.zf) goto L_5013D2;
@@ -641,19 +575,12 @@ L_5013D2:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501400(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -670,14 +597,14 @@ L_501400:
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
     { uint32_t v_ = TL32((uint32_t)(edi)); esp -= 4; M32(esp) = v_; }
-    esp -= 4; M32(esp) = 0x50141Eu; SPILLN(0xFFu); f_501840(c); RELOADN(0x0u);
+    esp -= 4; M32(esp) = 0x50141Eu; SPILL(); f_501870(c); RELOAD();
 L_50141E:
-    esp = (uint32_t)((uint32_t)(esp + (uint32_t)0x4u));
-    eax = (uint32_t)((uint32_t)(eax + ecx));
+    esp = (uint32_t)(add32(esp, (uint32_t)0x4u, &f));
+    eax = (uint32_t)(add32(eax, ecx, &f));
     { uint32_t v_ = TL32((uint32_t)(edi + 0x4u)); esp -= 4; M32(esp) = v_; }
-    esp -= 4; M32(esp) = 0x50142Bu; SPILLN(0xFFu); f_501840(c); RELOADN(0x0u);
+    esp -= 4; M32(esp) = 0x50142Bu; SPILL(); f_501870(c); RELOAD();
 L_50142B:
-    esp = (uint32_t)((uint32_t)(esp + (uint32_t)0x4u));
+    esp = (uint32_t)(add32(esp, (uint32_t)0x4u, &f));
     ebx = (uint32_t)(add32(ebx, eax, &f));
     TS32((uint32_t)(esi), (uint32_t)(eax));
     TS32((uint32_t)(esi + 0x4u), (uint32_t)(ecx));
@@ -697,19 +624,12 @@ L_50142B:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501460(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -726,9 +646,9 @@ L_501460:
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
     { uint32_t v_ = TL32((uint32_t)(edi)); esp -= 4; M32(esp) = v_; }
-    { uint32_t t_ = TL32((uint32_t)(edi + 0x8u)); esp -= 4; M32(esp) = 0x50147Cu; SPILL(); { static const FnEntry *ic_; const FnEntry *e_ = __atomic_load_n(&ic_, __ATOMIC_RELAXED); if (e_ && e_->addr == t_) e_->fn(c); else rt_call_ic(c, t_, &ic_); } RELOADN(0x0u); }
+    { uint32_t t_ = TL32((uint32_t)(edi + 0x8u)); esp -= 4; M32(esp) = 0x50147Cu; SPILL(); { static const FnEntry *ic_; const FnEntry *e_ = __atomic_load_n(&ic_, __ATOMIC_RELAXED); if (e_ && e_->addr == t_) e_->fn(c); else rt_call_ic(c, t_, &ic_); } RELOAD(); }
 L_50147C:
-    esp = (uint32_t)((uint32_t)(esp + (uint32_t)0x4u));
+    esp = (uint32_t)(add32(esp, (uint32_t)0x4u, &f));
     ecx = (uint32_t)(add32(ecx, eax, &f));
     edx = (uint32_t)(eax);
     TS32((uint32_t)(esi), (uint32_t)(eax));
@@ -749,19 +669,12 @@ L_50147C:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_5014B0(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -784,7 +697,7 @@ L_5014B0:
     eax = (uint32_t)(TL32((uint32_t)(edi + 0x18u)));
     { uint32_t v_ = eax; esp -= 4; M32(esp) = v_; }
     eax = (uint32_t)((uint32_t)0x802FA80u);
-    { uint32_t t_ = eax; esp -= 4; M32(esp) = 0x5014DAu; SPILL(); { static const FnEntry *ic_; const FnEntry *e_ = __atomic_load_n(&ic_, __ATOMIC_RELAXED); if (e_ && e_->addr == t_) e_->fn(c); else rt_call_ic(c, t_, &ic_); } RELOADN(0x0u); }
+    { uint32_t t_ = eax; esp -= 4; M32(esp) = 0x5014DAu; SPILL(); { static const FnEntry *ic_; const FnEntry *e_ = __atomic_load_n(&ic_, __ATOMIC_RELAXED); if (e_ && e_->addr == t_) e_->fn(c); else rt_call_ic(c, t_, &ic_); } RELOAD(); }
 L_5014DA:
     edx = (uint32_t)(eax);
     TS32((uint32_t)(esi), (uint32_t)(eax));
@@ -805,19 +718,12 @@ L_5014DA:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501510(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -854,19 +760,12 @@ L_501510:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_501560(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -902,19 +801,12 @@ L_501560:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 void f_5015B0(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
@@ -950,6 +842,11 @@ L_5015B0:
     ST(0) = ST(0); fpop(c);
     ST(0) = ST(0); fpop(c);
     c->c0 = c->c1 = c->c2 = c->c3 = 0;
+    fpush(c, (double)MF32((uint32_t)(eax)));
+    ST(1) = ST(0); fpop(c);
+    ST(0) = ST(0); fpop(c);
+    fpush(c, (double)MF32((uint32_t)(eax)));
+    fbstp_store((uint32_t)(eax + 0x40u), ST(0)); fpop(c);
     TS32((uint32_t)(esi), (uint32_t)(eax));
     TS32((uint32_t)(esi + 0x4u), (uint32_t)(ecx));
     TS32((uint32_t)(esi + 0x8u), (uint32_t)(edx));
@@ -968,23 +865,16 @@ L_5015B0:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
-void f_501620(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+void f_501630(CPU *c) {
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
-L_501620:
+L_501630:
     { uint32_t v_ = ebp; esp -= 4; M32(esp) = v_; }
     ebp = (uint32_t)(esp);
     { uint32_t v_ = ebx; esp -= 4; M32(esp) = v_; }
@@ -1016,23 +906,16 @@ L_501620:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
-void f_501670(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+void f_501680(CPU *c) {
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
-L_501670:
+L_501680:
     { uint32_t v_ = ebp; esp -= 4; M32(esp) = v_; }
     ebp = (uint32_t)(esp);
     { uint32_t v_ = ebx; esp -= 4; M32(esp) = v_; }
@@ -1077,6 +960,14 @@ L_501670:
     memcpy(n3ds_guest_ptr((uint32_t)(ecx + 0x40u),16), &c->xmm[2], 16);
     memcpy(n3ds_guest_ptr((uint32_t)(ecx + 0x50u),16), &c->xmm[3], 16);
     memcpy(n3ds_guest_ptr((uint32_t)(ecx + 0x60u),16), &c->xmm[5], 16);
+    { Xmm s_ = c->xmm[4]; for (int k_ = 0; k_ < 4; k_++) c->xmm[0].f[k_] = (float)s_.i[k_]; }
+    { Xmm d_ = c->xmm[0], s_ = c->xmm[1]; for (int k_ = 0; k_ < 4; k_++) { c->xmm[0].w[2 * k_] = d_.w[0 + k_]; c->xmm[0].w[2 * k_ + 1] = s_.w[0 + k_]; } }
+    { Xmm d_ = c->xmm[0], s_ = c->xmm[1]; for (int k_ = 0; k_ < 4; k_++) { c->xmm[0].w[2 * k_] = d_.w[4 + k_]; c->xmm[0].w[2 * k_ + 1] = s_.w[4 + k_]; } }
+    { Xmm d_ = c->xmm[0], s_ = c->xmm[1]; for (int k_ = 0; k_ < 2; k_++) { c->xmm[0].u[2 * k_] = d_.u[0 + k_]; c->xmm[0].u[2 * k_ + 1] = s_.u[0 + k_]; } }
+    { Xmm d_ = c->xmm[0], s_ = c->xmm[1]; for (int k_ = 0; k_ < 2; k_++) { c->xmm[0].u[2 * k_] = d_.u[2 + k_]; c->xmm[0].u[2 * k_ + 1] = s_.u[2 + k_]; } }
+    { Xmm d_ = c->xmm[0], s_ = c->xmm[1]; for (int k_ = 0; k_ < 8; k_++) { int32_t v_ = k_ < 4 ? d_.i[k_] : s_.i[k_ - 4]; c->xmm[0].w[k_] = (uint16_t)(int16_t)(v_ > 32767 ? 32767 : v_ < -32768 ? -32768 : v_); } }
+    { Xmm s_ = c->xmm[1]; for (int k_ = 0; k_ < 8; k_++) { unsigned v_ = (unsigned)c->xmm[0].w[k_] + s_.w[k_]; c->xmm[0].w[k_] = (uint16_t)(v_ > 65535 ? 65535 : v_); } }
+    memcpy(n3ds_guest_ptr((uint32_t)(ecx + 0x70u),16), &c->xmm[0], 16);
     TS32((uint32_t)(esi), (uint32_t)(eax));
     TS32((uint32_t)(esi + 0x4u), (uint32_t)(ecx));
     TS32((uint32_t)(esi + 0x8u), (uint32_t)(edx));
@@ -1095,24 +986,17 @@ L_501670:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
 
-void f_501730(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+void f_501760(CPU *c) {
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
-L_501730:
+L_501760:
     { uint32_t v_ = ebp; esp -= 4; M32(esp) = v_; }
     ebp = (uint32_t)(esp);
     { uint32_t v_ = ebx; esp -= 4; M32(esp) = v_; }
@@ -1125,15 +1009,15 @@ L_501730:
     edx = (uint32_t)(TL32((uint32_t)(edi + 0x8u)));
     ebx = (uint32_t)(TL32((uint32_t)(edi + 0xCu)));
     ecx = (uint32_t)((uint32_t)0x7D0u);
-L_50174C:
-    eax = (uint32_t)((uint32_t)(eax + ebx));
-    edx = (uint32_t)((uint32_t)(edx ^ eax));
-    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)(uint32_t)0x3u; eax = (uint32_t)(r_); }
+L_50177C:
+    eax = (uint32_t)(add32(eax, ebx, &f));
+    edx = (uint32_t)(logic32((uint32_t)(edx ^ eax), &f));
+    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)(uint32_t)0x3u; eax = (uint32_t)(r_); f.cf = f.of = r_ != (int32_t)r_; }
     ebx = (uint32_t)(add32(ebx, edx, &f));
     ecx = (uint32_t)(dec32(ecx, &f));
-    if (!f.zf) goto L_50174C;
-    goto L_501758;
-L_501758:
+    if (!f.zf) goto L_50177C;
+    goto L_501788;
+L_501788:
     TS32((uint32_t)(esi), (uint32_t)(eax));
     TS32((uint32_t)(esi + 0x4u), (uint32_t)(ecx));
     TS32((uint32_t)(esi + 0x8u), (uint32_t)(edx));
@@ -1152,23 +1036,16 @@ L_501758:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
-void f_501780(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+void f_5017B0(CPU *c) {
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
-L_501780:
+L_5017B0:
     { uint32_t v_ = ebp; esp -= 4; M32(esp) = v_; }
     ebp = (uint32_t)(esp);
     { uint32_t v_ = ebx; esp -= 4; M32(esp) = v_; }
@@ -1183,14 +1060,14 @@ L_501780:
     eax = (uint32_t)(TL32((uint32_t)(edi + 0x10u)));
     fpush(c, (double)MF32((uint32_t)(eax)));
     ecx = (uint32_t)((uint32_t)0x3E8u);
-L_5017A1:
+L_5017D1:
     { double v_ = ST(0); fpush(c, v_); }
     ST(0) = ST(0) + ST(1);
     ST(1) = ST(0); fpop(c);
     ecx = (uint32_t)(dec32(ecx, &f));
-    if (!f.zf) goto L_5017A1;
-    goto L_5017AA;
-L_5017AA:
+    if (!f.zf) goto L_5017D1;
+    goto L_5017DA;
+L_5017DA:
     ST(0) = ST(0); fpop(c);
     TS32((uint32_t)(esi), (uint32_t)(eax));
     TS32((uint32_t)(esi + 0x4u), (uint32_t)(ecx));
@@ -1210,23 +1087,16 @@ L_5017AA:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
-void f_5017E0(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+void f_501810(CPU *c) {
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
-L_5017E0:
+L_501810:
     { uint32_t v_ = ebp; esp -= 4; M32(esp) = v_; }
     ebp = (uint32_t)(esp);
     { uint32_t v_ = ebx; esp -= 4; M32(esp) = v_; }
@@ -1242,13 +1112,13 @@ L_5017E0:
     c->xmm[0] = n3ds_xmm_read((uint32_t)(eax));
     c->xmm[1] = n3ds_xmm_read((uint32_t)(eax + 0x10u));
     ecx = (uint32_t)((uint32_t)0x3E8u);
-L_501806:
+L_501836:
     { Xmm s_ = c->xmm[1]; for (int k_ = 0; k_ < 4; k_++) c->xmm[0].f[k_] += s_.f[k_]; }
     { Xmm s_ = c->xmm[1]; for (int k_ = 0; k_ < 4; k_++) c->xmm[0].f[k_] *= s_.f[k_]; }
     ecx = (uint32_t)(dec32(ecx, &f));
-    if (!f.zf) goto L_501806;
-    goto L_50180F;
-L_50180F:
+    if (!f.zf) goto L_501836;
+    goto L_50183F;
+L_50183F:
     memcpy(n3ds_guest_ptr((uint32_t)(eax + 0x20u),16), &c->xmm[0], 16);
     TS32((uint32_t)(esi), (uint32_t)(eax));
     TS32((uint32_t)(esi + 0x4u), (uint32_t)(ecx));
@@ -1268,30 +1138,23 @@ L_50180F:
     { uint32_t v_ = M32(esp); esp += 4; esi = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebx = (uint32_t)(v_); }
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
-void f_501840(CPU *c) {
-    #define eax c->r[0]
-    #define ecx c->r[1]
-    #define edx c->r[2]
-    #define ebx c->r[3]
-    #define esp c->r[4]
-    #define ebp c->r[5]
-    #define esi c->r[6]
-    #define edi c->r[7]
+void f_501870(CPU *c) {
+    uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     Flags f = {0};
     uint32_t jt_ = 0;
     (void)f; (void)jt_;
-L_501840:
+L_501870:
     { uint32_t v_ = ebp; esp -= 4; M32(esp) = v_; }
     ebp = (uint32_t)(esp);
     eax = (uint32_t)(TL32((uint32_t)(ebp + 0x8u)));
-    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)(uint32_t)0x3u; eax = (uint32_t)(r_); }
-    eax = (uint32_t)((uint32_t)(eax + (uint32_t)0x7u));
+    { int64_t r_ = (int64_t)(int32_t)eax * (int32_t)(uint32_t)0x3u; eax = (uint32_t)(r_); f.cf = f.of = r_ != (int32_t)r_; }
+    eax = (uint32_t)(add32(eax, (uint32_t)0x7u, &f));
     { uint32_t v_ = M32(esp); esp += 4; ebp = (uint32_t)(v_); }
-    esp += 4; SPILLN(0xFFu); return;
+    esp += 4; SPILL(); return;
 }
 
 
@@ -1312,11 +1175,11 @@ const FnEntry g_fn_table_ira[] = {
     {0x501510u, f_501510},
     {0x501560u, f_501560},
     {0x5015B0u, f_5015B0},
-    {0x501620u, f_501620},
-    {0x501670u, f_501670},
-    {0x501730u, f_501730},
-    {0x501780u, f_501780},
-    {0x5017E0u, f_5017E0},
-    {0x501840u, f_501840},
+    {0x501630u, f_501630},
+    {0x501680u, f_501680},
+    {0x501760u, f_501760},
+    {0x5017B0u, f_5017B0},
+    {0x501810u, f_501810},
+    {0x501870u, f_501870},
 };
 const unsigned g_fn_count_ira = 22;

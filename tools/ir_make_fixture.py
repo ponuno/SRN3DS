@@ -290,6 +290,11 @@ FUNCS = [
     fstp st(0)
     fstp st(0)
     fnclex
+    fld dword ptr [eax]
+    .byte 0xd9,0xd9          # fstp st(1): the D9 D8..DF register form
+    fstp st(0)
+    fld dword ptr [eax]
+    fbstp tbyte ptr [eax+64]
 """),
     # AOT supports push es (the lifter materialises the selector); v1 IR does
     # not, so this is the permanent explicit-unsupported-opcode test.
@@ -331,6 +336,14 @@ FUNCS = [
     movdqa [ecx+64], xmm2
     movdqa [ecx+80], xmm3
     movdqa [ecx+96], xmm5
+    cvtdq2ps xmm0, xmm4
+    punpcklwd xmm0, xmm1
+    punpckhwd xmm0, xmm1
+    punpckldq xmm0, xmm1
+    punpckhdq xmm0, xmm1
+    packssdw xmm0, xmm1
+    paddusw xmm0, xmm1
+    movntps [ecx+112], xmm0
 """),
     # Long deterministic loops: the ARM benchmark uses these so per-call setup
     # does not hide the tier's throughput.

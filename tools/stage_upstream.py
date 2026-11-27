@@ -67,10 +67,72 @@ def stage(upstream, out):
         ('__atomic_fetch_add(', 'N3DS_FETCH_ADD(', 1),
     ]:
         lift = change(lift, old, new, count)
+    # x87 forms Havok's serialiser/maths use but NET 4.1 missed:
+    #   D9 D8..DF  FSTP ST(i)   (capstone calls it fstpnce)
+    #   DF /6      FBSTP m80bcd
+    lift = change(lift, '"xabort", "int1", "fstpnce", "lock sbb",',
+                 '"xabort", "int1", "lock sbb",', 1)
+    lift = change(lift, '''            elif modrm == 0xD0:
+                pass
+            else:
+                ONE = {''', '''            elif modrm == 0xD0:
+                pass
+            elif 0xD8 <= modrm <= 0xDF:
+                e("%s = ST(0); fpop(c);" % s)
+            else:
+                ONE = {''', 1)
+    lift = change(lift, '''                elif reg == 5:
+                    e("fpush(c, (double)(int64_t)M64(%s));" % a)
+                elif reg == 7:
+                    e("M64(%s) = (uint64_t)fist64(c, ST(0)); fpop(c);" % a)''',
+                 '''                elif reg == 5:
+                    e("fpush(c, (double)(int64_t)M64(%s));" % a)
+                elif reg == 6:
+                    e("fbstp_store(%s, ST(0)); fpop(c);" % a)
+                elif reg == 7:
+                    e("M64(%s) = (uint64_t)fist64(c, ST(0)); fpop(c);" % a)''', 1)
+    # SSE2 packed unsigned saturating add/sub on XMM operands (paddusw was the
+    # only SSE instruction Havok still trapped on).
+    lift = change(lift, '''        elif mn == "packssdw":
+            x = self.xmm(i, ops[0])
+            e("{ Xmm d_ = %s, s_ = %s; for (int k_ = 0; k_ < 4; k_++) { int32_t a_ = d_.i[k_], b_ = s_.i[k_]; "''',
+                 '''        elif mn in ("paddusb", "paddusw", "psubusb", "psubusw"):
+            x = self.xmm(i, ops[0])
+            lane, n, lim = ("b", 16, 255) if mn.endswith("b") else ("w", 8, 65535)
+            if mn.startswith("padd"):
+                body = ("for (int k_ = 0; k_ < %d; k_++) { unsigned v_ = (unsigned)%s.%s[k_] + s_.%s[k_]; "
+                        "%s.%s[k_] = (uint%s_t)(v_ > %d ? %d : v_); }" %
+                        (n, x, lane, lane, x, lane, "8" if lane == "b" else "16", lim, lim))
+            else:
+                body = ("for (int k_ = 0; k_ < %d; k_++) { unsigned a_ = %s.%s[k_], b_ = s_.%s[k_]; "
+                        "%s.%s[k_] = (uint%s_t)(a_ > b_ ? a_ - b_ : 0); }" %
+                        (n, x, lane, lane, x, lane, "8" if lane == "b" else "16"))
+            e("{ Xmm s_ = %s; %s }" % (src128(ops[1]), body))
+        elif mn == "packssdw":
+            x = self.xmm(i, ops[0])
+            e("{ Xmm d_ = %s, s_ = %s; for (int k_ = 0; k_ < 4; k_++) { int32_t a_ = d_.i[k_], b_ = s_.i[k_]; "''', 1)
     fpu = (runtime / 'fpu.c').read_text(encoding='utf-8')
     fpu = change(fpu, '#include "rt.h"', '#include "x86.h"', 1)
     fpu = change(fpu, 'memset(MEM + a, 0, op == 0 ? 28 : 108)',
                  'memset(n3ds_guest_ptr(a,op == 0 ? 28 : 108), 0, op == 0 ? 28 : 108)', 1)
+    # Havok uses FBSTP (DF /6) to serialise 80-bit BCD.  Keep it here, next to
+    # the other x87 helpers, so both AOT and the IR interpreter share it.
+    fpu = change(fpu, 'void fxam(CPU *c) {', '''void fbstp_store(uint32_t a, double v) {
+    /* FBSTP: 18 packed BCD digits, low byte first, sign in bit 7 of byte 9. */
+    int neg = v < 0;
+    long double a_ = fabsl((long double)v);
+    unsigned long long n = (unsigned long long)nearbyintl(a_);
+    for (int i = 0; i < 9; i++) {
+        unsigned lo = (unsigned)(n % 10); n /= 10;
+        unsigned hi = (unsigned)(n % 10); n /= 10;
+        M8(a + i) = (uint8_t)(lo | (hi << 4));
+    }
+    M8(a + 9) = (uint8_t)(neg ? 0x80 : 0x00);
+}
+
+void fxam(CPU *c) {''', 1)
+    x86 = change(x86, 'void f80_store(uint32_t addr, double v);',
+                 'void f80_store(uint32_t addr, double v);\nvoid fbstp_store(uint32_t addr, double v);', 1)
     for name, data in [('x86.h',x86),('lift_prelude.h',pre),('lift.py',lift),('fpu.c',fpu)]:
         if re.search(r'\bMEM\s*\+',data):
             raise ValueError(f'unhandled flat guest address in {name}')

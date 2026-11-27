@@ -499,6 +499,9 @@ Add-Test "menu_swf_html" $common @("source/bsa_reader.c", "source/menu_swf.c", "
 # synthetic movie, so the renderer runs in CI without retail bytes.
 Add-Test "menu_swf_frame_probe" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "source/menu_swf_font.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "source/menu_swf_raster.c", "source/menu_swf_atlas.c", "source/menu_swf_batch.c", "tests/menu_swf_frame_probe.c") @("--self-test")
 Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "tests/d3d9_capture_smoke.c") @()
+# Havok SSE/x87 extension forms, differential AOT vs IR over the self-authored
+# corpus.  Deliberately independent of the D3DX pilot fixture so it always runs.
+Add-Test "ir_havok_ext" $liftCommon ($legacySources + @("tests/ir_havok_ext_smoke.c", "tests/ir_aot_fixture.c")) @()
 $irPilotGen = Join-Path $root "pilot_out_mult\D3DXMatrixMultiply\gen"
 if ((Test-Path (Join-Path $irPilotGen "pilot_00.c")) -and (Test-Path (Join-Path $irPilotGen "pilot_table.c"))) {
     $irPilotSrc = Get-ChildItem -Path $irPilotGen -Filter "pilot_*.c" | ForEach-Object { $_.FullName }
