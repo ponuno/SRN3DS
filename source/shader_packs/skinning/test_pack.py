@@ -39,9 +39,9 @@ class SkinningCatalogTest(unittest.TestCase):
 
     def test_counts(self):
         coverage = self.doc["coverage"]
-        self.assertEqual(coverage["translated"], 177)
+        self.assertEqual(coverage["translated"], 202)
         self.assertEqual(coverage["draw_enabled"], 3)
-        self.assertEqual(coverage["refused"], 1017)
+        self.assertEqual(coverage["refused"], 992)
         self.assertEqual(coverage["translated"] + coverage["refused"],
                          self.manifest["unique_hashes"])
 
@@ -59,6 +59,16 @@ class SkinningCatalogTest(unittest.TestCase):
                 self.assertLessEqual(entry["uniform_registers"], 96)
                 self.assertTrue(entry["skinning"], entry["id"])
                 self.assertIn(entry["codegen"], ("pending", "emitted-verified"))
+                packing = entry.get("packing") or {}
+                if packing.get("components"):
+                    self.assertLessEqual(len(packing["components"]), 24,
+                                         entry["id"])
+                for drop in packing.get("dropped", []):
+                    self.assertEqual(drop["usage"], 10, entry["id"])
+                    self.assertEqual(drop["usage_index"], 1, entry["id"])
+                if entry["quality"] == "approx":
+                    self.assertTrue(entry.get("approximation"), entry["id"])
+                    self.assertTrue(entry.get("contract_outputs"), entry["id"])
                 if entry["codegen"] == "emitted-verified":
                     self.assertEqual(entry["draw_enabled"],
                                      1 if entry["id"] in pack_plans.DRAWN else 0)
@@ -67,6 +77,8 @@ class SkinningCatalogTest(unittest.TestCase):
                                          "draw-enabled", entry["id"])
                         self.assertIn("emitted_code_upload_path",
                                       entry["preconditions"])
+                    self.assertEqual(entry.get("runtime"),
+                                     1 if entry["draw_enabled"] else 0)
                 else:
                     self.assertEqual(entry["draw_enabled"], 0, entry["id"])
             else:
@@ -89,9 +101,8 @@ class SkinningCatalogTest(unittest.TestCase):
         classes = {r["class"] for r in self.doc["refusals"]}
         self.assertIn("def_literal_out_of_range", classes)
         self.assertIn("unsupported_opcode", classes)
-        self.assertIn("pica_vs", classes)
-        self.assertIn("pica_vs_output_envelope", reasons)
         self.assertIn("ps_texture_budget", reasons)
+        self.assertIn("ps_not_straight_line", reasons)
 
     def test_no_hash_is_both_planned_and_refused(self):
         plans = {e["sha256"] for e in self.doc["entries"]}

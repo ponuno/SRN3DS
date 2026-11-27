@@ -35,13 +35,13 @@ class EmitterCatalogTest(unittest.TestCase):
 
     def test_report_has_the_verified_programs(self):
         self.assertEqual(self.report["status"], "pass")
-        self.assertGreaterEqual(len(self.report["entries"]), 29)
+        self.assertEqual(len(self.report["entries"]), 108)
         self.assertEqual(self.report["samples"], 256)
         self.assertEqual(self.report["tolerance"], 1e-4)
         for entry in self.report["entries"]:
             self.assertEqual(entry["status"], "pass", entry["id"])
 
-    def test_each_representative_is_inside_the_pica_envelope(self):
+    def test_each_verified_program_is_inside_the_pica_envelope(self):
         for entry in self.report["entries"]:
             self.assertEqual(entry["status"], "pass", entry["id"])
             self.assertLessEqual(entry["outputs"], E.MAX_OUTPUTS)
@@ -59,32 +59,37 @@ class EmitterCatalogTest(unittest.TestCase):
         marked = {p["id"] for p in self.plans.values()
                   if p.get("codegen") == "emitted-verified"}
         self.assertEqual(verified, marked)
-        self.assertGreaterEqual(len(marked), 29)
+        self.assertEqual(len(marked), 108)
         drawn = {p["id"] for p in self.plans.values()
                  if p.get("draw_enabled") == 1}
         self.assertEqual(drawn, set(E.REPRESENTATIVES))
         for plan_id in verified:
             plan = self.plans[plan_id]
-            self.assertEqual(plan["quality"], "exact")
+            self.assertIn(plan["quality"], ("exact", "approx"))
             self.assertEqual(plan["emitter"]["shbin"],
                              "generated/%s.shbin" % plan_id)
             self.assertEqual(plan["emitter"]["shbin_sha256"],
                              entry_sha[plan_id])
             self.assertTrue(plan["emitted_asm"].endswith(".v.pica"))
+            self.assertLessEqual(len(plan["outputs"]), E.MAX_OUTPUTS)
+            packing = plan.get("packing") or {}
+            self.assertLessEqual(len(packing.get("components", [])), 24)
+            for drop in packing.get("dropped", []):
+                self.assertEqual((drop["usage"], drop["usage_index"]), (10, 1))
+            if plan["quality"] == "approx":
+                self.assertTrue(plan.get("approximation"))
+                self.assertTrue(packing.get("dropped"))
             if plan_id in drawn:
                 self.assertIn("emitted_code_upload_path", plan["preconditions"])
                 self.assertEqual(plan.get("runtime"), 1)
             else:
                 self.assertEqual(plan.get("runtime"), 0)
 
-    def test_all_other_contracts_stay_pending(self):
+    def test_no_contract_is_left_pending(self):
         pending = [p for p in self.plans.values()
                    if p["kind"] == "pica_vs"
                    and p["codegen"] != "emitted-verified"]
-        self.assertEqual(len(pending), 83 - len(self.report["entries"]))
-        for plan in pending:
-            self.assertEqual(plan["codegen"], "pending")
-            self.assertEqual(plan["draw_enabled"], 0)
+        self.assertEqual(pending, [])
 
     def test_committed_asm_matches_the_emitter(self):
         for plan_id in E.REPRESENTATIVES:

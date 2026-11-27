@@ -6,125 +6,127 @@ character/normal-map/tint-mask shaders and skinned VS
 
 * census families: `skinning/characters`
 * chunks: **2162** / unique hashes: **1194**
-* pack catalog coverage: **177 translated**, **3 draw-enabled**, **1017 refused**
-  (`plans.json` / `refusals.json`; `manifest.json` and
-  `docs/shader_coverage.json` index the catalog, while the 16-slot runtime
-  table stays at its three committed PICA VS entries)
+* pack catalog coverage: **202 translated**, **3 draw-enabled**, **992 refused**
+  (`plans.json` / `refusals.json`; the manifest indexes it as 199 translated +
+  3 draw-enabled, because `manifest.json` separates the draw rows)
 
-## What is translated
+## VS: every contract is emitted and verified
 
-`plans.json` is the pack catalog: one `d9-shader-plan-v1` entry per hash that
-the pack can prove or explicitly approximate.  It is generated, never
-hand-edited:
-
-```powershell
-python source\shader_packs\skinning\pack_plans.py generate --data F:\Skyrim\Data
-python source\shader_packs\skinning\pack_plans.py verify   --data F:\Skyrim\Data
-python source\shader_packs\skinning\pica_vs_emit.py emit-all --data F:\Skyrim\Data
-python -m unittest discover -s source\shader_packs\skinning -p "test_*.py"
-```
-
-| stage | plans | quality | draw-enabled | runtime |
-|---|---:|---|---:|---:|
-| VS `pica_vs` contract | 83 | exact | 0 | 0 |
-| VS `pica_vs` emitted-verified | 29 (of 83) | exact (numeric proof) | 3 | 3 |
-| PS `tev` basic tint | 94 | **approx** | 0 | 0 |
-| **total** | **177** | | **3** | **3** |
-
-Every plan carries `quality` (`exact`/`approx`); approximate plans also carry
-an `approximation` string.  Only the three committed PICA VS representatives
-are draw-enabled and set `"runtime": 1`; all other emitted-verified programs
-set `"runtime": 0` and `draw_enabled: 0`, so the C upload table does not grow.
-
-### PS: the basic tint / membrane / facegen class (`ps_tint.py`)
-
-The shared `plan_ps` accepts only a strict single-temp straight-line graph and
-an RGBA8 `def`, so **none** of the 1,086 PS hashes could be translated by it:
-the census class `def_literal_out_of_range` is only the first refusal, and
-every one of those 1,044 shaders also reads `nrm`/`rcp`/`rsq`/`pow`/`cmp` or
-reuses a temp across stages (the shared planner's `temp_not_previous` /
-`written twice` limits).  A 1:1 lowering needs a multi-temp TEV scheduler and
-opcode library; that remains open.
-
-What this pack lands is the well-understood **basic albedo tint**: shaders
-with straight-line control flow (no `ifc`/`if`/`rep`) and at most three 2D
-textures become one TEV stage per texture plus one MODULATE by the vertex
-colour.  Normal, specular, lighting and the `texkill` alpha test are dropped,
-so the plan is `quality: "approx"`, names exactly what was dropped in
-`approximation`, and is never draw-enabled.  No literal `def` is baked, so the
-RGBA8 range limit does not apply to this class.  **94 hashes** translate this
-way (1-3 textures each).
-
-`cmp`/`if` folding and `def` -> uniform/scale for the remaining PS are still
-open; they need the scheduler first, because folding does not remove the
-multi-temp dataflow.
-
-### VS: emitted code (29 of 83)
-
-`pica_vs_emit.py` lowers the canonical vs_3_0 IR of **29** contracts to
-picasso `.v.pica` and verifies them three ways: outputs/inputs/uniform/opcode
-envelope, a D3D IR reference interpreter, and an interpreter over the emitted
-PICA text on 256 deterministic samples.
+All **108** `pica_vs` contracts in this pack are `codegen: "emitted-verified"`:
+picasso emits a non-empty `.shbin`, the D3D vs_3_0 reference interpreter and
+the emitted PICA interpreter agree on 256 deterministic samples, and the packed
+output map is compared component by component.
 
 | metric | value |
 |---|---|
-| emitted-verified contracts | 29 |
-| max abs position error | **0.0** (all 29) |
-| max abs varying error | 4.9e-10 (tolerance 1e-4) |
-| picasso | pass, non-empty `.shbin` |
+| VS contracts | **108 / 108** emitted-verified |
+| contract quality | 83 `exact`, 25 `approx` (second raster colour dropped) |
+| max abs position error | 4.4e-7 (tolerance 1e-4) |
+| max abs varying error | 2.8e-8 (tolerance 1e-3) |
 | draw-enabled / runtime | 3 (`f8ffaecd`, `20f4db07`, `60dbd11a`) |
 
-The 29 cover position-only, position+UV0/1/2, vertex tint, normal transforms,
-`dp3`/`dp4`/`add`/`sub`/`min`/`max`/`slt`/`sge`, relative palette rows, and
-`abs`/`nrm`/`lrp` synthesis.  `nrm` lowers to `dp3`+`rsq`+`mul`; `abs` to
-`max(x,-x)`; `lrp` to `add`+`mad`; `sub` to `add` with a negated source.
+### PICA output budget and varying packing (`pica_vs_pack.py`)
 
-Two emitter bugs were fixed on the way:
+PICA VS has **seven** output registers.  One is clip position; the other six
+carry varyings, and picasso names exactly these semantics:
 
-* upstream `asm.py` moved the `a0.<component>` token onto `Src.relative`;
-  the old emitter still looked for a following `REG_ADDR` pseudo-source and
-  refused every skinned program (`relative_constant_without_address_token`).
-  The three committed representatives did not regenerate before this fix.
-* PICA has a single raster colour: `color1` outputs stay a named refusal
-  (`output_color1_unmapped`, 39 contracts), as do `texcoord3+` semantics.
+```
+texcoord0, texcoord0w, texcoord1, texcoord2, color, view
+```
 
-The other 54 contracts stay `codegen: pending`: 39 declare a second colour,
-9 use `frc` outside the index-floor idiom, 3 declare `texcoord3+`, and 3 hit an
-interpreter operand form.  Each would need a packing contract (pack
-normal+colour into one varying, octant encoding) or a source fix; no claim is
-made for them.
+That is **24 varying components** (six 4-component registers).  A portability
+probe (`picasso` 2.7.2) rejects `texcoord3+`, `color1`, `normal` and
+`tangent`, and accepts `texcoord0w`/`view` as full 4-component registers; the
+pack therefore treats 24 as the physical limit and records it in every
+`packing` block (`capacity: 24`).
+
+* **83 contracts** declare at most six varying vectors.  Each declared output
+  keeps its own physical register (preferred semantics preserved, so committed
+  representative bytes do not move).  This is lossless.
+* **25 contracts** declare 8-9 varyings (22-28 written components).  They all
+  carry a second raster colour (`color1`) but **no** normal/tangent/binormal
+  outputs, so octahedral normal compression is not the lever here.  The pack
+  drops `color1` (4 components, the sanctioned `approx` fallback from the
+  brief), then packs the remaining 18-24 components into the 24 lanes.  Blocks
+  that fit a contiguous slot are written directly with a translated destination
+  mask; a block that would straddle registers is accumulated in a free
+  temporary and scattered component by component in the epilogue.  **No
+  quantisation is used**; the dropped colour is the only approximation and is
+  named in `approximation` and in the `dropped` list of `packing`.
+
+`plan["outputs"]` is the physical PICA output list (<=7 entries);
+`plan["contract_outputs"]` keeps the original D3D declaration; `packing` maps
+every written D3D component to its `(out, dst)` lane.  The emitter and the
+numeric verifier both consume this one map.
+
+### Emitter fixes required by the full corpus
+
+* **Relative-constant token.**  Upstream `asm.py` moved the `a0.<comp>` token
+  onto `Src.relative`; the old emitter looked for a following `REG_ADDR`
+  pseudo-source and refused every skinned program.  The three committed
+  representatives did not regenerate before this fix.
+* **Absolute/relative bank aliasing.**  `c0` can be read both as `c0[a0.y]`
+  and as an absolute row.  D3D has one constant bank, so an absolute read
+  below `3*bones` now maps to that palette row instead of allocating a
+  separate PICA row.  This was the last numeric mismatch in four contracts.
+* **`frc` outside the index-floor idiom** lowers to `x - flr(x)`.
+* **`pow`** lowers to `ex2(y * lg2(max(x,0)))`, with a `(0 < x)` mask and an
+  exponent clamp (`inf * 0` is NaN); D3D9's undefined negative base is 0.
+* **`abs`/`absneg` source modifiers** materialise `max(x, -x)` in distinct
+  temporaries (two abs sources in one instruction no longer collide).
+* **`dstmod1` saturate** clamps to [0,1] via `max`/`min` with a `.constf`
+  one; `dstmod2` (partial precision) is a semantic no-op.
+* `dp3`/`add`/`sub`/`min`/`max`/`slt`/`sge`/`rcp`/`rsq`, plus the existing
+  `abs`/`nrm`/`lrp` synthesis, cover the remaining straight-line bodies.
 
 ### Draw gate
 
-The three representatives carry `draw_enabled: 1`, `runtime: 1` and the full
-`emitter` block (`generated/*.shbin`, SHA-256 and byte count, plan inputs and
-the PICA uniform row map).  `pack_plans.py emit-runtime` only emits entries
-that are both `emitted-verified` and `draw_enabled == 1`, so the runtime table
-and `source/d3d9_pica_vs_*.inc` are unchanged.  `DevCaps` and any frame claim
-are untouched.
+The three representatives keep `draw_enabled: 1`, `runtime: 1` and the full
+`emitter` block.  The other 105 verified programs set `runtime: 0` and
+`draw_enabled: 0`.  `pack_plans.py emit-runtime` emits only draw-enabled rows,
+so the runtime table keeps exactly three programs; its pinned `.shbin` bytes
+were regenerated after the emitter changes and the ARM target was rebuilt
+compile-only (`tools/build.ps1 -Isolated`).  `DevCaps` and any frame claim are
+untouched.
+
+## PS: the basic tint / membrane / facegen class (`ps_tint.py`)
+
+The shared `plan_ps` accepts only a strict single-temp straight-line graph and
+an RGBA8 `def`, so none of the 1,086 PS hashes can be lowered 1:1 today; the
+census class `def_literal_out_of_range` is only the first refusal and every
+such shader also uses `nrm`/`rcp`/`rsq`/`pow`/`cmp` or reuses a temp across
+stages (`temp_not_previous` / `written twice`).  A 1:1 lowering needs a
+multi-temp TEV scheduler; that remains open.
+
+The pack lands the well-understood **basic albedo tint**: straight-line PS
+with at most three 2D textures become one TEV stage per texture plus one
+MODULATE by the vertex colour.  Normal/specular/lighting maths and the
+`texkill` alpha test are dropped, so these plans are `quality: "approx"`, name
+what was dropped in `approximation`, and are never draw-enabled.  No literal
+`def` is baked, so the RGBA8 range limit does not apply.  **94 hashes** translate
+this way.
 
 ## Named refusals (`refusals.json`)
 
-| class | hashes | reason / blocking lever |
+| class | hashes | actual remaining lever |
 |---|---:|---|
-| `def_literal_out_of_range` | 950 | `ps_texture_budget` (4+ textures) or `ps_not_straight_line` (branches); basic tint only covers <=3 textures |
-| `unsupported_opcode` | 42 | `pow`/`texkill`/`lrp` outside the straight-line class |
-| `pica_vs` | 14 | 8 outputs (7 varyings + position); needs varying packing |
-| `too_many_vs_varyings (8 > 7)` | 9 | varying packing or multi-pass VS |
-| `too_many_vs_varyings (9 > 7)` | 2 | varying packing or multi-pass VS |
+| `def_literal_out_of_range` | 962 | `ps_not_straight_line` (432 branches) / `ps_texture_budget` (398: 4+ textures) / `ps_dependent_texture_read` (162) |
+| `unsupported_opcode` | 30 | `pow`/`texkill`/`lrp` outside the straight-line PS class |
 
-The refusal keeps the manifest `class` (the census label is fixed); its
-`reason`/`needs` name the *actual* remaining lever, not just the first one.
+There are **no VS refusals left**: the 14 `pica_vs_output_envelope` and 11
+`too_many_vs_varyings` hashes are now packed and emitted-verified.  The
+refusal keeps the manifest `class` (the census label is fixed); `reason` and
+`needs` name the actual lever.
 
 ## Tests
 
 * `test_pack.py` (7 tests): catalog/refusal partition of all 1,194 hashes,
-  schema validation of all 177 descriptors, quality/approximation fields, the
-  draw/runtime rule, named refusals, and symbolic regeneration from the
-  retail archive.
-* `test_emitter.py` (7 tests): report/catalog agreement for 29
-  emitted-verified programs, the four-weight palette proof, the real c184
-  uniform row, and the "empty/skipped is not verified" rule.
-* `pack_plans.py verify --data` regenerates all 177 plans: **177/177 pass**.
+  schema validation of all 202 descriptors, the 24-component packing budget
+  and the color1-only drop rule, quality/approximation fields, the draw/runtime
+  rule, and symbolic regeneration from the retail archive.
+* `test_emitter.py` (7 tests): 108 verified programs, envelope limits, the
+  packing map, four-distinct-bone proof, the real c184 row, and the
+  "empty/skipped is not verified" rule.
+* `pack_plans.py verify --data`: **202/202 pass**.
 * `tools/shader_packs.py check` and
   `tools/shaders/plan_verify.py --plans docs/shader_plans.json` are green.

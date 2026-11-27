@@ -52,6 +52,7 @@ for path in (HERE, REPO, os.path.join(REPO, "tools"),
 
 from shaders import asm, compile as C, plan_verify  # noqa: E402
 import ps_tint  # noqa: E402
+import pica_vs_pack  # noqa: E402
 
 PACK = "skinning"
 ARCHIVE = "Skyrim - Shaders.bsa"
@@ -154,7 +155,9 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
     entry["source_key"] = key
     if plan["kind"] == "pica_vs":
         entry["codegen"] = "pending"
-        entry["quality"] = "exact"
+        entry["quality"] = plan.get("quality", "exact")
+        if plan.get("approximation"):
+            entry["approximation"] = plan["approximation"]
         entry["note"] = (
             "PICA VS contract: %d varying(s), %d uniform register(s); "
             "native codegen pending, draw disabled"
@@ -167,10 +170,11 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
         emitted = _emitter_verified().get(plan["sha256"])
         if emitted is not None and emitted.get("shbin_sha256"):
             entry["codegen"] = "emitted-verified"
-            entry["quality"] = "exact"
+            entry["quality"] = plan.get("quality", "exact")
             entry["emitted_asm"] = "generated/%s.v.pica" % entry["id"]
             entry["draw_enabled"] = 1 if entry["id"] in DRAWN else 0
             entry["runtime"] = 1 if entry["draw_enabled"] else 0
+            packing = plan.get("packing") or {}
             entry["emitter"] = {
                 "samples": emitted["samples"],
                 "tolerance": emitted["tolerance"],
@@ -190,19 +194,30 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
                      "reg_index": item["reg_index"]}
                     for item in plan["inputs"]],
                 "uniforms": _uniform_map(emitted["uniform_rows"]),
+                "packed": 1 if packing else 0,
+                "physical_outputs": [item.get("physical")
+                                     for item in plan["outputs"]],
+                "dropped_components": sum(
+                    len(item["components"]) for item in packing.get("dropped", [])),
             }
             entry["note"] = (
                 "PICA VS emitted and numerically verified against the vs_3_0 "
-                "IR (%d samples, max |dpos| %.1e, picasso pass, .shbin SHA-256 "
-                "pinned); draw-enabled only through the runtime upload/bind "
-                "contract (d3d9_pica_vs.c)"
-                % (emitted["samples"], emitted["max_abs_position"]))
+                "IR (%d samples, max |dpos| %.1e, max |dvary| %.1e, picasso "
+                "pass, .shbin SHA-256 pinned); %d physical output(s), %d "
+                "component(s) packed"
+                % (emitted["samples"], emitted["max_abs_position"],
+                   emitted["max_abs_varying"], len(plan["outputs"]),
+                   len(packing.get("components", []))))
             entry["preconditions"] = [
                 "blend_weight_blend_index_inputs",
                 "bone_palette_window_%d" % emitted["bones"],
                 "exact_hash_descriptor_match",
                 "emitted_code_upload_path",
+                "pica_vs_output_budget_%d" % len(plan["outputs"]),
             ]
+            if plan.get("quality") == "approx":
+                entry["preconditions"].append("varying_packing_approx")
+                entry["preconditions"].append("second_raster_colour_dropped")
     else:
         entry["quality"] = plan.get("quality", "exact")
         if plan.get("approximation"):
@@ -220,7 +235,21 @@ def translate(ir):
     if ir.kind == "ps":
         plan, why = ps_tint.plan(ir)
         return plan, ("tev_basic_tint" if plan is not None else None), why
-    return C.plan_vs(ir)
+    # The pack owns varying packing, so let plan_vs describe contracts that
+    # declare more than seven varyings; packing then fits them into PICA's
+    # 24-component output budget.
+    old_limit = C.VS_MAX_OUTPUTS
+    C.VS_MAX_OUTPUTS = 32
+    try:
+        plan, cls, why = C.plan_vs(ir)
+    finally:
+        C.VS_MAX_OUTPUTS = old_limit
+    if plan is not None:
+        try:
+            pica_vs_pack.apply(plan, ir)
+        except pica_vs_pack.PackingError as exc:
+            return None, None, str(exc)
+    return plan, cls, why
 
 
 def _refusal(sha: str, row: dict, why: str, ir) -> dict:
@@ -244,6 +273,10 @@ def _refusal(sha: str, row: dict, why: str, ir) -> dict:
         out["needs"] = ("basic tint class only: straight-line, <=3 2D textures; "
                         "other PS need a dataflow scheduler and opcode "
                         "lowering (nrm/rcp/rsq/pow/cmp/branches)")
+    elif reason.startswith("pica_vs_output_components"):
+        out["needs"] = ("physical PICA VS limit: 7 output registers, 24 "
+                        "varying components after position; the contract needs "
+                        "more than the sanctioned second-colour drop")
     else:
         out["needs"] = "shared planner work"
     return out

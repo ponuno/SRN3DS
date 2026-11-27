@@ -50,10 +50,10 @@
    "chunks": 2162,
    "unique_hashes": 1194,
    "coverage": {
-    "translated": 174,
+    "translated": 199,
     "draw-enabled": 3,
-    "refused": 1017,
-    "contract_only": 14
+    "refused": 992,
+    "contract_only": 0
    }
   },
   "lighting": {
