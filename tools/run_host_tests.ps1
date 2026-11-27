@@ -300,6 +300,9 @@ Add-Test "tesv_cube_probe" $common @("source/guest.c", "source/tesv_cube_probe.c
 Add-Test "tesv_cecdc0_probe" $common @("source/guest.c", "source/tesv_cecdc0_probe.c", "tests/tesv_cecdc0_probe_smoke.c") @()
 Add-Test "tesv_cecdc0_source" $common @("source/guest.c", "source/tesv_cecdc0_source.c", "tests/tesv_cecdc0_source_smoke.c") @()
 Add-Test "tesv_fault_regs" $liftCommon ($legacySources + @("tests/tesv_fault_regs_smoke.c")) @()
+# Deterministic menu-crash repro: real 0x60aa70/0x604750 bytes through the IR
+# container tier, three constructed states (valid, bad `this`, NULL `this`).
+Add-Test "menu_crash_repro" $liftCommon ($legacySources + @("tests/menu_crash_repro.c")) @()
 Add-Test "tesv_cube_desc_probe" $liftCommon ($legacySources + @("tests/tesv_cube_desc_probe_smoke.c")) @()
 Add-Test "pe_imports" $common @("source/guest.c", "source/pe_image.c", "source/pe_imports.c", "tests/pe_imports_smoke.c") @()
 Add-Test "lift" $liftCommon ($legacySources + @("tests/lift_smoke.c", "tests/win32_smoke.c")) @()
