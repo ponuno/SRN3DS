@@ -266,6 +266,14 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
     if (&g_fn_table_pilot && g_fn_count_pilot) {
         tables[table_count++] = (FnModule){"d3dx", g_fn_table_pilot, g_fn_count_pilot};
         printf("d3dx: %u lifted function(s) registered\n", g_fn_count_pilot);
+    } else {
+        /* Without the local pilot_out_mult table every d3dx9_42.dll hotpatch
+         * body the loader binds is undispatchable, so the first guest call
+         * through its IAT (for example the D3DXMatrixMultiply thunk at
+         * 0xf79dc2 -> 0x0802fa80) faults as "unknown indirect function".
+         * Name it in the run log; the build already warns on the same gap. */
+        printf("d3dx: no lifted body table; a guest call to a d3dx9_42.dll "
+               "hotpatch body (e.g. 0802fa80 D3DXMatrixMultiply) will fault\n");
     }
     if (table_count < sizeof tables / sizeof tables[0])
         tables[table_count++] = (FnModule){"cube-probe", cube_probe_table,

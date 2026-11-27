@@ -49,6 +49,17 @@ if ($Reslice -or -not $slice) {
 }
 if (-not $slice) { throw "no tesv_slice.exe under $OutDir" }
 
+# A slice built without the locally generated D3DX body table (pilot_out_mult,
+# git-ignored and derived from D3DX9_42.dll) links the real hotpatch bodies but
+# cannot dispatch them, so the first guest matrix call faults at a bare body
+# address such as 0802fa80 (D3DXMatrixMultiply).  Warn before the run instead
+# of reporting that as a new guest fault.
+$pilotTable = Join-Path $repo 'pilot_out_mult\D3DXMatrixMultiply\gen\pilot_table.c'
+if (-not (Test-Path -LiteralPath $pilotTable)) {
+    Write-Host "[fast] WARNING: $pilotTable is absent; the slice has no D3DX body table"
+    Write-Host "[fast]          and a guest d3dx9_42.dll call (e.g. 0802fa80 D3DXMatrixMultiply) will fault"
+}
+
 $log = Join-Path $OutDir 'last_run.log'
 $work = Split-Path -Parent $slice
 $env:N3DS_IRC_PATH = $Irc
