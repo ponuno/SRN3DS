@@ -157,6 +157,7 @@ const char *d9_com_last_diagnostic(void){return g.last_diagnostic;}
 #define RETF(v,n) do{double retval_f=(double)(v);fpush(c,retval_f);trace_result_float(retval_f);c->r[0]=0;c->r[4]+=4+4*(n);return;}while(0)
 static void *ptr(uint32_t address,size_t n){return address&&g.mem?guest_ptr(g.mem,address,n):NULL;}
 static void trace_detail(const char *fmt,...);
+static void draw_probe(CPU *c,const char *method);
 static void d3d_log(const char *method,const char *reason){fprintf(stderr,"[d3d9] %s: %s\n",method,reason);if(g.trace)trace_detail("diagnostic: %s",reason);}
 static void object_table_exhausted(void){
     char why[96];
@@ -2347,9 +2348,31 @@ static void stream(CPU *c){Obj *o=obj(A(2),VB);unsigned s=A(1);if(!obj(A(0),DEVI
     int rc=d9_set_stream(g.device,s,o?o->handle:0,A(3),A(4));if(!rc){bind(&g.streams[s],o);g.offsets[s]=A(3);g.strides[s]=A(4);}RET(hr(rc),5);}
 static void get_stream(CPU *c){unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||!ptr(A(2),4)||!ptr(A(3),4)||!ptr(A(4),4))RET(INVALID,5);
     Obj *o=g.streams[s];retain(o);M32(A(2))=o?o->guest:0;M32(A(3))=g.offsets[s];M32(A(4))=g.strides[s];RET(OK,5);}
-static void stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||A(2)!=1||g.phase==2)RET(UNAVAILABLE,3);RET(OK,3);}
+static void stream_freq(CPU *c){draw_probe(c,"SetStreamSourceFreq");if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||A(2)!=1||g.phase==2)RET(UNAVAILABLE,3);RET(OK,3);}
 static void get_stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||!ptr(A(2),4))RET(INVALID,3);M32(A(2))=1;RET(OK,3);}
-static void indices(CPU *c){Obj *o=obj(A(1),IB);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
+/* TESV_DRAW_PROBE: identify guest draw-submit wrappers that set state but
+ * never reach the Draw* slot.  The TESV rectangle/quad wrapper at 0xf874c0
+ * sets decl/VS/PS/freq/indices and then gates the draw on the high byte of
+ * its first argument.  Log the live frame so the gate value is known instead
+ * of inferred from the disassembly.  Diagnostic only; allocation/logging is
+ * bounded and disabled unless the env is present. */
+static int draw_probe_enabled(void){static int v=-1;if(v<0){const char*e=getenv("TESV_DRAW_PROBE");v=e&&*e;}return v;}
+static void draw_probe(CPU *c,const char *method){
+    if(!draw_probe_enabled())return;
+    uint32_t caller=M32(c->r[4]);
+    if(caller<0xf874c0u||caller>0xf87e60u)return;
+    static unsigned logged;
+    if(logged>=48)return;++logged;
+    uint32_t ebp=c->r[5];
+    uint32_t arg0=M32(c->r[4]+0xbc),wrapper_ret=M32(c->r[4]+0xb8);
+    fprintf(stderr,"[drawprobe] %s caller=%08x wr=%08x this=%08x m28=%u arg0=%08x "
+            "gate=%02x a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x\n",
+            method,(unsigned)caller,(unsigned)wrapper_ret,(unsigned)ebp,
+            (unsigned)(M32(ebp+0x28)&0xff),(unsigned)arg0,(unsigned)((arg0>>24)&0xff),
+            (unsigned)M32(c->r[4]+0xc0),(unsigned)M32(c->r[4]+0xc4),(unsigned)M32(c->r[4]+0xc8),
+            (unsigned)M32(c->r[4]+0xcc),(unsigned)M32(c->r[4]+0xd0));
+}
+static void indices(CPU *c){draw_probe(c,"SetIndices");Obj *o=obj(A(1),IB);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     int rc=d9_set_indices(g.device,o?o->handle:0);if(!rc)bind(&g.ib,o);RET(hr(rc),2);}
 static void get_indices(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.ib);M32(A(1))=g.ib?g.ib->guest:0;RET(OK,2);}
 static uint32_t bind_texture_obj(unsigned stage,Obj *o){
@@ -3244,7 +3267,7 @@ static void create_ps(CPU *c){
     shader_usage_log(PS,A(1),hr,M32(c->r[4]));
     RET(hr,3);
 }
-static void set_vs(CPU *c){Obj *o=obj(A(1),VS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
+static void set_vs(CPU *c){draw_probe(c,"SetVertexShader");Obj *o=obj(A(1),VS);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     if(o&&o->has_menu_vs){
         D9Decl tmp;const D9Decl *decl=menu_current_decl(&tmp);char why[D9_MENU_SHADER_REASON_MAX];
         if(decl&&d9_menu_shader_vs_check_decl(&o->menu,decl,why,sizeof why)){
@@ -3411,7 +3434,7 @@ static void create_decl(CPU *c){uint32_t p=A(1),out=A(2);if(!obj(A(0),DEVICE)||!
     if(d9_decl_init_why(decl,elements,n,why,sizeof why)){
         d3d_fail("CreateVertexDeclaration",why,INVALID);free(decl);RET(INVALID,3);}
     Obj *o=new_obj(DECL);o->declaration=decl;retain(g.dev);M32(out)=o->guest;RET(OK,3);}
-static void set_decl(CPU *c){Obj *o=obj(A(1),DECL);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
+static void set_decl(CPU *c){draw_probe(c,"SetVertexDeclaration");Obj *o=obj(A(1),DECL);if(!obj(A(0),DEVICE)||(A(1)&&!o)||g.phase==2)RET(INVALID,2);
     int rc=d9_set_vertex_declaration(g.device,o?o->declaration:NULL);if(!rc){bind(&g.declaration,o);g.fvf=0;}RET(hr(rc),2);}
 static void get_decl(CPU *c){if(!obj(A(0),DEVICE)||!ptr(A(1),4))RET(INVALID,2);retain(g.declaration);M32(A(1))=g.declaration?g.declaration->guest:0;RET(OK,2);}
 static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2);if(!o||!ptr(n,4))RET(INVALID,3);
