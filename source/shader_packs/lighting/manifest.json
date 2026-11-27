@@ -15,8 +15,8 @@
   "vs": 385
  },
  "coverage": {
-  "translated": 231,
-  "draw-enabled": 6,
+  "translated": 230,
+  "draw-enabled": 7,
   "refused": 4754,
   "contract_only": 0
  },
@@ -1208,7 +1208,7 @@
   },
   {
    "id": "lit.vs.b3a9babe",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "lighting",
    "sha256": "b3a9babe7949ac6f984060bae6edb5eb0898e6bc40474e60d1555d5d420852d6"

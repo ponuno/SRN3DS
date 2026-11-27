@@ -120,7 +120,7 @@ def parse_vs_catalog() -> dict:
         r'(\d+)u,\s*(\d+)u,\s*(\d+)u,\s*(\d+)u,', re.S)
     attr = re.compile(
         r"\{\s*(D9_PICA_VS_ATTR_\w+),\s*(D9_DECL_\w+),\s*(\d+),\s*"
-        r"(D9_PICA_VS_FMT_\w+),\s*(\d+)u\s*\}")
+        r"(D9_PICA_VS_FMT_\w+),\s*(\d+)u(?:\s*,\s*(\d+)u)?\s*\}")
     for path in sorted(glob.glob(VS_TABLE_GLOB) +
                        glob.glob(VS_TABLE_GLOB_EXTRA)):
         text = open(path, encoding="utf-8").read()
@@ -140,6 +140,7 @@ def parse_vs_catalog() -> dict:
                     "components": int(row.group(3)),
                     "format": row.group(4),
                     "reg": int(row.group(5)),
+                    "usage_index": int(row.group(6) or 0),
                 })
             programs[sha] = {
                 "id": pid, "sha256": sha, "asm_name": asm_name,
@@ -226,6 +227,9 @@ def validate_vs_program(program: dict, plan_entry) -> list:
         if row["reg"] in regs:
             fail("attribute register v%u is duplicated" % row["reg"])
         regs.add(row["reg"])
+        if not 0 <= row.get("usage_index", 0) <= 7:
+            fail("attribute v%u has usage index %r outside 0..7"
+                 % (row["reg"], row.get("usage_index")))
         if not 1 <= row["components"] <= 4:
             fail("attribute v%u has %u components"
                  % (row["reg"], row["components"]))

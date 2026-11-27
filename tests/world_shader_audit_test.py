@@ -29,8 +29,8 @@ import world_runtime_audit  # noqa: E402
 
 EXPECTED_DRAW = {
     "terrain": 0,
-    "lighting": 6,
-    "skinning": 3,
+    "lighting": 7,
+    "skinning": 4,
     "sky_water": 0,
     "blit_post": 7,
 }

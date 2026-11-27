@@ -220,8 +220,9 @@ def emit_runtime(promoted: List[dict]) -> None:
         ]
         for item in entry["inputs"]:
             attr, decl, comps, fmt = RUNTIME_ATTR[item["usage"]]
-            table.append("        {%s, %s, %d, %s, %du},"
-                         % (attr, decl, comps, fmt, item["reg_index"]))
+            table.append("        {%s, %s, %d, %s, %du, %du},"
+                         % (attr, decl, comps, fmt, item["reg_index"],
+                            item.get("usage_index", 0)))
         table += ["        },", "    },"]
         blobs.append("_Alignas(4) static const uint8_t %s[%u] = {"
                      % (symbol, len(blob)))

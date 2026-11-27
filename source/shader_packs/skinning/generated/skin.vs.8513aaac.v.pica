@@ -5,8 +5,8 @@
 .constf d185(765.01001, 1, 0, 0)
 .constf d255(1, 1, 1, 1)
 .out outpos position
-.out outtc2 texcoord2
 .out outtc0 texcoord0
+.out outtc1 texcoord1
 
 .proc main
     mul r0, d185.xxxx, v2.zyxw
@@ -56,10 +56,10 @@
     dp4 r1.x, c12, r0
     dp4 r1.y, c13, r0
     dp4 r1.z, c14, r0
-    mov outtc2.xyz, r0
+    mov outtc0.xyz, r0
     dp3 r0.x, r1, r1
     mov outpos.xyz, r1
-    mov outtc2.w, r1.zzzz
+    mov outtc0.w, r1.zzzz
     mov r15, c16.xxxx
     rcp r0.y, r15
     mul r0.x, r0.yyyy, r0.xxxx
@@ -70,7 +70,7 @@
     mul r0.x, r0.xxxx, r0.xxxx
     mul r0.x, r0.xxxx, r0.xxxx
     mov r15, d185.yyyy
-    mad outtc0.x, r0.xxxx, -r0.xxxx, r15
+    mad outtc1.x, r0.xxxx, -r0.xxxx, r15
     mov r15, outpos
     mov outpos.x, r15.yyyy
     mov outpos.y, -r15.xxxx

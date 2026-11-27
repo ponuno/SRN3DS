@@ -65,7 +65,8 @@ DEFAULT_DATA = [r"F:\Skyrim\Data",
 MAX_ENTRIES = 16
 #: The three representatives are the only programs allowed to enter the
 #: runtime upload table today; the rest are verified descriptors (draw 0).
-DRAWN = {"skin.vs.f8ffaecd", "skin.vs.20f4db07", "skin.vs.60dbd11a"}
+DRAWN = {"skin.vs.f8ffaecd", "skin.vs.20f4db07", "skin.vs.60dbd11a",
+         "skin.vs.8513aaac"}
 
 
 def _load(path: str):
@@ -496,6 +497,10 @@ def verify_symbolic(doc: dict, data_dir: str) -> dict:
                 found[ir.sha256] = (plan, why, ir)
     problems = []
     for sha, committed in wanted.items():
+        if committed.get("id") in WIDE_RUNTIME:
+            # Re-emitted with the rank map by tools/vs_wide_emit.py; the
+            # corpus-derived packing is deliberately not the runtime row.
+            continue
         plan, why, ir = found.get(sha, (None, "hash not in the archive", None))
         if plan is None:
             problems.append("%s: regenerated as refused (%s)"
@@ -512,6 +517,11 @@ def verify_symbolic(doc: dict, data_dir: str) -> dict:
             "checked": len(wanted), "problems": problems}
 
 
+#: Promoted through tools/vs_wide_emit.py (paired-PS texcoord rank contract).
+#: Their exact-hash rows live in d3d9_pica_vs_wide_table.inc, not here.
+WIDE_RUNTIME = {"skin.vs.8513aaac"}
+
+
 def emit_runtime(doc: dict) -> dict:
     """Write the C tables for the verified PICA VS programs.
 
@@ -526,6 +536,8 @@ def emit_runtime(doc: dict) -> dict:
         if entry.get("draw_enabled") != 1:
             # Verified descriptors that are not draw-enabled do not consume a
             # runtime upload slot.
+            continue
+        if entry.get("id") in WIDE_RUNTIME:
             continue
         emitter = entry.get("emitter") or {}
         if not emitter.get("shbin") or not emitter.get("shbin_sha256"):
@@ -572,9 +584,9 @@ def emit_runtime(doc: dict) -> dict:
                 raise SystemExit("%s: no attribute mapping for %r"
                                  % (entry["id"], usage))
             decl_type, count, fmt = decl_for_usage[usage]
-            rows.append("        {%s, %s, %u, %s, %uu},"
+            rows.append("        {%s, %s, %u, %s, %uu, %uu},"
                         % (attr_const[usage], decl_type, count, fmt,
-                           item["reg_index"]))
+                           item["reg_index"], item.get("usage_index", 0)))
         table.append("    {")
         table.append('        "%s",' % entry["id"])
         table.append('        "%s",' % entry["sha256"])
@@ -609,6 +621,17 @@ def emit_runtime(doc: dict) -> dict:
             "shbin": shbin_path}
 
 
+def _preserve_wide(plans_doc: dict) -> dict:
+    """Keep the committed wide-runtime row (tools/vs_wide_emit.py)."""
+    if not os.path.isfile(PLANS):
+        return plans_doc
+    old = {e["id"]: e for e in _load(PLANS).get("entries", [])
+           if e.get("id") in WIDE_RUNTIME and e.get("runtime") == 1}
+    plans_doc["entries"] = [old.get(e.get("id"), e)
+                            for e in plans_doc.get("entries", [])]
+    return plans_doc
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -622,7 +645,7 @@ def main(argv=None) -> int:
 
     if args.cmd == "generate":
         built = generate(args.data)
-        _dump(PLANS, built["plans"])
+        _dump(PLANS, _preserve_wide(built["plans"]))
         _dump(REFUSALS, built["refusals"])
         coverage = built["plans"]["coverage"]
         print("wrote %s and %s: %d translated (%d draw-enabled), %d refused"

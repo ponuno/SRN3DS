@@ -50,8 +50,8 @@
    "chunks": 2162,
    "unique_hashes": 1194,
    "coverage": {
-    "translated": 199,
-    "draw-enabled": 3,
+    "translated": 198,
+    "draw-enabled": 4,
     "refused": 992,
     "contract_only": 0
    }
@@ -61,8 +61,8 @@
    "chunks": 7459,
    "unique_hashes": 4991,
    "coverage": {
-    "translated": 231,
-    "draw-enabled": 6,
+    "translated": 230,
+    "draw-enabled": 7,
     "refused": 4754,
     "contract_only": 0
    }

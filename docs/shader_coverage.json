@@ -56,8 +56,8 @@
    "owner": "sm3-agent-skinning",
    "chunks": 2162,
    "unique_hashes": 1194,
-   "translated": 1191,
-   "draw_enabled": 3,
+   "translated": 1190,
+   "draw_enabled": 4,
    "refused": 0,
    "contract_only": 0,
    "refused_classes": {},
@@ -68,8 +68,8 @@
    "owner": "sm3-agent-lighting",
    "chunks": 7459,
    "unique_hashes": 4991,
-   "translated": 4963,
-   "draw_enabled": 6,
+   "translated": 4962,
+   "draw_enabled": 7,
    "refused": 22,
    "contract_only": 0,
    "refused_classes": {
@@ -95,8 +95,8 @@
   }
  },
  "total": {
-  "translated": 6544,
-  "draw-enabled": 93,
+  "translated": 6542,
+  "draw-enabled": 95,
   "refused": 22,
   "chunks": 10475,
   "unique_hashes": 6659

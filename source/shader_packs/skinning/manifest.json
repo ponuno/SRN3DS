@@ -14,8 +14,8 @@
   "vs": 290
  },
  "coverage": {
-  "translated": 199,
-  "draw-enabled": 3,
+  "translated": 198,
+  "draw-enabled": 4,
   "refused": 992,
   "contract_only": 0
  },
@@ -784,7 +784,7 @@
   },
   {
    "id": "skin.vs.8513aaac",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "skinning",
    "sha256": "8513aaac88efadcd52639d9b1b87692f1242e6d21d7f4383f7133762e104d3a6"

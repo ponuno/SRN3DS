@@ -1,7 +1,7 @@
 {
  "archive": "Skyrim - Shaders.bsa",
  "coverage": {
-  "draw_enabled": 3,
+  "draw_enabled": 4,
   "refused": 992,
   "translated": 202
  },
@@ -32044,145 +32044,145 @@
   {
    "codegen": "emitted-verified",
    "constants": [
-    0,
-    1,
-    2,
     180,
     181,
     182,
     183,
-    184,
-    185
+    184
    ],
-   "contract_outputs": [
-    {
-     "reg_index": 0,
-     "type": 6,
-     "usage": 0,
-     "usage_index": 0,
-     "usage_name": "position"
-    },
-    {
-     "reg_index": 1,
-     "type": 6,
-     "usage": 5,
-     "usage_index": 2,
-     "usage_name": "texcoord"
-    },
-    {
-     "reg_index": 2,
-     "type": 6,
-     "usage": 5,
-     "usage_index": 3,
-     "usage_name": "texcoord"
-    }
-   ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "emitted_asm": "generated/skin.vs.8513aaac.v.pica",
    "emitter": {
+    "samples": 256,
+    "tolerance": 0.0001,
+    "rel_tolerance": 1e-06,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "magnitude_limit": 1000000.0,
+    "skipped_ill_conditioned": 0,
+    "picasso": "pass",
     "bones": 4,
-    "dropped_components": 0,
+    "uniform_rows": 17,
+    "uniform_map": "bone_window",
+    "instructions": 68,
+    "shbin": "generated/skin.vs.8513aaac.shbin",
+    "shbin_sha256": "9419e3ca68358c1b2b1ae16ea25aae6aaa053e509b4a49ef3d4a7d715198e76d",
+    "shbin_bytes": 636,
     "inputs": [
      {
-      "reg_index": 0,
       "usage": 0,
-      "usage_name": "position"
+      "usage_name": "position",
+      "reg_index": 0
+     },
+     {
+      "usage": 1,
+      "usage_name": "blendweight",
+      "reg_index": 1
+     },
+     {
+      "usage": 2,
+      "usage_name": "blendindices",
+      "reg_index": 2
+     }
+    ],
+    "uniforms": [
+     {
+      "row": 0,
+      "d3d": 0
+     },
+     {
+      "row": 1,
+      "d3d": 1
+     },
+     {
+      "row": 2,
+      "d3d": 2
+     },
+     {
+      "row": 3,
+      "d3d": 3
+     },
+     {
+      "row": 4,
+      "d3d": 4
+     },
+     {
+      "row": 5,
+      "d3d": 5
+     },
+     {
+      "row": 6,
+      "d3d": 6
+     },
+     {
+      "row": 7,
+      "d3d": 7
+     },
+     {
+      "row": 8,
+      "d3d": 8
+     },
+     {
+      "row": 9,
+      "d3d": 9
+     },
+     {
+      "row": 10,
+      "d3d": 10
+     },
+     {
+      "row": 11,
+      "d3d": 11
+     },
+     {
+      "row": 12,
+      "d3d": 180
+     },
+     {
+      "row": 13,
+      "d3d": 181
+     },
+     {
+      "row": 14,
+      "d3d": 182
+     },
+     {
+      "row": 15,
+      "d3d": 183
+     },
+     {
+      "row": 16,
+      "d3d": 184
+     }
+    ],
+    "varying_map": [
+     {
+      "reg_index": 0,
+      "d3d_usage": 0,
+      "d3d_usage_name": "position",
+      "d3d_usage_index": 0,
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "mode": "natural"
      },
      {
       "reg_index": 1,
-      "usage": 1,
-      "usage_name": "blendweight"
+      "d3d_usage": 5,
+      "d3d_usage_name": "texcoord",
+      "d3d_usage_index": 2,
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "mode": "remap"
      },
      {
       "reg_index": 2,
-      "usage": 2,
-      "usage_name": "blendindices"
-     }
-    ],
-    "instructions": 68,
-    "max_abs_position": 0.0,
-    "max_abs_varying": 0.0,
-    "packed": 1,
-    "physical_outputs": [
-     "outpos",
-     "outtc2",
-     "outtc0"
-    ],
-    "picasso": "pass",
-    "samples": 256,
-    "shbin": "generated/skin.vs.8513aaac.shbin",
-    "shbin_bytes": 636,
-    "shbin_sha256": "3ef5f1b183cb0680ab6ba33cf14908786f54fb6b5d882bcc13da01dbc30b3b45",
-    "tolerance": 0.0001,
-    "uniform_rows": 17,
-    "uniforms": [
-     {
-      "d3d": 0,
-      "row": 0
-     },
-     {
-      "d3d": 1,
-      "row": 1
-     },
-     {
-      "d3d": 2,
-      "row": 2
-     },
-     {
-      "d3d": 3,
-      "row": 3
-     },
-     {
-      "d3d": 4,
-      "row": 4
-     },
-     {
-      "d3d": 5,
-      "row": 5
-     },
-     {
-      "d3d": 6,
-      "row": 6
-     },
-     {
-      "d3d": 7,
-      "row": 7
-     },
-     {
-      "d3d": 8,
-      "row": 8
-     },
-     {
-      "d3d": 9,
-      "row": 9
-     },
-     {
-      "d3d": 10,
-      "row": 10
-     },
-     {
-      "d3d": 11,
-      "row": 11
-     },
-     {
-      "d3d": 180,
-      "row": 12
-     },
-     {
-      "d3d": 181,
-      "row": 13
-     },
-     {
-      "d3d": 182,
-      "row": 14
-     },
-     {
-      "d3d": 183,
-      "row": 15
-     },
-     {
-      "d3d": 184,
-      "row": 16
+      "d3d_usage": 5,
+      "d3d_usage_name": "texcoord",
+      "d3d_usage_index": 3,
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "mode": "remap"
      }
     ]
    },
@@ -32193,140 +32193,130 @@
     {
      "reg_index": 0,
      "usage": 0,
-     "usage_index": 0,
-     "usage_name": "position"
+     "usage_name": "position",
+     "usage_index": 0
     },
     {
      "reg_index": 1,
      "usage": 1,
-     "usage_index": 0,
-     "usage_name": "blendweight"
+     "usage_name": "blendweight",
+     "usage_index": 0
     },
     {
      "reg_index": 2,
      "usage": 2,
-     "usage_index": 0,
-     "usage_name": "blendindices"
+     "usage_name": "blendindices",
+     "usage_index": 0
     }
    ],
    "instructions": 34,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled under the paired-PS rank contract: D3D TEXCOORD indices are packed in ascending order into PICA texcoord slots",
    "outputs": [
     {
-     "physical": "outpos",
      "reg_index": 0,
-     "semantic": "position",
      "type": 6,
      "usage": 0,
+     "usage_name": "position",
      "usage_index": 0,
-     "usage_name": "position"
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "pica_name": "outpos",
+     "map_mode": "natural"
     },
     {
-     "physical": "outtc2",
      "reg_index": 1,
-     "semantic": "texcoord2",
      "type": 6,
      "usage": 5,
-     "usage_index": 2,
-     "usage_name": "texcoord"
+     "usage_name": "texcoord",
+     "usage_index": 0,
+     "d3d_usage": 5,
+     "d3d_usage_index": 2,
+     "pica_name": "outtc0",
+     "map_mode": "remap"
     },
     {
-     "physical": "outtc0",
      "reg_index": 2,
-     "semantic": "texcoord0",
      "type": 6,
      "usage": 5,
-     "usage_index": 3,
-     "usage_name": "texcoord"
+     "usage_name": "texcoord",
+     "usage_index": 1,
+     "d3d_usage": 5,
+     "d3d_usage_index": 3,
+     "pica_name": "outtc1",
+     "map_mode": "remap"
     }
    ],
-   "packing": {
-    "capacity": 24,
-    "components": [
-     {
-      "dst": 0,
-      "out": "outpos",
-      "reg_index": 0,
-      "reg_type": 6,
-      "src": 0
-     },
-     {
-      "dst": 1,
-      "out": "outpos",
-      "reg_index": 0,
-      "reg_type": 6,
-      "src": 1
-     },
-     {
-      "dst": 2,
-      "out": "outpos",
-      "reg_index": 0,
-      "reg_type": 6,
-      "src": 2
-     },
-     {
-      "dst": 3,
-      "out": "outpos",
-      "reg_index": 0,
-      "reg_type": 6,
-      "src": 3
-     },
-     {
-      "dst": 0,
-      "out": "outtc2",
-      "reg_index": 1,
-      "reg_type": 6,
-      "src": 0
-     },
-     {
-      "dst": 1,
-      "out": "outtc2",
-      "reg_index": 1,
-      "reg_type": 6,
-      "src": 1
-     },
-     {
-      "dst": 2,
-      "out": "outtc2",
-      "reg_index": 1,
-      "reg_type": 6,
-      "src": 2
-     },
-     {
-      "dst": 3,
-      "out": "outtc2",
-      "reg_index": 1,
-      "reg_type": 6,
-      "src": 3
-     },
-     {
-      "dst": 0,
-      "out": "outtc0",
-      "reg_index": 2,
-      "reg_type": 6,
-      "src": 0
-     }
-    ],
-    "dropped": []
-   },
    "preconditions": [
-    "blend_weight_blend_index_inputs",
-    "bone_palette_window_4",
     "exact_hash_descriptor_match",
-    "emitted_code_upload_path",
-    "pica_vs_output_budget_3"
+    "paired_ps_texcoord_rank_map",
+    "emitted_code_upload_path"
    ],
    "quality": "exact",
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "5a38671ed4d3e12de76dd4c891dec8b606f2fbc2",
    "sha256": "8513aaac88efadcd52639d9b1b87692f1242e6d21d7f4383f7133762e104d3a6",
    "skinning": true,
    "source_key": "0x00400006",
    "source_package": "shadersfx\\shaders001.fxp",
    "stage": "vs_3_0",
-   "uniform_registers": 9,
-   "version": "0xfffe0300"
+   "uniform_registers": 17,
+   "version": "0xfffe0300",
+   "approximation": "PICA varying envelope: remapped texcoord2->texcoord0, texcoord3->texcoord1; exact only under the paired-PS texcoord rank contract (D3D tN -> PICA tc<rank(N)>)",
+   "varying_map": [
+    {
+     "reg_index": 0,
+     "d3d_usage": 0,
+     "d3d_usage_name": "position",
+     "d3d_usage_index": 0,
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "mode": "natural"
+    },
+    {
+     "reg_index": 1,
+     "d3d_usage": 5,
+     "d3d_usage_name": "texcoord",
+     "d3d_usage_index": 2,
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "mode": "remap"
+    },
+    {
+     "reg_index": 2,
+     "d3d_usage": 5,
+     "d3d_usage_name": "texcoord",
+     "d3d_usage_index": 3,
+     "pica_name": "outtc1",
+     "pica_semantic": "texcoord1",
+     "mode": "remap"
+    }
+   ],
+   "dropped_output_regs": [],
+   "uniform_map": "bone_window",
+   "contract_outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_name": "position",
+     "usage_index": 0
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_name": "texcoord",
+     "usage_index": 2
+    },
+    {
+     "reg_index": 2,
+     "type": 6,
+     "usage": 5,
+     "usage_name": "texcoord",
+     "usage_index": 3
+    }
+   ]
   },
   {
    "approximation": "basic base-albedo tint: 2 texture stage(s) modulated by the vertex colour; normal/specular/lighting maths (nrm, rcp, rsq, pow, dp3, dp4, mad, mul, lrp, abs, min, max, cmp) and the texkill alpha test dropped; def literals outside RGBA8 [0,1] are not baked (no literal constants in this plan)",

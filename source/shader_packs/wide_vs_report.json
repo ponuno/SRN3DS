@@ -1,0 +1,86 @@
+{
+ "entries": [
+  {
+   "bones": 0,
+   "id": "lit.vs.b3a9babe",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "pack": "lighting",
+   "sha256": "b3a9babe7949ac6f984060bae6edb5eb0898e6bc40474e60d1555d5d420852d6",
+   "shbin_bytes": 400,
+   "shbin_sha256": "ad58098a97d8faef20324a7b48aa65dc22164324689d4ea706ba7a5246fc5c56",
+   "uniform_rows": 5,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 2,
+     "d3d_usage_name": "texcoord",
+     "mode": "remap",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 3,
+     "d3d_usage_name": "texcoord",
+     "mode": "remap",
+     "pica_name": "outtc1",
+     "pica_semantic": "texcoord1",
+     "reg_index": 2
+    }
+   ]
+  },
+  {
+   "bones": 4,
+   "id": "skin.vs.8513aaac",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "pack": "skinning",
+   "sha256": "8513aaac88efadcd52639d9b1b87692f1242e6d21d7f4383f7133762e104d3a6",
+   "shbin_bytes": 636,
+   "shbin_sha256": "9419e3ca68358c1b2b1ae16ea25aae6aaa053e509b4a49ef3d4a7d715198e76d",
+   "uniform_rows": 17,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 2,
+     "d3d_usage_name": "texcoord",
+     "mode": "remap",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 3,
+     "d3d_usage_name": "texcoord",
+     "mode": "remap",
+     "pica_name": "outtc1",
+     "pica_semantic": "texcoord1",
+     "reg_index": 2
+    }
+   ]
+  }
+ ],
+ "samples": 256,
+ "schema": "wide-vs-runtime/1"
+}

@@ -11,6 +11,7 @@
 #include "d3d9_pica_vs_ui_shbin.inc"
 #include "d3d9_pica_vs_contract_shbin.inc"
 #include "d3d9_pica_vs_blit_shbin.inc"
+#include "d3d9_pica_vs_wide_shbin.inc"
 
 /* Verified emitted programs (exact vs_3_0 SHA-256 keys). */
 #include "d3d9_pica_vs_table.inc"
@@ -22,6 +23,8 @@
 #include "d3d9_pica_vs_contract_table.inc"
 /* Fullscreen-quad blit/post VS: position + texcoord0, identity bank. */
 #include "d3d9_pica_vs_blit_table.inc"
+/* Wide-varying world VS: packed D3D TEXCOORD rank map, paired PS contract. */
+#include "d3d9_pica_vs_wide_table.inc"
 
 /* ------------------------------------------------------------------------- */
 /* SHA-256 (FIPS 180-4), used to pin the embedded .shbin bytes. */
@@ -119,7 +122,8 @@ unsigned d9_pica_vs_count(void) {
     return (unsigned)(D9_PICA_VS_ENTRY_COUNT + D9_PICA_VS_MENU_ENTRY_COUNT +
                       D9_PICA_VS_UI_ENTRY_COUNT +
                       D9_PICA_VS_CONTRACT_ENTRY_COUNT +
-                      D9_PICA_VS_BLIT_ENTRY_COUNT);
+                      D9_PICA_VS_BLIT_ENTRY_COUNT +
+                      D9_PICA_VS_WIDE_ENTRY_COUNT);
 }
 
 const D9PicaVsProgram *d9_pica_vs_at(unsigned index) {
@@ -134,8 +138,11 @@ const D9PicaVsProgram *d9_pica_vs_at(unsigned index) {
     if (index < D9_PICA_VS_CONTRACT_ENTRY_COUNT)
         return &d9_pica_vs_contract_entries[index];
     index -= D9_PICA_VS_CONTRACT_ENTRY_COUNT;
-    if (index >= D9_PICA_VS_BLIT_ENTRY_COUNT) return NULL;
-    return &d9_pica_vs_blit_entries[index];
+    if (index < D9_PICA_VS_BLIT_ENTRY_COUNT)
+        return &d9_pica_vs_blit_entries[index];
+    index -= D9_PICA_VS_BLIT_ENTRY_COUNT;
+    if (index >= D9_PICA_VS_WIDE_ENTRY_COUNT) return NULL;
+    return &d9_pica_vs_wide_entries[index];
 }
 
 const D9PicaVsProgram *d9_pica_vs_lookup(const char *sha256_hex) {
@@ -157,6 +164,10 @@ const D9PicaVsProgram *d9_pica_vs_lookup(const char *sha256_hex) {
         if (d9_pica_vs_sha256_equal(d9_pica_vs_blit_entries[i].sha256,
                                     sha256_hex))
             return &d9_pica_vs_blit_entries[i];
+    for (unsigned i = 0; i < D9_PICA_VS_WIDE_ENTRY_COUNT; ++i)
+        if (d9_pica_vs_sha256_equal(d9_pica_vs_wide_entries[i].sha256,
+                                    sha256_hex))
+            return &d9_pica_vs_wide_entries[i];
     return NULL;
 }
 
@@ -362,7 +373,7 @@ int d9_pica_vs_declare(const D9PicaVsProgram *program, const D9Decl *decl,
         for (unsigned i = 0; i < decl->count; ++i) {
             const D9VertexElement *e = &decl->elements[i];
             if (e->stream == 0xff) continue;
-            if (e->usage != attr_usage(attr) || e->usage_index != 0) continue;
+            if (e->usage != attr_usage(attr) || e->usage_index != attr->usage_index) continue;
             if (found) {
                 if (why && why_size)
                     snprintf(why, why_size,
@@ -438,7 +449,8 @@ int d9_pica_vs_declare(const D9PicaVsProgram *program, const D9Decl *decl,
         if (e->stream == 0xff) continue;
         int known = 0;
         for (unsigned a = 0; a < program->attr_count; ++a)
-            if (e->usage == attr_usage(&program->attrs[a]) && e->usage_index == 0)
+            if (e->usage == attr_usage(&program->attrs[a]) &&
+                e->usage_index == program->attrs[a].usage_index)
                 known = 1;
         if (!known) {
             if (why && why_size)

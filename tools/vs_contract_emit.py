@@ -444,8 +444,9 @@ def emit_runtime(pack: str = "all", write: bool = True) -> dict:
         ]
         for item in entry["inputs"]:
             attr, decl, comps, fmt = RUNTIME_ATTR[item["usage"]]
-            table.append("        {%s, %s, %d, %s, %du},"
-                         % (attr, decl, comps, fmt, item["reg_index"]))
+            table.append("        {%s, %s, %d, %s, %du, %du},"
+                         % (attr, decl, comps, fmt, item["reg_index"],
+                            item.get("usage_index", 0)))
         table += ["        },", "    },"]
         blobs.append("_Alignas(4) static const uint8_t %s[%u] = {"
                      % (symbol, len(blob)))
@@ -475,7 +476,9 @@ def emit_runtime(pack: str = "all", write: bool = True) -> dict:
             handle.write("\n".join(blobs) + "\n")
         for name in packs:
             path, doc = docs[name]
-            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            raw = open(path, "rb").read()
+            newline = "\r\n" if b"\r\n" in raw else "\n"
+            with open(path, "w", encoding="utf-8", newline=newline) as handle:
                 json.dump(doc, handle, indent=1, sort_keys=(name == "ui"))
                 handle.write("\n")
     return {"pack": pack, "runtime": len(chosen),
@@ -550,6 +553,16 @@ def generate(pack: str, data_dir: str = "", write: bool = True) -> dict:
             "reason": entry.get("refusal"),
         })
     doc["entries"] = foreign + ours
+    # A committed wide-runtime row (tools/vs_wide_emit.py) carries its own
+    # rank-mapped emitter proof; corpus regeneration must not roll it back.
+    committed = {}
+    if os.path.isfile(plans_path):
+        with open(plans_path, encoding="utf-8") as handle:
+            committed = {e["id"]: e for e in json.load(handle)["entries"]
+                         if e.get("runtime") == 1
+                         and e.get("codegen") == "emitted-verified"}
+    doc["entries"] = [committed.get(e.get("id"), e)
+                      for e in doc["entries"]]
     if write:
         with open(plans_path, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(doc, handle, indent=1, sort_keys=(pack == "ui"))

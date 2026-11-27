@@ -32,8 +32,8 @@
         }
       ],
       "census_hashes": 4991,
-      "draw_enabled": 6,
-      "runtime_paths": 6,
+      "draw_enabled": 7,
+      "runtime_paths": 7,
       "catalog_only": 0,
       "unmatched": [],
       "by_kind": {
@@ -47,8 +47,8 @@
       "joined_plans": 202,
       "cross_pack_plans": [],
       "census_hashes": 1194,
-      "draw_enabled": 3,
-      "runtime_paths": 3,
+      "draw_enabled": 4,
+      "runtime_paths": 4,
       "catalog_only": 0,
       "unmatched": [],
       "by_kind": {
@@ -99,8 +99,8 @@
   ],
   "totals": {
     "plans": 691,
-    "draw_enabled": 16,
-    "runtime_paths": 16,
+    "draw_enabled": 18,
+    "runtime_paths": 18,
     "catalog_only": 0,
     "unmatched": 0,
     "invalid": 0,
@@ -122,7 +122,7 @@
       "kind": "vs",
       "chunks": 16,
       "class": "pica_vs",
-      "status": "catalog-only",
+      "status": "runtime",
       "plan": "lit.vs.b3a9babe"
     },
     {
@@ -149,7 +149,7 @@
       "kind": "vs",
       "chunks": 16,
       "class": "pica_vs",
-      "status": "catalog-only",
+      "status": "runtime",
       "plan": "skin.vs.8513aaac"
     },
     {

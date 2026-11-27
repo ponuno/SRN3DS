@@ -99,7 +99,7 @@ class CommittedPlansTest(unittest.TestCase):
             self.assertEqual(plan_verify.derive_status(entry), "translated")
             self.assertTrue(entry["preconditions"])
         drawn = [e for e in self.vs if e["draw_enabled"] == 1]
-        self.assertEqual(len(drawn), 6)
+        self.assertEqual(len(drawn), 7)
         for entry in self.vs:
             if entry["draw_enabled"] == 1:
                 self.assertEqual(entry["runtime"], 1, entry["id"])
@@ -124,7 +124,7 @@ class CommittedPlansTest(unittest.TestCase):
         self.assertEqual(len(self.vs), 130)
         self.assertTrue(all(e["codegen"] == "emitted-verified"
                             for e in self.vs))
-        self.assertEqual(sum(1 for e in self.vs if e["draw_enabled"] == 1), 6)
+        self.assertEqual(sum(1 for e in self.vs if e["draw_enabled"] == 1), 7)
         self.assertTrue(all((e.get("runtime", 0) == 1)
                             == (e["draw_enabled"] == 1) for e in self.vs))
         exact = [e for e in self.vs if e["quality"] == "exact"]

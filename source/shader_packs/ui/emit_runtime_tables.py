@@ -50,7 +50,8 @@ def _attrs(entry):
             raise SystemExit("%s: no attribute mapping for %r"
                              % (entry["id"], usage))
         attr, kind, comps, fmt = ATTRS[usage]
-        rows.append((attr, kind, comps, fmt, item["reg_index"]))
+        rows.append((attr, kind, comps, fmt, item["reg_index"],
+                     item.get("usage_index", 0)))
     return rows
 
 
@@ -111,9 +112,10 @@ def main() -> int:
             "        %uu," % len(attrs),
             "        {",
         ]
-        for attr, kind, comps, fmt, reg in attrs:
-            table_lines.append("        {%s, %s, %d, %s, %du},"
-                               % (attr, kind, comps, fmt, reg))
+        for attr, kind, comps, fmt, reg, usage_index in attrs:
+            table_lines.append("        {%s, %s, %d, %s, %du, %du},"
+                               % (attr, kind, comps, fmt, reg,
+                                  usage_index))
         table_lines += ["        },", "    },"]
     table_lines += [
         "};",

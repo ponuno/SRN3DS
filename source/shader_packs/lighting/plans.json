@@ -67886,12 +67886,12 @@
     }
    ],
    "dropped_output_regs": [],
-   "draw_enabled": 0,
-   "runtime": 0,
+   "draw_enabled": 1,
+   "runtime": 1,
    "uniform_registers": 5,
    "uniform_map": "identity",
    "codegen": "emitted-verified",
-   "quality": "approx",
+   "quality": "exact",
    "emitted_asm": "generated/lit.vs.b3a9babe.v.pica",
    "emitter": {
     "samples": 256,
@@ -67905,6 +67905,7 @@
     "picasso": "pass",
     "bones": 0,
     "uniform_rows": 5,
+    "uniform_map": "identity",
     "instructions": 27,
     "shbin": "generated/lit.vs.b3a9babe.shbin",
     "shbin_sha256": "ad58098a97d8faef20324a7b48aa65dc22164324689d4ea706ba7a5246fc5c56",
@@ -67938,7 +67939,6 @@
       "d3d": 4
      }
     ],
-    "uniform_map": "identity",
     "varying_map": [
      {
       "reg_index": 0,
@@ -67969,13 +67969,36 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled under the paired-PS rank contract: D3D TEXCOORD indices are packed in ascending order into PICA texcoord slots",
    "preconditions": [
     "exact_hash_descriptor_match",
-    "pica_vs_catalog",
-    "runtime_upload_path_pending"
+    "paired_ps_texcoord_rank_map",
+    "emitted_code_upload_path"
    ],
-   "approximation": "PICA varying envelope: remapped texcoord2->texcoord0, texcoord3->texcoord1"
+   "approximation": "PICA varying envelope: remapped texcoord2->texcoord0, texcoord3->texcoord1; exact only under the paired-PS texcoord rank contract (D3D tN -> PICA tc<rank(N)>)",
+   "contract_outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_name": "position",
+     "usage_index": 0
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_name": "texcoord",
+     "usage_index": 2
+    },
+    {
+     "reg_index": 2,
+     "type": 6,
+     "usage": 5,
+     "usage_name": "texcoord",
+     "usage_index": 3
+    }
+   ]
   },
   {
    "id": "lit.vs.b652054e",

@@ -12,8 +12,8 @@ static const D9PicaVsProgram d9_pica_vs_blit_entries[] = {
         10u, 1u, 0u, 0u, 1u,
         2u,
         {
-        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
-        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u},
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u, 0u},
+        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u, 0u},
         },
     },
     {
@@ -26,8 +26,8 @@ static const D9PicaVsProgram d9_pica_vs_blit_entries[] = {
         10u, 4u, 0u, 0u, 4u,
         2u,
         {
-        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
-        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u},
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u, 0u},
+        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u, 0u},
         },
     },
     {
@@ -40,8 +40,8 @@ static const D9PicaVsProgram d9_pica_vs_blit_entries[] = {
         10u, 1u, 0u, 0u, 1u,
         2u,
         {
-        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
-        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u},
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u, 0u},
+        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u, 0u},
         },
     },
     {
@@ -54,8 +54,8 @@ static const D9PicaVsProgram d9_pica_vs_blit_entries[] = {
         13u, 3u, 0u, 0u, 3u,
         2u,
         {
-        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
-        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u},
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u, 0u},
+        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u, 0u},
         },
     },
     {
@@ -68,8 +68,8 @@ static const D9PicaVsProgram d9_pica_vs_blit_entries[] = {
         10u, 6u, 0u, 0u, 6u,
         2u,
         {
-        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
-        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u},
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u, 0u},
+        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u, 0u},
         },
     },
     {
@@ -82,8 +82,8 @@ static const D9PicaVsProgram d9_pica_vs_blit_entries[] = {
         13u, 2u, 0u, 0u, 2u,
         2u,
         {
-        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
-        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u},
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u, 0u},
+        {D9_PICA_VS_ATTR_TEXCOORD, D9_DECL_FLOAT2, 2, D9_PICA_VS_FMT_FLOAT, 1u, 0u},
         },
     },
 };

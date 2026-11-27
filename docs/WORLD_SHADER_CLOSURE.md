@@ -1,6 +1,6 @@
 # World shader closure (terrain, lighting, skinning, sky/water, blit/post)
 
-Status: **static audit, gate wired, six fullscreen-quad runtime paths added
+Status: **static audit, gate wired, eight world runtime paths added
 (2026-11-27).** This is the world-pack companion to
 `docs/MENU_SHADER_CLOSURE.md` §0. It changes neither
 `GetDeviceCaps`/`DevCaps` nor the renderer, and it claims no frame. Every
@@ -47,16 +47,16 @@ pack that have no plan row at all.
 | Pack | Plans | Draw-enabled | Runtime paths | Remaining (offline-only) | Census hashes | Refused |
 |---|---:|---:|---:|---:|---:|---:|
 | `terrain` | 138 | 0 | 0 | 138 TEV | 247 | 109 |
-| `lighting` | 237 | 6 | 6 | 124 VS + 107 TEV | 4,991 | 4,754 |
-| `skinning` | 202 | 3 | 3 | 105 VS + 94 TEV | 1,194 | 992 |
+| `lighting` | 237 | 7 | 7 | 123 VS + 107 TEV | 4,991 | 4,754 |
+| `skinning` | 202 | 4 | 4 | 104 VS + 94 TEV | 1,194 | 992 |
 | `sky_water` | 45 | 0 | 0 | 45 TEV | 45 | 0 |
 | `blit_post` | 69 | 7 | 7 | 2 VS + 59 TEV + 1 docs contract | 69 | 0 |
-| **Total** | **691** | **16** | **16** | **675** | **6,546** | **5,855** |
+| **Total** | **691** | **18** | **18** | **673** | **6,546** | **5,855** |
 
 `691 plans + 5,855 refused = 6,546 census hashes`; the five world packs
 partition their census exactly. The global report is unchanged at
-`6,659 hashes / 6,544 translated / 93 draw-enabled / 22 refused`; six census
-hashes moved from `translated` to `draw-enabled`.
+`6,659 hashes / 6,542 translated / 95 draw-enabled / 22 refused`; eight
+census hashes moved from `translated` to `draw-enabled`.
 
 ### Runtime rows (the only world draws that claim a path)
 
@@ -78,6 +78,8 @@ hashes moved from `translated` to `draw-enabled`.
 | `blit.vs.d48c8642` | PICA VS | `blit` table, c0..c5, 248 B | 2 chunks |
 | `blit.vs.ce758c79` | PICA VS | `blit` table, c0..c2, 284 B | 1 chunk |
 | `blit.vs.d6896494` | PICA VS | `blit` table, c0..c1, 292 B | 1 chunk |
+| `lit.vs.b3a9babe` | PICA VS | `wide` table, c0, 400 B | 16 chunks, t2/t3 → tc0/tc1 |
+| `skin.vs.8513aaac` | PICA VS | `wide` table, 17 rows, 636 B | 16 chunks, t2/t3 → tc0/tc1 |
 
 `menu.composite.ps` is a shared `docs` row reachable from a `blit_post` census
 hash. There is still no `terrain`/`sky_water` runtime draw.
@@ -126,6 +128,33 @@ Both are emitted and numerically verified (`max |dpos| = 0`) but
 them would silently feed the PS the wrong varying. They need a wider varying
 loader plus a paired PS contract, not a counter change.
 
+## 2b. Wide-varying paths (paired PS rank contract)
+
+`tools/vs_wide_emit.py` promotes the two 16-chunk VS that write D3D
+TEXCOORD2/TEXCOORD3:
+
+| Plan | Chunks | Bank | `.shbin` bytes | Pinned SHA-256 | Map |
+|---|---:|---|---:|---|---|
+| `lit.vs.b3a9babe` | 16 | identity, 5 rows | 400 | `ad58098a97d8…` | t2→tc0, t3→tc1 |
+| `skin.vs.8513aaac` | 16 | 4-bone, 17 rows | 636 | `9419e3ca6835…` | t2→tc0, t3→tc1 |
+
+The rank rule is shared with the PS side: the retail PS family in
+`shadersfx\shaders001.fxp` that samples exactly `{t2,t3}` (12 distinct blobs,
+e.g. `ui.ps.a5712176`) already stores `textures[].texcoord_reg = 1` for t3.
+The VS packs the same ascending rank, so `t2` and `t3` arrive on the slots
+the PS reads. The plan keeps `varying_map`/`contract_outputs`, states
+`paired_ps_texcoord_rank_map` as a precondition, and is `quality: exact`
+because the component values are unchanged (the same rule the skinning packed
+representatives use).
+
+The loader itself is widened in the same pass: `D9PicaVsAttr` now carries a
+D3D `usage_index`, and `d9_pica_vs_declare` matches `TEXCOORDn` against the
+declaration's `TEXCOORDn` instead of always index 0. That unlocks the 15
+emitted-verified lighting/skinning VS that read `TEXCOORD1..4` once their
+output envelope and PS pair are certified; none is promoted by this change.
+`pica_vs_runtime_smoke` covers both directions (TEXCOORD1 binds, TEXCOORD0
+does not satisfy a TEXCOORD1 input).
+
 ## 3. Top-30 world plans by frequency
 
 By census chunk count (`manifest.json` `hashes[3]`); status is the committed
@@ -135,10 +164,10 @@ most frequent first.
 | # | Chunks | Pack | SHA-256 | Kind | Plan | Needs |
 |---:|---:|---|---|---|---|---|
 | 1 | 38 | `blit_post` | `c7ef0cd44146` | vs | `blit.vs.c7ef0cd4` | closed (runtime) |
-| 2 | 16 | `lighting` | `b3a9babe7949` | vs | `lit.vs.b3a9babe` | wider varying loader + paired PS remap (writes texcoord2/3 → 0/1) |
+| 2 | 16 | `lighting` | `b3a9babe7949` | vs | `lit.vs.b3a9babe` | closed (runtime, wide rank contract) |
 | 3 | 16 | `skinning` | `06aa117c6779` | ps | — | `ps_dependent_texture_read`: dataflow scheduler (sample coordinate from another sample) |
 | 4 | 16 | `skinning` | `14db34d71a4b` | ps | — | same dataflow scheduler |
-| 5 | 16 | `skinning` | `8513aaac88ef` | vs | `skin.vs.8513aaac` | multi-texcoord loader (3 outputs, texcoord2+texcoord0) |
+| 5 | 16 | `skinning` | `8513aaac88ef` | vs | `skin.vs.8513aaac` | closed (runtime, wide rank contract) |
 | 6 | 10 | `blit_post` | `31d368cecad5` | vs | `blit.vs.31d368ce` | closed (runtime) |
 | 7 | 10 | `lighting` | `53fe44bbf0df` | ps | — | PS `def` literal rewrite (outside RGBA8 [0,1]) |
 | 8 | 10 | `lighting` | `5c6bfb974a97` | ps | `lighting.approx.5c6bfb97` | runtime TEV slot for an offline approximation |
@@ -209,12 +238,12 @@ These are documented refusals/offline plans, not hidden draw paths:
   hashes have no plan (`needs_multipass` 103, `stage_budget` 6).
 * `sky_water` — all 45 TEV plans are draw 0; this is the pack the menu audit
   deliberately demoted (catalog-only, no shared runtime slot).
-* `lighting` — 124/130 PICA VS programs are emitted-verified but outside the
-  six-slot runtime catalog; 107 TEV plans are offline recipes; 4,754 hashes
+* `lighting` — 123/130 PICA VS programs are emitted-verified but outside the
+  seven-slot runtime catalog; 107 TEV plans are offline recipes; 4,754 hashes
   have no plan, including 22 VS with 8–9 varyings
   (`too_many_vs_varyings`). Promoting more VS needs the multi-texcoord loader
   above, not a new ALU opcode.
-* `skinning` — 105/108 PICA VS are emitted-verified but outside the three-slot
+* `skinning` — 104/108 PICA VS are emitted-verified but outside the four-slot
   runtime catalog; 94 TEV plans need the material contract; 992 hashes have no
   plan. The 16-chunk PS pair `06aa117c`/`14db34d7` needs a dataflow scheduler
   (dependent texture read), not a single missing opcode.
@@ -228,14 +257,15 @@ These are documented refusals/offline plans, not hidden draw paths:
 python tools/shader_packs.py check                     # 6 packs, 6659 hashes, OK
 python source/shader_packs/blit_post/pack_plans.py --check
                                                        # catalog reproducible
-python tools/shaders/world_runtime_audit.py            # 16/16 world draws, 0 holes
+python tools/shaders/world_runtime_audit.py            # 18/18 world draws, 0 holes
 python tests/world_shader_audit_test.py                # 21 checks, 0 failures
 python tests/blit_vs_runtime_test.py                   # 108 checks, 0 failures
-python tests/pica_runtime_audit_test.py                # 134/134, 36 VS programs
+python tests/vs_wide_runtime_test.py                   # 33 checks, 0 failures
+python tests/pica_runtime_audit_test.py                # 136/136, 38 VS programs
 python tests/tev_sched_test.py                         # 10 tests, OK
 python tools/shaders/plan_verify.py --data E:\SteamLibrary\steamapps\common\Skyrim\Data
                                                        # 115 entries, symbolic pass
-tools/run_host_tests.ps1 -Only pica_vs_runtime         # 262 checks passed
+tools/run_host_tests.ps1 -Only pica_vs_runtime         # 280 checks passed
 ```
 
 `lift`/`com` could not be built in this worktree because the generated

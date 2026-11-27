@@ -40,7 +40,7 @@ class SkinningCatalogTest(unittest.TestCase):
     def test_counts(self):
         coverage = self.doc["coverage"]
         self.assertEqual(coverage["translated"], 202)
-        self.assertEqual(coverage["draw_enabled"], 3)
+        self.assertEqual(coverage["draw_enabled"], 4)
         self.assertEqual(coverage["refused"], 992)
         self.assertEqual(coverage["translated"] + coverage["refused"],
                          self.manifest["unique_hashes"])
@@ -124,7 +124,7 @@ class SkinningCatalogTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(blob).hexdigest(),
                                  emitter["shbin_sha256"], entry["id"])
                 self.assertEqual(len(blob), emitter["shbin_bytes"])
-        self.assertEqual(self.doc["coverage"]["draw_enabled"], 3)
+        self.assertEqual(self.doc["coverage"]["draw_enabled"], 4)
 
 
 class SkinningSymbolicTest(unittest.TestCase):

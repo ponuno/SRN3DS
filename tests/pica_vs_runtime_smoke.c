@@ -59,9 +59,9 @@ static void skin_decl(D9Decl *decl, unsigned index_type) {
 }
 
 int main(void) {
-    CHECK(d9_pica_vs_count() == 36,
+    CHECK(d9_pica_vs_count() == 38,
           "three skin + five GFx menu + sixteen BSA UI + six contract + "
-          "six blit programs");
+          "six blit + two wide programs");
 
     for (unsigned i = 0; i < d9_pica_vs_count(); ++i) {
         const D9PicaVsProgram *p = d9_pica_vs_at(i);
@@ -95,7 +95,8 @@ int main(void) {
                   "contract identity bank is 1..32 rows");
         } else {
             CHECK(p->shbin_size == 500u || p->shbin_size == 532u ||
-                  p->shbin_size == 548u, "skin shbin size is the emitter's");
+                  p->shbin_size == 548u || p->shbin_size == 636u,
+                  "skin shbin size is the emitter's");
         }
         CHECK(p->shbin[0] == 'D' && p->shbin[1] == 'V', "DVLB magic");
         CHECK(strlen(p->shbin_sha256) == 64, "pinned shbin SHA-256 present");
@@ -116,6 +117,18 @@ int main(void) {
         CHECK(b && b->attr_count == 2u,
               "c7ef0cd4 declares position/texcoord0");
         CHECK(b && b->uniform_rows == 1u, "c7ef0cd4 reads c0 only");
+    }
+    /* Wide-varying programs: exact lookup, rank-mapped texcoord outputs. */
+    {
+        const D9PicaVsProgram *w = d9_pica_vs_lookup(
+            "b3a9babe7949ac6f984060bae6edb5eb0898e6bc40474e60d1555d5d420852d6");
+        CHECK(w != NULL, "b3a9babe is in the wide runtime catalog");
+        CHECK(w && w->bone_rows == 0u, "b3a9babe uses the identity bank");
+        const D9PicaVsProgram *s = d9_pica_vs_lookup(
+            "8513aaac88efadcd52639d9b1b87692f1242e6d21d7f4383f7133762e104d3a6");
+        CHECK(s != NULL, "8513aaac is in the wide runtime catalog");
+        CHECK(s && s->bone_rows == 12u,
+              "8513aaac keeps the four-bone palette window");
     }
     CHECK(d9_pica_vs_lookup(
               "0000000000000000000000000000000000000000000000000000000000000000")
@@ -167,6 +180,44 @@ int main(void) {
     CHECK(d9_pica_vs_declare(p, &decl, &loaders, why, sizeof why) != 0,
           "an extra texcoord is refused for the position/weight/index program");
     CHECK(strstr(why, "texcoord") != NULL || strstr(why, "usage 5") != NULL, why);
+
+    /* Wider varying loader: a TEXCOORD1 input must bind declaration
+     * TEXCOORD1, not TEXCOORD0, and TEXCOORD0 alone is then a refusal. */
+    {
+        D9PicaVsProgram wide;
+        D9Decl wdecl;
+        memset(&wide, 0, sizeof wide);
+        wide.bone_rows = 0;
+        wide.uniform_rows = 1;
+        wide.wvp_rows = 1;
+        wide.attr_count = 2;
+        wide.attrs[0].attr = D9_PICA_VS_ATTR_POSITION;
+        wide.attrs[0].decl_type = D9_DECL_FLOAT3;
+        wide.attrs[0].components = 3;
+        wide.attrs[0].format = D9_PICA_VS_FMT_FLOAT;
+        wide.attrs[0].reg = 0;
+        wide.attrs[1].attr = D9_PICA_VS_ATTR_TEXCOORD;
+        wide.attrs[1].decl_type = D9_DECL_FLOAT2;
+        wide.attrs[1].components = 2;
+        wide.attrs[1].format = D9_PICA_VS_FMT_FLOAT;
+        wide.attrs[1].reg = 1;
+        wide.attrs[1].usage_index = 1;
+        memset(&wdecl, 0, sizeof wdecl);
+        wdecl.count = 2;
+        wdecl.elements[0] = entry(0, 0, D9_DECL_FLOAT3, D9_USAGE_POSITION, 0);
+        wdecl.elements[1] = entry(0, 16, D9_DECL_FLOAT2,
+                                  D9_USAGE_TEXCOORD, 1);
+        why[0] = 0;
+        CHECK(d9_pica_vs_declare(&wide, &wdecl, &loaders, why, sizeof why) == 0,
+              why);
+        CHECK(loaders.count == 2u && loaders.loader[1].offset == 16u,
+              "TEXCOORD1 loads the TEXCOORD1 declaration element");
+        wdecl.elements[1] = entry(0, 16, D9_DECL_FLOAT2,
+                                  D9_USAGE_TEXCOORD, 0);
+        why[0] = 0;
+        CHECK(d9_pica_vs_declare(&wide, &wdecl, &loaders, why, sizeof why) != 0,
+              "TEXCOORD0 cannot satisfy a TEXCOORD1 input");
+    }
 
     /* Uniform bank: c0..c11 palette, c12..c15 WVP. */
     D9PicaVsBank bank;

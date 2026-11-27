@@ -54,6 +54,7 @@ typedef struct {
     uint8_t components;   /* PICA loader count */
     uint8_t format;       /* D9_PICA_VS_FMT_* */
     uint8_t reg;          /* PICA input register v0..v2 */
+    uint8_t usage_index;  /* D3D declaration usage index (0 when omitted) */
 } D9PicaVsAttr;
 
 typedef struct {

@@ -48,8 +48,8 @@ def main() -> int:
     check(report["draw_enabled"] == report["runtime_matched"],
           "draw-enabled %d != runtime matched %d"
           % (report["draw_enabled"], report["runtime_matched"]))
-    check(report["vs_programs"] == 36,
-          "PICA VS catalog has %d programs, expected 36"
+    check(report["vs_programs"] == 38,
+          "PICA VS catalog has %d programs, expected 38"
           % report["vs_programs"])
     check(report["vs_valid"] == report["vs_programs"],
           "only %d of %d PICA VS programs are valid"
