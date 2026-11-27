@@ -315,3 +315,36 @@ ASan for the failure case.
 
 Next independent blocker on this path: `IR: block has no terminator at
 00429872`.
+
+## Fixed: the 0x429872 block was longer than the IR block count (2026-11-27)
+
+`0x429872` is not misaligned and not data. It is the instruction after
+`call 0x4d5300` at `0x42986d`, and the code that follows has **no branch for
+333 instructions** (through the real `jmp 0x429d83`): an unrolled x87
+interpolation run. The discovery is right (one range `0x429808..0x429d85`),
+and every x87 form in it is already supported. The block header and container
+block entry store the instruction count in one byte, so the decoder stopped at
+255 instructions and reported the generic "no terminator" error.
+
+Fix: `n3ds_ir_encode_block()` closes a block at the 255-instruction cap with a
+synthetic fall-through `IR_OP_JMP` (displacement 0 -> `start + x86_len`) and
+sets `IrBlockInfo.split`; the rest of the run decodes as the next block.
+`tests/ir_container_pack.c` continues a discovery span after such a split the
+same way it already did after a `call`. Mini-repro on the real image
+(`_work/ir_container_input.bin`, `0x429872..0x429e75`): the old decoder prints
+`IR: block has no terminator at 00429872`; the fixed decoder produces
+`255 + 78 = 333` instructions in two blocks, then the function tail to the
+`ret` at `0x429e74`. Packer on a synthetic 301-instruction span: before
+`no_terminator`, after `decoded`, 2 blocks. Regression:
+`tests/ir_long_block_smoke.c`.
+
+Host evidence: with the D3DX pilot table linked, a 6e9-step run enters
+`0x4297c0` 511 times, decodes `0x429872` as `x86_len=978 insns=255`, and
+continues through menu loads and D3DX texture creation. No 0x429872 fault.
+
+Next independent blocker: `Guest fault at 00b7f450: unknown function/import`
+on thread 13 (start `0x00a4b4a0`). `0x00b7f450` is a real function prologue
+(`push ebx/ebp/esi/edi; mov esi, ecx`) but it is **not in
+`functions.json`** (neighbours `0x00b7f3e0` and `0x00b7f530`) and not in
+`tesv.irc`, so it is a discovery/closure gap, not a decoder gap.
+
