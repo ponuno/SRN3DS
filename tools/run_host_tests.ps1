@@ -470,6 +470,8 @@ Add-Test "steam" $liftCommon @("source/guest.c", "source/win32_steam.c", "tests/
 Add-Test "registry" $liftCommon @("source/guest.c", "source/win32_registry.c", "tests/win32_registry_smoke.c") @()
 # Profile/save path mapping + a real .ess/.skse write-read-enumerate round-trip.
 Add-Test "save_paths" $liftCommon ($legacySources + @("tests/win32_save_paths_smoke.c")) @()
+# TESV_INI_OVERLAY read overlay: merge/replace [General] values on read only.
+Add-Test "ini_overlay" $liftCommon ($legacySources + @("tests/win32_ini_overlay_smoke.c")) @()
 Add-Test "renderer_requirements" $common @("source/d3d9_renderer_requirements.c", "tests/renderer_requirements_smoke.c") @()
 Add-Test "menu_bsa" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/guest.c", "source/guest_heap.c", "tests/menu_bsa_smoke.c") @()
 Add-Test "stream_range" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_range_smoke.c") @()

@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <ctype.h>
 #include <limits.h>
 #include <time.h>
@@ -2595,16 +2596,210 @@ static void s_GlobalMemoryStatusEx(CPU *c){
  * documented Win32 shape is implemented: [section], key=value, ';'/'#' comments,
  * case-insensitive names, double quotes stripped, CRLF or LF accepted. */
 #define INI_MAX_BYTES (1024u*1024u)
-static char *ini_read(const char *name,size_t *len){
+/* TESV_INI_OVERLAY merges [General] test values into INI *reads* only.  The
+ * on-disk profile and the guest image are never touched; with the variable
+ * unset the reader is byte-for-byte the old one.  See docs/WORLD_ENTRY.md. */
+static int ini_overlay_merge(const char *name,char *buf,size_t *len);
+static char *ini_read_raw(const char *name,size_t *len){
     char path[1024];if(path_for(name,path,sizeof path)){errno=ENOENT;return NULL;}
     FILE *f=fopen(path,"rb");if(!f)return NULL;
     char *buf=malloc(INI_MAX_BYTES);if(!buf){fclose(f);errno=ENOMEM;return NULL;}
     size_t n=fread(buf,1,INI_MAX_BYTES-1,f);buf[n]=0;fclose(f);*len=n;return buf;
 }
+static char *ini_read(const char *name,size_t *len){
+    char *buf=ini_read_raw(name,len);
+    if(buf)ini_overlay_merge(name,buf,len);
+    return buf;
+}
 static char *trim(char *s){while(*s==' '||*s=='\t')++s;char *e=s+strlen(s);while(e>s&&(e[-1]==' '||e[-1]=='\t'||e[-1]=='\r'||e[-1]=='\n'))*--e=0;return s;}
 static int is_section(const char *line,const char *want){
     if(*line!='[')return 0;const char *e=strchr(line+1,']');if(!e)return 0;
     size_t n=(size_t)(e-line-1);return strlen(want)==n && ci_eq_n(line+1,want,n);
+}
+
+/* ---- INI test overlay (TESV_INI_OVERLAY) ---------------------------------------
+ * Allows an experiment to inject engine settings (sStartingCell and friends)
+ * without editing the profile on the SD card or the slice run directory.
+ *
+ *   TESV_INI_OVERLAY=path\to\world.ini     ; plain "key=value" lines
+ *   TESV_INI_OVERLAY="sStartingCell=RiverwoodSleepingGiantInn;bPreloadIntroSequence=1"
+ *
+ * Only [General] keys from the supported list are honoured; the value is merged
+ * into the buffer the Win32 profile parser sees, so GetPrivateProfileStringA /
+ * IntA return it exactly as if the file contained the line.  Duplicate keys in
+ * the overlay are last-wins.  The file is opened read-only and never rewritten.
+ */
+#define INI_OVERLAY_KEYS 6
+#define INI_OV_KEY_MAX 32
+#define INI_OV_VAL_MAX 512
+typedef struct {char key[INI_OV_KEY_MAX];char val[INI_OV_VAL_MAX];} IniOverlayEntry;
+static const char *const ini_overlay_supported[INI_OVERLAY_KEYS]={
+    "sStartingCell","sStartingWorld","sStartingCellX","sStartingCellY",
+    "sIntroSequence","bPreloadIntroSequence"};
+static int ini_trace_on(void){
+    static int v=-1;
+    if(v<0){const char *e=getenv("TESV_INI_TRACE");v=e&&*e;}
+    return v;
+}
+/* Overlay diagnostics go to stderr and, when TESV_INI_LOG names a file, to that
+ * file as well: a slice/device run does not always keep a console. */
+static void ini_log(const char *fmt,...){
+    char text[1024];
+    va_list ap;
+    va_start(ap,fmt);
+    int n=vsnprintf(text,sizeof text,fmt,ap);
+    va_end(ap);
+    if(n<=0)return;
+    fputs(text,stderr);fflush(stderr);
+    const char *path=getenv("TESV_INI_LOG");
+    if(path&&*path){FILE *f=fopen(path,"ab");if(f){fputs(text,f);fclose(f);}}
+}
+static int ini_overlay_key(const char *key){
+    for(int i=0;i<INI_OVERLAY_KEYS;++i)
+        if(ci_eq(key,ini_overlay_supported[i]))return i;
+    return -1;
+}
+static int ini_overlay_basename_is(const char *name,const char *base){
+    const char *b=name;
+    for(const char *p=name;*p;++p)if(*p=='\\'||*p=='/')b=p+1;
+    return ci_eq(b,base);
+}
+static int ini_overlay_is_target(const char *name){
+    return ini_overlay_basename_is(name,"Skyrim.INI")||
+           ini_overlay_basename_is(name,"Skyrim.ini");
+}
+static void ini_overlay_store(IniOverlayEntry *ov,int *n,const char *key,const char *val){
+    int slot=ini_overlay_key(key);
+    if(slot<0)return;                       /* unsupported key: ignore */
+    if(strlen(key)>=INI_OV_KEY_MAX||strlen(val)>=INI_OV_VAL_MAX){
+        ini_log("[ini] overlay: value for %s is too long, ignored\n",key);
+        return;
+    }
+    for(int i=0;i<*n;++i)
+        if(ci_eq(ov[i].key,key)){            /* last wins */
+            snprintf(ov[i].val,sizeof ov[i].val,"%s",val);
+            return;
+        }
+    snprintf(ov[*n].key,sizeof ov[*n].key,"%s",key);
+    snprintf(ov[*n].val,sizeof ov[*n].val,"%s",val);
+    ++*n;
+}
+/* Parse "key=value;key=value" (inline) or newline-separated text.  A "[General]"
+ * header is accepted and other headers switch the keys off; a bare key before
+ * any header is General. */
+static void ini_overlay_parse(IniOverlayEntry *ov,int *n,const char *text){
+    int in_general=1;
+    while(*text){
+        const char *e=text;
+        while(*e&&*e!='\n'&&*e!=';'&&*e!='\r')++e;
+        char line[INI_OV_VAL_MAX+INI_OV_KEY_MAX];
+        size_t k=(size_t)(e-text);
+        if(k>=sizeof line)k=sizeof line-1;
+        memcpy(line,text,k);line[k]=0;
+        text=(*e)?e+1:e;
+        char *l=trim(line);
+        if(!*l||*l==';'||*l=='#')continue;
+        if(*l=='['){in_general=is_section(l,"General");continue;}
+        char *eq=strchr(l,'=');
+        if(!eq){continue;}
+        *eq=0;
+        char *key=trim(l),*val=trim(eq+1);
+        size_t vn=strlen(val);
+        if(vn>=2&&val[0]=='"'&&val[vn-1]=='"'){val[vn-1]=0;++val;}
+        if(!in_general)continue;
+        ini_overlay_store(ov,n,key,val);
+    }
+}
+/* Returns the number of overlay entries, 0 when the variable is unset. */
+static int ini_overlay_load_spec(const char *spec,IniOverlayEntry *ov,int cap){
+    if(!spec||!*spec)return 0;
+    int n=0;
+    FILE *f=fopen(spec,"rb");
+    if(f){
+        char text[4096];
+        size_t got=fread(text,1,sizeof text-1,f);
+        text[got]=0;fclose(f);
+        ini_overlay_parse(ov,&n,text);
+    }else if(strchr(spec,'=')){
+        ini_overlay_parse(ov,&n,spec);       /* inline form */
+    }else{
+        ini_log("[ini] TESV_INI_OVERLAY=%s: not a file and not key=value, ignored\n",spec);
+        return 0;
+    }
+    (void)cap;
+    return n;
+}
+static int ini_overlay_load(IniOverlayEntry *ov,int cap){
+    return ini_overlay_load_spec(getenv("TESV_INI_OVERLAY"),ov,cap);
+}
+static int ini_overlay_emit(char *out,size_t cap,size_t *used,const char *s,size_t n){
+    if(*used+n>cap)return -1;
+    memcpy(out+*used,s,n);*used+=n;return 0;
+}
+static int ini_overlay_emit_kv(char *out,size_t cap,size_t *used,
+                               const char *key,const char *val){
+    return ini_overlay_emit(out,cap,used,key,strlen(key))||
+           ini_overlay_emit(out,cap,used,"=",1)||
+           ini_overlay_emit(out,cap,used,val,strlen(val))||
+           ini_overlay_emit(out,cap,used,"\n",1);
+}
+/* Merge the overlay into the freshly read buffer.  Existing keys in [General]
+ * are replaced in place (order preserved, no duplicates for enumeration); keys
+ * the file lacks are inserted right after the [General] header, or after a new
+ * header when the file has no General section. */
+static int ini_overlay_merge_into(const IniOverlayEntry *ov,int n,const char *name,
+                                  char *buf,size_t *len){
+    if(n<=0||!ini_overlay_is_target(name))return 0;
+    char *tmp=malloc(4096);
+    if(!tmp)return 0;
+    size_t used=*len,add=0;
+    int rc=0;
+    for(int i=0;i<n&&!rc;++i)
+        rc=ini_overlay_emit_kv(tmp,4095,&add,ov[i].key,ov[i].val);
+    if(rc||used+add+16>INI_MAX_BYTES){free(tmp);return 0;}
+    /* Append a fresh [General] block at EOF.  The profile parser is
+     * last-match-wins, so these values override the file's own General keys
+     * without rewriting (and risking) the original lines. */
+    if(used&&buf[used-1]!='\n')buf[used++]='\n';
+    memcpy(buf+used,"[General]\n",10);used+=10;
+    memcpy(buf+used,tmp,add);used+=add;
+    buf[used]=0;*len=used;
+    {
+        char line[768];int p2=0;
+        p2+=snprintf(line+p2,sizeof line-(size_t)p2,"[ini] overlay applied to %s:",name);
+        for(int i=0;i<n&&p2<(int)sizeof line-64;++i)
+            p2+=snprintf(line+p2,sizeof line-(size_t)p2," %s=%s",ov[i].key,ov[i].val);
+        if(p2<(int)sizeof line-1){line[p2++]='\n';line[p2]=0;}
+        ini_log("%s",line);
+    }
+    free(tmp);
+    return n;
+}
+static int ini_overlay_merge(const char *name,char *buf,size_t *len){
+    IniOverlayEntry ov[INI_OVERLAY_KEYS];
+    int n=ini_overlay_load(ov,INI_OVERLAY_KEYS);
+    return ini_overlay_merge_into(ov,n,name,buf,len);
+}
+/* Test hook: merge an explicit overlay spec into one INI text buffer
+ * without a GuestMemory or a configured profile root.  Same parser and merge
+ * used by the read path, so the unit test pins the real semantics. */
+int win32_ini_overlay_merge_text(const char *spec,const char *name,char *buf,
+                                 size_t capacity,size_t *inout_len){
+    IniOverlayEntry ov[INI_OVERLAY_KEYS];
+    int n=ini_overlay_load_spec(spec,ov,INI_OVERLAY_KEYS);
+    if(capacity<INI_MAX_BYTES||!inout_len||!buf||*inout_len>=capacity)return -1;
+    return ini_overlay_merge_into(ov,n,name,buf,inout_len);
+}
+/* Query used by the trace line so the log says where the value came from. */
+static int ini_overlay_lookup(const char *section,const char *key,char *out,size_t cap){
+    if(!section||!key||!ci_eq(section,"General"))return 0;
+    IniOverlayEntry ov[INI_OVERLAY_KEYS];
+    int n=ini_overlay_load(ov,INI_OVERLAY_KEYS);
+    for(int i=0;i<n;++i)if(ci_eq(ov[i].key,key)){
+        snprintf(out,cap,"%s",ov[i].val);
+        return 1;
+    }
+    return 0;
 }
 static int ini_each(const char *name,const char *section,const char *key,
                     int (*cb)(const char*,const char*,void*),void *ctx){
@@ -2660,6 +2855,12 @@ static void s_GetPrivateProfileStringA(CPU *c){
     IniValue v={out,cap,0,0};
     ini_each(name,section,key,ini_value_cb,&v);
     if(!v.hit && defp){const char *d=str(c,defp);size_t n=strlen(d);if(n>=cap)n=cap-1;memcpy(out,d,n);out[n]=0;v.used=n;}
+    if(ini_trace_on()){
+        char from_ov[INI_OV_VAL_MAX];
+        int via=ini_overlay_lookup(section,key,from_ov,sizeof from_ov);
+        ini_log("[ini] Get \"%s\" \"%s\" -> \"%s\"%s%s\n",section,key,out,
+                v.hit?"":" (default)",via?" (overlay)":"");
+    }
     set_error(c,0);RET((uint32_t)v.used,6);
 }
 static void s_GetPrivateProfileIntA(CPU *c){
@@ -2671,6 +2872,9 @@ static void s_GetPrivateProfileIntA(CPU *c){
     if(!section||!key)RET(def,4);
     IniValue v={out,sizeof out,0,0};
     ini_each(name,section,key,ini_value_cb,&v);
+    if(ini_trace_on())
+        ini_log("[ini] GetInt \"%s\" \"%s\" -> \"%s\"%s\n",section,key,
+                v.hit?out:"(default)",v.hit?"":"");
     if(!v.hit)RET(def,4);
     char *end;long n=strtol(out,&end,10);
     if(end==out)RET(def,4);
@@ -2683,7 +2887,7 @@ static void s_WritePrivateProfileStringA(CPU *c){
     const char *name=guest_cstr(mem,A(3),1024);
     if(!section||!*section||!name)FAIL(ERR_INVALID_PARAMETER,0,4);
     if(key&&!*key)FAIL(ERR_INVALID_PARAMETER,0,4);
-    size_t len=0;char *buf=ini_read(name,&len);
+    size_t len=0;char *buf=ini_read_raw(name,&len);   /* write path: no overlay */
     size_t cap=len+4096+(key?strlen(key):0)+(val?strlen(val):0);
     char *out=malloc(cap?cap:1);
     if(!out){free(buf);FAIL(ERR_NO_MEMORY,0,4);}

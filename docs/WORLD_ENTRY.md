@@ -330,39 +330,90 @@ mismatch on FAT (deploy currently writes `Skyrim.ini`, the engine appends
    exterior (`sStartingWorld=Tamriel` + X/Y) is the next step and the first
    real test of `uGrids` / `0x4f5330` cell streaming.
 
-## 8. Safe host-side mechanism (sketch only, NOT applied)
+## 8. Safe host-side mechanism (implemented: `TESV_INI_OVERLAY`)
 
-The cleanest host hook is an **INI overlay**, not guest-memory poking: at
-process start, before the guest's first `GetPrivateProfileStringA`, merge a
-small overlay file into the guest-visible INI contents. That is exactly what
-the existing shim reader already does for the whole file, so the change is in
-`path_for`/`ini_read` land:
+The overlay is implemented in `source/win32_shims.c` (INI read path only) and is
+the supported way to run the world-entry experiment without touching the
+profile on the SD card or in the slice run directory.
 
-```
-/* pseudo, source/win32_shims.c */
-static const char *ini_overlay(const char *path) {
-    if (!strstr(path, "Skyrim.INI")) return NULL;
-    const char *v = getenv("TESV_INI_OVERLAY");   /* e.g. a world-entry .ini */
-    return (v && *v) ? v : NULL;
-}
-/* ini_read(): read base file, then append overlay bytes (with a trailing
-   newline) into the same buffer; the line parser then sees the overlay
-   values last, so they win over the deployed INI without touching it. */
+### 8.1 Usage
+
+```bat
+:: file form: plain key=value lines, [General] implied
+set TESV_INI_OVERLAY=C:\temp\world.ini
+:: or inline form
+set TESV_INI_OVERLAY=sStartingCell=RiverwoodSleepingGiantInn;bPreloadIntroSequence=0
+:: optional diagnostics
+set TESV_INI_TRACE=1
+set TESV_INI_LOG=C:\temp\ini_trace.log
 ```
 
-This keeps the `[General] sStartingCell` value flowing through the engine's own
-settings loader (`0x691410` -> `0x1272fb4`), which is the same path the retail
-game uses - no second entry vector, no direct writes into `.data`, no risk of
-desynchronising the settings table.
+`world.ini`:
 
-A *worse* alternative (do not ship): write a host-allocated string pointer into
-`0x1272fb4` at startup. It works only if the string lives in guest memory and
-survives the settings loader's own `strdup`/free cycle; the loader at
-`0x691410` does allocate its own copies, so a hand-written pointer is likely to
-leak or be overwritten.
+```ini
+sStartingCell=RiverwoodSleepingGiantInn
+```
 
-An argv switch is a dead end for the reasons in option C (the engine never
-parses extra arguments), so the overlay is the only viable host-only knob.
+Supported `[General]` keys: `sStartingCell`, `sStartingWorld`,
+`sStartingCellX`, `sStartingCellY`, `sIntroSequence`,
+`bPreloadIntroSequence`. Unknown keys are ignored, duplicates are last-wins,
+`;` and newlines are both separators, surrounding quotes are stripped.
+
+### 8.2 Semantics
+
+* The overlay is merged into the buffer the Win32 profile parser sees when
+  `Skyrim.INI` / `Skyrim.ini` is read, so `GetPrivateProfileStringA/IntA`
+  return the overlay value exactly as if the file contained it.
+* The block is appended as a fresh `[General]` section at EOF. The parser is
+  last-match-wins, so the overlay overrides the file's own value while the file
+  is never rewritten. Consequence: section enumeration lists `General` twice;
+  key lookups (what the engine's settings loader `0x691410` does) are
+  unaffected.
+* Only reads are overlaid. `WritePrivateProfileStringA` uses the raw file
+  (`ini_read_raw`), so a write never persists overlay values.
+* `SkyrimPrefs.ini`, `Skyrim_default.ini` and any other INI name are untouched.
+* `TESV_INI_OVERLAY` unset or empty: the reader is byte-for-byte the previous
+  implementation.
+* No guest memory is patched and `0x1272fb4` is never written by the host: the
+  engine's own settings loader stores the string.
+
+### 8.3 Experiment
+
+```
+set TESV_INI_OVERLAY=sStartingCell=RiverwoodSleepingGiantInn
+set TESV_INI_TRACE=1
+set TESV_INI_LOG=%CD%\ini_trace.log
+tesv_slice.exe <TESV.irc/exe> . 200000000 167772160 *
+```
+
+Expected log (`ini_trace.log`):
+
+```
+[ini] overlay applied to Documents\My Games\Skyrim\Skyrim.INI: sStartingCell=RiverwoodSleepingGiantInn
+[ini] Get "General" "sStartingCell" -> "RiverwoodSleepingGiantInn" (overlay)
+```
+
+The second line is the engine's own settings-load call for that key, i.e. the
+value that lands in `0x1272fb4` and is consumed by `0x6982c0`. Checkpoints are
+unchanged from section 6: `0x6982c0` must return 0 and StartMenu must not be
+created.
+
+### 8.4 Tests
+
+`tests/win32_ini_overlay_smoke.c` (registered as `ini_overlay` in
+`tools/run_host_tests.ps1`) drives the same parser/merge through
+`win32_ini_overlay_merge_text()` with no guest memory: file and inline forms,
+last-wins duplicates, unknown keys ignored, quoted values, CRLF, missing
+`[General]` (appended), `[Display]` untouched, non-target INI names, the
+no-overlay byte-for-byte case and the argument guards. The test also prints the
+effective tail, so the run log shows the appended `sStartingCell` line.
+
+### 8.5 Rejected alternatives
+
+Writing a host-allocated string pointer into `0x1272fb4` remains rejected: the
+loader re-allocates its own copy, so a hand-written pointer leaks or is
+overwritten. An argv switch is a dead end (the engine never parses extra
+arguments).
 
 ## 9. Summary
 
@@ -376,4 +427,5 @@ parses extra arguments), so the overlay is the only viable host-only knob.
 * Command-line `-loadgame` does not exist in this build and the host hardcodes
   the guest command line.
 * Recommended first test: `RiverwoodSleepingGiantInn`
-  (`0x000133C6`, interior) via the guest INI, with an empty-value control run.
+  (`0x000133C6`, interior) via `TESV_INI_OVERLAY` (section 8), with an
+  empty-value control run.

@@ -29,6 +29,12 @@ enum {
     WIN32_GUEST_PATH_INVALID = -5
 };
 int win32_guest_path(const char *guest_name,char *out,size_t capacity);
+/* TESV_INI_OVERLAY test hook: merge `spec` (a key=value file path, or an inline
+ * "key=value;..." string) into `buf` as the INI read path would.  Returns the
+ * number of applied values, or -1 on bad arguments.  `buf` must have
+ * capacity >= 1 MiB; `name` must be Skyrim.INI/Skyrim.ini for the merge to fire. */
+int win32_ini_overlay_merge_text(const char *spec,const char *name,char *buf,
+                                 size_t capacity,size_t *inout_len);
 /* Diagnostic mode: bind unknown imports to a trap that faults on call with the
  * exact dll!name. Never returns a fake success; unknown slots still fail. */
 void win32_set_unresolved_trap(int enabled);
