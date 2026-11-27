@@ -204,6 +204,7 @@ static void hang_dump(unsigned elapsed) {
     for (unsigned i = 0; i < MAX_THREADS; ++i)
         if (threads[i].state != ST_FREE) dump_thread("thread", &threads[i]);
     n3ds_lift_dump_recent_calls(stderr);
+    n3ds_lift_dump_stream(stderr);
     win32_sync_dump(stderr);
     win32_cs_dump(stderr);
     win32_icx_dump(stderr);

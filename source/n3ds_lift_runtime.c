@@ -44,6 +44,54 @@ static CPU *g_last_cpu;
  * short ring of the most recent guest entries. AOT keeps its registers in
  * locals, so the entry ring is the only cheap PC evidence for a lifted spin. */
 static uint32_t g_ir_ip;
+static uint32_t g_stream_obj;
+void n3ds_lift_dump_stream(FILE *f) {
+    if (!f || !g_stream_obj || !memory) return;
+    uint32_t o = g_stream_obj, v[12] = {0};
+    for (unsigned i = 0; i < 12; ++i) (void)guest_read32(memory, o + 4u * i, &v[i]);
+    fprintf(f, "[stream] dump obj=%08x vt=%08x pos=%08x..%08x base=%08x.%08x buf=%08x size=%08x flags=%08x\n",
+            (unsigned)o, (unsigned)v[0], (unsigned)v[2], (unsigned)v[4],
+            (unsigned)v[6], (unsigned)v[7], (unsigned)v[8], (unsigned)v[9],
+            (unsigned)v[10]);
+    if (v[0]) {
+        uint32_t m18 = 0, m20 = 0;
+        (void)guest_read32(memory, v[0] + 0x18, &m18);
+        (void)guest_read32(memory, v[0] + 0x20, &m20);
+        fprintf(f, "[stream] dump vt methods +18=%08x +20=%08x\n", (unsigned)m18,
+                (unsigned)m20);
+    }
+}
+/* Diagnostic only: TESV_STREAM_TRACE=1 dumps the buffered-reader object at
+ * 0x00ac6c10 (the menu reader retry-loop callee) and its vtable. */
+static void stream_trace(CPU *c) {
+    static unsigned n;
+    if (!c || n >= 12) return;
+    ++n;
+    uint32_t obj = c->r[1], ret = 0;
+    g_stream_obj = obj;
+    if (memory) (void)guest_read32(memory, c->r[4], &ret);
+    fprintf(stderr, "[stream] obj=%08x ret=%08x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x\n",
+            (unsigned)obj, (unsigned)ret, (unsigned)c->r[0], (unsigned)c->r[3],
+            (unsigned)c->r[1], (unsigned)c->r[2], (unsigned)c->r[6],
+            (unsigned)c->r[7], (unsigned)c->r[4]);
+    if (!obj || !memory) return;
+    uint32_t f[11] = {0};
+    for (unsigned i = 0; i < 11; ++i) (void)guest_read32(memory, obj + 4u * i, &f[i]);
+    fprintf(stderr, "[stream] +00=%08x +04=%08x +08=%08x +0c=%08x +10=%08x +14=%08x +18=%08x +1c=%08x +20=%08x +24=%08x +28=%08x\n",
+            (unsigned)f[0], (unsigned)f[1], (unsigned)f[2], (unsigned)f[3],
+            (unsigned)f[4], (unsigned)f[5], (unsigned)f[6], (unsigned)f[7],
+            (unsigned)f[8], (unsigned)f[9], (unsigned)f[10]);
+    if (f[0]) {
+        uint32_t m18 = 0, m1c = 0, m20 = 0, m24 = 0;
+        (void)guest_read32(memory, f[0] + 0x18, &m18);
+        (void)guest_read32(memory, f[0] + 0x1c, &m1c);
+        (void)guest_read32(memory, f[0] + 0x20, &m20);
+        (void)guest_read32(memory, f[0] + 0x24, &m24);
+        fprintf(stderr, "[stream] vtable=%08x +18=%08x +1c=%08x +20=%08x +24=%08x\n",
+                (unsigned)f[0], (unsigned)m18, (unsigned)m1c, (unsigned)m20,
+                (unsigned)m24);
+    }
+}
 #define RT_CALL_RING 12u
 static struct { uint32_t addr, from; } g_call_ring[RT_CALL_RING];
 static unsigned g_call_ring_n;
@@ -560,6 +608,7 @@ void rt_int3(CPU *c,uint32_t addr) {rt_unimpl(c,addr,"int3");}
  * calls keep the verified slice IR before the all-functions container. */
 int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return 0;
+    if (addr == 0x00ac6c10u && getenv("TESV_STREAM_TRACE")) stream_trace(c);
     g_last_call=addr; g_last_cpu=c;
     uint32_t from=0;
     if(memory&&c) (void)guest_read32(memory,c->r[4],&from);

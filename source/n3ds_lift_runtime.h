@@ -36,6 +36,7 @@ void n3ds_trace_u32(const char *tag, uint32_t value);
 uint32_t n3ds_lift_current_ip(void);
 uint32_t n3ds_lift_last_call(void);
 void n3ds_lift_dump_recent_calls(FILE *f);
+void n3ds_lift_dump_stream(FILE *f);
 /* Measurement-only dump for the NiDX9TextureBufferData descriptor slot. */
 void n3ds_cube_desc_probe(uint32_t arg, uint32_t index, uint32_t base, uint32_t slot);
 /* Measurement-only fill for f_CECDC0's uninitialised base local.
