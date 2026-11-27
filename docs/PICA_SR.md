@@ -152,48 +152,77 @@ viewport and the UV region change, so no per-step reallocation happens.
   rejection of bad values, scaled sizes, POT rounding, the POT-fit scale
   picker, the scene/depth/scratch byte plan (including the D16 depth size),
   the UV region and the 2D/2DQ pass plans.  No GPU involved.
-- **ARM**: the changed translation units (`source/n3ds_sr.c`,
-  `source/d3d9_citro3d.c`) compile cleanly with devkitARM in
-  `-Mode graphics` / `-Mode com` (objects archived in the isolated build).
-  The **link** of both modes fails on base `8a8f743` for unrelated OFILES
-  omissions (`bsa_reader.o`, `menu_bsa_runtime.o` for com; `d3d9_pica_vs.o`
-  for graphics); that is not caused by this change.
-- **Azahar**: see `docs/PICA_SR.md` §Evidence below / the archived
-  `build_azahar/<stamp>-*` directories.  The emulator does not emulate PICA SR
-  performance; frame numbers from Azahar are wall-clock of the host, so they
-  are not device measurements.
+- **ARM**: `tools/build.ps1 -Mode com -Isolated srev` on base `2969b62`
+  now **links** `Skyrim_N3DS_graphics_com_srev.3dsx`
+  (1,198,328 bytes, sha256
+  `7f93834f4dd06a34c4f8c3a6ae41524428abaf5670aa4b5b189a495ca4180af5`).
+  The earlier link failure on `8a8f743` is gone.  That `.3dsx` is the binary
+  used for every Azahar run below.
+- **Azahar**: see §Evidence below and
+  `build_azahar/<stamp>-srev-*` (each has `screen.png`, `run.log`,
+  `N3DS_SR.log`, `azahar_log.txt`).  **These are emulator screenshots, not
+  hardware measurements.**  Azahar does not model PICA SR cost, so no frame
+  time or performance claim is made.
 
 ### Evidence
 
-Azahar 2126.2, `-Mode com` demo, `build_azahar/` (each directory has
-`screen.png`, `run.log`, `azahar_log.txt`):
+> **Emulator evidence, not hardware.**  Everything in this section was
+> captured in desktop Azahar (OpenGL renderer, RX 7900 XTX host), never on a
+> 3DS.  It proves that the frame renders and that the configured scale/POT
+> plan is accepted by citro3d; it says nothing about device frame time.
 
-| Run | cfg / env actually parsed | Result |
+Binary: `Skyrim_N3DS_graphics_com_srev.3dsx` built at base `2969b62`
+(sha256 `7f93834f4dd06a34c4f8c3a6ae41524428abaf5670aa4b5b189a495ca4180af5`).
+Each directory in `build_azahar/<stamp>-srev-*` has `screen.png`, `run.log`
+(stdout of the capture script), `N3DS_SR.log` (the app's own decision file)
+and `azahar_log.txt` (emulator log).  A missing `N3DS_SR.log` is expected in
+the `off` run: `sr_init` returns before writing it.
+
+| Run / screenshot | `sdmc:/N3DS_SR.log` (actually parsed) | Observations |
 | --- | --- | --- |
-| `20261127-063004-picasr_off_base` | none (pre-change build) | baseline frame, direct path |
-| `20261127-064127-picasr_off_new` | none | identical to the baseline |
-| `20261127-064425-picasr_bilinear` | `mode=bilinear scale=0.8` | upscaled, framing matches `off` |
-| `20261127-064447-picasr_tev2d` | `mode=tev2d scale=0.8` | 2-pass LITE, framing matches `off` |
-| `20261127-064509-picasr_tev2dq` | `mode=tev2dq scale=0.8` | 4-pass 2DQ chain |
-| `20261127-064550-picasr_tev2dq_064` | `mode=tev2dq scale=0.64` | 4-pass at 64% |
-| `20261127-094000-picasr_05_prev` | `mode=tev2dq scale=0.5` (pre-change 06:53 binary) | 4-pass at 50%; `N3DS_SR.log` last line `SCALE=50%`, screenshot archived.  The strict app-log check failed because that pre-change binary writes no `Skyrim_N3DS.log`; the visual frame is present. |
-| `20261127-064623-picasr_tev2d_drs` | `mode=tev2d drs=1` | DRS frame, no crash |
-| `20261127-064949-picasr_final_tev2dq` | `mode=tev2dq scale=0.8` | blank capture (emulator window not yet painted) - not evidence |
-| `20261127-065022-picasr_final_retry` | `mode=tev2dq scale=0.8` | final build, same frame as above |
+| `20261127-100109-srev-off/screen.png` | none (mode `off`) | Direct path baseline.  Cone silhouette smooth; the known 400-wide viewport on a 240-wide buffer crops/stretches it.  No SR allocation. |
+| `20261127-100356-srev-tev2d-053b/screen.png` | `N3DS_SR=tev2d N3DS_SR_SCALE=53% N3DS_SR_DRS=0` (cfg had only `mode=tev2d`, so this is the **default**) | 127x212 content in a 128x256 POT target, 2-pass LITE.  Frame is present and correctly framed; edges are visibly stair-stepped versus `off`, as expected from 2D LITE upscaling.  No depth speckle, no z-fighting, no missing/black geometry. |
+| `20261127-100423-srev-tev2d-050b/screen.png` | `...SCALE=50%...` (`mode=tev2d`, `scale=0.5`) | 120x200 content in 128x256 POT, same 2 passes.  Strongest stair-stepping of the three SR scales, consistent with the lowest internal resolution.  No z-fighting. |
+| `20261127-100319-srev-tev2d-064/screen.png` | `...SCALE=64%...` (`mode=tev2d`, `scale=0.64`) | 154x256 content in 256x256 POT.  Edges are less stair-stepped than `0.53`/`0.50`; no z-fighting, colour corruption or depth shimmer. |
 
-`sdmc:/N3DS_SR.log` in each SR run contains exactly the parsed line, e.g.
-`N3DS_SR=tev2dq N3DS_SR_SCALE=64% N3DS_SR_DRS=0`, so the screenshot mode is
-not inferred from the filename.
+POT sizes above come from `n3ds_sr_storage_size` and are asserted by the host
+test; the runtime file only records mode/scale/DRS.  The guest's stderr
+(`PICA_SR_ACTIVE ... texture=...` and the `VRAM: ... depth(D16) ...` line) is
+not forwarded into Azahar's log, so it could not be copied.  However,
+`sr_log_file()` is called at the **end** of a successful `sr_init()`, after
+`C3D_RenderTargetCreateFromTex(..., GPU_RB_DEPTH16)` and the pass plan have
+succeeded; a per-run `N3DS_SR.log` therefore proves the D16 scene target and
+the pass chain were created, not merely that the config parsed.
 
-The `0.53` default is covered by the host size/POT tests; no fresh Azahar run
-of the new default exists yet because base `8a8f743` does not link a com
-`.3dsx` (see the ARM note above), and the archived `0.5`/`0.64` screenshots
-come from the pre-change binary.  D16 changes only the SR depth attachment,
-not the visible colour path.
+Run notes and limits:
 
-Azahar is vsync-locked at 59.8-60.0 FPS in every run (including `off`), so
-these runs prove correctness and framing, **not** frame cost.  No device
-timing was taken; the native/0.8/0.64 frame-time comparison remains open.
+- Azahar does not forward host environment variables to the homebrew process:
+  launching it with `N3DS_SR`/`N3DS_SR_SCALE` set in the parent shell produced
+  no `N3DS_SR.log` and an unscaled frame.  Every archived run therefore used
+  `sdmc:/N3DS_SR.cfg`.  The `0.53` row omits `scale`, so the default path is
+  what was exercised.
+- `tools/run_azahar.ps1` reports `FAIL` for all four runs only because this
+  `-Mode com` demo writes no `Skyrim_N3DS.log`/`PASS` marker.  The emulator
+  stayed alive until closed, the window painted, and `N3DS_SR.log` was
+  written; these are screenshots, not a crash report.
+- The demo's rotation angle is `svcGetSystemTick()`-based, so the four
+  screenshots land on different rotation phases.  A pixel-exact diff is not
+  meaningful; the comparison above is about framing, edge quality and the
+  absence of depth artefacts.  `0.53` shows more aliasing than `0.64` (lower
+  internal resolution) but **no z-fighting or depth-order artefacts relative
+  to `0.64` or `off`**.
+- `azahar_log.txt` for each run contains only the known non-renderer errors
+  (`Failed to find title id for ROM` for a `.3dsx`, `ClCertA file missing`,
+  `ConfigureNew3DSCPU` stub).  There are **no** Render/OpenGL/citro3d errors
+  and no fault report.
+
+Azahar is vsync-locked, so these runs prove correctness and framing, **not**
+frame cost.  No device timing was taken; the native/0.53/0.64 frame-time
+comparison remains open.
+
+Historical 0.8/pre-change captures referenced by earlier revisions of this
+document lived in other worktrees and are not present in this one; they are
+superseded by the table above.
 
 ### Known interaction with the existing screen viewport
 
