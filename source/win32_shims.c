@@ -16,6 +16,7 @@
 #include "n3ds_lift_runtime.h"
 #include "bsa_reader.h"
 #include "menu_bsa_runtime.h"
+#include "bink_decode.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3986,49 +3987,212 @@ static void s_RtlUnwind(CPU *c){
 
 /* ---- Bink video / sound middleware -----------------------------------------
  * binkw32.dll is mapped at 0x09000000 and its exports are real x86 bodies, but
- * it is not lifted or predecoded: a call into 0x0900d630 (_BinkSetSoundSystem)
- * was the first post-thread blocker.  Bink video has no 3DS implementation, so
- * the open/sound entry points return a documented NULL instead of executing
- * unlifted code; frame/close operations on a handle that BinkOpen never
- * produced are explicit named refusals.  This is middleware skipping, not a
- * faked render: nothing is decoded, copied or presented. */
-static int bink_logged;
-static void bink_skip(const char *what){
-    if(bink_logged)return;
-    bink_logged=1;
-    fprintf(stderr,"[bink] %s: Bink video/sound is not implemented; returning NULL "
-                   "(middleware skipped, no frame decoded)\n",what);
+ * it is not lifted.  The video path is now real: BinkOpen decodes the .bik with
+ * FFmpeg's binkvideo decoder on the Windows host (bink_decode.c) into a raw
+ * BGRA frame store, and BinkDoFrame/CopyToBufferRect serve those decoded
+ * pixels into guest memory.  Nothing is filled with gray.  On the 3DS the
+ * decoder is unavailable and BinkOpen returns a documented NULL with a named
+ * reason, so the device keeps the old middleware skip.  Sound is still a named
+ * skip: it is not needed for a video frame. */
+#define MAX_BINK 4
+typedef struct {
+    int used;
+    uint32_t guest;      /* guest BINK struct (Width/Height/Frames/FrameNum/fps) */
+    BinkDecoded dec;
+    uint32_t cur;
+    int paused;
+} BinkSlot;
+static BinkSlot bink_slots[MAX_BINK];
+static int bink_sound_logged;
+
+static BinkSlot *bink_for(uint32_t h){
+    int i;
+    if(!h)return NULL;
+    for(i=0;i<MAX_BINK;++i)if(bink_slots[i].used && bink_slots[i].guest==h)return &bink_slots[i];
+    return NULL;
+}
+static void bink_guest_fields(BinkSlot *s){
+    uint32_t *b=guest_ptr(mem,s->guest,24);
+    if(!b)return;
+    b[0]=(uint32_t)s->dec.width;
+    b[1]=(uint32_t)s->dec.height;
+    b[2]=s->dec.frames;
+    b[3]=s->cur;
+    b[4]=s->dec.fps_num;
+    b[5]=s->dec.fps_den;
 }
 static void s_BinkOpen(CPU *c){
-    bink_skip("_BinkOpen@8");
-    RET(0,2);
+    const char *name=guest_cstr(mem,A(0),512);
+    char host[1024];
+    BinkSlot *s=NULL;
+    int i,rc;
+    if(!name){fprintf(stderr,"[bink] _BinkOpen@8: invalid path pointer\n");RET(0,2);}
+    host[0]=0;
+    if(win32_guest_path(name,host,sizeof host)!=WIN32_GUEST_PATH_OK){
+        /* The engine can also pass an absolute path already inside the root. */
+        FILE *t=fopen(name,"rb");
+        if(t){fclose(t);snprintf(host,sizeof host,"%s",name);}
+    }
+    if(!host[0]){
+        fprintf(stderr,"[bink] _BinkOpen@8 '%s': path is outside the game root; returning NULL\n",name);
+        RET(0,2);
+    }
+    for(i=0;i<MAX_BINK;++i)if(!bink_slots[i].used){s=&bink_slots[i];break;}
+    if(!s){fprintf(stderr,"[bink] _BinkOpen@8: no free handle slot\n");RET(0,2);}
+    memset(s,0,sizeof *s);
+    rc=bink_decode_open(host,&s->dec);
+    if(rc!=BINK_DECODE_OK){
+        fprintf(stderr,"[bink] _BinkOpen@8 '%s' host='%s': %s; returning NULL\n",name,host,
+                rc==BINK_DECODE_NO_DECODER?"no Bink decoder on this platform":
+                rc==BINK_DECODE_BAD_FORMAT?"not a Bink 1 (.bik) file":
+                "the real decoder could not decode the file");
+        memset(s,0,sizeof *s);
+        RET(0,2);
+    }
+    s->guest=heap_alloc(&heap,256);
+    if(!s->guest){
+        bink_decode_close(&s->dec);
+        fprintf(stderr,"[bink] _BinkOpen@8: guest BINK struct allocation failed\n");
+        RET(0,2);
+    }
+    memset(guest_ptr(mem,s->guest,256),0,256);
+    s->used=1;s->cur=0;s->paused=0;
+    bink_guest_fields(s);
+    s->dec.fp=NULL;
+    if(!s->dec.fp)s->dec.fp=fopen(s->dec.raw_path,"rb");
+    fprintf(stderr,"[bink] _BinkOpen@8 '%s' host='%s' %dx%d frames=%u fps=%u/%u flags=%08lx\n",
+            name,host,s->dec.width,s->dec.height,s->dec.frames,
+            s->dec.fps_num,s->dec.fps_den,(unsigned long)A(1));
+    RET(s->guest,2);
 }
 static void s_BinkOpenDirectSound(CPU *c){
-    bink_skip("_BinkOpenDirectSound@4");
+    if(!bink_sound_logged){bink_sound_logged=1;
+        fprintf(stderr,"[bink] _BinkOpenDirectSound@4: Bink sound is not implemented; "
+                       "returning NULL (video frames do not need it)\n");}
     RET(0,1);
 }
 static void s_BinkSetSoundSystem(CPU *c){
-    bink_skip("_BinkSetSoundSystem@8");
+    if(!bink_sound_logged){bink_sound_logged=1;
+        fprintf(stderr,"[bink] _BinkSetSoundSystem@8: Bink sound is not implemented; "
+                       "returning NULL (video frames do not need it)\n");}
     RET(0,2); /* no previous sound system */
 }
 static void s_BinkClose(CPU *c){
-    if(A(0))rt_unimpl(c,A(0),"_BinkClose@4: Bink video is not implemented (no Bink handle exists)");
+    BinkSlot *s=bink_for(A(0));
+    if(!A(0))RET(0,1);
+    if(!s)rt_unimpl(c,A(0),"_BinkClose@4: unknown Bink handle");
+    bink_decode_close(&s->dec);
+    heap_free(&heap,s->guest);
+    memset(s,0,sizeof *s);
     RET(0,1);
 }
 static void s_BinkDoFrame(CPU *c){
-    rt_unimpl(c,A(0),"_BinkDoFrame@4: Bink video is not implemented (no Bink handle exists)");
+    BinkSlot *s=bink_for(A(0));
+    if(!s)rt_unimpl(c,A(0),"_BinkDoFrame@4: unknown Bink handle");
+    /* The frame store is already decoded by FFmpeg; DoFrame pins the current
+     * index.  CopyToBufferRect performs the actual rectangle copy. */
+    bink_guest_fields(s);
+    RET(0,1);
 }
 static void s_BinkNextFrame(CPU *c){
-    rt_unimpl(c,A(0),"_BinkNextFrame@4: Bink video is not implemented (no Bink handle exists)");
+    BinkSlot *s=bink_for(A(0));
+    if(!s)rt_unimpl(c,A(0),"_BinkNextFrame@4: unknown Bink handle");
+    if(s->cur+1u<s->dec.frames)++s->cur;
+    bink_guest_fields(s);
+    RET(0,1);
 }
 static void s_BinkWait(CPU *c){
-    rt_unimpl(c,A(0),"_BinkWait@4: Bink video is not implemented (no Bink handle exists)");
+    BinkSlot *s=bink_for(A(0));
+    if(!s)rt_unimpl(c,A(0),"_BinkWait@4: unknown Bink handle");
+    RET(0,1); /* decoded store is ready */
 }
 static void s_BinkPause(CPU *c){
-    rt_unimpl(c,A(0),"_BinkPause@8: Bink video is not implemented (no Bink handle exists)");
+    BinkSlot *s=bink_for(A(0));
+    uint32_t prev;
+    if(!s)rt_unimpl(c,A(0),"_BinkPause@8: unknown Bink handle");
+    prev=(uint32_t)s->paused;
+    s->paused=A(1)!=0;
+    RET(prev,2);
 }
+#if defined(_WIN32) && !defined(__3DS__)
+/* Measurement hook: save the exact guest frame the engine copied.  Enabled by
+ * TESV_BINK_DUMP=<dir>; a few frames are enough to prove real pixels. */
+static void bink_dump_guest(uint32_t addr,uint32_t pitch,uint32_t height,
+                            uint32_t x0,uint32_t y0,uint32_t w,uint32_t h,
+                            uint32_t flags,uint32_t frame){
+    static unsigned dumped;
+    const char *dir=getenv("TESV_BINK_DUMP");
+    char path[1024],ppm[1024],line[512];
+    uint32_t bpp=(flags&7u)<=3u?4u:((flags&7u)<=5u?3u:2u);
+    uint32_t r;
+    FILE *f,*p=NULL;
+    if(!dir||!*dir||dumped>=4u)return;
+    CreateDirectoryA(dir,NULL);
+    snprintf(path,sizeof path,"%s\\bink_guest_%05u.raw",dir,frame);
+    f=fopen(path,"wb");
+    if(!f)return;
+    for(r=0;r<h;++r){
+        void *src=guest_ptr(mem,addr+(y0+r)*pitch+x0*bpp,w*bpp);
+        if(!src||fwrite(src,1,(size_t)w*bpp,f)!=(size_t)w*bpp){fclose(f);return;}
+    }
+    fclose(f);
+    if((flags&7u)<=3u){
+        snprintf(ppm,sizeof ppm,"%s\\bink_guest_%05u.ppm",dir,frame);
+        p=fopen(ppm,"wb");
+    }
+    if(p){
+        fprintf(p,"P6\n%u %u\n255\n",w,h);
+        for(r=0;r<h;++r){
+            uint32_t x;
+            unsigned char *src=guest_ptr(mem,addr+(y0+r)*pitch+x0*4u,w*4u);
+            if(!src)break;
+            for(x=0;x<w;++x){
+                unsigned char *px=src+x*4;
+                unsigned char ob,og,or_;
+                switch(flags&7u){
+                case 0u: ob=px[0]; og=px[1]; or_=px[2]; break;      /* BGRA */
+                case 1u: ob=px[2]; og=px[1]; or_=px[0]; break;      /* RGBA */
+                case 2u: ob=px[1]; og=px[2]; or_=px[3]; break;      /* ABGR */
+                default: ob=px[3]; og=px[2]; or_=px[1]; break;      /* ARGB */
+                }
+                fputc(or_,p);fputc(og,p);fputc(ob,p);
+            }
+        }
+        fclose(p);
+    }
+    snprintf(line,sizeof line,"%s\\bink_guest_info.txt",dir);
+    p=fopen(line,"ab");
+    if(p){
+        fprintf(p,"frame=%u rect=(%u,%u) %ux%u dest=(%u,%u) pitch=%u height=%u flags=%08lx raw=%s\n",
+                frame,x0,y0,w,h,x0,y0,pitch,height,(unsigned long)flags,path);
+        fclose(p);
+    }
+    ++dumped;
+    fprintf(stderr,"[bink] dumped guest frame %u -> %s\n",frame,path);
+}
+#endif
 static void s_BinkCopyToBufferRect(CPU *c){
-    rt_unimpl(c,A(0),"_BinkCopyToBufferRect@44: Bink video is not implemented (no Bink handle exists)");
+    BinkSlot *s=bink_for(A(0));
+    uint32_t dst=A(1),pitch=A(2),dh=A(3),dx=A(4),dy=A(5);
+    uint32_t sx=A(6),sy=A(7),sw=A(8),sh=A(9),flags=A(10);
+    int rc;
+    void *g;
+    if(!s)rt_unimpl(c,A(0),"_BinkCopyToBufferRect@44: unknown Bink handle");
+    g=guest_ptr(mem,dst,(size_t)pitch*dh);
+    if(!g)rt_unimpl(c,dst,"_BinkCopyToBufferRect@44: destination is not mapped guest memory");
+    rc=bink_decode_copy_rect(&s->dec,s->cur,g,pitch,dh,dx,dy,sx,sy,sw,sh,flags);
+    if(rc!=BINK_DECODE_OK){
+        static unsigned logged;
+        if(logged<4u){++logged;
+            fprintf(stderr,"[bink] _BinkCopyToBufferRect@44 failed rc=%d rect=(%u,%u) %ux%u "
+                           "dest=(%u,%u) pitch=%u height=%u flags=%08lx\n",
+                    rc,sx,sy,sw,sh,dx,dy,pitch,dh,(unsigned long)flags);}
+        RET(1,11);
+    }
+#if defined(_WIN32) && !defined(__3DS__)
+    bink_dump_guest(dst,pitch,dh,dx,dy,sw,sh,flags,s->cur);
+#endif
+    RET(0,11);
 }
 
 #define BINK(X) \

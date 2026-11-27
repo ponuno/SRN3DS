@@ -36,7 +36,7 @@ if (-not (Test-Path $clang)) { throw "clang not found" }
 
 $src = @(
     "source/guest.c", "source/guest_heap.c", "source/pe_image.c",
-    "source/pe_imports.c", "source/win32_shims.c", "source/win32_sync.c",
+    "source/pe_imports.c", "source/win32_shims.c", "source/bink_decode.c", "source/win32_sync.c",
     "source/win32_user.c", "source/win32_locale.c", "tools/alloc_win32_shell_fixed.c",
     "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c",
     "source/win32_input.c", "source/n3ds_lift_runtime.c", "source/ir_core.c",

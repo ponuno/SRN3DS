@@ -272,7 +272,7 @@ $liftCommon = @("-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-fwrapv", "-
 if ($env:N3DS_WATCH_STORE_CHECKS -eq '1') { $liftCommon += '-DN3DS_WATCH_STORE_CHECKS' }
 if ($Sanitize) { $liftCommon = $common + @("-Istaged", "-fwrapv", "-fno-strict-aliasing") }
 
-$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", "staged/fpu.c", "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/asset_stream.c", "source/stream_cell.c", "source/rep_movs.c", "source/mem_stats.c")
+$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/bink_decode.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", "staged/fpu.c", "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/asset_stream.c", "source/stream_cell.c", "source/rep_movs.c", "source/mem_stats.c")
 $comSources = $legacySources + @("source/guest_process.c", "source/n3ds_boot.c")
 $d3dSources = @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c")
 $d3dFull = $d3dSources + @("source/d3d9_shader.c", "source/d3d9_tev.c")
@@ -300,6 +300,7 @@ Add-Test "tesv_sm3_probe" $common @("source/guest.c", "source/tesv_sm3_probe.c",
 Add-Test "tesv_cube_probe" $common @("source/guest.c", "source/tesv_cube_probe.c", "tests/tesv_cube_probe_smoke.c") @()
 Add-Test "tesv_cecdc0_probe" $common @("source/guest.c", "source/tesv_cecdc0_probe.c", "tests/tesv_cecdc0_probe_smoke.c") @()
 Add-Test "tesv_cecdc0_source" $common @("source/guest.c", "source/tesv_cecdc0_source.c", "tests/tesv_cecdc0_source_smoke.c") @()
+Add-Test "bink_host" $common @("source/bink_decode.c", "source/guest.c", "tests/bink_host_smoke.c") @()
 Add-Test "tesv_fault_regs" $liftCommon ($legacySources + @("tests/tesv_fault_regs_smoke.c")) @()
 # Deterministic menu-crash repro: real 0x60aa70/0x604750 bytes through the IR
 # container tier, three constructed states (valid, bad `this`, NULL `this`).
