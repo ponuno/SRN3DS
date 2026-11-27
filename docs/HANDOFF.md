@@ -30,7 +30,9 @@ Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
 - **Paths.** The game install lives at `E:\SteamLibrary\steamapps\common\Skyrim`;
   the host runs the decrypted exe `E:\skyr\TESV.exe` (entry `0xb568a1`; the Steam
   exe has a DRM stub at `0x19882ee`). IRC: `E:\census_ir2\ir_container\tesv.irc`.
-  Device builds use `E:\Skyrim_N3DS_build\live_arm_check2\gen`.
+  Device builds use `E:\Skyrim_N3DS_build\live_arm_check2\gen` (32 AOT
+  entries). Full-exe tracing needs the 90,620-entry table at
+  `E:\Skyrim_N3DS_build\gen_full_check`; see "Build a full AOT table".
   **`F:` is the user's 3DS SD card and must never be read or written by tools.**
 - **Menu blocker.** `0xa3cdd0` is *not* a retry loop: `0xac6c10` is a buffered
   stream read (0 = success) and the loop advances through ~2.8 MB of shader
@@ -121,6 +123,101 @@ powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Mode com -Isolated nam
 powershell -ExecutionPolicy Bypass -File tools\build_cia.ps1 `
   -Elf dist\Skyrim_N3DS_tesv_d3dxNN\...elf -Out build_cia\....cia
 ```
+
+### Build a full AOT table (`gen`) from the decrypted EXE
+
+`live_arm_check2/gen` is a 32-entry device table. It cannot trace
+`0xa43f80`/`0xa4b4a0`. The full table is a lift of the whole discovery
+manifest; it is generated output and is gitignored, so it can be lost.
+
+Stable inputs (verified 2026-11-27):
+
+```
+exe:        E:\skyr\TESV.exe        17,462,064 B
+            SHA256 D97EB0CC0CEEF0923D2234D42B382C0D033853356528B271BC043542B1F5E605
+functions:  E:\Skyrim_N3DS_build\analysis\tesv\functions.json
+            18,721,072 B, 90,900 functions
+            SHA256 1FC28CE90D668D635ACE8FD641D95720782E24C0F64EAF08CBAF8BF170D15B6D
+```
+
+The only surviving copy of `functions.json` after the `analysis/` cleanup was
+`E:\Skyrim_N3DS_build\sd_cleanup_20261124_160253\analysis\tesv\functions.json`
+(byte-identical); it is restored at the stable path above. Do not delete it.
+
+`staged/` is gitignored. In a fresh worktree copy it from the main tree first
+(`lift.py`, `peimg.py`, `x86.h`, `rt_table.h`, `lift_prelude.h`, `fpu.c`), or
+the host compile fails with `'x86.h' file not found`.
+
+```powershell
+$py = 'C:\Users\vasya\Documents\Skyrim_N3DS\.venv\Scripts\python.exe'
+$env:HOST_LIFT_JOBS = '8'   # ~79 s for 90,900 functions on this workstation
+
+# 1. lift all discovered functions (do NOT target live_arm_check2)
+& $py staged\lift.py E:\skyr\TESV.exe `
+    E:\Skyrim_N3DS_build\analysis\tesv\functions.json `
+    E:\Skyrim_N3DS_build\gen_full_check tesv 400000
+# expected: round 1 90900 pending / 90620 accepted / 280 rejected
+#           round 2 no change; "lifted 90620 rejected 280"
+
+# 2. instrument (needed by build.ps1 and n3ds_pilot_tick_pc)
+& $py tools\instrument_generated.py E:\Skyrim_N3DS_build\gen_full_check
+
+# 3. KNOWN TOOL BUG: instrument_generated.py also rewrites the lifter's
+#    `L_dispatch:` label to `n3ds_pilot_tick_pc(0xdispatchu);`, which clang
+#    rejects ("invalid suffix 'ispatchu'"). Remove just those lines, or fix the
+#    label regex to accept hex-only labels. (live_arm_check2/gen predates this.)
+Get-ChildItem E:\Skyrim_N3DS_build\gen_full_check -Filter tesv_*.c | ForEach-Object {
+    $t = Get-Content $_.FullName -Raw
+    $t = [regex]::Replace($t, '(?m)^\s*n3ds_pilot_tick_pc\(0xdispatchu\);\r?\n?', '')
+    Set-Content $_.FullName -Value $t -NoNewline
+}
+```
+
+Expected output: 32 files, **375,485,718 B**, `tesv_table.c` with **90,620**
+entries, `funcs_tesv.h` with 90,620 prototypes, including
+`{0xA43F80u, f_A43F80}` and `{0xA4B4A0u, f_A4B4A0}`. Directory hash
+`SHA256 bf97c76d09063bd0678d12f6253eb820669b7a555d716f0ea312a7c9121d6fec`
+(aggregate over `name<space>file-sha256` sorted by name, as `build.ps1`).
+`tesv_table.c` itself is
+`6D8B1CE54C6C1A2DC444203FBD2A10EF3CBFC71692C73EA1FE757E2DE1324715`.
+
+Sanity check and host compile (cold cache, ~77 s; `.text` is 372,690,070 B
+from `llvm-size`):
+
+```powershell
+Select-String E:\Skyrim_N3DS_build\gen_full_check\tesv_table.c -Pattern 'A43F80|A4B4A0'
+$env:HOST_CLANG_JOBS = '8'
+powershell -ExecutionPolicy Bypass -File tools\run_host_tests.ps1 `
+  -TesvIrc E:\census_ir2\ir_container\tesv.irc `
+  -TesvSliceGen E:\Skyrim_N3DS_build\gen_full_check `
+  -TesvExe E:\skyr\TESV.exe -AllowDiagnosticFault `
+  -OutDir E:\Skyrim_N3DS_build\host_gen_full -TestTimeoutSec 300 `
+  -Only tesv_slice -SkipPython
+# result 2026-11-27: COMPILE/LINK OK, then "HOST DIAG: guest called
+# ExitProcess(0) ... 'Not enough memory to run application.'" at the default
+# 200k steps (no TESV_MEMPROBE). Diagnostic, not PASS.
+```
+
+For a real trace run, run the built exe with the memory probe and more steps:
+
+```powershell
+cd E:\Skyrim_N3DS_build\host_gen_full\run_tesv_slice_<pid>
+$env:N3DS_IRC_PATH = 'E:\census_ir2\ir_container\tesv.irc'
+$env:TESV_MEMPROBE = '1'
+$env:TESV_A43F_TRACE = '1'   # optional
+.\tesv_slice.exe E:\skyr\TESV.exe . 200000000 167772160
+```
+
+Result 2026-11-27: `CreateTexture` path runs (48 `VirtualAlloc` calls, 721 MiB
+requested) but the first fault is
+`[guest] unmapped addr=00000008 ... last_call=00ac6400 irc_fn=00000000`;
+`0xa43f80` is never entered and there is no `BeginScene`/`Present`. This is the
+same `0xac6400`/addr-8 blocker recorded in PORT_LOG row 256 for `gen_trace`;
+the full table does make `0xa4b4a0` AOT (`irc_fn=0`), so the next step is to
+compare the `0xa4b4a0` block ranges with the IRC (the packer adds pre-entry
+leaders that discovery may not list) rather than to rebuild the table.
+
+Never write the table to `live_arm_check2/gen` and never put it on `F:`.
 
 ### Fast iteration (measured 2026-11-26)
 
