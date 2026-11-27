@@ -13,8 +13,9 @@
 .PARAMETER Opt
   Optimisation flag passed to make (default -O2).
 .PARAMETER MemProfile
-  Heap profile: 96x8 (default), 104x16 or 120x24 (newlib MiB x linear MiB).
-  Selects TESV_HEAP_MIB / TESV_LINEAR_MIB for the TESV slice.
+  Heap profile: 96x8 (default), 104x16, 120x24, 128x16, 132x12 or 136x8
+  (newlib MiB x linear MiB).  Selects TESV_HEAP_MIB / TESV_LINEAR_MIB for the
+  TESV slice; every profile keeps heap + linear + 34 MiB <= 178 MiB.
 #>
 param(
     [ValidateSet("default", "graphics", "com", "menu", "boot", "lift", "pilot", "tesv", "audio", "va")]
@@ -22,7 +23,7 @@ param(
     [string]$PilotGen = "",
     [string]$TesvGen = "",
     [string]$Opt = "-O2",
-    [ValidateSet("", "96x8", "104x16", "120x24")]
+    [ValidateSet("", "96x8", "104x16", "120x24", "128x16", "132x12", "136x8")]
     [string]$MemProfile = "",
     [string]$Isolated = "",
     [switch]$NoClean,
@@ -60,6 +61,12 @@ $memProfiles = @{
     "96x8"   = @{ Heap = 96;  Linear = 8 }
     "104x16" = @{ Heap = 104; Linear = 16 }
     "120x24" = @{ Heap = 120; Linear = 24 }
+    # 178 MiB CIA budget: heap + linear + 34 MiB non-heap == 178.
+    # The guest peak measured on the host is 129.4 MiB, so only 136x8 leaves
+    # guest headroom (132 MiB) at the cost of a tight 8 MiB linear heap.
+    "128x16" = @{ Heap = 128; Linear = 16 }
+    "132x12" = @{ Heap = 132; Linear = 12 }
+    "136x8"  = @{ Heap = 136; Linear = 8 }
 }
 if ($MemProfile) {
     if (-not $memProfiles.ContainsKey($MemProfile)) {

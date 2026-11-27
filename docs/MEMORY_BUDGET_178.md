@@ -249,9 +249,12 @@ maps the only accepted values to them and the Makefile appends them through
 | `96x8` (default) | 96 MiB | 8 MiB | 92 MiB | 138 MiB |
 | `104x16` | 104 MiB | 16 MiB | 100 MiB | 154 MiB |
 | `120x24` | 120 MiB | 24 MiB | 116 MiB | 178 MiB |
+| `128x16` | 128 MiB | 16 MiB | 124 MiB | 178 MiB |
+| `132x12` | 132 MiB | 12 MiB | 128 MiB | 178 MiB |
+| `136x8` | 136 MiB | 8 MiB | 132 MiB | 178 MiB |
 
 Anything else is refused by name:
-`throw "Unknown -MemProfile '<x>'; expected 96x8, 104x16 or 120x24"`. The
+`throw "Unknown -MemProfile '<x>'; expected 96x8, 104x16, 120x24, 128x16, 132x12 or 136x8"`. The
 guest budget is `mem_stats_guest_budget()`, checked against
 `heap − reserve` at startup and logged as
 `[mem] profile 120x24 MiB (newlib/linear): ...`.
