@@ -863,20 +863,24 @@ class TevScheduler:
 
     def _emit_carry(self, vec: tuple):
         self._room(False)
-        src = self._source(vec, (0, 1, 2, 3))
-        op = src.rgb_op()
+        rgb = self._source(vec, (0, 1, 2, 0))
+        alpha = self._source(vec, (3, 3, 3, 3))
         stage = {
             "func_rgb": F_REPLACE, "func_a": F_REPLACE,
-            "src_rgb": [src.src, SRC_PREV, SRC_PREV],
-            "src_a": [src.src, SRC_PREV, SRC_PREV],
-            "op_rgb": [op, RGB_COLOR, RGB_COLOR],
-            "op_a": [src.alpha_op(), A_ALPHA, A_ALPHA],
+            "src_rgb": [rgb.src, SRC_PREV, SRC_PREV],
+            "src_a": [alpha.src, SRC_PREV, SRC_PREV],
+            "op_rgb": [rgb.rgb_op(), RGB_COLOR, RGB_COLOR],
+            "op_a": [alpha.alpha_op(), A_ALPHA, A_ALPHA],
             "scale_rgb": 0, "scale_a": 0,
-            "const_reg": src.const_reg, "const_is_literal": 0,
+            "const_reg": rgb.const_reg if rgb.src == SRC_CONST else alpha.const_reg,
+            "const_is_literal": 0,
             "const_rgba8": 0, "instruction": "carry",
         }
-        if src.src == SRC_CONST:
-            self.constants.add(src.const_reg)
+        for src in (rgb, alpha):
+            if src.src == SRC_CONST:
+                self.constants.add(src.const_reg)
+            if src.sampler is not None:
+                self.pass_reads_append(src.sampler)
         self.stages.append(stage)
         self.prev = vec
 
@@ -1025,11 +1029,11 @@ class TevScheduler:
         if a_info[0] == "op":
             _, args = self._stage_sources(a_info, True)
             a_src = [self._source(a, (3, 3, 3, 3)) for a in args]
-        stage = self._make_stage(rgb_info, a_info, rgb_src, a_src)
+        stage = self._make_stage(vec, rgb_info, a_info, rgb_src, a_src)
         self.stages.append(stage)
         self.prev = vec
 
-    def _make_stage(self, rgb_info, a_info, rgb_src, a_src):
+    def _make_stage(self, vec, rgb_info, a_info, rgb_src, a_src):
         stage = {
             "func_rgb": F_REPLACE, "func_a": F_REPLACE,
             "src_rgb": [SRC_PREV, SRC_PREV, SRC_PREV],
@@ -1039,6 +1043,24 @@ class TevScheduler:
             "scale_rgb": 0, "scale_a": 0,
             "const_reg": 255, "const_is_literal": 0, "const_rgba8": 0,
         }
+        # If one side is a leaf and the other is computed, the stage must
+        # replace that side from its own source instead of carrying PREV.
+        if rgb_info[0] == "leaf" and not all(is_undef(e) for e in vec[:3]):
+            leaf = self._source(vec, (0, 1, 2, 0))
+            stage["src_rgb"][0] = leaf.src
+            stage["op_rgb"][0] = leaf.rgb_op()
+            if leaf.src == SRC_CONST:
+                if stage["const_reg"] not in (255, leaf.const_reg):
+                    raise PlanImpossible("two_constants_in_stage")
+                stage["const_reg"] = leaf.const_reg
+        if a_info[0] == "leaf" and not is_undef(vec[3]):
+            leaf = self._source(vec, (3, 3, 3, 3))
+            stage["src_a"][0] = leaf.src
+            stage["op_a"][0] = leaf.alpha_op()
+            if leaf.src == SRC_CONST:
+                if stage["const_reg"] not in (255, leaf.const_reg):
+                    raise PlanImpossible("two_constants_in_stage")
+                stage["const_reg"] = leaf.const_reg
         const_reg = 255
         for info, srcs, alpha in ((rgb_info, rgb_src, False),
                                   (a_info, a_src, True)):
@@ -1087,6 +1109,10 @@ class TevScheduler:
             if a_info[0] == "op" and a_info[1] == "dot3" and vec_equal(
                     rgb_info[2][0], a_info[2][0]):
                 pass
+        if const_reg == 255:
+            const_reg = stage["const_reg"]
+        elif stage["const_reg"] not in (255, const_reg):
+            raise PlanImpossible("two_constants_in_stage")
         stage["const_reg"] = const_reg
         if const_reg != 255:
             self.constants.add(const_reg)
