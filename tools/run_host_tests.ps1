@@ -468,8 +468,8 @@ if ($tevChunks -and (Test-Path $tevChunks)) {
 }
 Add-Test "sync" $liftCommon @("source/guest.c", "source/win32_sync.c", "tests/win32_sync_smoke.c") @()
 Add-Test "thread" $liftCommon ($legacySources + @("tests/win32_thread_smoke.c")) @()
-Add-Test "thread_coop" $liftCommon ($legacySources + @("tests/thread_coop.c")) @()
-Add-Test "thread_coop_asm" ($liftCommon + @("-DWIN32_HOSTCTX_BACKEND=3")) ($legacySources + @("tests/thread_coop.c")) @()
+Add-Test "thread_coop" $liftCommon ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "tests/thread_coop.c")) @()
+Add-Test "thread_coop_asm" ($liftCommon + @("-DWIN32_HOSTCTX_BACKEND=3")) ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "tests/thread_coop.c")) @()
 Add-Test "input" $liftCommon ($legacySources + @("tests/win32_input_smoke.c")) @()
 Add-Test "user" $liftCommon @("source/guest.c", "source/win32_user.c", "tests/win32_user_smoke.c") @()
 Add-Test "locale" $liftCommon @("source/guest.c", "source/win32_locale.c", "tests/win32_locale_smoke.c") @()

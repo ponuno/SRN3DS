@@ -16,6 +16,7 @@
 #include "win32_sync.h"
 #include "n3ds_lift_runtime.h"
 #include "ir_core.h"
+#include "pilot_guard.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,7 @@
 #define CODE   0x00510000u
 #define ENTRY_DEADLOCK 0x00520000u
 #define ENTRY_IR       0x00530000u
+#define ENTRY_AOT      0x00500090u   /* native C body: lifted-AOT shape */
 #define CODE2          0x00510100u   /* pure-compute loop, no imports */
 static int failures;
 static int checks;
@@ -162,6 +164,7 @@ static void body_main_deadlock(CPU *c) {
 }
 
 /* the table must not shadow the IR body at ENTRY_IR */
+static void body_aot_spin(CPU *c);
 static const FnEntry table[] = {
     {0x00500000u, body_worker},
     {0x00500010u, body_launcher},
@@ -172,6 +175,7 @@ static const FnEntry table[] = {
     {0x00500060u, body_fault},
     {0x00500070u, body_wait_forever},
     {0x00500080u, body_cs},
+    {ENTRY_AOT, body_aot_spin},
     {ENTRY_DEADLOCK, body_main_deadlock},
 };
 
@@ -535,6 +539,52 @@ static void test_ir_compute_loop_yields(void) {
  * and not entered.  Before this the shim faulted (the one-shot model assumed no
  * other thread could ever hold a section), which killed TESV's loader while it
  * waited on a lock held by a thread the executor had just preempted. */
+/* ---------------------------------------------------------------- 9b */
+/* AOT tier: lifted bodies are native C, so the executor's between-IR-block
+ * tick never runs inside them.  A long lifted loop used to own the CPU for its
+ * whole duration (the menu-worker starvation): 165 s with the main thread
+ * READY and no scheduler event.  n3ds_pilot_tick_pc() runs after every lifted
+ * block label; the regression below is that exact shape - a native body that
+ * loops calling the per-block tick - and requires the creator to regain the
+ * CPU in well under 100 ms instead of after the whole loop. */
+static void body_aot_spin(CPU *c) {
+    uint32_t st = param_of(c);
+    uint32_t budget = M32(st + 4);
+    M32(st + 0) = 0;
+    M32(st + 8) = 0;
+    M32(st + 12) = (uint32_t)win32_thread_now_ms();
+    for (uint32_t i = 0; i < budget; ++i) {
+        M32(st + 0) += 1;
+        n3ds_pilot_tick_pc(0x00500090u);
+    }
+    M32(st + 8) = 1;
+    ret4(c, 0);
+}
+static void test_aot_loop_yields(void) {
+    reset_state();
+    n3ds_pilot_set_steps(0); /* unlimited: this test drives the tick directly */
+    uint32_t rec = DATA + 0x1c0;
+    const uint32_t budget = 3000000u;
+    M32(rec + 0) = 0;
+    M32(rec + 4) = budget;
+    M32(rec + 8) = 0;
+    M32(rec + 12) = 0;
+    uint64_t t0 = win32_thread_now_ms();
+    uint32_t t = spawn(ENTRY_AOT, rec, 0);
+    uint64_t t1 = win32_thread_now_ms();
+    CHECK(M32(rec + 0) > 0, "AOT loop started before the spawner resumed");
+    CHECK(M32(rec + 0) < budget, "AOT loop yielded mid-loop (creator regained the CPU)");
+    CHECK(t1 - t0 < 100, "AOT back-edge poll released the CPU within 100 ms");
+    printf("INFO AOT loop yielded after %u/%u blocks in %llu ms\n",
+           M32(rec + 0), budget, (unsigned long long)(t1 - t0));
+    CHECK(wait1(t, 0xffffffffu) == 0, "AOT loop thread completes");
+    CHECK(M32(rec + 0) == budget, "AOT loop ran every iteration exactly once");
+    CHECK(M32(rec + 8) == 1, "AOT loop reached its tail after the yields");
+    CHECK(exit_code(t) == 0, "AOT loop thread exit code 0");
+    printf("PASS AOT back-edge yield keeps other threads runnable\n");
+    close_h(t);
+}
+
 static void test_critical_section_waits(void) {
     reset_state();
     uint32_t rec = DATA + 0x220;
@@ -642,6 +692,7 @@ int main(void) {
     test_timeout_paths();
     test_ir_flags_and_continuation();
     test_ir_compute_loop_yields();
+    test_aot_loop_yields();
     test_critical_section_waits();
     report_memory();
 

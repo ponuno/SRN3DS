@@ -79,6 +79,60 @@ static uint8_t teb_template[TEB_BYTES];
 static uint32_t tls_base, tls_size;
 static int teb_ready;
 
+/* ---- scheduler counters (N3DS_SCHED_TRACE / hang dump) ------------------ */
+/* These answer the starvation question directly: how often the executor's
+ * yield hook fired, how often it actually switched, and whether a READY main
+ * lost pick_ready.  Without them a hang dump can only show the final state. */
+static unsigned long long g_yield_enter;      /* win32_thread_yield entries */
+static unsigned long long g_yield_switch;     /* ... that switched away */
+static unsigned long long g_pick_calls;       /* pick_ready invocations */
+static unsigned long long g_pick_main_skipped;/* main READY, another chosen */
+static unsigned long long g_ready_orphans;    /* ST_READY with in_ready==0 */
+static unsigned long long g_switch_count;
+static unsigned g_trace_on = 2;               /* 2 = unread */
+static volatile uint64_t g_activity_ms;        /* last scheduler event (ms) */
+static int sched_trace_on(void) {
+    if (g_trace_on == 2) {
+        const char *v = getenv("N3DS_SCHED_TRACE");
+        g_trace_on = (v && *v && strcmp(v, "0")) ? 1 : 0;
+    }
+    return (int)g_trace_on;
+}
+static void dump_ready_queue(FILE *f) {
+    fprintf(f, "[hang] ready queue:");
+    unsigned n = 0;
+    if (scheduler_up && main_thread.state == ST_READY) {
+        fprintf(f, " main(seq=%llu,in=%d,susp=%u)",
+                (unsigned long long)main_thread.ready_seq, main_thread.in_ready,
+                main_thread.suspends);
+        ++n;
+    }
+    for (unsigned i = 0; i < MAX_THREADS; ++i) {
+        W32Thread *t = &threads[i];
+        if (t->state != ST_READY) continue;
+        fprintf(f, " %lu(seq=%llu,in=%d,susp=%u)", (unsigned long)t->id,
+                (unsigned long long)t->ready_seq, t->in_ready, t->suspends);
+        ++n;
+    }
+    fprintf(f, " count=%u g_seq=%llu\n", n, (unsigned long long)g_seq);
+}
+static void dump_sched(FILE *f) {
+    uint64_t now_ms = win32_thread_now_ms();
+    int64_t gap = (int64_t)(now_ms - g_activity_ms);
+    if (gap < 0) gap = 0;
+    fprintf(f, "[hang] sched: hook=%d yields=%llu switched=%llu picks=%llu "
+               "main_skipped=%llu ready_orphans=%llu switches=%llu gap_ms=%llu "
+               "ir_blocks=%llu ir_yields=%llu poll_yields=%llu last_block=%08x "
+               "block_age_ms=%u longest_block_ms=%u\n",
+            n3ds_ir_yield_hook ? 1 : 0, g_yield_enter, g_yield_switch,
+            g_pick_calls, g_pick_main_skipped, g_ready_orphans, g_switch_count,
+            (unsigned long long)gap,
+            n3ds_ir_blocks_run, n3ds_ir_yield_calls, n3ds_ir_poll_yields,
+            (unsigned)n3ds_ir_current_block_ip(), n3ds_ir_block_age_ms(),
+            n3ds_ir_longest_block_ms);
+    dump_ready_queue(f);
+}
+
 static uint32_t tid_of(unsigned slot) { return THREAD_ID_BASE + slot; }
 static int slot_of(uint32_t handle, unsigned *slot) {
     if (handle < WIN32_THREAD_HANDLE_BASE) return 0;
@@ -142,7 +196,7 @@ static void host_sleep_ms(uint32_t ms) {
 /* Progress is a scheduler event, not a guest instruction: a cooperative spin
  * inside one lifted function keeps executing code but never yields, sleeps or
  * calls a shim, so wall-clock since the last switch is the honest signal. */
-static volatile uint64_t g_activity_ms;
+/* last scheduler event (ms); defined with the counters above */
 static volatile int g_watchdog_running;
 static volatile int g_watchdog_armed;
 static unsigned g_watchdog_ms;
@@ -205,6 +259,8 @@ static void hang_dump(unsigned elapsed) {
     fprintf(stderr, "[hang] current=%lu last_call=%08x ir_ip=%08x live_threads=%u\n",
             (unsigned long)(cur ? cur->id : 0), (unsigned)n3ds_lift_last_call(),
             (unsigned)n3ds_lift_current_ip(), win32_thread_live_count());
+    dump_sched(stderr);
+    n3ds_lift_dump_tiers(stderr);
     if (scheduler_up) dump_thread("main", &main_thread);
     for (unsigned i = 0; i < MAX_THREADS; ++i)
         if (threads[i].state != ST_FREE) dump_thread("thread", &threads[i]);
@@ -219,9 +275,28 @@ static void hang_dump(unsigned elapsed) {
 static DWORD WINAPI watchdog_proc(LPVOID unused) {
     (void)unused;
     uint64_t start = win32_thread_now_ms();
+    uint64_t last_trace = start;
     for (;;) {
         Sleep(50);
         uint64_t now = win32_thread_now_ms();
+        int64_t gap = (int64_t)(now - g_activity_ms);
+        if (gap < 0) gap = 0;
+        if (sched_trace_on() && now - last_trace >= 1000) {
+            last_trace = now;
+            fprintf(stderr, "[sched] t=%llums cur=%lu activity_age=%llums "
+                            "blocks=%llu ir_yields=%llu poll_yields=%llu "
+                            "hook_yields=%llu switches=%llu via_yield=%llu "
+                            "picks=%llu main_skip=%llu block=%08x age_ms=%u "
+                            "longest=%u\n",
+                    (unsigned long long)(now - start),
+                    (unsigned long)(cur ? cur->id : 0),
+                    (unsigned long long)(gap > 0 ? (uint64_t)gap : 0),
+                    n3ds_ir_blocks_run, n3ds_ir_yield_calls, n3ds_ir_poll_yields,
+                    g_yield_enter, g_switch_count, g_yield_switch, g_pick_calls,
+                    g_pick_main_skipped, (unsigned)n3ds_ir_current_block_ip(),
+                    n3ds_ir_block_age_ms(), n3ds_ir_longest_block_ms);
+            fflush(stderr);
+        }
         if (g_dump_after_ms && now - start > g_dump_after_ms) {
             hang_dump((unsigned)(now - start));
             fprintf(stderr, "[hang] timed dump aborting the run (diagnostic only)\n");
@@ -229,8 +304,13 @@ static DWORD WINAPI watchdog_proc(LPVOID unused) {
             ExitProcess(70);
         }
         uint64_t last = g_activity_ms;
-        if (g_watchdog_armed && now - last > g_watchdog_ms) {
-            hang_dump((unsigned)(now - last));
+        /* A guest thread can stamp activity() at a later millisecond than the
+         * `now` sampled above (the clock advances between the two reads), which
+         * makes `now - last` an enormous unsigned value and fires a bogus
+         * "hang". Compare signed and never report a negative gap. */
+        int64_t hang_gap = (int64_t)(now - last);
+        if (g_watchdog_armed && hang_gap > (int64_t)g_watchdog_ms) {
+            hang_dump((unsigned)hang_gap);
             fprintf(stderr, "[hang] watchdog aborting the run (diagnostic only)\n");
             fflush(stderr);
             ExitProcess(70);
@@ -286,13 +366,16 @@ static void enqueue(W32Thread *t) {
 static W32Thread *pick_ready(void) {
     W32Thread *cand[1 + MAX_THREADS];
     unsigned n = 0;
+    ++g_pick_calls;
     for (unsigned i = 0; i < MAX_THREADS; ++i) {
         W32Thread *t = &threads[i];
+        if (t->state == ST_READY && !t->in_ready) ++g_ready_orphans;
         if (t->state != ST_READY || t->suspends) continue;
         if (!t->ready_seq) t->ready_seq = ++g_seq; /* never let 0 win */
         cand[n++] = t;
     }
     if (scheduler_up && main_thread.state == ST_READY && main_thread.suspends == 0) {
+        if (!main_thread.in_ready) ++g_ready_orphans;
         if (!main_thread.ready_seq) main_thread.ready_seq = ++g_seq;
         cand[n++] = &main_thread;
     }
@@ -303,6 +386,8 @@ static W32Thread *pick_ready(void) {
             (t->ready_seq == best->ready_seq && t == &main_thread))
             best = t;
     }
+    if (scheduler_up && main_thread.state == ST_READY && best && best != &main_thread)
+        ++g_pick_main_skipped;
     return best;
 }
 static void reap_now(void) {
@@ -322,6 +407,7 @@ static void switch_to(W32Thread *n) {
     W32Thread *prev = cur;
     if (!n || !prev) abort();
     activity();
+    ++g_switch_count;
     SCHED_TR("[sched] %u(%d,%llu) -> %u(%d,%llu)\n", prev->id, prev->state,
              (unsigned long long)prev->ready_seq, n->id, n->state,
              (unsigned long long)n->ready_seq);
@@ -486,11 +572,13 @@ void win32_thread_wake(uint32_t handle) {
 void win32_thread_yield(void) {
     if (!scheduler_up) return;
     activity();
+    ++g_yield_enter;
     W32Thread *self = cur;
     if (!self) return;
     enqueue(self);
     W32Thread *n = pick_ready();
     if (!n || n == self) { self->state = ST_RUNNING; self->in_ready = 0; return; }
+    ++g_yield_switch;
     switch_to(n);
 }
 

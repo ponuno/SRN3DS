@@ -50,6 +50,8 @@ void n3ds_trace_u32(const char *tag, uint32_t value);
  * ring plus the guest stack scan is the available location evidence. */
 uint32_t n3ds_lift_current_ip(void);
 uint32_t n3ds_lift_last_call(void);
+/* Dispatch counts per tier (AOT / slice IR / container), hang-dump evidence. */
+void n3ds_lift_dump_tiers(FILE *f);
 void n3ds_lift_dump_recent_calls(FILE *f);
 void n3ds_lift_dump_stream(FILE *f);
 /* Diagnostic only: TESV_A43F_TRACE=1 counts entries to the buffered-window

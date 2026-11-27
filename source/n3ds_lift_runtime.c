@@ -53,6 +53,17 @@ static char fault[256];
 /* Diagnostic only: last guest function the dispatcher entered. */
 static uint32_t g_last_call;
 static CPU *g_last_cpu;
+/* Which tier serves the hot path: AOT, slice IR, or the indexed container.
+ * A dispatch counter per tier makes "the hot loop is native AOT code, so the IR
+ * block yield never runs" visible in a hang dump. */
+unsigned long long n3ds_lift_tier_aot;
+unsigned long long n3ds_lift_tier_slice;
+unsigned long long n3ds_lift_tier_container;
+void n3ds_lift_dump_tiers(FILE *f) {
+    if (!f) return;
+    fprintf(f, "[hang] dispatch tiers: aot=%llu slice_ir=%llu container=%llu\n",
+            n3ds_lift_tier_aot, n3ds_lift_tier_slice, n3ds_lift_tier_container);
+}
 /* Diagnostic only (TESV_HANG_WATCHDOG_MS): current IR block address and a
  * short ring of the most recent guest entries. AOT keeps its registers in
  * locals, so the entry ring is the only cheap PC evidence for a lifted spin. */
@@ -398,8 +409,7 @@ void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
 
 void n3ds_lift_set_ir_ip(uint32_t ip){g_ir_ip=ip;}
 uint32_t n3ds_lift_current_ip(void){return g_ir_ip;}
-uint32_t n3ds_lift_last_call(void){return g_last_call;}
-void n3ds_lift_dump_recent_calls(FILE *f){
+uint32_t n3ds_lift_last_call(void){return g_last_call;}void n3ds_lift_dump_recent_calls(FILE *f){
     if(!f)return;
     unsigned n=g_call_ring_n<RT_CALL_RING?g_call_ring_n:RT_CALL_RING;
     fprintf(f,"[hang] recent guest entries (oldest first):");
@@ -1025,6 +1035,7 @@ int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     }
     const FnEntry *e=lookup(addr);
     if(e){
+        ++n3ds_lift_tier_aot;
         if(a43f_on()&&addr==0x00a43f80u){
             n3ds_a43f_trace_aot_pre(c);
             e->fn(c);
@@ -1034,10 +1045,10 @@ int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     }
     int slice = n3ds_ir_has(addr) != 0;
     if (slice && container_has_preentry(addr)) {
-        if (!container_dispatch(c, addr)) return 0;
+        if (!container_dispatch(c, addr)) { ++n3ds_lift_tier_container; return 0; }
     }
-    if (slice) { n3ds_ir_call(c,addr); return 0; }
-    if(!container_dispatch(c,addr))return 0;
+    if (slice) { ++n3ds_lift_tier_slice; n3ds_ir_call(c,addr); return 0; }
+    if(!container_dispatch(c,addr)){ ++n3ds_lift_tier_container; return 0; }
     return -1;
 }
 void rt_call(CPU *c,uint32_t addr) {

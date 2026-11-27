@@ -178,6 +178,13 @@ static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
 
 /* ---------------------------------------------------------------- string */
 
+/* One x86 `rep` is a single IR block: an unbounded count would run to
+ * completion inside exec_block(), where the executor's between-block tick can
+ * never fire (the 165 s starvation was one such block).  A string op therefore
+ * polls the same cooperative hook every NDS_IR_REP_CHUNK elements; the count
+ * and index state are loop-local, so chunking preserves exact x86 semantics. */
+#define NDS_IR_REP_CHUNK 65536u
+
 static void do_string(CPU *c, Flags *f, uint32_t w) {
     unsigned kind = IR_DST(w), size = IR_SIZE(w), rep = IR_AUX(w);
     unsigned bytes = size == IR_SIZE_8 ? 1u : size == IR_SIZE_16 ? 2u : 4u;
@@ -212,15 +219,35 @@ static void do_string(CPU *c, Flags *f, uint32_t w) {
         BODY();
     } else if ((kind == 0 || kind == 1) && rep == 1) {
         if (kind == 0 && size == IR_SIZE_32 && !c->df) {
-            rep_movsd(ecx, edi, esi);
-            edi += ecx * 4; esi += ecx * 4; ecx = 0;
+            /* Forward dword copy in bounded chunks: the fast path must not turn
+             * a multi-gigabyte count into one unschedulable block either. */
+            while (ecx) {
+                uint32_t n_ = ecx > NDS_IR_REP_CHUNK ? NDS_IR_REP_CHUNK : ecx;
+                rep_movsd(n_, edi, esi);
+                edi += n_ * 4; esi += n_ * 4; ecx -= n_;
+                n3ds_ir_yield_poll();
+            }
         } else {
-            while (ecx) { BODY(); ecx--; }
+            while (ecx) {
+                uint32_t n_ = ecx > NDS_IR_REP_CHUNK ? NDS_IR_REP_CHUNK : ecx;
+                while (n_) { BODY(); ecx--; n_--; }
+                n3ds_ir_yield_poll();
+            }
         }
     } else if (rep == 1) {          /* repe / repz / rep on lods/cmps/scas */
-        while (ecx) { BODY(); ecx--; if (!f->zf) break; }
+        while (ecx) {
+            uint32_t n_ = ecx > NDS_IR_REP_CHUNK ? NDS_IR_REP_CHUNK : ecx;
+            while (n_) { BODY(); ecx--; n_--; if (!f->zf) break; }
+            if (!ecx || !f->zf) break;
+            n3ds_ir_yield_poll();
+        }
     } else {                        /* repne / repnz */
-        while (ecx) { BODY(); ecx--; if (f->zf) break; }
+        while (ecx) {
+            uint32_t n_ = ecx > NDS_IR_REP_CHUNK ? NDS_IR_REP_CHUNK : ecx;
+            while (n_) { BODY(); ecx--; n_--; if (f->zf) break; }
+            if (!ecx || f->zf) break;
+            n3ds_ir_yield_poll();
+        }
     }
 #undef BODY
     c->r[1] = ecx; c->r[6] = esi; c->r[7] = edi;
@@ -1470,14 +1497,18 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
         HP_ADD(HP_FETCH, hp_fetch);
         uint32_t next = 0;
         if (trace) n3ds_a43f_trace_pre(c, b.start, addr, 0);
+        ++n3ds_ir_blocks_run;
+        n3ds_ir_block_begin(ip);
         HP_START(hp_exec);
         int done = exec_block(c, &b, &f, addr, func_end, &next);
+        n3ds_ir_block_end();
         HP_ADD(HP_EXEC, hp_exec);
         if (done) { n3ds_ir_cur_func_end = prev_end; return; }
         if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 0);
         ip = next;
         if (n3ds_ir_yield_hook && ++slice_yield_count >= N3DS_IR_YIELD_INTERVAL) {
             slice_yield_count = 0;
+            ++n3ds_ir_yield_calls;
             n3ds_ir_yield_hook();
         }
     }

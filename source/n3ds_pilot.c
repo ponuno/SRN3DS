@@ -3,6 +3,7 @@
 #include "guest.h"
 #include "win32_thread.h"
 #include "pilot_guard.h"
+#include "ir_core.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -18,7 +19,7 @@ static int steps_unlimited;
 static uint32_t budget_pc[16][64];
 static unsigned budget_pc_count[16];
 void n3ds_pilot_tick(void){if(!steps_unlimited){if(!steps){unsigned t=win32_thread_current_id();unsigned slot=t<16?t:15;fprintf(stderr,"[budget] thread=%u blocks=",t);unsigned n=budget_pc_count[slot];unsigned start=n>64?n-64:0;for(unsigned i=start;i<n;++i)fprintf(stderr," %08x",budget_pc[slot][i&63]);fputc('\n',stderr);rt_unimpl(NULL,0,"pilot basic-block budget exceeded");}--steps;}}
-void n3ds_pilot_tick_pc(uint32_t pc){unsigned t=win32_thread_current_id();unsigned slot=t<16?t:15;budget_pc[slot][budget_pc_count[slot]++&63]=pc;guest_watch_set_pc(pc,t);n3ds_pilot_tick();}
+void n3ds_pilot_tick_pc(uint32_t pc){unsigned t=win32_thread_current_id();unsigned slot=t<16?t:15;budget_pc[slot][budget_pc_count[slot]++&63]=pc;guest_watch_set_pc(pc,t);n3ds_ir_yield_poll();n3ds_pilot_tick();}
 void n3ds_pilot_set_steps(uint64_t n){steps=n;steps_unlimited=(n==0);memset(budget_pc,0,sizeof budget_pc);memset(budget_pc_count,0,sizeof budget_pc_count);}
 int n3ds_pilot_identity(const char *path,uint64_t *bytes,uint64_t *hash){
     FILE *f=fopen(path,"rb");if(!f)return -1;uint8_t block[4096];uint64_t n=0,h=UINT64_C(0xcbf29ce484222325);size_t got;

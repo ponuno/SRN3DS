@@ -761,14 +761,18 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
         HP_ADD(HP_FETCH, hp_fetch);
         uint32_t next = 0;
         if (trace) n3ds_a43f_trace_pre(c, b.start, addr, 1);
+        ++n3ds_ir_blocks_run;
+        n3ds_ir_block_begin(ip);
         HP_START(hp_exec);
         int done = exec_block(c, &b, &f, frame_start, func_end, &next);
+        n3ds_ir_block_end();
         HP_ADD(HP_EXEC, hp_exec);
         if (done) return;
         if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 1);
         ip = next;
         if (n3ds_ir_yield_hook && ++irc->yield_count >= N3DS_IR_YIELD_INTERVAL) {
             irc->yield_count = 0;
+            ++n3ds_ir_yield_calls;
             n3ds_ir_yield_hook();
         }
     }

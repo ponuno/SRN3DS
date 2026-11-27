@@ -178,6 +178,36 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end);
  * per block. */
 #define N3DS_IR_YIELD_INTERVAL 4096u
 extern void (*n3ds_ir_yield_hook)(void);
+/* Diagnostic counters for the hang watchdog (see ir_core.c): blocks executed
+ * and yield-hook firings. A stuck single block leaves blocks flat; a missing
+ * hook lets blocks climb while yields stay flat. */
+extern unsigned long long n3ds_ir_blocks_run;
+extern unsigned long long n3ds_ir_yield_calls;
+extern unsigned long long n3ds_ir_poll_yields; /* AOT block / rep chunk polls */
+extern uint32_t n3ds_ir_longest_block_ms;
+int n3ds_ir_sched_trace(void);
+void n3ds_ir_block_begin(uint32_t ip);
+void n3ds_ir_block_end(void);
+extern uint32_t n3ds_ir_block_ip;
+uint32_t n3ds_ir_current_block_ip(void);
+uint32_t n3ds_ir_block_age_ms(void);
+
+/* Native (AOT) tier time slicing.  AOT bodies are ordinary host C and run
+ * their loops to completion inside one dispatch, so the executor's between-
+ * block tick never runs there.  tools/instrument_generated.py already inserts
+ * n3ds_pilot_tick_pc() after every lifted block label; that tick calls this
+ * poll, which costs one increment/compare and fires the same scheduler hook
+ * every N3DS_IR_YIELD_INTERVAL blocks.  With a NULL hook (standalone tools,
+ * single-threaded pilots) the whole thing is one predictable branch. */
+extern unsigned n3ds_ir_yield_poll_count;
+static inline void n3ds_ir_yield_poll(void) {
+    if (n3ds_ir_yield_hook && ++n3ds_ir_yield_poll_count >= N3DS_IR_YIELD_INTERVAL) {
+        n3ds_ir_yield_poll_count = 0;
+        ++n3ds_ir_yield_calls;
+        ++n3ds_ir_poll_yields;
+        n3ds_ir_yield_hook();
+    }
+}
 
 /* Diagnostic PC ring (N3DS_PC_RING=1).  Defined here so ir_exec.c and
  * ir_container.c never reference guest.c/win32_thread.c directly: the
