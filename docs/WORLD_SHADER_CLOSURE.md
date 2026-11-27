@@ -281,6 +281,33 @@ Order of work that actually unblocks these: opcode lowering (`nrm/rcp/lrp`)
 for the 10-chunk queue → translated-stage-to-plan serializer + literal
 `constant_ops` → PS-plan COLOR1-drop with measured error.
 
+## 2h. Opcode lowering probe: the block is the texture budget, not only opcodes
+
+Ran the scheduler over the eight lighting 10-chunk refusals with the
+approximation path and a two-texture cap:
+
+```
+plan_shader(ir, approx_only=True, max_textures=2)
+53fe44bb/6b95db62/a47654d2/c157fddc  q=approx stages=1 tex=1  max|err|=0.864
+997083d1/d8a0ed61                     q=approx stages=1 tex=1  max|err|=0.885
+c2b26bfe/f43b6dc2                     q=approx stages=1 tex=1  max|err|=0.969
+```
+
+All eight fall back to one dominant texture because the source PS sample
+**4–7 distinct samplers** (`53fe44bb` uses s0,s1,s2,s3,s4,s5,s6;
+`c2b26bfe` s0..s4; `997083d1`/`c157fddc` s0..s3), while PICA TEV has three
+texture units and `d3d9_pica_tev` accepts two. `lrp` is already exactly
+expressible (a synthetic `lrp` plan comes out `quality: exact`, error 0), and
+the scheduler already carries named `nrm/rcp/rsq/pow/cmp` approximations; the
+0.86–0.97 errors come from dropping the extra textures, not from the opcode
+lowering.
+
+Promoting these needs **multi-pass texture splitting**: each pass may bind at
+most two units, with an accumulator blend for the remaining terms. A
+one-dominant-texture plan at ~0.9 error is not a meaningful runtime path and
+stays off. Estimate **L** (pass decomposition + per-pass texture budget); the
+opcode work is not the blocker.
+
 ## 3. Top-30 world plans by frequency
 
 By census chunk count (`manifest.json` `hashes[3]`); status is the committed
