@@ -343,6 +343,9 @@ Add-Test "shader_draw_trace" $common @("source/d3d9_shader.c", "source/d3d9_tev.
 # BLENDWEIGHT/BLENDINDICES decode, packed loader stream and the backend
 # draw_pica_vs gate (missing program/declaration/bank/backend all refused).
 Add-Test "pica_vs_draw" $common ($d3dFull + $picaSources + @("source/d3d9_menu_light.c", "tests/pica_vs_draw_smoke.c")) @()
+# Verified PICA VS non-skinned (blit/lit) plain fetch: no BLENDWEIGHT/
+# BLENDINDICES, identity uniform bank, null-backend submission counter.
+Add-Test "pica_vs_flat_draw" $common ($d3dFull + $picaSources + @("source/d3d9_menu_light.c", "tests/pica_vs_flat_draw_smoke.c")) @()
 # CreatePixelShader exact-hash plan wiring: own hash -> TEV object, foreign hash
 # -> named refusal, plan draw precondition, caps unchanged.  The test hook only
 # routes lookup at a caller-owned table; production builds never see it.

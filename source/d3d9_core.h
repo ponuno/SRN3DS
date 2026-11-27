@@ -401,15 +401,18 @@ typedef struct {
      * depth_attachment_embedded policy. */
     int (*target_has_depth)(void *ctx,void *native);
     int (*target_depth_attach)(void *ctx,void *native);
-    /* Optional verified PICA VS skinned draw, appended after target_depth_attach
-     * so every existing positional initializer keeps its meaning.  vertices are
-     * decoded D9SkinVertex values; draw carries the emitted program, the packed
-     * loader declaration, the 4-bone/WVP bank and the full c0..c255 float bank
+    /* Optional verified PICA VS draw, appended after target_depth_attach so
+     * every existing positional initializer keeps its meaning.  vertices are
+     * decoded D9SkinVertex values: the skinned fetch fills the bone weights
+     * and indices, the non-skinned plain fetch leaves them zero and fills
+     * position/texcoord/colour/normal/tangent/binormal instead.  draw carries
+     * the emitted program, the packed loader declaration, the program's
+     * uniform bank (4-bone/WVP or identity) and the full c0..c255 float bank
      * with its dirty mask.  The backend packs the attributes in loader order,
      * calls BufInfo_Add with the declaration's attribute permutation,
      * C3D_FVUnifSet only for written bank rows, then C3D_DrawElements.  NULL
-     * means the skinned fetch contract cannot be submitted; the core refuses
-     * by name instead of drawing through the legacy path. */
+     * means the fetch contract cannot be submitted; the core refuses by name
+     * instead of drawing through the legacy path. */
     int (*draw_pica_vs)(void *ctx,const D9SkinVertex *vertices,size_t count,
                         const D9PicaVsDraw *draw);
     /* Optional GPU completion barrier, appended after draw_pica_vs so every

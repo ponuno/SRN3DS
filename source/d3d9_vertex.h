@@ -6,7 +6,8 @@
 enum {D9_DECL_FLOAT1=0,D9_DECL_FLOAT2,D9_DECL_FLOAT3,D9_DECL_FLOAT4,D9_DECL_COLOR,D9_DECL_UBYTE4,
  D9_DECL_SHORT2,D9_DECL_SHORT4,D9_DECL_UBYTE4N,D9_DECL_SHORT2N,D9_DECL_SHORT4N,D9_DECL_USHORT2N,
  D9_DECL_USHORT4N,D9_DECL_UDEC3,D9_DECL_DEC3N,D9_DECL_FLOAT16_2,D9_DECL_FLOAT16_4,D9_DECL_UNUSED};
-enum {D9_USAGE_POSITION=0,D9_USAGE_NORMAL=3,D9_USAGE_TEXCOORD=5,D9_USAGE_POSITIONT=9,D9_USAGE_COLOR=10};
+enum {D9_USAGE_POSITION=0,D9_USAGE_NORMAL=3,D9_USAGE_TEXCOORD=5,
+      D9_USAGE_TANGENT=6,D9_USAGE_BINORMAL=7,D9_USAGE_POSITIONT=9,D9_USAGE_COLOR=10};
 /* D3DFVF_* bits used by the admitted pre-transformed GFx batch. */
 enum {D9_OK=0,D9_INVALID=-1,D9_MEMORY=-2,D9_BACKEND=-3,D9_RELEASE_FAILED=-4,D9_UNSUPPORTED=-5};
 enum {D9_FVF_XYZ=0x002u,D9_FVF_XYZRHW=0x004u,D9_FVF_NORMAL=0x010u,D9_FVF_DIFFUSE=0x040u,D9_FVF_TEX1=0x100u};
@@ -37,6 +38,11 @@ typedef struct {
     float nx,ny,nz;
     float weight[4];
     uint8_t index[4];
+    /* TANGENT0/BINORMAL0 for the non-skinned PICA VS plain fetch.  Appended
+     * so the skinned field layout and every existing initializer keep their
+     * meaning; the skinned fetch leaves them zero. */
+    float tx,ty,tz;
+    float bx,by,bz;
 } D9SkinVertex;
 unsigned d9_decl_type_size(unsigned type);
 unsigned d9_decl_components(unsigned type);

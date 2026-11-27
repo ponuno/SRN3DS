@@ -581,7 +581,7 @@ int d9_pica_vs_gate(const D9PicaVsProgram *program, const D9Decl *decl,
         if (why && why_size)
             snprintf(why, why_size,
                      "PICA VS %s: backend has no draw_pica_vs callback; "
-                     "the skinned stream cannot be submitted", program->id);
+                     "the vertex stream cannot be submitted", program->id);
         return -1;
     }
     return 0;
@@ -626,6 +626,8 @@ static const float *attr_source(const D9PicaVsLoader *loader,
     case D9_PICA_VS_ATTR_TEXCOORD: return &v->u;
     case D9_PICA_VS_ATTR_COLOR: return &v->r;
     case D9_PICA_VS_ATTR_NORMAL: return &v->nx;
+    case D9_PICA_VS_ATTR_TANGENT: return &v->tx;
+    case D9_PICA_VS_ATTR_BINORMAL: return &v->bx;
     default: return NULL;
     }
 }

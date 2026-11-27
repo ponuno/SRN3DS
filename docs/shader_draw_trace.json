@@ -2,8 +2,8 @@
  "draws": 23,
  "entries": [
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "lighting",
    "passes": 1,
@@ -14,8 +14,8 @@
    "shbin_sha256": "ff811bf83e750a2095789860d76259edc7b5bd40ba5233b0ee5ae480fb04613f"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "lighting",
    "passes": 1,
@@ -26,8 +26,8 @@
    "shbin_sha256": "f94cecf16647619d0fa81e17982db6590fbbf969dabbf634ff26695032e71c84"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "lighting",
    "passes": 1,
@@ -38,8 +38,8 @@
    "shbin_sha256": "0d70d8ae878fd8b04346d7e62698b00878e6db8b9701f4e1d421778ef1fa90f2"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "lighting",
    "passes": 1,
@@ -50,8 +50,8 @@
    "shbin_sha256": "ad58098a97d8faef20324a7b48aa65dc22164324689d4ea706ba7a5246fc5c56"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "lighting",
    "passes": 1,
@@ -62,8 +62,8 @@
    "shbin_sha256": "387388ef27e669c33d7ca6b9450054f98687ab8331274190fc6986e0121b0a78"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "lighting",
    "passes": 1,
@@ -74,8 +74,8 @@
    "shbin_sha256": "838cf5cc425d79793d7e2510717e9c64bf648c4e575b6b1fe58a0805b86dfa0a"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "lighting",
    "passes": 1,
@@ -87,7 +87,7 @@
   },
   {
    "complete": true,
-   "core_draw": "ok",
+   "core_draw": "skinned fetch",
    "kind": "pica_vs",
    "pack": "skinning",
    "passes": 1,
@@ -99,7 +99,7 @@
   },
   {
    "complete": true,
-   "core_draw": "ok",
+   "core_draw": "skinned fetch",
    "kind": "pica_vs",
    "pack": "skinning",
    "passes": 1,
@@ -111,7 +111,7 @@
   },
   {
    "complete": true,
-   "core_draw": "ok",
+   "core_draw": "skinned fetch",
    "kind": "pica_vs",
    "pack": "skinning",
    "passes": 1,
@@ -123,7 +123,7 @@
   },
   {
    "complete": true,
-   "core_draw": "ok",
+   "core_draw": "skinned fetch",
    "kind": "pica_vs",
    "pack": "skinning",
    "passes": 1,
@@ -134,8 +134,8 @@
    "shbin_sha256": "2ad9eb779ced69bccbc544645620145e0cefa29ae5d2eef19600d4f7d15159b4"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "blit_post",
    "passes": 1,
@@ -146,8 +146,8 @@
    "shbin_sha256": "73432d9f121839a21e795faf1ebd8f606d79bd45a62678075e877aeba8a83239"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "blit_post",
    "passes": 1,
@@ -158,8 +158,8 @@
    "shbin_sha256": "69f5212e685f9d57c1e55c8808e12bffa42f784796cf7fd835f3a2bb2ec6a69f"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "blit_post",
    "passes": 1,
@@ -170,8 +170,8 @@
    "shbin_sha256": "73432d9f121839a21e795faf1ebd8f606d79bd45a62678075e877aeba8a83239"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "blit_post",
    "passes": 1,
@@ -182,8 +182,8 @@
    "shbin_sha256": "7767e7e3ceee5720a55d59a80897fa00be208a9b191b1708932d93f2956d07ec"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "blit_post",
    "passes": 1,
@@ -194,8 +194,8 @@
    "shbin_sha256": "3976efb6c48ce275947a5ea44f38515098b03a8747da4091db8f5df6480db2aa"
   },
   {
-   "complete": false,
-   "core_draw": "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required",
+   "complete": true,
+   "core_draw": "plain fetch (non-skinned)",
    "kind": "pica_vs",
    "pack": "blit_post",
    "passes": 1,

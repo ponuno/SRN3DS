@@ -27,6 +27,7 @@ import runtime_audit  # noqa: E402
 import world_runtime_audit  # noqa: E402
 
 OUT = os.path.join(REPO, "docs", "shader_draw_trace.json")
+CORE = os.path.join(REPO, "source", "d3d9_core.c")
 
 
 def main() -> int:
@@ -44,6 +45,15 @@ def main() -> int:
                                         encoding="utf-8"))["entries"]}
     vs = runtime_audit.parse_vs_catalog()
     table = runtime_audit.parse_plan_table()
+    core = open(CORE, encoding="utf-8").read()
+    # The core selects the fetch contract from the emitted program: bone
+    # programs need fetch_skin(), non-bone programs use fetch_plain().  If the
+    # plain path is removed, non-bone plans silently become incomplete again;
+    # fail here instead of committing a false complete:true row.
+    check("fetch_plain" in core,
+          "d3d9_core.c has no plain (non-skinned) PICA VS fetch path")
+    check("fetch_skin" in core,
+          "d3d9_core.c has no skinned PICA VS fetch path")
     rows = []
     for pack in world_runtime_audit.WORLD_PACKS:
         plan_doc = world_runtime_audit._pack_doc(pack, "plans.json") \
@@ -73,19 +83,23 @@ def main() -> int:
                 "shbin_sha256": shbin,
                 "passes": len(entry.get("passes") or []) or 1,
                 "refusal": None if path else why,
-                # d3d9_core's PICA VS draw path is currently skinned-only:
-                # draw_skinned() -> fetch_skin() requires BLENDWEIGHT0 and
-                # BLENDINDICES0, so a non-bone program resolves at the gate
-                # but the core refuses before submission.  Recorded, not
-                # hidden; fixing it is a d3d9_core change (out of this gate).
+                # d3d9_core selects by the emitted program's declaration:
+                # bone_rows != 0 -> fetch_skin(), otherwise fetch_plain()
+                # with the program's identity uniform bank.  The source probe
+                # above makes a regression here a test failure.
                 "core_draw": (
-                    "skinned-only: BLENDWEIGHT0/BLENDINDICES0 required"
-                    if entry.get("kind") == "pica_vs"
-                    and (vs.get(sha, {}).get("bone_rows", 0) == 0)
+                    "plain fetch (non-skinned)" if entry.get("kind") == "pica_vs"
+                    and vs.get(sha, {}).get("bone_rows", 0) == 0
+                    else "skinned fetch" if entry.get("kind") == "pica_vs"
                     else "ok"),
-                "complete": not (entry.get("kind") == "pica_vs"
-                                 and vs.get(sha, {}).get("bone_rows", 0) == 0),
+                "complete": bool(path),
             })
+
+    for row in rows:
+        check(not (row["kind"] == "pica_vs" and not row["complete"]
+                   and row["refusal"] is None),
+              "%s: runtime path is incomplete with no recorded refusal"
+              % row["plan"])
 
     menu = sorted(program["id"] for program in vs.values()
                   if program["id"].startswith("menu.gfx."))

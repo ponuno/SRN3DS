@@ -3320,7 +3320,8 @@ static void positiont_matrix(D9Matrix *m,unsigned w,unsigned h){
     m->m[2][2]=1.0f;m->m[2][3]=-1.0f;            /* out z = z - 1 */
     m->m[3][0]=m->m[3][1]=m->m[3][2]=0.0f;m->m[3][3]=1.0f;
 }
-static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9ColorVertex *col,float normal[3]){
+static int fetch_raw(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,
+                     D9ColorVertex *col,float normal[3],int menu_helpers){
     if(!d->decl_active){
         memcpy(out,s[0].data+(size_t)index*s[0].stride,sizeof *out);
         *col=(D9ColorVertex){out->x,out->y,out->z,out->u,out->v,1.0f,1.0f,1.0f,1.0f,0.0f};
@@ -3336,13 +3337,13 @@ static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9
         if(decl->normal!=UINT32_MAX){p=&decl->elements[decl->normal];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),nrm))return D9_INVALID;}
         /* Selected menu.generic.vs helpers: the certified GFx texgen is
          * dp4(position, c4/c5); the BGR colour read is zyxw. */
-        if(d->menu_uvgen){
+        if(menu_helpers&&d->menu_uvgen){
             uv[0]=d->vs_constants_f[4][0]*pos[0]+d->vs_constants_f[4][1]*pos[1]+
                   d->vs_constants_f[4][2]*pos[2]+d->vs_constants_f[4][3];
             uv[1]=d->vs_constants_f[5][0]*pos[0]+d->vs_constants_f[5][1]*pos[1]+
                   d->vs_constants_f[5][2]*pos[2]+d->vs_constants_f[5][3];
         }
-        if(d->menu_color_swap){float t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}
+        if(menu_helpers&&d->menu_color_swap){float t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}
         *out=(D9Vertex){pos[0],pos[1],pos[2],uv[0],uv[1]};
         *col=(D9ColorVertex){pos[0],pos[1],pos[2],uv[0],uv[1],rgba[0],rgba[1],rgba[2],rgba[3],uv[2]};
         normal[0]=nrm[0];normal[1]=nrm[1];normal[2]=nrm[2];
@@ -3350,6 +3351,50 @@ static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9
     return isfinite(out->x)&&isfinite(out->y)&&isfinite(out->z)&&isfinite(out->u)&&isfinite(out->v)&&
            isfinite(col->r)&&isfinite(col->g)&&isfinite(col->b)&&isfinite(col->a)&&isfinite(col->w)&&
            isfinite(normal[0])&&isfinite(normal[1])&&isfinite(normal[2])?D9_OK:D9_INVALID;
+}
+/* The fixed-function/menu decode applies the CPU texgen and colour-swap
+ * helpers.  An emitted PICA program performs both itself, so the verified
+ * PICA VS paths use the raw decode. */
+static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,
+                 D9ColorVertex *col,float normal[3]){
+    return fetch_raw(d,s,index,out,col,normal,1);
+}
+/* First declaration element with usage/usage_index 0, or UINT32_MAX. */
+static unsigned decl_usage0(const D9Decl *decl,unsigned usage){
+    for(unsigned i=0;i<decl->count;++i)
+        if(decl->elements[i].usage==usage&&!decl->elements[i].usage_index)return i;
+    return UINT32_MAX;
+}
+static int decode_usage0(D9Device *d,const DrawStream *s,uint64_t index,
+                         unsigned usage,float out[4]){
+    unsigned i=decl_usage0(&d->declaration,usage);
+    if(i==UINT32_MAX)return 0; /* attribute absent: leave the default */
+    const D9VertexElement *p=&d->declaration.elements[i];
+    return d9_decl_decode(p->type,s[p->stream].data+
+                              (size_t)index*s[p->stream].stride+p->offset,
+                          d9_decl_type_size(p->type),out);
+}
+/* Plain (non-bone) decode for a verified PICA VS program: the same
+ * position/texcoord0/colour0/normal0 decode as the fixed path, plus the
+ * optional TANGENT0/BINORMAL0 inputs, and zero skin weights/indices.  No bone
+ * palette or WVP rows are consulted; the program's own identity uniform bank
+ * carries the transform. */
+static int fetch_plain(D9Device *d,const DrawStream *s,uint64_t index,
+                       D9SkinVertex *out){
+    D9Vertex v;D9ColorVertex c;float normal[3];
+    int rc=fetch_raw(d,s,index,&v,&c,normal,0);
+    if(rc)return rc;
+    memset(out,0,sizeof *out);
+    out->x=v.x;out->y=v.y;out->z=v.z;out->u=v.u;out->v=v.v;
+    out->r=c.r;out->g=c.g;out->b=c.b;out->a=c.a;
+    out->nx=normal[0];out->ny=normal[1];out->nz=normal[2];
+    float t[4]={0,0,0,1},b[4]={0,0,0,1};
+    if(decode_usage0(d,s,index,D9_USAGE_TANGENT,t)||
+       decode_usage0(d,s,index,D9_USAGE_BINORMAL,b))return D9_INVALID;
+    out->tx=t[0];out->ty=t[1];out->tz=t[2];
+    out->bx=b[0];out->by=b[1];out->bz=b[2];
+    return isfinite(out->tx)&&isfinite(out->ty)&&isfinite(out->tz)&&
+           isfinite(out->bx)&&isfinite(out->by)&&isfinite(out->bz)?D9_OK:D9_INVALID;
 }
 /* Skinned decode for the verified PICA VS path: the ordinary position/uv/
  * color/normal decode plus BLENDWEIGHT0 (float4) and BLENDINDICES0 (normalised
@@ -3360,7 +3405,7 @@ static int fetch_skin(D9Device *d,const DrawStream *s,uint64_t index,
     const D9Decl *decl=&d->declaration;
     if(decl->weight==UINT32_MAX||decl->index==UINT32_MAX)return D9_UNSUPPORTED;
     D9Vertex v;D9ColorVertex c;float normal[3];
-    int rc=fetch(d,s,index,&v,&c,normal);
+    int rc=fetch_raw(d,s,index,&v,&c,normal,0);
     if(rc)return rc;
     out->x=v.x;out->y=v.y;out->z=v.z;out->u=v.u;out->v=v.v;
     out->r=c.r;out->g=c.g;out->b=c.b;out->a=c.a;
@@ -3547,32 +3592,37 @@ static int draw_menu_indexed_text(D9Device *d,
     }
     return D9_OK;
 }
-/* Verified PICA VS batch.  Decodes every output vertex into the skinned scratch
- * stream and submits exactly one backend call.  The fragment stage is not part
- * of this contract yet: a bound texture or pixel shader is a named refusal
- * rather than a draw with stale TEV state. */
-static int draw_skinned(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
-                        size_t max_index,unsigned type,int32_t base,unsigned start,
-                        unsigned primitives,int indexed,int limited,unsigned min,
-                        unsigned count,const UpSource *up,const uint8_t *ixdata,
-                        size_t ixbytes,unsigned step){
+/* Verified PICA VS batch.  The emitted program's own declaration decides the
+ * fetch contract: bone_rows != 0 needs BLENDWEIGHT0/BLENDINDICES0 and the
+ * 4-bone palette window (fetch_skin), while a non-bone program uses the plain
+ * position/texcoord/colour/normal/tangent/binormal decode and its identity
+ * uniform bank.  Both decode into the scratch stream and submit exactly one
+ * backend call.  The fragment stage is not part of this contract yet: a bound
+ * texture or pixel shader is a named refusal rather than a draw with stale TEV
+ * state. */
+static int draw_pica_vs_batch(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
+                              size_t max_index,unsigned type,int32_t base,
+                              unsigned start,unsigned primitives,int indexed,
+                              int limited,unsigned min,unsigned count,
+                              const UpSource *up,const uint8_t *ixdata,
+                              size_t ixbytes,unsigned step,int skinned){
     if(!d->ops.draw_pica_vs){
-        set_diagnosis(d,"PICA VS skinned draw requires the backend draw_pica_vs "
+        set_diagnosis(d,"PICA VS draw requires the backend draw_pica_vs "
                         "callback; this backend cannot submit the stream");
         return D9_UNSUPPORTED;
     }
     if(!d->decl_active){
-        set_diagnosis(d,"PICA VS skinned draw has no active vertex declaration");
+        set_diagnosis(d,"PICA VS draw has no active vertex declaration");
         return D9_UNSUPPORTED;
     }
-    if(d->declaration.weight==UINT32_MAX||d->declaration.index==UINT32_MAX){
+    if(skinned&&(d->declaration.weight==UINT32_MAX||d->declaration.index==UINT32_MAX)){
         set_diagnosis(d,d->declaration.weight==UINT32_MAX?
             "PICA VS skinned draw: the declaration has no BLENDWEIGHT0 element":
             "PICA VS skinned draw: the declaration has no BLENDINDICES0 element");
         return D9_UNSUPPORTED;
     }
     if(d->texture||d->pixel_shader){
-        set_diagnosis(d,"PICA VS skinned draw has no fragment-stage contract yet; "
+        set_diagnosis(d,"PICA VS draw has no fragment-stage contract yet; "
                         "unbind the texture and pixel shader for the VS-only submit");
         return D9_UNSUPPORTED;
     }
@@ -3585,7 +3635,9 @@ static int draw_skinned(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
     size_t n=(size_t)primitives*3;
     if(type!=D9_TRIANGLELIST)n=(size_t)primitives+2;
     if(n>MAX_DRAW_VERTICES){
-        set_diagnosis(d,"PICA VS skinned draw exceeds the 4,096-vertex scratch bound");
+        set_diagnosis(d,skinned?
+            "PICA VS skinned draw exceeds the 4,096-vertex scratch bound":
+            "PICA VS non-skinned draw exceeds the 4,096-vertex scratch bound");
         return D9_UNSUPPORTED;
     }
     if(indexed&&!(up&&up->indices)&&((size_t)start>ixbytes/step||n>ixbytes/step-(size_t)start))
@@ -3598,21 +3650,25 @@ static int draw_skinned(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
             if(limited&&(raw<min||(uint64_t)raw>=((uint64_t)min+count)))return D9_INVALID;
             index=(int64_t)base+raw;}
         if(index<0||(uint64_t)index>max_index)return D9_INVALID;
-        int rc=fetch_skin(d,streams,(uint64_t)index,&d->skin_scratch[i]);
+        int rc=skinned?fetch_skin(d,streams,(uint64_t)index,&d->skin_scratch[i]):
+                       fetch_plain(d,streams,(uint64_t)index,&d->skin_scratch[i]);
         if(rc){
-            set_diagnosis(d,rc==D9_UNSUPPORTED?
+            set_diagnosis(d,skinned?(rc==D9_UNSUPPORTED?
                 "PICA VS skinned draw: the declaration lost BLENDWEIGHT0/BLENDINDICES0":
-                "PICA VS skinned vertex decode failed");
+                "PICA VS skinned vertex decode failed"):
+                "PICA VS non-skinned vertex decode failed");
             return rc;
         }
-        /* The emitted program indexes the 4-bone palette window.  Any larger
-         * BLENDINDICES byte would silently read c12+ (the WVP rows) instead of
-         * a bone matrix, so it is a named refusal, not a wrap. */
-        for(unsigned j=0;j<4;++j){
-            if(d->skin_scratch[i].index[j]>=D9_PICA_VS_BONES){
-                set_diagnosis(d,"PICA VS skinned draw: BLENDINDICES references a "
-                                "bone outside the 4-bone palette window");
-                return D9_UNSUPPORTED;
+        if(skinned){
+            /* The emitted program indexes the 4-bone palette window.  Any larger
+             * BLENDINDICES byte would silently read c12+ (the WVP rows) instead
+             * of a bone matrix, so it is a named refusal, not a wrap. */
+            for(unsigned j=0;j<4;++j){
+                if(d->skin_scratch[i].index[j]>=D9_PICA_VS_BONES){
+                    set_diagnosis(d,"PICA VS skinned draw: BLENDINDICES references a "
+                                    "bone outside the 4-bone palette window");
+                    return D9_UNSUPPORTED;
+                }
             }
         }
     }
@@ -3626,7 +3682,8 @@ static int draw_skinned(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
     draw.row_mask=d->vs_constants_f_mask;
     draw.row_mask_words=D9_VS_CONST_F_REGS/32u;
     if(d->ops.draw_pica_vs(d->ctx,d->skin_scratch,n,&draw)){
-        set_diagnosis(d,"PICA VS skinned draw rejected by the backend");
+        set_diagnosis(d,skinned?"PICA VS skinned draw rejected by the backend":
+                                "PICA VS non-skinned draw rejected by the backend");
         return D9_BACKEND;
     }
     set_diagnosis(d,"");
@@ -3823,8 +3880,9 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     frame_pin_draw_set(d);
     DrawStream streams[D9_MAX_STREAMS]={0};size_t max_index;if(prepare_streams(d,streams,&max_index,up))return D9_INVALID;
     if(d->pica_vs_active)
-        return draw_skinned(d,streams,max_index,type,base,start,primitives,indexed,
-                            limited,min,count,up,ixdata,ixbytes,step);
+        return draw_pica_vs_batch(d,streams,max_index,type,base,start,primitives,
+                                  indexed,limited,min,count,up,ixdata,ixbytes,step,
+                                  d->pica_vs_program.bone_rows!=0);
     /* Test-only CPU T&L: light object-space vertices before the existing draw
      * path.  POSITIONT bypasses the transform, so it is never lit (D3D does the
      * same for pre-transformed vertices). */
