@@ -11,6 +11,9 @@
 
 #define DATA 0x21000000u
 #define CONSOLE 0x40000000u
+#define STEP_RUNS (DATA + 16)
+#define STEP_MAIN (DATA + 20)
+#define STEP_ORDER (DATA + 24)
 
 static int call(CPU *c, const char *dll, const char *name, const uint32_t *args, size_t n, uint32_t *out) {
     PeImport e = {.dll = dll, .name = name};
@@ -32,6 +35,20 @@ static void body_return(CPU *c) {
 }
 static void body_exit(CPU *c) { (void)c; n3ds_lift_exit(42); }
 static void body_fault(CPU *c) { (void)c; rt_unimpl(NULL, 0, "thread smoke fault"); }
+/* A non-suspended worker that must get the CPU between main's Sleep(0) calls:
+ * it records each run and yields four times. */
+static void body_stepper(CPU *c) {
+    for (unsigned i = 0; i < 4; ++i) {
+        uint32_t n = M32(STEP_RUNS);
+        M32(STEP_RUNS) = n + 1;
+        if (n < 8) {
+            M32(STEP_ORDER + 4 * n) = win32_thread_current_id();
+            M32(STEP_ORDER + 0x40 + 4 * n) = M32(STEP_MAIN);
+        }
+        win32_thread_sleep(0); /* cooperative yield */
+    }
+    ret_stdcall(c, 0);
+}
 /* WaitForSingleObject(handle, 0) from inside a guest thread body. */
 static void body_mutex(CPU *c) {
     uint32_t sp = c->r[4], handle = M32(DATA);
@@ -53,6 +70,7 @@ static void body_mutex(CPU *c) {
 static const FnEntry table[] = {
     {0x00500000u, body_return}, {0x00501000u, body_exit},
     {0x00502000u, body_fault}, {0x00503000u, body_mutex},
+    {0x00504000u, body_stepper},
 };
 
 int main(void) {
@@ -67,6 +85,10 @@ int main(void) {
     if (!cpu) goto done;
     n3ds_lift_init_cpu(cpu, CONSOLE + 4096 - 64, 0);
     uint32_t r, a[8];
+
+    /* 0. The main thread must own a real FIFO sequence from init, never the
+     * magic 0 that would let it outrank every created thread forever. */
+    CHECK(win32_thread_ready_seq(1) != 0);
 
     /* 1. Un-suspended thread runs to completion inside CreateThread. */
     a[0] = 0; a[1] = 0x20000; a[2] = 0x00500000u; a[3] = 41; a[4] = 0; a[5] = CONSOLE + 0x100;
@@ -129,7 +151,27 @@ int main(void) {
     a[0] = 0xffffffffu; a[1] = CONSOLE + 0x124;
     CHECK(!K(GetExitCodeProcess, a, 2) && r == 1);
 
-    /* 6. CloseHandle releases every thread slot. */
+    /* 6. FIFO fairness: a non-suspended worker and main alternate through
+     * Sleep(0).  Neither may be starved: the worker must run all four times and
+     * main must advance through all eight yields. */
+    M32(STEP_RUNS) = 0;
+    M32(STEP_MAIN) = 0;
+    for (uint32_t i = 0; i < 0x50; i += 4) M32(STEP_ORDER + i) = 0;
+    a[0] = 0; a[1] = 0x10000u; a[2] = 0x00504000u; a[3] = 0; a[4] = 0; a[5] = CONSOLE + 0x140;
+    CHECK(!K(CreateThread, a, 6) && r >= WIN32_THREAD_HANDLE_BASE);
+    uint32_t stepper = r;
+    CHECK(win32_thread_ready_seq(M32(CONSOLE + 0x140)) != 0);
+    for (uint32_t i = 0; i < 8; ++i) {
+        M32(STEP_MAIN) = i + 1;
+        win32_thread_sleep(0);
+    }
+    CHECK(M32(STEP_RUNS) == 4);
+    CHECK(M32(STEP_MAIN) == 8);
+    CHECK(M32(STEP_ORDER) == M32(CONSOLE + 0x140));
+    CHECK(M32(STEP_ORDER + 0x40) < 8);
+    a[0] = stepper; CHECK(!K(CloseHandle, a, 1) && r == 1);
+
+    /* 7. CloseHandle releases every thread slot. */
     a[0] = thread; CHECK(!K(CloseHandle, a, 1) && r == 1);
     a[0] = suspended; CHECK(!K(CloseHandle, a, 1) && r == 1);
     a[0] = faulted; CHECK(!K(CloseHandle, a, 1) && r == 1);

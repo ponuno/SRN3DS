@@ -261,20 +261,43 @@ void n3ds_hang_watchdog_arm(void) {
 }
 
 /* ---- ready queue ------------------------------------------------------- */
-static void enqueue(W32Thread *t) {
-    if (!t || t->state == ST_FREE || t->state == ST_EXITED) return;
+/* The single place a thread becomes runnable.  Every ST_READY transition --
+ * main's Sleep(0), a wake from block_current(), ResumeThread/activate(), a new
+ * created thread -- is stamped here with the next FIFO sequence.  A thread that
+ * is already runnable keeps its place rather than being pushed to the back. */
+static void ready_stamp(W32Thread *t) {
     t->state = ST_READY;
     t->in_ready = 1;
     t->ready_seq = ++g_seq;
 }
+static void enqueue(W32Thread *t) {
+    if (!t || t->state == ST_FREE || t->state == ST_EXITED) return;
+    if (t->state == ST_READY && t->in_ready) return;
+    ready_stamp(t);
+}
+/* One FIFO over threads[] and main_thread, ordered by ready_seq.  main has no
+ * permanent priority: it competes like every worker.  On an exact tie main is
+ * chosen first (deterministic, and it is the thread that owns process control),
+ * but a tie cannot recur because each enqueue stamps a fresh sequence. */
 static W32Thread *pick_ready(void) {
-    W32Thread *best = NULL;
-    if (scheduler_up && main_thread.state == ST_READY && main_thread.suspends == 0)
-        best = &main_thread;
+    W32Thread *cand[1 + MAX_THREADS];
+    unsigned n = 0;
     for (unsigned i = 0; i < MAX_THREADS; ++i) {
         W32Thread *t = &threads[i];
         if (t->state != ST_READY || t->suspends) continue;
-        if (!best || t->ready_seq < best->ready_seq) best = t;
+        if (!t->ready_seq) t->ready_seq = ++g_seq; /* never let 0 win */
+        cand[n++] = t;
+    }
+    if (scheduler_up && main_thread.state == ST_READY && main_thread.suspends == 0) {
+        if (!main_thread.ready_seq) main_thread.ready_seq = ++g_seq;
+        cand[n++] = &main_thread;
+    }
+    W32Thread *best = NULL;
+    for (unsigned i = 0; i < n; ++i) {
+        W32Thread *t = cand[i];
+        if (!best || t->ready_seq < best->ready_seq ||
+            (t->ready_seq == best->ready_seq && t == &main_thread))
+            best = t;
     }
     return best;
 }
@@ -489,6 +512,11 @@ int win32_thread_memory(unsigned slot, uint32_t *guest_bytes, size_t *host_bytes
 }
 size_t win32_thread_struct_size(void) { return sizeof(W32Thread); }
 
+uint64_t win32_thread_ready_seq(uint32_t id) {
+    W32Thread *t = thread_for_id(id);
+    return t ? t->ready_seq : 0;
+}
+
 /* ---- thread body trampoline ------------------------------------------- */
 static void thread_trampoline(void *arg) {
     W32Thread *t = arg;
@@ -559,6 +587,9 @@ int win32_thread_init(GuestMemory *m) {
     cur = &main_thread;
     scheduler_up = 1;
     g_seq = g_ticket = 0;
+    /* main is RUNNING now, but it takes a real FIFO stamp (not 0) so its first
+     * ST_READY transition cannot masquerade as an infinite-priority thread. */
+    main_thread.ready_seq = ++g_seq;
     reap_pending = NULL;
     win32_sync_set_current_thread(MAIN_THREAD_ID);
     win32_sync_set_waker(win32_thread_wake);
@@ -680,7 +711,7 @@ static void s_CreateThread(CPU *c) {
     t->param = param;
     t->priority = 0; /* THREAD_PRIORITY_NORMAL */
     t->affinity = 1;
-    t->state = ST_READY;
+    ready_stamp(t); /* a concrete FIFO sequence, even while still suspended */
     t->suspends = (flags & CREATE_SUSPENDED) ? 1 : 0;
     if (build_thread_memory(t, stack)) {
         memset(t, 0, sizeof *t);

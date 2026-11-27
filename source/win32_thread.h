@@ -104,6 +104,9 @@ void win32_thread_sleep(uint32_t ms);
 void win32_thread_yield(void);
 /* Number of live (READY/RUNNING/BLOCKED) created threads; diagnostics. */
 unsigned win32_thread_live_count(void);
+/* Test/diagnostic: last FIFO sequence stamped for a guest thread id (0 = never
+ * stamped).  Main id 1 must be non-zero as soon as the scheduler is up. */
+uint64_t win32_thread_ready_seq(uint32_t id);
 /* Diagnostics: guest mapping and host stack reserved for a thread slot. */
 int win32_thread_memory(unsigned slot, uint32_t *guest_bytes, size_t *host_bytes);
 size_t win32_thread_struct_size(void);
