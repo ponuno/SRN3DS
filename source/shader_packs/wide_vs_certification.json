@@ -1,0 +1,1176 @@
+{
+ "entries": [
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 3
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "packed_color",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 2
+     }
+    ]
+   },
+   "id": "lit.vs.2b6fc858",
+   "numeric": {
+    "max_abs_position": 1.0685166085266928e-09,
+    "max_abs_varying": 1.2254797177035925e-10,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": 1,
+     "kind": "tev",
+     "plan": "ui.ps.15c553db",
+     "sha256": "15c553db30f52b7691c21e433c28bdf5e1365e47242c3e599f050291a250cca2",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0
+     ],
+     "verdict": "ps_reads_color1"
+    },
+    {
+     "colors": [
+      0
+     ],
+     "draw_enabled": 0,
+     "kind": "tev",
+     "plan": "sky.two_tex_lerp.ps",
+     "sha256": "37902aa719a706ea5dd41c9036d4b8f41dcb8db17c80119d05edc03edde345cd",
+     "texcoord_reg": [
+      0,
+      1
+     ],
+     "texcoords": [
+      0,
+      1
+     ],
+     "verdict": "ps_not_runtime"
+    }
+   ],
+   "reason": "paired PS 15c553db samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it",
+   "sha256": "2b6fc858a3425079497bd71bb59c4a4b61ee38d1a3ed5bfef44984e08e8ed916",
+   "technique_key": 6,
+   "verdict": "ps_reads_color1"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 3,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 5
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "dropped",
+      "pica_name": null,
+      "pica_semantic": null,
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.475db3a3",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "475db3a3596b83daa48e6771dd4c7cec243d463ebaf319dbb33e884940c63732",
+   "technique_key": 672663,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 1
+     }
+    ]
+   },
+   "id": "lit.vs.5102e34f",
+   "numeric": {
+    "max_abs_position": 3.9574462817881795e-08,
+    "max_abs_varying": 1.5241141682054149e-12,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": 1,
+     "kind": "tev",
+     "plan": "ui.ps.15c553db",
+     "sha256": "15c553db30f52b7691c21e433c28bdf5e1365e47242c3e599f050291a250cca2",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0
+     ],
+     "verdict": "ps_reads_color1"
+    },
+    {
+     "colors": [
+      0
+     ],
+     "draw_enabled": 1,
+     "kind": "tev",
+     "plan": "ui.ps.d70cde62",
+     "sha256": "d70cde62fa16d1645b1f2802bf67b87ca424152de1554d9b8fd58c9479f34318",
+     "texcoord_reg": [
+      1,
+      0
+     ],
+     "texcoords": [
+      0
+     ],
+     "verdict": "rank_mismatch"
+    },
+    {
+     "colors": [
+      0
+     ],
+     "draw_enabled": 0,
+     "kind": "tev",
+     "plan": "sky.tex_vcolor_x1p5_lite.ps",
+     "sha256": "013ad862c987aa3ece6ec06e2fcc57b94cc5a8d60a1515a2cbc65212483e9577",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0,
+      2
+     ],
+     "verdict": "ps_not_runtime"
+    }
+   ],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "5102e34f155b4540a001f1217e0fac29216fdffcc8c3585cf757ae324677cd34",
+   "technique_key": 3,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 3,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 5
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "dropped",
+      "pica_name": null,
+      "pica_semantic": null,
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.5c915b8e",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "5c915b8ee721dcf43ead2e780e5a39322cd6fb5317931af710fed233d5ffe4f1",
+   "technique_key": 148375,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "packed_color",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.7bf75173",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 1.1102230246251565e-16,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": 1,
+     "kind": "tev",
+     "plan": "ui.ps.c5d8f0a0",
+     "sha256": "c5d8f0a0e9e9b29018cee2eb1e48bf5090e78873a276f0b18d40d8fdc915a81b",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0,
+      5
+     ],
+     "verdict": "ps_reads_color1"
+    }
+   ],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "7bf75173b396edd8e825e81584d5f58ad44c6cee54ea013d777e4087881c658c",
+   "technique_key": 19351,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "packed_color",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.810e8155",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 1.1102230246251565e-16,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": 1,
+     "kind": "tev",
+     "plan": "ui.ps.c5d8f0a0",
+     "sha256": "c5d8f0a0e9e9b29018cee2eb1e48bf5090e78873a276f0b18d40d8fdc915a81b",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0,
+      5
+     ],
+     "verdict": "ps_reads_color1"
+    }
+   ],
+   "reason": "paired PS c5d8f0a0 samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it",
+   "sha256": "810e81556e2870fd7bf9bb3a68b9aa65b485e74127bc4fdaf67b87bb6a64c002",
+   "technique_key": 18823,
+   "verdict": "ps_reads_color1"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "packed_color",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.91edbfd1",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 2.220446049250313e-16,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": null,
+     "kind": null,
+     "plan": null,
+     "sha256": "bda33984324b6334124c619564ee1c17cfb26aa760f47c8cf212270419f18098",
+     "texcoord_reg": [],
+     "texcoords": [
+      0,
+      5
+     ],
+     "verdict": "ps_not_runtime"
+    }
+   ],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "91edbfd1097761d74b692a711eda5a21c9e7ee690917754a63de99ba8bf5c080",
+   "technique_key": 543639,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "packed_color",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.b376c937",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": null,
+     "kind": null,
+     "plan": null,
+     "sha256": "bda33984324b6334124c619564ee1c17cfb26aa760f47c8cf212270419f18098",
+     "texcoord_reg": [],
+     "texcoords": [
+      0,
+      5
+     ],
+     "verdict": "ps_not_runtime"
+    }
+   ],
+   "reason": "paired PS bda33984 has no draw-enabled runtime plan",
+   "sha256": "b376c93713dafe6b454844538c2b278763edb79ee605729fb8797ab4597e87dd",
+   "technique_key": 543111,
+   "verdict": "ps_not_runtime"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 3,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 5
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "dropped",
+      "pica_name": null,
+      "pica_semantic": null,
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.d1c92b1a",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": null,
+     "kind": null,
+     "plan": null,
+     "sha256": "8fce433cfb984ed49ebad060bd8212b4f01d0f7605d07cf5c218ad726793eba8",
+     "texcoord_reg": [],
+     "texcoords": [
+      0,
+      3,
+      5
+     ],
+     "verdict": "ps_not_runtime"
+    }
+   ],
+   "reason": "paired PS 8fce433c has no draw-enabled runtime plan",
+   "sha256": "d1c92b1a5bb3261d612cb2642c0bcf61b18ac756cfedf602d667c1c87a3c693f",
+   "technique_key": 665991,
+   "verdict": "ps_not_runtime"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 3,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 3
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "packed_color",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 2
+     }
+    ]
+   },
+   "id": "lit.vs.d526784f",
+   "numeric": {
+    "max_abs_position": 8.567744291809731e-10,
+    "max_abs_varying": 9.420650926017515e-10,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      1
+     ],
+     "draw_enabled": 1,
+     "kind": "tev",
+     "plan": "ui.ps.b8f4e53c",
+     "sha256": "b8f4e53c003ea6587a0bb200adc2934f57749822904ff21a06874626f79124f0",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0,
+      3
+     ],
+     "verdict": "ps_reads_color1"
+    },
+    {
+     "colors": [
+      0
+     ],
+     "draw_enabled": 0,
+     "kind": "tev",
+     "plan": "sky.tex_vcolor_bias_alphascale.ps",
+     "sha256": "250481a5376a565d1a12d5bceb36d5329c7a51a3903bfe839ea4ea54abb35181",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0
+     ],
+     "verdict": "ps_not_runtime"
+    }
+   ],
+   "reason": "paired PS b8f4e53c samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it",
+   "sha256": "d526784f308405def5459f50b3ff5f1d64cd40a02f4786b4cdd10d712668b26d",
+   "technique_key": 8,
+   "verdict": "ps_reads_color1"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [
+     0
+    ],
+    "texcoords": [
+     0,
+     1,
+     2
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 3,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 5,
+      "d3d_usage_name": "texcoord",
+      "mode": "remap",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 5
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "color",
+      "mode": "natural",
+      "pica_name": "outclr",
+      "pica_semantic": "color",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 10,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "color",
+      "mode": "dropped",
+      "pica_name": null,
+      "pica_semantic": null,
+      "reg_index": 3
+     }
+    ]
+   },
+   "id": "lit.vs.ef6207ba",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "lighting",
+   "ps_partners": [
+    {
+     "colors": [
+      0,
+      1
+     ],
+     "draw_enabled": 1,
+     "kind": "tev",
+     "plan": "ui.ps.fdbc428b",
+     "sha256": "fdbc428b889c72e2a0d50d5dc6eb9ad58f90409b4cf655683dcd1c747398c15c",
+     "texcoord_reg": [
+      0
+     ],
+     "texcoords": [
+      0,
+      3,
+      5
+     ],
+     "verdict": "ps_reads_color1"
+    }
+   ],
+   "reason": "paired PS fdbc428b samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it",
+   "sha256": "ef6207ba463c4f96ef3c2ffaa5dad2afb95f1cb2d666dadb84cd0f05005b59ed",
+   "technique_key": 141703,
+   "verdict": "ps_reads_color1"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [],
+    "texcoords": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "varying_map": null
+   },
+   "id": "skin.vs.7800effd",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "skinning",
+   "ps_partners": [],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "7800effd008ab353ffe4bee51af11058afc6a87b7918bd3628b0e0c03ad77642",
+   "technique_key": 33555459,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [],
+    "texcoords": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "varying_map": null
+   },
+   "id": "skin.vs.80c76b45",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "skinning",
+   "ps_partners": [],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "80c76b458db77586fbd494f1810316482ac97884ee8c5087f79aa3882642cfa9",
+   "technique_key": 33555474,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [],
+    "texcoords": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "varying_map": null
+   },
+   "id": "skin.vs.8be5cabf",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "skinning",
+   "ps_partners": [],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "8be5cabfad43263281ebc5d50d024b5e085926b540f9b9bc54411c0582ca6192",
+   "technique_key": 33555475,
+   "verdict": "vs_input_not_loadable"
+  },
+  {
+   "draw_enabled": 0,
+   "envelope": {
+    "colors": [],
+    "texcoords": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "varying_map": null
+   },
+   "id": "skin.vs.e54c8f75",
+   "numeric": {
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "status": "pass"
+   },
+   "pack": "skinning",
+   "ps_partners": [],
+   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "sha256": "e54c8f756f6f78d5bd4f48a76bc1e9cc409f4d2f161f2f0455ea704131a21946",
+   "technique_key": 33555458,
+   "verdict": "vs_input_not_loadable"
+  }
+ ],
+ "ok": 0,
+ "programs": 15,
+ "samples": 256,
+ "schema": "wide-vs-certification/1"
+}

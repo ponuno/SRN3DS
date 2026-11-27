@@ -155,6 +155,72 @@ output envelope and PS pair are certified; none is promoted by this change.
 `pica_vs_runtime_smoke` covers both directions (TEXCOORD1 binds, TEXCOORD0
 does not satisfy a TEXCOORD1 input).
 
+## 2c. Wide VS certification (15 loader-ready programs)
+
+`tools/vs_wide_certify.py` re-derives, for every emitted-verified world VS that
+reads `TEXCOORD1..4`, the envelope, the 256-sample differential and every
+retail PS that shares its technique key. The committed record is
+`source/shader_packs/wide_vs_certification.json`; a test fails if a program is
+draw-enabled with a non-`ok` verdict.
+
+**0 of 15 are promotable today.** The loader is ready, but no pair is a full
+runtime path:
+
+| Blocker | Programs | Exact cause |
+|---|---:|---|
+| `vs_input_not_loadable` | 9 | reads normal/tangent/binormal; `D9PicaVsAttr` has no enum for those |
+| `ps_reads_color1` | 4 | paired PS samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it |
+| `ps_not_runtime` | 2 | paired PS is refused or draw 0 (`bda33984`, `8fce433c`) |
+
+None of the 15 is draw-enabled; their notes/preconditions are unchanged apart
+from the new certification record. Unblocking them needs either a
+normal/tangent attribute enum (loader + table + declaration type) or a PS-side
+COLOR1 carrier, not a counter change.
+
+## 2d. PS dependent read (`06aa117c`/`14db34d7`) design
+
+Both 16-chunk PS compute the second sample's UV from the first sample
+(`ps_dependent_texture_read`). PICA's texture units take their coordinate from
+an interpolated VS varying only; TEV stages cannot write a texture coordinate.
+A two-pass RT therefore does **not** solve it: pass 1 can produce an offset
+image, but pass 2's sampler still has no way to consume it per pixel.
+
+Viable designs, in cost order:
+
+1. **CPU/software fallback for the two PS only** (L, 1–2 days): keep the
+   draw as an offscreen bounded tile (e.g. 64×64 RGBA8), read back, run the
+   original SM3 in the host/ARM software PS interpreter (`d3d9_shader.c` +
+   `ir_exec`), and upload the result. Registers: s0 at `tc0`; offset
+   `(s0.rg - 0.5) * c0.xy`; s1 at `tc0 + offset`. No new TEV stage is needed;
+   the cost is the readback and CPU fill for ~32 chunks/frame.
+2. **Vertex-displaced mesh** (L): subdivide the affected quad and displace its
+   UVs in the VS; PICA has no vertex texture fetch, so the distortion texture
+   must be uploaded as a uniform grid (not viable at real resolutions).
+3. **Declared approximation** (current): single centre tap. Already what the
+   pack records; it stays `draw_enabled: 0`.
+
+Recommendation: option 1 behind a frame-budget flag; do not claim a runtime
+path until the readback cost is measured.
+
+## 2e. Lighting PS `def` literal blocker
+
+The blit-pack rewrite (fold an out-of-range `def` lane into a derived `c7` via
+`constant_ops`) produces valid TEV descriptors, and the runtime already has
+`d9_set_derived_constants`/`d9_shader_plan_build_constants`. But for lighting
+PS the device path is gated earlier: `d3d9_pica_tev_preflight_pixel` parses the
+original SM3 and rejects `def` outside RGBA8 before any plan row is consulted.
+Adding a plan-table row alone would be a fake runtime path (audit green,
+device refusal). The real fix is a translator-level fold:
+
+* replace the offending `def` lane with a derived register cN;
+* emit a `constant_ops` producer (`pack`/`negate` of c0) into the plan;
+* make `d9_pica_tev` and the plan generator agree on the same N and op;
+* add samples for the folded literal.
+
+Estimate **M** (half a day) in `d3d9_pica_tev.c` + `lighting_plans.py`; the
+five 10-chunk `lighting.approx.*` plans already carry the measured loss note,
+so once the fold exists the descriptor itself is ready.
+
 ## 3. Top-30 world plans by frequency
 
 By census chunk count (`manifest.json` `hashes[3]`); status is the committed
@@ -261,6 +327,7 @@ python tools/shaders/world_runtime_audit.py            # 18/18 world draws, 0 ho
 python tests/world_shader_audit_test.py                # 21 checks, 0 failures
 python tests/blit_vs_runtime_test.py                   # 108 checks, 0 failures
 python tests/vs_wide_runtime_test.py                   # 33 checks, 0 failures
+python tests/wide_vs_certification_test.py             # 109 checks, 0 failures
 python tests/pica_runtime_audit_test.py                # 136/136, 38 VS programs
 python tests/tev_sched_test.py                         # 10 tests, OK
 python tools/shaders/plan_verify.py --data E:\SteamLibrary\steamapps\common\Skyrim\Data
