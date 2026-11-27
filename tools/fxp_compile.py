@@ -33,8 +33,7 @@ from shaders import packages  # noqa: E402
 from skyrim import bsa  # noqa: E402
 from skyrim.shaders import parse_package  # noqa: E402
 
-DEFAULT_DATA = [r"F:\Skyrim\Data",
-                r"E:\SteamLibrary\steamapps\common\Skyrim\Data"]
+DEFAULT_DATA = [r"E:\SteamLibrary\steamapps\common\Skyrim\Data"]
 ARCHIVE = "Skyrim - Shaders.bsa"
 RUNTIME_MAX_ENTRIES = 16  # keep in sync with source/d3d9_shader_plan.h
 LOGO_HASH = "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"

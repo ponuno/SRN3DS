@@ -25,7 +25,39 @@ Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
   on Azahar. Never claim a frame/pixel result without it.
 - `docs/PORT_LOG.md` is append-only, numbered rows. Add one row per landed layer.
 
-## Census state (2026-11-27, `hunger-renderer`)
+## Current state (2026-11-27, `main`)
+
+- **Paths.** The game install lives at `E:\SteamLibrary\steamapps\common\Skyrim`;
+  the host runs the decrypted exe `E:\skyr\TESV.exe` (entry `0xb568a1`; the Steam
+  exe has a DRM stub at `0x19882ee`). IRC: `E:\census_ir2\ir_container\tesv.irc`.
+  Device builds use `E:\Skyrim_N3DS_build\live_arm_check2\gen`.
+  **`F:` is the user's 3DS SD card and must never be read or written by tools.**
+- **Menu blocker.** `0xa3cdd0` is *not* a retry loop: `0xac6c10` is a buffered
+  stream read (0 = success) and the loop advances through ~2.8 MB of shader
+  blobs. `0xa43f80` is a leaf range accessor; `0xa43fb5` is only the last
+  published IR leader, not proof of a spin. After the preload the first
+  `Present` happens and thread 11 runs D3D9 state setup (`0xf87bxx`,
+  `SetTextureStageState`), but **no `Draw*` follows**. That is the current
+  first divergent layer; the watchdog now dumps after a positive stall
+  threshold (the old zero-threshold arm fired after 6 ms).
+- **Heap.** `shader_new` clamped the retained word count: `realloc(code, 0)`
+  with `info.words == 0` used to free the buffer and leave a dangling
+  `o->code`. The fix and its regression are in; `0xC0000374` itself was not
+  reproduced.
+- **Shaders.** Six packs are merged: ui (19), skinning (83 VS contracts, 3
+  `emitted-verified` `.shbin`), terrain (19 approx), lighting (34), blit_post
+  (27), sky_water (14). Runtime table: 7 entries (4 canonical + 3 menu).
+  Coverage: 177 translated / 7 draw-enabled / 6,475 refused + 19 extra-census.
+  An external review of the PICA VS path (VS-01..VS-10) is being fixed;
+  `VS-02` (independent bone indices hidden by the verifier) is first.
+- **Menu BSA.** Boot now reads `sdmc:/Skyrim/Skyrim.ini` then
+  `Data/Skyrim.ini`, mounts `sResourceArchiveList`/`List2` in order (32
+  archives / 96 MiB index caps), and falls back to Interface+Update.
+- **Deploy.** `tools/deploy_device.py plan|stage` resolves load-order winners
+  and can write cooked archives (`--pack cooked`, uncompressed, group-split,
+  `stream_index` phase 1 in progress). It never touches `F:`.
+
+## Census history (superseded)
 
 - Commit `8db224e` trims each shader copy to its declared token stream. The
   walker steps over instruction/comment lengths, so operand words that equal
@@ -71,9 +103,9 @@ Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
 # host suite (use E: because C: has hit "no space on device")
 $env:HOST_CLANG_JOBS='8'
 powershell -ExecutionPolicy Bypass -File tools\run_host_tests.ps1 `
-  -TesvIrc F:\Skyrim\ir\tesv.irc `
+  -TesvIrc E:\census_ir2\ir_container\tesv.irc `
   -TesvSliceGen E:\Skyrim_N3DS_build\live_arm_check2\gen `
-  -TesvExe F:\Skyrim\TESV.exe -AllowDiagnosticFault `
+  -TesvExe E:\skyr\TESV.exe -AllowDiagnosticFault `
   -OutDir E:\host_full -TestTimeoutSec 300
 
 # targeted

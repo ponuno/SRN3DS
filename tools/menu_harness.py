@@ -354,7 +354,7 @@ HARNESS = {
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--exe", default=r"F:\Skyrim\TESV.exe")
+    ap.add_argument("--exe", default=r"E:\skyr\TESV.exe")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--gfx-shaders", action="store_true",
                     help="print GFx's built-in VS/PS tables with hashes")

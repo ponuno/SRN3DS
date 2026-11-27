@@ -26,7 +26,7 @@ Commands::
 
     python tools\vs_emit.py emit --manifest docs\shader_plans.json ^
         --id game.vs.0ccc7542 --out source\generated\game.vs.0ccc7542.v.pica
-    python tools\vs_emit.py emit --data F:\Skyrim\Data ^
+    python tools\vs_emit.py emit --data E:\SteamLibrary\steamapps\common\Skyrim\Data ^
         --package shadersfx\imagespace002.fxp --offset 4808 ^
         --id game.vs.0ccc7542 --out ... 
     python tools\vs_emit.py emit-c --manifest docs\generated_vs.json ^

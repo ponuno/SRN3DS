@@ -34,7 +34,6 @@ from shaders import packages  # noqa: E402
 
 DEFAULT_DATA = [
     r"E:\SteamLibrary\steamapps\common\Skyrim\Data",
-    r"F:\Skyrim\Data",
 ]
 DEFAULT_OUT = r"E:\host_sm3"
 

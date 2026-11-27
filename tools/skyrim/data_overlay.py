@@ -146,7 +146,7 @@ def resolve_data_root(explicit: Optional[str] = None,
 
     probes = [
         os.path.join(os.getcwd(), "Data"),
-        r"F:\Skyrim\Data",
+        r"E:\SteamLibrary\steamapps\common\Skyrim\Data",
         r"C:\Program Files (x86)\Steam\steamapps\common\Skyrim\Data",
     ]
     for candidate in probes:

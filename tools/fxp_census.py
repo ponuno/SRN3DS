@@ -37,7 +37,6 @@ from skyrim import bsa  # noqa: E402
 from skyrim.shaders import parse_package, version_name  # noqa: E402
 
 DEFAULT_DATA = [
-    r"F:\Skyrim\Data",
     r"E:\SteamLibrary\steamapps\common\Skyrim\Data",
 ]
 ARCHIVE = "Skyrim - Shaders.bsa"
