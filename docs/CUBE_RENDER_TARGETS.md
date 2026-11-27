@@ -7,6 +7,11 @@ created in this run**. The fault is inside the guest's
 `NiDX9RenderedCubeMapData::CreateSurf` *before* `CreateCubeTexture`; the receiver
 is a guest `NiRenderedCubeMap` object whose face-0 pointer is invalid.
 
+> 2D NPOT render-target **textures** (CreateTexture with
+> `D3DUSAGE_RENDERTARGET`) use the POT-storage + UV-sub-rect scheme described
+> in `docs/NPOT_RENDER_TARGETS.md`.  Cube faces remain power-of-two because a
+> cube is allocated as one square mip chain.
+
 ## 1. What the 64 MiB census actually did
 
 All nine 2D render targets were created (`S_OK`): 5 x 1024 R32F, 3 x 512 A8,

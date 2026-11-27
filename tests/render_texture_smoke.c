@@ -77,18 +77,101 @@ static void core_render_texture(void) {
     assert(d9_create_render_texture(d, 256, 256, D9_A8R8G8B8,
                                     D9_POOL_MANAGED, D9_USAGE_RENDERTARGET, &bad) == D9_INVALID);
     assert(d9_create_render_texture(d, 100, 256, D9_A8R8G8B8,
-                                    D9_POOL_DEFAULT, D9_USAGE_RENDERTARGET, &bad) == D9_INVALID);
+                                    D9_POOL_DEFAULT, D9_USAGE_RENDERTARGET, &bad) == D9_OK);
+    assert(d9_release_texture(d, bad) == D9_OK); bad = 0;
     assert(d9_create_render_texture(d, 2000, 256, D9_A8R8G8B8,
                                     D9_POOL_DEFAULT, D9_USAGE_RENDERTARGET, &bad) == D9_INVALID);
     assert(d9_create_render_texture(d, 256, 256, D9_A8R8G8B8,
                                     D9_POOL_DEFAULT, 0, &bad) == D9_INVALID);
 
+    /* NPOT logical surfaces round up to POT storage; the excess is padding. */
+    D9Handle npot = 0;
+    assert(d9_create_render_texture(d, 400, 240, D9_A8R8G8B8,
+                                    D9_POOL_DEFAULT, D9_USAGE_RENDERTARGET, &npot) == D9_OK);
+    D9Handle ntgt = d9_texture_render_target(d, npot);
+    assert(ntgt);
+    unsigned nw = 0, nh = 0;
+    assert(d9_render_target_info(d, ntgt, &nw, &nh, NULL, NULL, NULL) == D9_OK);
+    assert(nw == 400 && nh == 240);
+    unsigned total_w = 0, total_h = 0;
+    assert(d9_render_target_storage_info(d, ntgt, &total_w, &total_h) == D9_OK);
+    assert(total_w == 512 && total_h == 256);
+    assert(d9_release_texture(d, npot) == D9_OK);
+
     /* Releasing the texture releases exactly one backing target. */
-    assert(d9_null_stats()->target_creates == 1);
+    assert(d9_null_stats()->target_creates == 3);
     assert(d9_release_texture(d, tex) == D9_OK);
-    assert(d9_null_stats()->target_deletes == 1);
+    assert(d9_null_stats()->target_deletes == 3);
     assert(d9_set_render_target(d, tgt) == D9_INVALID);
 
+    d9_destroy_device(d);
+}
+
+/* ------------------------------------------------------------ NPOT core --- */
+
+static void core_npot_render_target(void) {
+    d9_null_reset();
+    D9Device *d = d9_create_device(d9_null_backend(), d9_null_context(), 8u << 20);
+    assert(d);
+
+    struct { unsigned w, h, tw, th; } sizes[] = {
+        {400, 240, 512, 256}, {320, 180, 512, 256}, {100, 100, 128, 128},
+        {2, 2, 8, 8}, {1, 1, 8, 8},
+    };
+    D9Handle tex[5] = {0}, tgt[5] = {0};
+    for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; ++i) {
+        assert(d9_create_render_texture(d, sizes[i].w, sizes[i].h, D9_A8R8G8B8,
+                                        D9_POOL_DEFAULT, D9_USAGE_RENDERTARGET,
+                                        &tex[i]) == D9_OK);
+        tgt[i] = d9_texture_render_target(d, tex[i]);
+        assert(tgt[i]);
+        unsigned sw = 0, sh = 0;
+        assert(d9_render_target_storage_info(d, tgt[i], &sw, &sh) == D9_OK);
+        assert(sw == sizes[i].tw && sh == sizes[i].th);
+        /* Clear covers the logical surface; readback is an exact sub-rect. */
+        assert(d9_set_render_target(d, tgt[i]) == D9_OK);
+        assert(d9_begin_scene(d, 0xff112233u) == D9_OK);
+        assert(d9_end_scene(d) == D9_OK);
+        uint8_t *row = malloc((size_t)sizes[i].w * sizes[i].h * 4);
+        assert(row);
+        assert(d9_render_target_read(d, tgt[i], row, (size_t)sizes[i].w * 4,
+                                     0, 0, sizes[i].w, sizes[i].h) == D9_OK);
+        for (unsigned p = 0; p < sizes[i].w * sizes[i].h; ++p)
+            assert(((uint32_t *)row)[p] == 0xff112233u);
+        free(row);
+    }
+
+    /* Partial write/read of the logical sub-rect leaves the rest intact. */
+    uint32_t patch[20 * 10];
+    for (unsigned i = 0; i < 20 * 10; ++i) patch[i] = 0xff445566u;
+    assert(d9_render_target_write(d, tgt[0], patch, 20 * 4, 10, 5, 20, 10) == D9_OK);
+    static uint32_t full[400 * 240];
+    assert(d9_render_target_read(d, tgt[0], full, 400 * 4, 0, 0, 400, 240) == D9_OK);
+    for (unsigned y = 0; y < 240; ++y)
+        for (unsigned x = 0; x < 400; ++x) {
+            int inside = x >= 10 && x < 30 && y >= 5 && y < 15;
+            assert(full[y * 400 + x] == (inside ? 0xff445566u : 0xff112233u));
+        }
+
+    /* StretchRect NPOT -> NPOT (full logical rects). */
+    assert(d9_blit(d, tgt[1], NULL, tgt[2], NULL, D9_FILTER_POINT) == D9_OK);
+    static uint32_t np[320 * 180];
+    assert(d9_render_target_read(d, tgt[1], np, 320 * 4, 0, 0, 320, 180) == D9_OK);
+    for (unsigned y = 0; y < 180; ++y)
+        for (unsigned x = 0; x < 320; ++x)
+            assert(np[y * 320 + x] == 0xff112233u);
+
+    /* StretchRect NPOT -> POT target. */
+    D9Handle pot = 0;
+    assert(d9_create_render_target(d, 256, 256, D9_A8R8G8B8, 0, &pot) == D9_OK);
+    assert(d9_blit(d, pot, NULL, tgt[2], NULL, D9_FILTER_POINT) == D9_OK);
+    static uint32_t pp[256 * 256];
+    assert(d9_render_target_read(d, pot, pp, 256 * 4, 0, 0, 256, 256) == D9_OK);
+    for (unsigned i = 0; i < 256 * 256; ++i) assert(pp[i] == 0xff112233u);
+
+    assert(d9_release_render_target(d, pot) == D9_OK);
+    for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; ++i)
+        assert(d9_release_texture(d, tex[i]) == D9_OK);
     d9_destroy_device(d);
 }
 
@@ -334,23 +417,40 @@ static void com_render_texture(void) {
     uint32_t tex256 = read32(&demo, OUT);
     assert(tex512 && tex256 && m.targets_created == 3);
 
-    /* 7. Refusals are named and do not allocate a target. */
+    /* 7. NPOT surfaces keep their logical size and use POT storage. */
+    assert(create_rt(&demo, 400, 240, 1, D9_A8R8G8B8, D9_POOL_DEFAULT) == 0);
+    uint32_t tex400 = read32(&demo, OUT);
+    assert(tex400 && m.targets_created == 4);
+    uint32_t nsv[] = {0, OUT};
+    assert(call(&demo, tex400, 18, nsv, 2) == 0);
+    uint32_t nsurf = read32(&demo, OUT);
+    assert(nsurf && m.targets_created == 4);
+    /* Scaleform also creates 2x2 helper targets; storage is the 8x8 floor. */
+    assert(create_rt(&demo, 2, 2, 1, D9_A8R8G8B8, D9_POOL_DEFAULT) == 0);
+    uint32_t tex2 = read32(&demo, OUT);
+    assert(tex2 && m.targets_created == 5);
+
+    /* 8. Refusals are named and do not allocate a target. */
     unsigned created_before = m.targets_created;
     assert(create_rt(&demo, 1024, 1024, 1, 0x72u, D9_POOL_DEFAULT) == ERR_UNAVAILABLE);
     assert(create_rt(&demo, 1024, 1024, 1, 0x71u, D9_POOL_DEFAULT) == ERR_UNAVAILABLE);
     assert(create_rt(&demo, 1024, 1024, 2, D9_A8R8G8B8, D9_POOL_DEFAULT) == ERR_UNAVAILABLE);
     assert(create_rt(&demo, 1024, 1024, 1, D9_A8R8G8B8, D9_POOL_MANAGED) == ERR_UNAVAILABLE);
-    assert(create_rt(&demo, 100, 128, 1, D9_A8R8G8B8, D9_POOL_DEFAULT) == ERR_UNAVAILABLE);
     assert(create_rt(&demo, 2048, 128, 1, D9_A8R8G8B8, D9_POOL_DEFAULT) == ERR_UNAVAILABLE);
     assert(m.targets_created == created_before);
 
-    /* 8. Releasing surface + texture releases exactly the backing target. */
+    /* 9. Releasing surface + texture releases exactly the backing target. */
     assert(call(&demo, surface, 2, NULL, 0) == 0);
     assert(call(&demo, tex, 2, NULL, 0) == 0);
     assert(m.targets_deleted == 1);
     assert(call(&demo, tex512, 2, NULL, 0) == 0);
     assert(call(&demo, tex256, 2, NULL, 0) == 0);
     assert(m.targets_deleted == 3);
+    assert(call(&demo, nsurf, 2, NULL, 0) == 0);
+    assert(call(&demo, tex400, 2, NULL, 0) == 0);
+    assert(m.targets_deleted == 4);
+    assert(call(&demo, tex2, 2, NULL, 0) == 0);
+    assert(m.targets_deleted == 5);
 
     d9_com_demo_destroy(&demo);
     assert(!d9_destroy_device_ex(d));
@@ -360,6 +460,7 @@ static void com_render_texture(void) {
 
 int main(void) {
     core_render_texture();
+    core_npot_render_target();
     com_render_texture();
     return 0;
 }

@@ -21,7 +21,11 @@ enum {MAX_BUFFERS=32,MAX_TEXTURES=128,MAX_CUBES=32,MAX_VOLUMES=32,
  *   5x1024 + 4x512 logical targets -> nine 256x256 targets
  *   = 9 * (256 KiB colour + 256 KiB depth) = 4.5 MiB.
  * The retained back buffer is created through the unbounded path. */
-enum {D9_TARGET_NATIVE_MIN=64,D9_TARGET_NATIVE_DEFAULT=256,D9_TARGET_NATIVE_LIMIT=512};
+enum {D9_TARGET_NATIVE_MIN=64,D9_TARGET_NATIVE_DEFAULT=256,D9_TARGET_NATIVE_LIMIT=512,
+      /* Largest POT storage an NPOT render-target texture may round up to.
+       * 400x240 and 320x180 fit in 512x256; larger logical surfaces keep the
+       * historical bounded/down-scaled path instead of a 1024-axis alloc. */
+      D9_TARGET_POT_LIMIT=512};
 static unsigned target_native_max_from_env(void){
     const char *s=getenv("TESV_D3D9_TARGET_NATIVE_MAX");
     if(!s||!*s)return D9_TARGET_NATIVE_DEFAULT;
@@ -71,6 +75,11 @@ typedef struct {
     int is_cube_face; /* native is a backend cube-face view, not a 2D target */
     D9Handle cube;unsigned cube_face,cube_level;
     int has_depth;    /* native currently owns a depth-stencil attachment */
+    /* NPOT logical surface stored in a larger power-of-two allocation.  The
+     * logical image occupies the top-left w x h corner; render/scissor uses the
+     * logical size and sampling/copying addresses the sub-rect.  Zero for the
+     * historical exact/bounded (down-scaled) targets. */
+    int pot_pad;
 } Target;
 typedef struct {D9Handle id;unsigned w,h,format,lockable;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
@@ -82,6 +91,11 @@ typedef struct {
     /* D3DUSAGE_RENDERTARGET: nonzero target handle whose colour buffer is the
      * texture storage.  The Texture owns no separate native allocation. */
     D9Handle rt_target;
+    /* Power-of-two storage dimensions of an NPOT render-target texture.  Zero
+     * means the sampler's texture dimensions equal w/h (every other texture).
+     * A non-zero pair makes the draw path scale normalized UVs by w/storage_w
+     * and h/storage_h so sampling stays inside the logical sub-rect. */
+    unsigned storage_w,storage_h;
     /* Set when LockRect/UnlockRect wrote the CPU store inside BeginScene; the
      * GPU copy is published at EndScene or by the next SetTexture outside a
      * frame. */
@@ -1846,19 +1860,36 @@ static Depth *depth_slot(D9Device *d,D9Handle h);
 static unsigned bounded_native_dim(unsigned v,unsigned cap){
     return v>cap?cap:v;
 }
-/* bounded=0 is the retained back buffer: it is already created at its native
- * power-of-two size and keeps the existing corner-viewport/present path.
- * bounded=1 is an explicit render target or render-target texture; its logical
- * size is preserved while native storage is capped per axis. */
-static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,
-                         int bounded,int want_depth,D9Handle *out){
+/* Smallest power-of-two >= v, clamped to the PICA texture range 8..1024. */
+static unsigned pot_ceil(unsigned v){
+    if(v<8)return 8;
+    unsigned p=8;
+    while(p<v&&p<1024)p<<=1;
+    return p>1024?1024:p;
+}
+/* NPOT render-target textures use a power-of-two allocation that is at least
+ * as large as the logical surface whenever that fits the offscreen budget cap
+ * (512).  Larger logical surfaces keep the historical bounded/down-scaled
+ * storage instead of a 1024x1024+ allocation. */
+static unsigned rt_texture_native_dim(unsigned logical,unsigned cap){
+    unsigned p=pot_ceil(logical);
+    if(p<=D9_TARGET_POT_LIMIT)return p;
+    return bounded_native_dim(logical,cap);
+}
+/* Performs the allocation for an already-decided native size.  `bounded` is
+ * non-zero when native storage may be smaller than the logical surface (the
+ * scaled-viewport path); it is zero for pot-padded and exact targets, where
+ * every native axis is >= the logical axis. */
+static int create_target_sized(D9Device *d,unsigned w,unsigned h,
+                               unsigned nw,unsigned nh,unsigned format,
+                               int lockable,int pot_pad,int want_depth,
+                               D9Handle *out){
     if(out)*out=0;
-    if(!d||d->scene||d->teardown||!out||!d->next||w<8||h<8||w>1024||h>1024||
-       (w&(w-1))||(h&(h-1))||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
+    if(!d||d->scene||d->teardown||!out||!d->next||w<1||h<1||w>1024||h>1024||
+       nw<8||nh<8||nw>1024||nh>1024||(nw&(nw-1))||(nh&(nh-1))||
+       (format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
        !d->ops.target_create||!d->ops.target_delete||!d->ops.target_bind||!d->ops.target_clear||
        (lockable&&!d->ops.target_read))return D9_INVALID;
-    unsigned nw=bounded?bounded_native_dim(w,d->target_native_max):w;
-    unsigned nh=bounded?bounded_native_dim(h,d->target_native_max):h;
     if((nw<w||nh<h)&&!d->ops.target_viewport_scaled){
         char why[160];
         snprintf(why,sizeof why,"CreateRenderTarget: backend cannot scale %ux%u logical to %ux%u native; no target_viewport_scaled",w,h,nw,nh);
@@ -1886,6 +1917,7 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
         return D9_BACKEND;
     }
     D9Handle id=d->next++;*slot=(Target){id,w,h,nw,nh,format,lockable?1:0,bytes,native};
+    slot->pot_pad=pot_pad;
     d->target_used+=bytes;
     if(want_depth){
         int drc=target_ensure_depth(d,slot);
@@ -1897,6 +1929,21 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
     }
     *out=id;return D9_OK;
 }
+/* bounded=0 is the retained back buffer: it is already created at its native
+ * power-of-two size and keeps the existing corner-viewport/present path.
+ * bounded=1 is an explicit render target or render-target texture; its logical
+ * size is preserved while native storage is capped per axis. */
+static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,
+                         int bounded,int want_depth,D9Handle *out){
+    if(out)*out=0;
+    if(!d||d->scene||d->teardown||!out||!d->next||w<8||h<8||w>1024||h>1024||
+       (format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
+       !d->ops.target_create||!d->ops.target_delete||!d->ops.target_bind||!d->ops.target_clear||
+       (lockable&&!d->ops.target_read))return D9_INVALID;
+    unsigned nw=bounded?bounded_native_dim(w,d->target_native_max):w;
+    unsigned nh=bounded?bounded_native_dim(h,d->target_native_max):h;
+    return create_target_sized(d,w,h,nw,nh,format,lockable,0,want_depth,out);
+}
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
     return create_target(d,w,h,format,lockable,1,0,out);
 }
@@ -1904,14 +1951,24 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
                              unsigned pool,unsigned usage,D9Handle *out){
     if(out)*out=0;
     if(!d||d->scene||d->teardown||!out||!d->next||pool!=D9_POOL_DEFAULT||
-       usage!=D9_USAGE_RENDERTARGET||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))
+       usage!=D9_USAGE_RENDERTARGET||(format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8)||
+       w<1||h<1||w>1024||h>1024)
         return D9_INVALID;
     if(!d->ops.target_texture){
         if(out)*out=0;
         set_diagnosis(d,"CreateTexture: backend has no sampleable render-target texture view");
         return D9_UNSUPPORTED;
     }
-    D9Handle tgt=0;int rc=d9_create_render_target(d,w,h,format,0,&tgt);
+    /* PICA (citro3d C3D_TexInitWithParams) allocates power-of-two storage only.
+     * An NPOT D3D surface keeps its logical size in the top-left corner of the
+     * rounded-up allocation; draws use the logical viewport and the sampler
+     * scales UVs by w/storage_w, h/storage_h.  A surface too large for the POT
+     * cap keeps the existing bounded/down-scaled native storage. */
+    unsigned nw=rt_texture_native_dim(w,d->target_native_max);
+    unsigned nh=rt_texture_native_dim(h,d->target_native_max);
+    int pot_pad=(nw>=w&&nh>=h&&(nw!=w||nh!=h))?1:0;
+    D9Handle tgt=0;
+    int rc=create_target_sized(d,w,h,nw,nh,format,0,pot_pad,0,&tgt);
     if(rc)return rc;
     Target *tg=target(d,tgt);
     Texture *slot=NULL;
@@ -1930,6 +1987,7 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
     Texture t;memset(&t,0,sizeof t);
     t.w=w;t.h=h;t.format=format;t.levels=1;t.gpu_levels=1;t.pool=pool;t.usage=usage;
     t.gpu_only=1;t.native=sample;t.rt_target=tgt;
+    if(pot_pad){t.storage_w=nw;t.storage_h=nh;}
     t.level[0]=(Level){w,h,(size_t)w*4u,(size_t)w*h*4u,0,1};
     t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
@@ -1947,6 +2005,11 @@ static int apply_target_viewport(D9Device *d,Target *t){
                    ?D9_BACKEND:D9_OK;
     if(t->id==d->back_target)
         return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,d->back_w,d->back_h)?D9_BACKEND:D9_OK;
+    /* NPOT logical surface in POT storage: the image lives in the top-left
+     * logical rectangle, so the viewport (and therefore scissor) is the logical
+     * size; the padded columns/rows are never rasterized or sampled. */
+    if(t->pot_pad)
+        return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,t->w,t->h)?D9_BACKEND:D9_OK;
     if(t->native_w!=t->w||t->native_h!=t->h){
         if(!d->ops.target_viewport_scaled){
             set_diagnosis(d,"SetRenderTarget: backend cannot scale this bounded native target");
@@ -2042,6 +2105,14 @@ static unsigned writeback_nearest_logical(unsigned native_pos,unsigned native_di
 int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);if(!t||!d||!dst||!dst_pitch||d->scene)return D9_INVALID;
+    if(t->pot_pad){
+        /* Exact sub-rect copy: the logical image occupies the top-left corner,
+         * so no resampling and no scaled-readback opt-in is needed. */
+        if(!d->ops.target_read)return D9_BACKEND;
+        if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||dst_pitch<(size_t)w*4)
+            return D9_INVALID;
+        return d->ops.target_read(d->ctx,t->native,dst,dst_pitch,x,y,w,height)?D9_BACKEND:D9_OK;
+    }
     if(t->native_w!=t->w||t->native_h!=t->h){
         if(!d->scaled_readback){
             char why[220];
@@ -2076,6 +2147,25 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
                            unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);
     if(!t||!d||!src||!src_pitch||d->scene||d->teardown)return D9_INVALID;
+    if(t->pot_pad){
+        /* Read-modify-write of the POT allocation: patch only the logical
+         * sub-rect, leaving the padding and any sibling semantics untouched. */
+        if(!d->ops.target_read||!d->ops.target_write)return D9_BACKEND;
+        if(!w||!height||x>t->w||y>t->h||w>t->w-x||height>t->h-y||src_pitch<(size_t)w*4)
+            return D9_INVALID;
+        size_t npitch=(size_t)t->native_w*4,nbytes=npitch*t->native_h;
+        uint8_t *native=malloc(nbytes);if(!native)return D9_MEMORY;
+        if(d->ops.target_read(d->ctx,t->native,native,npitch,0,0,t->native_w,t->native_h)){
+            free(native);return D9_BACKEND;
+        }
+        for(unsigned yy=0;yy<height;++yy)
+            memcpy(native+(size_t)(y+yy)*npitch+(size_t)x*4,
+                   (const uint8_t *)src+(size_t)yy*src_pitch,(size_t)w*4);
+        int rc=d->ops.target_write(d->ctx,t->native,native,npitch,t->native_w,t->native_h);
+        free(native);
+        if(rc)return D9_BACKEND;
+        return D9_OK;
+    }
     if(t->native_w!=t->w||t->native_h!=t->h){
         if(!d->scaled_readback){
             char why[220];
@@ -3814,6 +3904,11 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
         return D9_UNSUPPORTED;
     }
     if(indexed&&!(up&&up->indices)&&((size_t)start>ixbytes/step||in>ixbytes/step-(size_t)start))return D9_INVALID;
+    float uv_su=1.0f,uv_sv=1.0f;
+    if(t&&t->storage_w&&t->storage_h&&!cube_mode&&!volume_mode){
+        uv_su=(float)t->w/(float)t->storage_w;
+        uv_sv=(float)t->h/(float)t->storage_h;
+    }
     for(size_t i=0;i<n;++i){size_t rel=triangle_index(type,i);int64_t index=(int64_t)start+(int64_t)rel;
         if(indexed){const uint8_t *p=ixdata+((size_t)start+rel)*step;uint32_t raw=(uint32_t)p[0]|(uint32_t)p[1]<<8;
             if(step==4)raw|=(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
@@ -3835,6 +3930,10 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
             }
             entry->index=(uint64_t)index;entry->valid=1;}
         d->scratch[i]=entry->vertex;d->color_scratch[i]=entry->color;
+        if(uv_su!=1.0f||uv_sv!=1.0f){
+            d->scratch[i].u*=uv_su;d->scratch[i].v*=uv_sv;
+            d->color_scratch[i].u*=uv_su;d->color_scratch[i].v*=uv_sv;
+        }
         if(cube_mode){
             unsigned face=0;
             if(cube_select_face(entry->normal,cube_has_normal,cube_nm_ok,cube_nm,

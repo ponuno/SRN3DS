@@ -1426,13 +1426,18 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||!ptr(out,
     if(A(8))RET(INVALID,9);
     if(A(4)==1u){
         unsigned w=A(1),height=A(2),levels=A(3),format=A(5),pool=A(6);
+        const char *rtt=getenv("TESV_D3D9_RT_TRACE");
+        int rt_trace=rtt&&*rtt&&strcmp(rtt,"0")!=0;
+        if(rt_trace)
+            fprintf(stderr,"[rt-trace] CreateTexture w=%u h=%u levels=%u format=0x%x pool=%u usage=0x%x\n",
+                    w,height,levels,format,pool,(unsigned)A(4));
         unsigned storage=format;
         int hdr=format==0x6fu||format==0x71u||format==0x72u; /* R16F / A16B16G16R16F / R32F */
         if(hdr&&g.hdr_ldr_fallback)storage=D9_A8R8G8B8;
         const char *why=pool!=0?"render-target textures require D3DPOOL_DEFAULT":
             levels!=1?"render-target textures are implemented with exactly one level":
-            (w<8||height<8||w>1024||height>1024||(w&(w-1))||(height&(height-1)))?
-                "render-target textures must be power-of-two 8..1024":
+            (w<1||height<1||w>1024||height>1024)?
+                "render-target textures must be 1..1024 pixels":
             (storage!=D9_A8R8G8B8&&storage!=D9_X8R8G8B8)?
                 "float/HDR render-target textures are not implemented; A8R8G8B8 and X8R8G8B8 only":NULL;
         if(why){d3d_fail("CreateTexture",why,UNAVAILABLE);RET(UNAVAILABLE,9);}
@@ -1449,7 +1454,14 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||!ptr(out,
         }
         Obj *o=new_obj(TEX);if(!o){d9_release_texture(g.device,h);RET(OUTMEM,9);}
         o->handle=h;o->width=w;o->height=height;o->bytes=w*height*4u;o->pitch=w*4u;
-        o->format=format;o->usage=1u;o->pool=pool;retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,9);
+        o->format=format;o->usage=1u;o->pool=pool;retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;
+        if(rt_trace){
+            D9Handle tt=d9_texture_render_target(g.device,h);
+            unsigned sw=0,sh=0;
+            if(tt)d9_render_target_storage_info(g.device,tt,&sw,&sh);
+            fprintf(stderr,"[rt-trace]   -> OK logical %ux%u storage %ux%u\n",w,height,sw,sh);
+        }
+        RET(OK,9);
     }
     if(A(4)&~0x00220200u){d3d_fail("CreateTexture","autogen, depth-stencil and non-DYNAMIC texture usages are not implemented",UNAVAILABLE);RET(UNAVAILABLE,9);}
     if(A(6)>2)RET(UNAVAILABLE,9);

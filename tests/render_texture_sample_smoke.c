@@ -37,6 +37,8 @@ typedef struct {
     int active, refuse_large;
     unsigned native_w, native_h, scaled_calls;
     unsigned logical_w, logical_h;
+    unsigned vp_calls, vp_w, vp_h;
+    float last_u[3], last_v[3];
 } Ctx;
 
 static int tex_create(void *opaque, unsigned w, unsigned h, unsigned levels,
@@ -73,11 +75,12 @@ static int begin(void *opaque, uint32_t argb) {
 }
 static int draw(void *opaque, const D9Vertex *v, size_t n,
                 const D9Matrix *clip, void *texture, const D9DrawState *state) {
-    (void)v; (void)n; (void)clip; (void)state;
+    (void)clip; (void)state;
     Ctx *c = opaque;
-    assert(c->active && texture);
+    assert(c->active && texture && v && n <= 3);
     c->last0 = *(uint32_t *)texture;
     assert(c->last0 == TEX_MAGIC || c->last0 == SAMPLE_MAGIC);
+    for (size_t i = 0; i < n; ++i) { c->last_u[i] = v[i].u; c->last_v[i] = v[i].v; }
     ++c->draws;
     return 0;
 }
@@ -136,6 +139,12 @@ static int target_bind(void *opaque, void *native) {
     assert(!t || t->magic == TARGET_MAGIC);
     return 0;
 }
+static int target_viewport(void *opaque, unsigned w, unsigned h) {
+    Ctx *c = opaque;
+    assert(c->active);
+    c->vp_calls++; c->vp_w = w; c->vp_h = h;
+    return 0;
+}
 static int target_clear(void *opaque, void *native, uint32_t argb) {
     (void)opaque; (void)argb;
     MockTarget *t = native;
@@ -174,6 +183,7 @@ static const D9Backend ops = {
     .target_bind = target_bind,
     .target_clear = target_clear,
     .target_texture = target_texture,
+    .target_viewport = target_viewport,
     .target_viewport_scaled = target_viewport_scaled,
 };
 
@@ -248,6 +258,46 @@ int main(void) {
     assert(big.native_w == 512 && big.native_h == 512);
     assert(d9_release_texture(d5, r) == D9_OK && big.target_deletes == 1);
     assert(d9_destroy_device_ex(d5) == 0);
+
+    /* NPOT render-target textures: logical size stays, storage rounds up to
+     * POT, UVs scale by logical/storage and the viewport is the logical rect. */
+    Ctx np; memset(&np, 0, sizeof np);
+    D9Device *dnp = d9_create_device(&ops, &np, 8u << 20);
+    assert(dnp);
+    struct { unsigned w, h, tw, th; } cases[] = {
+        {400, 240, 512, 256}, {320, 180, 512, 256}, {100, 100, 128, 128},
+        {2, 2, 8, 8}, {1, 1, 8, 8},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+        D9Handle rt = 0;
+        assert(d9_create_render_texture(dnp, cases[i].w, cases[i].h,
+                                        D9_A8R8G8B8, D9_POOL_DEFAULT,
+                                        D9_USAGE_RENDERTARGET, &rt) == D9_OK);
+        assert(rt && np.target_creates == i + 1);
+        assert(np.native_w == cases[i].tw && np.native_h == cases[i].th);
+        D9Handle tgt = d9_texture_render_target(dnp, rt);
+        unsigned sw = 0, sh = 0;
+        assert(d9_render_target_storage_info(dnp, tgt, &sw, &sh) == D9_OK);
+        assert(sw == cases[i].tw && sh == cases[i].th);
+
+        assert(d9_set_render_target(dnp, tgt) == D9_OK);
+        assert(d9_begin_scene(dnp, 0xff010203u) == D9_OK);
+        assert(np.vp_calls >= 1 && np.vp_w == cases[i].w && np.vp_h == cases[i].h);
+        assert(d9_bind_texture(dnp, 0, rt) == D9_OK);
+        assert(d9_draw_primitive_up(dnp, D9_TRIANGLELIST, 1, vertices,
+                                    sizeof vertices[0]) == D9_OK);
+        float eu = (float)cases[i].w / (float)cases[i].tw;
+        float ev = (float)cases[i].h / (float)cases[i].th;
+        for (unsigned k = 0; k < 3; ++k) {
+            assert(np.last_u[k] >= 0.0f && np.last_u[k] <= eu);
+            assert(np.last_v[k] >= 0.0f && np.last_v[k] <= ev);
+        }
+        assert(np.last_u[1] > eu - 1e-5f && np.last_v[2] > ev - 1e-5f);
+        assert(d9_end_scene(dnp) == D9_OK);
+        assert(d9_release_texture(dnp, rt) == D9_OK);
+    }
+    assert(np.target_deletes == 5);
+    assert(d9_destroy_device_ex(dnp) == 0);
 
     Ctx small;
     memset(&small, 0, sizeof small);

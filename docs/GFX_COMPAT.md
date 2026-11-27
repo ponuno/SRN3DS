@@ -260,6 +260,16 @@ its logical size and PICA CLAMP sampling addresses it.  RGBA8/XRGB8 and every
 BC format keep the power-of-two rule.  A8L8/A4R4G4B4 stay refused (they are only
 reached if A8 creation fails).
 
+**Render-target textures** (`D3DUSAGE_RENDERTARGET`, `A8R8G8B8`/`X8R8G8B8`)
+also accept NPOT logical sizes in 1..1024.  citro3d can only allocate
+power-of-two PICA storage, so the surface is rounded up per axis, the logical
+image occupies the top-left `w x h` corner, draws use a logical viewport, and
+the sampler scales normalized UVs by `w/storage_w`, `h/storage_h`.  Clear
+covers the allocation (the padding is never sampled), while
+StretchRect/GetRenderTargetData copy the logical sub-rect.  Allocations larger
+than 512 per axis keep the historical bounded/down-scaled path.  See
+`docs/NPOT_RENDER_TARGETS.md`.
+
 The 24-bit corpus is handled at the D3DX layer, not by `CreateTexture`
 (`docs/TEXTURE_FORMATS.md` §2a): `R8G8B8` DDS rows are B,G,R with a
 `(w*3+3)&~3` pitch and expand to A8R8G8B8 with A=255; `A8B8G8R8` DDS bytes
@@ -413,7 +423,7 @@ refusal with a non-`S_OK` HRESULT.
 | `SetStreamSourceFreq` | **OK** (FIXED) | accepts `1`, indexed-data `0x80000001` and any indexed-data count; stores per stream; `INSTANCEDATA`/count 0 are named refusals | P0 | done; the PICA draw still renders one instance |
 | `SetRenderState` ids 26/28/29/52..59/136/137/152/174 | **OK** (FIXED) | shadow-stored with range validation; GetRenderState and state blocks round-trip. Fog/specular/clip-plane/scissor effects have no PICA fixed-function stage and are recorded only | **P1** | done in `render_slot` |
 | `CreateTexture` inside a scene | **OK** (FIXED) | deferred publication at Present/EndScene | P1 | done; binds from the next frame |
-| `CreateTexture` non-pow2 / <8 px | **PART** (FIXED for A8) | A8 8..1024 NPOT, one level; RGBA8/BC keep pow2; <8 still RGBA8-only | P1 | done |
+| `CreateTexture` non-pow2 / <8 px | **PART** (FIXED for A8, RT) | A8 and RT textures 1..1024 NPOT (RT storage min 8); plain RGBA8/BC keep pow2 | P1 | done |
 | `CreateTexture A8L8 / A4R4G4B4` | **REF** | layout table has A8/RGBA8/XRGB8/BC only | P2 | only reachable as fallback; map A8L8→A8+RGBA8 pair or expand to RGBA8 |
 | `CreateTexture DXT1/3/5` | **OK** (decode) | needs pow2 ≥8, ≤1024 | P2 | already decodes in `d9_bc_to_pica`; add a test for 2 mips |
 | `CreateTexture ATI2/BC5U (BC5)` | **OK** (decode) | needs pow2 ≥8, ≤1024; two BC4 channels, B=0/A=255 | P2 | corpus has no ATI2; synthetic block test only |
