@@ -49,11 +49,15 @@ Resource entry, 104 bytes, sorted by normalized path::
       8  4  path length in bytes
      12  4  archive index
      16  8  physical payload offset (after the embedded-name/compressed prefix)
-     24  4  payload length (the range this device may read)
+     24  4  payload length (the range this device may read; for a compressed
+             archive this is the stored deflate length and ``bsa_read_range``
+             refuses it)
      28  4  stored size from the directory record
      32  4  stored offset from the directory record
      36  4  flags (bit 0 = compressed, bit 1 = embedded name)
-     40 32  SHA-256 of the stored payload (what ``bsa_read_range`` returns)
+     40 32  SHA-256 of the stored payload (what ``bsa_read_range`` returns;
+             for a compressed row the digest is of the unpacked payload,
+             because that is what ``read_file``/``verify_index`` check)
      72 32  SHA-256 of the original winning asset before cooking
     104 end
 
@@ -127,6 +131,11 @@ class IndexArchive:
     sha256: str
     priority: int
     files: int = 0
+    # Derived from the archive header / resource flags, never serialised:
+    # schema 1 has no spare bit in the 56-byte archive record, and the C
+    # parser rejects unknown header flags.  Per-entry flag bit 0 is the
+    # authoritative signal used by ``bsa_read_range``.
+    compressed: bool = False
 
 
 @dataclass
@@ -322,6 +331,11 @@ class StreamIndex:
         counts = [0] * archive_count
         for row in index.resources:
             counts[row.archive] += 1
+            if row.flags & 0x1:
+                # Schema 1 stores the compressed bit per resource, not per
+                # archive (the 56-byte archive record is full and the C parser
+                # rejects new header flags).
+                index.archives[row.archive].compressed = True
         for i, row in enumerate(index.archives):
             if row.priority != i:
                 raise StreamIndexError("archive %d priority is not its index" % i)
@@ -451,10 +465,12 @@ def build_index(archive_rows: Sequence[dict], file_rows: Sequence[dict],
                 raise StreamIndexError(
                     "archive %s has %d files, manifest lists %d"
                     % (name, len(listed), len(rows)))
-            if archive.header.compressed:
+            if "compressed" in row and \
+                    bool(row["compressed"]) != archive.header.compressed:
                 raise StreamIndexError(
-                    "archive %s is compressed; cooked streaming requires "
-                    "uncompressed payloads" % name)
+                    "archive %s is %scompressed, manifest says %scompressed"
+                    % (name, "" if archive.header.compressed else "not ",
+                       "" if row["compressed"] else "not "))
             for item in rows:
                 key = normalize_path(item["path"])
                 if key in seen:
@@ -467,11 +483,18 @@ def build_index(archive_rows: Sequence[dict], file_rows: Sequence[dict],
                 prefix = _payload_prefix(entry, archive)
                 physical = entry.offset + prefix
                 payload_len = entry.size - prefix
-                if payload_len != item["bytes"]:
-                    raise StreamIndexError(
-                        "%s: manifest says %d bytes, archive stores %d"
-                        % (key, item["bytes"], payload_len))
                 payload = archive.read_file(entry.path)
+                if not archive.header.compressed:
+                    if payload_len != item["bytes"]:
+                        raise StreamIndexError(
+                            "%s: manifest says %d bytes, archive stores %d"
+                            % (key, item["bytes"], payload_len))
+                elif len(payload) != item["bytes"]:
+                    # Compressed rows publish the stored deflate range in
+                    # ``payload_length``; the manifest size stays unpacked.
+                    raise StreamIndexError(
+                        "%s: manifest says %d bytes, archive unpacks to %d"
+                        % (key, item["bytes"], len(payload)))
                 digest = hashlib.sha256(payload).hexdigest()
                 if digest != item["sha256"].lower():
                     raise StreamIndexError(
@@ -484,6 +507,7 @@ def build_index(archive_rows: Sequence[dict], file_rows: Sequence[dict],
                     physical_offset=physical, payload_length=payload_len,
                     stored_size=entry.size, entry_offset=entry.offset,
                     flags=flags, sha256=digest, source_sha256=source))
+            archives[archive_index].compressed = archive.header.compressed
         archives[archive_index].files = len(rows)
 
     resources.sort(key=lambda row: row.path)
@@ -542,7 +566,19 @@ def verify_index(index: StreamIndex, archives_dir: str) -> List[str]:
                     errors.append("%s: %s range needs a 33-bit offset"
                                   % (archive_row.name, row.path))
                 payload = archive.read_file(entry.path)
-                if len(payload) != row.payload_length:
+                if archive.header.compressed:
+                    # ``payload_length`` is the stored deflate range; the
+                    # digest is of the unpacked payload.
+                    prefix = _payload_prefix(entry, archive)
+                    if row.payload_length != entry.size - prefix:
+                        errors.append(
+                            "%s: %s compressed range %d != %d"
+                            % (archive_row.name, row.path, row.payload_length,
+                               entry.size - prefix))
+                    if hashlib.sha256(payload).hexdigest() != row.sha256:
+                        errors.append("%s: %s payload SHA-256 changed"
+                                      % (archive_row.name, row.path))
+                elif len(payload) != row.payload_length:
                     errors.append("%s: %s payload length %d != %d"
                                   % (archive_row.name, row.path, len(payload),
                                      row.payload_length))

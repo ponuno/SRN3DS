@@ -180,11 +180,66 @@ def main():
 
         comp_root = root / "compressed"
         comp_root.mkdir()
-        cdata, carchives, crows, _ = build_fixture(comp_root, compressed=True)
-        expect_error(lambda: stream_index.build_index(carchives, crows,
+        cdata, carchives, crows, cpayloads = build_fixture(comp_root,
+                                                           compressed=True)
+        cout = root / "compressed_index.bin"
+        cr = stream_index.write_index(carchives, crows, str(cdata), str(cout))
+        assert cr["resources"] == 4, cr
+        cindex = stream_index.read_index(str(cout))
+        assert cindex.generation != report["generation"]
+        assert all(row.flags & 0x1 for row in cindex.resources)
+        assert all(not row.flags & 0x2 for row in cindex.resources)
+        assert all(row.archive < len(cindex.archives) for row in cindex.resources)
+        for row in cindex.resources:
+            archive_row = cindex.archives[row.archive]
+            assert archive_row.compressed
+            with bsa.BsaArchive(str(cdata / archive_row.name)) as a:
+                entry = a.find(row.path)
+                assert entry is not None, row.path
+                # Compressed layout: u32 unpacked size, then the deflate
+                # stream.  The index publishes only the stored range.
+                assert row.physical_offset == entry.offset + 4
+                assert row.payload_length == entry.size - 4
+                assert row.stored_size == entry.size
+                assert row.payload_length == len(zlib.compress(
+                    cpayloads[row.path]))
+                payload = a.read_file(entry.path)
+                assert payload == cpayloads[row.path]
+                assert row.sha256 == sha(payload)
+        assert stream_index.verify_index(cindex, str(cdata)) == []
+        checks += 7
+
+        # Embedded name + compression: both prefixes are skipped before the
+        # stored deflate range; the row stays undecodable by bsa_read_range.
+        ce_root = root / "compressed_embed"
+        ce_root.mkdir()
+        cedata, cearchives, cerows, cepayloads = build_fixture(
+            ce_root, compressed=True, embed_names=True)
+        ceout = root / "compressed_embed_index.bin"
+        stream_index.write_index(cearchives, cerows, str(cedata), str(ceout))
+        ceindex = stream_index.read_index(str(ceout))
+        for row in ceindex.resources:
+            with bsa.BsaArchive(str(cedata / ceindex.archives[row.archive].name)) as a:
+                entry = a.find(row.path)
+                assert entry is not None, row.path
+                assert row.physical_offset == entry.offset + 1 + len(row.path) + 4
+                assert row.flags & 0x3 == 0x3
+                assert a.read_file(row.path) == cepayloads[row.path]
+        assert stream_index.verify_index(ceindex, str(cedata)) == []
+        checks += 4
+
+        # The manifest's archive flag must agree with the header actually
+        # written; a stale flag is a named refusal, not a silent mixed pack.
+        bad_archives = [dict(r, compressed=False) for r in carchives]
+        expect_error(lambda: stream_index.build_index(bad_archives, crows,
                                                       str(cdata)),
-                     "compressed")
-        checks += 1
+                     "manifest says")
+        # Omitting the optional flag keeps older manifests working.
+        no_flag = [{k: v for k, v in r.items() if k != "compressed"}
+                   for r in carchives]
+        legacy = stream_index.build_index(no_flag, crows, str(cdata))
+        assert all(a.compressed for a in legacy.archives)
+        checks += 2
 
         # Tampered tables: the parser validates offsets, ranges and the CRC.
         def tamper(offset, fmt, value, needle):

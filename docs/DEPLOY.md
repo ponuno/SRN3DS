@@ -49,6 +49,9 @@ Options:
 | `--skip-archives` | do not copy the BSA files (report only) |
 | `--plugins`, `--loadorder` | explicit plugin lists instead of auto-discovery |
 | `--full-rows` | include per-texture rows in the plan JSON |
+| `--compress` | zlib-compress every cooked payload (`--pack cooked` only) |
+| `--compress-level N` | deflate level 0..9 (default 9; inflate cost is flat) |
+| `--compress-sample-mb N` | `plan --compress`: raw bytes sampled per group (default 8, 0 disables) |
 
 ## 2. What wins
 
@@ -61,8 +64,6 @@ Winners come from the same resolver the runtime uses
 * a path that loses is counted under `resolve.overridden_entries` — it is the
   size a future cooked pack could drop.
 
-<<<<<<< HEAD
-=======
 ### Runtime mount list
 
 The C runtime reads the archive names from `Skyrim.ini` **at boot**.  The menu
@@ -80,7 +81,6 @@ Startup writes `[menu-bsa] N archive(s) from Skyrim.ini: ...` or
 `[menu-bsa] fallback: Interface+Update` to the device stderr log.  See
 `docs/MENU_BSA_RUNTIME.md`.
 
->>>>>>> 2abd304 (menu_frame_main: mount StartMenu archives from Skyrim.ini at boot)
 ## 3. Texture policy
 
 | source | action |
@@ -128,8 +128,8 @@ The single refusal is `textures\effects\noisevolume.dds` (R8 volume noise).
 * a group larger than `--max-archive-mb` (default 1800) is split into
   `Skyrim - Cooked <group> 2.bsa`, …;
 * plugins, `*.ini`, `*.txt`, `*.bik` and `*.bkr` stay outside the archive;
-* archives are written **uncompressed** — on ARM11 the CPU is more expensive
-  than SD read time;
+* archives are written **uncompressed by default** — on ARM11 the CPU is more
+  expensive than SD read time; `--compress` opts into zlib (see §5.1);
 * `Data\Skyrim.ini` is rewritten with
   `sResourceArchiveList=<cooked archives>` and an empty
   `sResourceArchiveList2`;
@@ -142,6 +142,59 @@ sound 0.86 GB, grass 0.16 GB, music 0.10 GB, everything else < 50 MB.
 The writer is `skyrim.bsa_write.write_bsa_stream`: payloads are staged in a
 temporary file and only metadata stays in RAM, so a multi-gigabyte archive does
 not need a matching Python heap. It emits the same v104 layout as `write_bsa`.
+
+### 5.1 Compression (`--compress`)
+
+`--compress` makes every cooked payload zlib-compressed; `--compress-level`
+(0..9, default 9) only changes the cook, not the runtime inflate cost. The
+on-disk format is exactly the retail one: archive flag `0x004`, then per file
+`u32 unpacked_size` + the deflate stream (after the optional embedded-name
+prefix). `BsaArchive.read_file()`, the C `bsa_read()`/`bsa_read_prefix()` and
+`stream_index.verify_index()` inflate and hash the unpacked bytes, so a
+compressed stage is validated like an uncompressed one.
+
+`plan --compress` projects the saving without staging 6 GB: it samples the
+winning sources per group, byte-weighted so a 5 MB texture and a 40 KB tint map
+do not count equally, and caps the work at `--compress-sample-mb` (default 8)
+per group. Measured on the current `E:\SteamLibrary\...\Skyrim\Data` install
+(with mods; 113,285 cooked files, 6.64 GB raw / 13 archives, 68.9 MB sampled):
+
+| group | raw MB | projected MB | saved |
+|---|---:|---:|---:|
+| meshes | 2542.5 | 1194.7 | 53% |
+| textures | 1955.1 | 1159.1 | 41% |
+| sound | 1744.6 | 1401.4 | 20% |
+| grass | 186.8 | 151.1 | 19% |
+| music | 123.0 | 121.6 | 1% |
+| strings | 40.3 | 15.4 | 62% |
+| shadersfx | 27.5 | 1.8 | 94% |
+| scripts | 16.7 | 6.0 | 64% |
+| **total** | **6639** | **4053** | **39%** |
+
+The sample ratio is 0.626, projected saving ≈ 2.59 GB. This is a plan
+estimate: converted textures are sampled as their source bytes, and the
+8 MB/group cap keeps the projection noisy for the smallest groups. A real
+`stage --compress` is the authority.
+
+When it pays:
+
+* **Yes — meshes, shadersfx, scripts, strings, seq.** Structured/text payloads
+  save 40–94%, and the CPU cost is paid on load, not per frame.
+* **Depends — textures, sound, grass.** ~20–40% saved, but every DDS/WAV load
+  pays a full ARM11 inflate, and BC DDS / PCM are already entropy-coded.
+  Enable only when card space is the binding constraint.
+* **No — music, interface.** 1–3% saved for the same CPU; leave uncompressed.
+* **Never for streamed groups.** `bsa_read_range()` returns
+  `BSA_ERR_UNSUPPORTED` for a compressed entry, so a resource read through the
+  range path must stay uncompressed. `stream_index.bin` is still written and
+  every compressed row carries flag bit 0 with its stored deflate range; the
+  device can see the row but must fall back to `bsa_read()` or a loose file.
+  Prefer compressing groups the loader reads whole; keep streamed geometry
+  uncompressed.
+
+The C reader already refuses compressed ranges (it reads the archive header
+flag, not the index), so a mixed pack is safe: compressed groups fail the range
+path by name instead of returning deflate bytes.
 
 Trade-offs:
 

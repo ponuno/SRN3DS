@@ -31,6 +31,7 @@ import os
 import shutil
 import struct
 import sys
+import zlib
 from collections import Counter
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -250,6 +251,50 @@ def _budget(rows: Iterable[dict], winners, archives) -> dict:
             "converted_bytes_estimate": converted, "refused_bytes": refused}
 
 
+def _compress_ratio_estimate(entries, archives, level: int,
+                             per_group_cap: int) -> Dict[str, dict]:
+    """Sample winning payloads per group and zlib-compress them.
+
+    This is a plan-time estimate, not the staged output: it compresses the
+    winning source bytes (textures already in BC form) and caps the work at
+    ``per_group_cap`` raw bytes per group so a full 6 GB plan stays cheap.
+    """
+    stats: Dict[str, dict] = {}
+    by_group: Dict[str, List[dict]] = {}
+    for entry in entries:
+        by_group.setdefault(entry["group"], []).append(entry)
+    for group, items in by_group.items():
+        row = stats.setdefault(group, {"files": 0, "sampled_bytes": 0,
+                                       "compressed_bytes": 0})
+        if per_group_cap <= 0 or not items:
+            continue
+        # Sample by byte mass, not by file count: a 5 MB texture and a 40 KB
+        # tint map must not weigh the same in the group estimate.  Walk 128
+        # quantiles of the cumulative size ladder.
+        sizes = [max(1, int(entry.get("estimate") or 1)) for entry in items]
+        total = sum(sizes)
+        picks: List[dict] = []
+        targets = [total * (i + 0.5) / 128 for i in range(128)]
+        acc = 0
+        target = 0
+        for entry, size in zip(items, sizes):
+            acc += size
+            while target < len(targets) and targets[target] <= acc:
+                picks.append(entry)
+                target += 1
+        for entry in picks:
+            if row["sampled_bytes"] >= per_group_cap:
+                break
+            try:
+                data = _read_all(entry["asset"], archives)
+            except (OSError, bsa.BsaError, DeployError):
+                continue
+            row["files"] += 1
+            row["sampled_bytes"] += len(data)
+            row["compressed_bytes"] += len(zlib.compress(data, level))
+    return stats
+
+
 def plan_report(overlay, args) -> dict:
     winners, stats = resolve_winners(overlay)
     archives = _archive_by_host(overlay)
@@ -300,6 +345,47 @@ def plan_report(overlay, args) -> dict:
                        for name in sorted(by_group)},
             "refused": len(refusals),
         }
+        if getattr(args, "compress", False):
+            level = int(getattr(args, "compress_level", 9))
+            if not 0 <= level <= 9:
+                raise DeployError(
+                    "--compress-level must be 0..9 (got %d)" % level)
+            sample = _compress_ratio_estimate(
+                entries, archives, level,
+                max(0, int(getattr(args, "compress_sample_mb", 8)))
+                * 1024 * 1024)
+            est_groups = {}
+            est_total = 0
+            sampled = compressed_sample = 0
+            for name in sorted(by_group):
+                row = sample.get(name)
+                if not row or not row["sampled_bytes"]:
+                    est_groups[name] = {"sampled_bytes": 0, "ratio": None,
+                                        "bytes_estimate": None}
+                    continue
+                ratio = row["compressed_bytes"] / row["sampled_bytes"]
+                estimate = int(by_group_bytes[name] * ratio)
+                est_total += estimate
+                sampled += row["sampled_bytes"]
+                compressed_sample += row["compressed_bytes"]
+                est_groups[name] = {
+                    "sampled_files": row["files"],
+                    "sampled_bytes": row["sampled_bytes"],
+                    "compressed_bytes": row["compressed_bytes"],
+                    "ratio": round(ratio, 4),
+                    "bytes_estimate": estimate,
+                }
+            cooked["compress"] = {
+                "level": level,
+                "sample_mb_per_group":
+                    max(0, int(getattr(args, "compress_sample_mb", 8))),
+                "sampled_bytes": sampled,
+                "compressed_sample_bytes": compressed_sample,
+                "ratio": (round(compressed_sample / sampled, 4)
+                          if sampled else None),
+                "bytes_estimate": est_total if sampled else None,
+                "groups": est_groups,
+            }
     return {
         "schema": SCHEMA,
         "command": "plan",
@@ -557,6 +643,10 @@ def stage_cooked(overlay, args) -> dict:
     groups: Dict[str, List[dict]] = {}
     for entry in entries:
         groups.setdefault(entry["group"], []).append(entry)
+    compressed = bool(getattr(args, "compress", False))
+    level = int(getattr(args, "compress_level", 9))
+    if not 0 <= level <= 9:
+        raise DeployError("--compress-level must be 0..9 (got %d)" % level)
     for group in sorted(groups):
         for part, batch in enumerate(_batches(groups[group], cap), 1):
             name = "Skyrim - Cooked %s%s.bsa" % (
@@ -591,9 +681,11 @@ def stage_cooked(overlay, args) -> dict:
                     yield asset.virtual_path, payload
 
             result = bsa_write.write_bsa_stream(
-                os.path.join(data_dir, name), payloads(), compressed=False)
+                os.path.join(data_dir, name), payloads(), compressed=compressed,
+                level=level)
             archive_rows.append({"name": name, "files": len(rows),
                                  "bytes": result["bytes"],
+                                 "compressed": result["compressed"],
                                  "sha256": hashlib.sha256(
                                      open(result["path"], "rb").read()).hexdigest()})
             file_rows.extend(rows)
@@ -611,6 +703,9 @@ def stage_cooked(overlay, args) -> dict:
         "data_root": overlay.data_root, "out_root": os.path.abspath(args.out),
         "resize": args.resize, "load_order": overlay.load_report,
         "resolve": stats, "core": cores["report"],
+        "compressed": bool(getattr(args, "compress", False)),
+        "compress_level": (int(getattr(args, "compress_level", 9))
+                           if getattr(args, "compress", False) else None),
         "archives": archive_rows, "files": file_rows,
         "refused": refusals,
         "bytes": sum(row["bytes"] for row in copied)
@@ -734,6 +829,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        help="comma list of extensions, e.g. .bto,.btr,.hkx")
         p.add_argument("--no-stream-index", action="store_true",
                        help="do not write stream_index.bin for a cooked pack")
+        p.add_argument("--compress", action="store_true",
+                       help="zlib-compress cooked payloads (costs ARM11 CPU)")
+        p.add_argument("--compress-level", type=int, default=9,
+                       help="zlib level 0..9 for cooked payloads (default 9)")
+        p.add_argument("--compress-sample-mb", type=int, default=8,
+                       help="plan: raw bytes sampled per group for the "
+                            "compression estimate (0 disables sampling)")
     args = parser.parse_args(argv)
     try:
         with data_overlay.DataOverlay(args.data or None,

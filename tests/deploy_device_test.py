@@ -11,6 +11,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -199,6 +200,73 @@ def main():
         assert again["stream_index"]["generation"] == report["generation"]
         checks += 3
 
+        # --compress: same unpacked payloads, smaller archives, and an index
+        # whose rows carry the compressed flag and refuse range reads.
+        compressed_out = root / "cooked_compressed"
+        rc = deploy.main(["stage", "--data", str(root / "Data"),
+                          "--tesv", str(root / "TESV.exe"),
+                          "--out", str(compressed_out), "--pack", "cooked",
+                          "--compress", "--compress-level", "6"])
+        assert rc == 0, rc
+        comp_manifest = json.loads(
+            (compressed_out / "deploy_manifest.json").read_text(encoding="utf-8"))
+        assert comp_manifest["compressed"] is True
+        assert comp_manifest["compress_level"] == 6
+        assert comp_manifest["archives"] and all(
+            row["compressed"] for row in comp_manifest["archives"])
+        comp_found = {}
+        comp_size = 0
+        for path in sorted((compressed_out / "Data").glob(
+                "Skyrim - Cooked*.bsa")):
+            comp_size += path.stat().st_size
+            with bsa.BsaArchive(str(path)) as archive:
+                assert archive.header.compressed, path
+                for entry in archive.list_files():
+                    payload = archive.read_file(entry.path)
+                    comp_found[entry.path.lower()] = payload
+                    with open(path, "rb") as handle:
+                        handle.seek(entry.offset)
+                        stored = handle.read(entry.size)
+                    assert struct.unpack_from("<I", stored, 0)[0] == len(payload)
+                    assert zlib.decompress(stored[4:]) == payload
+        raw_size = sum(path.stat().st_size for path in archive_paths)
+        assert comp_size < raw_size, (comp_size, raw_size)
+        assert comp_found == found, "compressed payloads changed"
+        comp_index_path = compressed_out / "stream_index.bin"
+        comp_index = stream_index.read_index(str(comp_index_path))
+        assert all(row.flags & 0x1 for row in comp_index.resources)
+        assert all(row.flags & 0x2 == 0 for row in comp_index.resources)
+        assert all(archive.compressed for archive in comp_index.archives)
+        assert stream_index.verify_index(
+            comp_index, str(compressed_out / "Data")) == []
+        for row in comp_index.resources:
+            with bsa.BsaArchive(str(
+                    compressed_out / "Data" /
+                    comp_index.archives[row.archive].name)) as archive:
+                entry = archive.find(row.path)
+                assert row.physical_offset == entry.offset + 4
+                assert row.payload_length == entry.size - 4
+                assert row.stored_size == entry.size
+        checks += 14
+
+        # --compress + --no-stream-index: archives stay valid, no index rows.
+        comp_plain = root / "cooked_compressed_plain"
+        rc = deploy.main(["stage", "--data", str(root / "Data"),
+                          "--tesv", str(root / "TESV.exe"),
+                          "--out", str(comp_plain), "--pack", "cooked",
+                          "--compress", "--no-stream-index"])
+        assert rc == 0, rc
+        assert not (comp_plain / "stream_index.bin").exists()
+        comp_plain_manifest = json.loads(
+            (comp_plain / "deploy_manifest.json").read_text(encoding="utf-8"))
+        assert "stream_index" not in comp_plain_manifest
+        assert comp_plain_manifest["compressed"] is True
+        with bsa.BsaArchive(str(sorted(
+                (comp_plain / "Data").glob("Skyrim - Cooked*.bsa"))[0])) as archive:
+            assert archive.header.compressed
+            assert archive.read_file(archive.list_files()[0].path)
+        checks += 4
+
         # The opt-out writes neither the file nor the manifest key.
         plain = root / "cooked_plain"
         rc = deploy.main(["stage", "--data", str(root / "Data"),
@@ -214,13 +282,19 @@ def main():
 
         rc = deploy.main(["plan", "--data", str(root / "Data"),
                           "--tesv", str(root / "TESV.exe"),
-                          "--pack", "cooked", "--json", str(root / "cooked_plan.json")])
+                          "--pack", "cooked", "--compress",
+                          "--json", str(root / "cooked_plan.json")])
         assert rc == 0, rc
         cooked_plan = json.loads((root / "cooked_plan.json").read_text(
             encoding="utf-8"))
         assert cooked_plan["cooked"]["files"] == 3, cooked_plan["cooked"]
         assert cooked_plan["cooked"]["archives_estimate"] >= 1
-        checks += 2
+        compress = cooked_plan["cooked"]["compress"]
+        assert compress["level"] == 9
+        assert compress["sampled_bytes"] > 0
+        assert compress["bytes_estimate"] is not None
+        assert any(row["ratio"] is not None for row in compress["groups"].values())
+        checks += 4
 
     print("deploy_device_test: %d checks OK" % checks)
     return 0
