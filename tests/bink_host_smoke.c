@@ -66,6 +66,21 @@ int main(int argc, char **argv) {
     uint32_t colors[4096];
     unsigned ncolors = 0;
 
+    /* Destination span: the engine tiles the frame into locked 256x256
+     * surface rectangles and passes the surface height (720) as dh. The shim
+     * must validate only dst_y+sh rows; asking for pitch*dh rejected every
+     * tiled copy as unmapped (the TESV BGS_LOGO thread died there). */
+    assert(bink_copy_span(1024, 720, 0, 0, 256, 256, BINK_COPY_ARGB) == 256u * 1024u);
+    assert(bink_copy_span(1024, 720, 0, 464, 256, 256, BINK_COPY_ARGB) == 720u * 1024u);
+    assert(bink_copy_span(5120, 720, 0, 0, 1280, 720, BINK_COPY_BGRA) == 720u * 5120u);
+    assert(bink_copy_span(5120, 720, 3, 0, 1280, 1, BINK_COPY_RGB) == 3849u);
+    assert(bink_copy_span(100, 8, 0, 0, 25, 8, BINK_COPY_565) == 750u);
+    assert(bink_copy_span(1024, 720, 0, 0, 257, 256, BINK_COPY_ARGB) == 0); /* > pitch/4 */
+    assert(bink_copy_span(1024, 720, 0, 465, 256, 256, BINK_COPY_ARGB) == 0); /* > height */
+    assert(bink_copy_span(1024, 720, 0, 0, 256, 256, 7) == 0);                /* bad format */
+    assert(bink_copy_span(1024, 720, 0, 0, 0, 256, BINK_COPY_ARGB) == 0);
+    printf("BINK_HOST span contract OK\n");
+
     rc = bink_decode_open(path, &d);
     if (rc == BINK_DECODE_BAD_ARG) {
         printf("BINK_HOST SKIP: no readable video at %s\n", path);

@@ -81,16 +81,23 @@ C:\Users\vasya\AppData\Local\Temp\srn3ds_host_bink_frame\bink_frame_preview.png
 
 The preview is the real Bethesda Game Studios logo.
 
-## 4. Engine slice: not reached
+## 4. Engine slice: the intro video now runs
+
+`E:\harness_skyrim\Skyrim.ini` plays `BGS_Logo.bik`, and the 80576a0 host slice
+reaches it (`_BinkOpen@8 1280x720 frames=166`).  The engine uploads the frame
+as **locked 256x256 surface tiles**: each `_BinkCopyToBufferRect@44` call passes
+the surface height (720) as `destheight` while only `dy+sh` rows belong to the
+locked tile.  The shim used to validate `pitch*destheight`, which is larger
+than the locked span (`(rows-1)*pitch + row_bytes`), so every tile faulted as
+"destination is not mapped guest memory" and the video thread died holding a
+spin lock.
+
+`bink_copy_span()` (`source/bink_decode.c`) now returns exactly the bytes
+`bink_decode_copy_rect()` writes: `(dy+sh-1)*pitch + (dx+sw)*bpp`, with the
+same format/rectangle validation as the copy.  `bink_host` pins the tiled case
+(256x256 into a 1024-pitch, 720-row buffer -> 262144 B) and the full-frame case.
 
 The shim honours `TESV_BINK_DUMP=<dir>`: `_BinkCopyToBufferRect@44` writes the
 exact guest rectangle as `bink_guest_<frame>.raw`, a `.ppm` for 32-bit
-orders, and `bink_guest_info.txt`.
-
-This worktree cannot build `tesv_slice`: `staged/` and the generated
-`TESV_GEN` tables are absent, and `run_host_tests.ps1 -Only tesv_slice`
-requires both.  Even with a slice, the shipped ini skips the intro.  So no
-in-engine guest frame was captured and none is claimed.  To do it later:
-provide `staged/` + `TESV_GEN`, set `sIntroSequence=BGS_Logo.bik` (or use
-`TESV_INI_OVERLAY`), build with `-Mode tesv`, and run with
-`TESV_FILE_TRACE=1 TESV_BINK_DUMP=<dir>`.
+orders, and `bink_guest_info.txt`.  No in-engine frame is claimed by the host
+runs above.

@@ -41,6 +41,16 @@ int bink_decode_open(const char *host_path, BinkDecoded *out);
 /* Release the frame store.  Safe on a zeroed struct. */
 void bink_decode_close(BinkDecoded *out);
 
+/* Span in bytes that bink_decode_copy_rect() writes into `dst`, i.e. the
+ * bytes that must be mapped and contiguous.  0 means the rectangle or flags
+ * are invalid (the copy would return BINK_DECODE_BAD_RECT).  `dst_height` is
+ * the destination buffer height for bounds checking, not the number of rows
+ * written: callers that tile a frame (256x256 copy into a 1024-pitch, 720-row
+ * surface) must validate only dst_y+src_h rows, not the whole height. */
+uint64_t bink_copy_span(uint32_t dst_pitch, uint32_t dst_height,
+                        uint32_t dst_x, uint32_t dst_y,
+                        uint32_t src_w, uint32_t src_h, uint32_t flags);
+
 /* Copy a rectangle of one decoded frame into dst.
  * dst_pitch/dst_height describe the destination guest buffer, dst_x/dst_y are
  * its pixel origin, src_* select the frame rectangle.  `flags` follows the

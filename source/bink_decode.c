@@ -182,6 +182,25 @@ static int put_pixel(unsigned char *dst, const unsigned char *src, uint32_t fmt)
     }
 }
 
+uint64_t bink_copy_span(uint32_t dst_pitch, uint32_t dst_height,
+                        uint32_t dst_x, uint32_t dst_y,
+                        uint32_t src_w, uint32_t src_h, uint32_t flags) {
+    unsigned bpp;
+    switch (flags & 7u) {
+    case BINK_COPY_BGRA: case BINK_COPY_RGBA:
+    case BINK_COPY_ABGR: case BINK_COPY_ARGB: bpp = 4; break;
+    case BINK_COPY_RGB: case BINK_COPY_BGR: bpp = 3; break;
+    case BINK_COPY_565: bpp = 2; break;
+    default: return 0;
+    }
+    if (!src_w || !src_h || !dst_pitch) return 0;
+    /* Same bounds as bink_decode_copy_rect(): the copy is rejected, so no
+     * destination byte needs to be mapped. */
+    if (dst_x + src_w > dst_pitch / bpp || dst_y + src_h > dst_height) return 0;
+    return (uint64_t)(dst_y + src_h - 1u) * dst_pitch +
+           (uint64_t)(dst_x + src_w) * bpp;
+}
+
 int bink_decode_copy_rect(BinkDecoded *d, uint32_t frame,
                           void *dst, uint32_t dst_pitch, uint32_t dst_height,
                           uint32_t dst_x, uint32_t dst_y,

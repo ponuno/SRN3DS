@@ -107,12 +107,6 @@ static struct {
 
 void win32_set_memory_probe(int on) { memt.probe = on ? 1 : 0; }
 int win32_memory_probe(void) { return memt.probe; }
-void win32_alloc_stats(Win32AllocStats *out) {
-    if (!out) return;
-    *out = (Win32AllocStats){
-        memt.va_calls, memt.heap_calls, memt.crt_calls, memt.failures,
-        memt.va_live, memt.heap_live, memt.crt_live, memt.peak_live};
-}
 static uint64_t *mem_live(int kind) {
     return kind == MEM_VA ? &memt.va_live : kind == MEM_HEAP ? &memt.heap_live : &memt.crt_live;
 }
@@ -782,7 +776,7 @@ static void s_Sleep(CPU *c){
 #else
 fprintf(stderr,"[lock] bt=unavailable on this host\n");
 #endif
-fprintf(stderr,"[lock] lock[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(lock-8),M32(lock-4),M32(lock),M32(lock+4),M32(lock+8),M32(lock+12),M32(lock+16),M32(lock+20),M32(lock+24),M32(lock+28));uint32_t o=M32(lock);if(o){fprintf(stderr,"[lock] owner[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(o-8),M32(o-4),M32(o),M32(o+4),M32(o+8),M32(o+12),M32(o+16),M32(o+20),M32(o+24),M32(o+28));}}}else fprintf(stderr,"[sync] Sleep %lu ms from %08x thread=%u\n",(unsigned long)ms,ret,win32_thread_current_id());}}
+fprintf(stderr,"[lock] lock[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(lock-8),M32(lock-4),M32(lock),M32(lock+4),M32(lock+8),M32(lock+12),M32(lock+16),M32(lock+20),M32(lock+24),M32(lock+28));uint32_t o=M32(lock);if(o&&guest_ptr(mem,o,4)){fprintf(stderr,"[lock] owner[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(o-8),M32(o-4),M32(o),M32(o+4),M32(o+8),M32(o+12),M32(o+16),M32(o+20),M32(o+24),M32(o+28));}else if(o)fprintf(stderr,"[lock] owner=%08x is not a guest pointer (thread id or stale value); owner dump skipped\n",o);}else fprintf(stderr,"[sync] Sleep %lu ms from %08x thread=%u\n",(unsigned long)ms,ret,win32_thread_current_id());}}}
     win32_thread_sleep(ms);
     RET(0,1);
 }
@@ -4203,40 +4197,26 @@ static void s_BinkCopyToBufferRect(CPU *c){
     int rc;
     void *g;
     if(!s)rt_unimpl(c,A(0),"_BinkCopyToBufferRect@44: unknown Bink handle");
-    g=guest_ptr(mem,dst,(size_t)pitch*dh);
-    if(!g){
-        /* The destination is often a locked surface or a partly committed
-         * buffer: the whole pitch*height span need not be mapped at once.
-         * Decode the rectangle into a host buffer and write it row by row
-         * through the checked guest helper. A row that is genuinely unmapped
-         * returns failure to the guest instead of faulting the whole thread. */
-        static unsigned row_logged;
-        if(sw&&sh&&pitch>=(size_t)dx*4u+(size_t)sw*4u){
-            size_t row=sw*4u,total=row*sh;
-            unsigned char *tmp=(unsigned char *)malloc(total);
-            if(tmp){
-                rc=bink_decode_copy_rect(&s->dec,s->cur,tmp,sw*4u,sh,0,0,sx,sy,sw,sh,flags);
-                if(rc==BINK_DECODE_OK){
-                    for(uint32_t y=0;y<sh;++y){
-                        uint32_t at=dst+(dy+y)*pitch+dx*4u;
-                        if(guest_write(mem,at,tmp+(size_t)y*row,row)){
-                            if(row_logged<4u){++row_logged;
-                                fprintf(stderr,"[bink] copy row %u/%u at %08x not mapped "
-                                               "(dst=%08x pitch=%u %ux%u)\n",
-                                        y,sh,at,dst,pitch,sw,sh);}
-                            free(tmp);RET(1,11);
-                        }
-                    }
-                    free(tmp);
-                    RET(0,11);
-                }
-                free(tmp);
-            }
-        }
-        if(row_logged<4u){++row_logged;
-            fprintf(stderr,"[bink] dest %08x %ux%u pitch=%u not mapped; copy refused\n",
-                    dst,sw,sh,pitch);}
+    /* The destination is a locked D3D9 surface and `dh` is its height, not
+     * the number of rows this call writes: the video uploader tiles the frame
+     * (e.g. 256x256 into a 1024-pitch surface) and each locked tile covers
+     * only (dst_y+sh) rows.  Validate the bytes the decoder actually writes;
+     * asking for pitch*dh rejected every tiled copy as unmapped. */
+    uint64_t span=bink_copy_span(pitch,dh,dx,dy,sw,sh,flags);
+    if(!span){
+        static unsigned logged;if(logged<4u){++logged;
+            fprintf(stderr,"[bink] _BinkCopyToBufferRect@44 refused rect=(%u,%u) %ux%u "
+                           "dest=(%u,%u) pitch=%u height=%u flags=%08lx\n",
+                    sx,sy,sw,sh,dx,dy,pitch,dh,(unsigned long)flags);}
         RET(1,11);
+    }
+    g=guest_ptr(mem,dst,(size_t)span);
+    if(!g){
+        fprintf(stderr,"[bink] copy dst=%08x pitch=%u dh=%u span=%llu "
+                "dest=(%u,%u) src=(%u,%u) %ux%u flags=%08lx\n",
+                dst,pitch,dh,(unsigned long long)span,
+                dx,dy,sx,sy,sw,sh,(unsigned long)flags);
+        rt_unimpl(c,dst,"_BinkCopyToBufferRect@44: destination is not mapped guest memory");
     }
     rc=bink_decode_copy_rect(&s->dec,s->cur,g,pitch,dh,dx,dy,sx,sy,sw,sh,flags);
     if(rc!=BINK_DECODE_OK){
