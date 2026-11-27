@@ -444,6 +444,10 @@ Add-Test "user" $liftCommon @("source/guest.c", "source/win32_user.c", "tests/wi
 Add-Test "locale" $liftCommon @("source/guest.c", "source/win32_locale.c", "tests/win32_locale_smoke.c") @()
 Add-Test "shell" $liftCommon @("source/guest.c", "source/win32_shell.c", "tests/win32_shell_smoke.c") @()
 Add-Test "audio" $liftCommon @("source/guest.c", "source/win32_audio.c", "tests/audio_smoke.c") @()
+# N3DS_AUDIO=ndsp host null sink: open/prepare/write/tick/reset/close, no NODRIVER.
+Add-Test "audio_ndsp_host" $liftCommon @("source/guest.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_ndsp_host_smoke.c") @()
+# Real source/win32_audio_3ds.c against the fake libctru surface (ARM path on host).
+Add-Test "audio_3ds_backend" ($common + @("-Istaged", "-D__3DS__", "-Itests/audio_3ds_stubs")) @("source/guest.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_3ds_backend_smoke.c") @()
 Add-Test "steam" $liftCommon @("source/guest.c", "source/win32_steam.c", "tests/win32_steam_smoke.c") @()
 Add-Test "registry" $liftCommon @("source/guest.c", "source/win32_registry.c", "tests/win32_registry_smoke.c") @()
 Add-Test "renderer_requirements" $common @("source/d3d9_renderer_requirements.c", "tests/renderer_requirements_smoke.c") @()

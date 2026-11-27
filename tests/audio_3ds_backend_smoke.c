@@ -19,9 +19,20 @@
 #define HWO (SCRATCH + 0x100u)
 #define WFX (SCRATCH + 0x140u)
 #define CAPS (SCRATCH + 0x300u)
+#define HDR (SCRATCH + 0x400u)
+#define PCM (SCRATCH + 0x500u)
 
 #define MMSYSERR_NOERROR 0u
 #define MMSYSERR_NODRIVER 6u
+#define WHDR_DONE 0x00000001u
+
+static void set_audio_env(const char *value) {
+#ifdef _WIN32
+    _putenv_s("N3DS_AUDIO", value ? value : "");
+#else
+    if (value) setenv("N3DS_AUDIO", value, 1); else unsetenv("N3DS_AUDIO");
+#endif
+}
 
 static GuestMemory memory;
 static CPU cpu;
@@ -62,7 +73,7 @@ static unsigned exit_device_count;
 static uint64_t fake_us;
 static float fake_mix[12];
 static bool fake_paused;
-static unsigned reset_calls, wave_clear_calls;
+static unsigned reset_calls, wave_clear_calls, wave_add_calls, wave_add_samples;
 
 uint64_t svcGetSystemTick(void) { return fake_us; }
 Result svcQueryMemory(MemInfo *info, PageInfo *page, u32 address) {
@@ -122,6 +133,8 @@ bool ndspChnIsPaused(int channel) { (void)channel; return fake_paused; }
 void ndspChnWaveBufClear(int channel) { (void)channel; ++wave_clear_calls; }
 void ndspChnWaveBufAdd(int channel, ndspWaveBuf *buffer) {
     (void)channel;
+    ++wave_add_calls;
+    wave_add_samples += buffer->nsamples;
     buffer->status = NDSP_WBUF_QUEUED;
 }
 
@@ -142,7 +155,7 @@ Result opendspGetCapabilities(u32 *caps) { *caps = fake_caps; return 0; }
 /* ---- guest shim helpers ---- */
 
 static GuestFn g_open, g_close, g_reset, g_pause, g_restart, g_volume;
-static GuestFn g_numdevs, g_devcaps;
+static GuestFn g_numdevs, g_devcaps, g_prepare, g_write;
 
 static GuestFn fn_of(const char *name) {
     uint32_t addr = win32_audio_resolve("winmm.dll", name);
@@ -233,8 +246,19 @@ int main(void) {
     g_volume = fn_of("waveOutSetVolume");
     g_numdevs = fn_of("waveOutGetNumDevs");
     g_devcaps = fn_of("waveOutGetDevCaps");
+    g_prepare = fn_of("waveOutPrepareHeader");
+    g_write = fn_of("waveOutWrite");
+
+    /* Explicit off keeps the old NODRIVER result, for bisecting a regression. */
+    set_audio_env("off");
+    CHECK_EQ(win32_audio_3ds_install(), 0);
+    CHECK(!strcmp(win32_audio_3ds_name(), "none"));
+    CHECK_EQ(call(g_numdevs, NULL, 0), 0);
+    CHECK_EQ(open_dev(), MMSYSERR_NODRIVER);
+    win32_audio_3ds_shutdown();
 
     /* OpenDSP available: no fallback and an honest device name. */
+    set_audio_env("opendsp");
     opendsp_result = 0;
     ndsp_result = 0;
     fake_caps = OPENDSP_CAP_FIRMWARE | OPENDSP_CAP_AAC_ARM11;
@@ -250,27 +274,47 @@ int main(void) {
     CHECK_EQ(call(g_numdevs, NULL, 0), 0);
     CHECK_EQ(exit_device_count, 0);
 
-    /* Missing firmware: opendspExit() leaves the image pinned.  The backend
-     * must clear it before asking libctru to discover/load its own component. */
+    /* Default device mode (N3DS_AUDIO unset): ndsp directly, no OpenDSP probe. */
+    set_audio_env(NULL);
     clear_calls = 0;
     ndsp_init_calls = 0;
+    opendsp_init_calls = 0;
     ndsp_init_saw_pinned = -1;
     fake_caps = OPENDSP_CAP_AAC_ARM11 | OPENDSP_CAP_MP3_ARM11;
     CHECK_EQ(win32_audio_3ds_install(), 2);
     CHECK(!strcmp(win32_audio_3ds_name(), "ndsp"));
+    CHECK_EQ(opendsp_init_calls, 0);
     CHECK_EQ(clear_calls, 1);
     CHECK_EQ(ndsp_init_calls, 1);
     CHECK_EQ(ndsp_init_saw_pinned, 0);
     CHECK_EQ(call(g_numdevs, NULL, 0), 1);
     check_caps_name("Skyrim N3DS ndsp");
     CHECK_EQ(open_dev(), MMSYSERR_NOERROR);
+
+    /* waveOutPrepareHeader + waveOutWrite reach the DSP ring as real frames. */
+    memset(n3ds_guest_ptr(HDR, 32), 0, 32);
+    memset(n3ds_guest_ptr(PCM, 16), 0, 16);
+    M32(HDR + 0) = PCM;
+    M32(HDR + 4) = 16; /* 4 stereo s16 frames at 44.1 kHz */
+    {
+        uint32_t args[3] = { M32(HWO), HDR, 32 };
+        CHECK_EQ(call(g_prepare, args, 3), MMSYSERR_NOERROR);
+        CHECK_EQ(call(g_write, args, 3), MMSYSERR_NOERROR);
+    }
+    CHECK(wave_add_calls > 0);
+    CHECK(wave_add_samples > 0);
+    fake_us += 500000;
+    win32_audio_tick();
+    CHECK((M32(HDR + 16) & WHDR_DONE) != 0);
+
     check_reset_preserves_volume_and_pause();
     CHECK_EQ(device_call(g_close), MMSYSERR_NOERROR);
     win32_audio_3ds_shutdown();
     CHECK_EQ(exit_device_count, 0);
 
-    /* Failed OpenDSP init may also leave a pinned selection.  If libctru cannot
-     * find a component either, preserve the explicit no-driver result. */
+    /* If libctru cannot find a component either, preserve the explicit
+     * no-driver result instead of pretending a device exists. */
+    set_audio_env("ndsp");
     clear_calls = 0;
     ndsp_init_calls = 0;
     ndsp_init_saw_pinned = -1;
