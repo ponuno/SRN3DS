@@ -597,7 +597,7 @@ static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *
     if(state->pixel_shader){
         NativeTex *native=texture;
         if(d9_pica_citro3d_apply_tev_ex(state->pixel_shader,native?&native->tex:NULL,NULL,
-                                        state->tev_constants,9,NULL,0))return -1;
+                                        state->tev_constants,D9_TEV_CONSTANT_ROWS,NULL,0))return -1;
     }else{
         d9_pica_citro3d_restore_tev();
         C3D_TexEnv *env=C3D_GetTexEnv(0);if(!env)return -1;
@@ -843,7 +843,7 @@ static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
     if(d9_pica_citro3d_apply_tev_ex(state->pixel_shader,
                                     native0?&native0->tex:NULL,
                                     native1?&native1->tex:NULL,
-                                    constants,9,NULL,0)){
+                                    constants,D9_TEV_CONSTANT_ROWS,NULL,0)){
         d9_pica_citro3d_restore_tev();
         prepare_draw(c);
         return -1;

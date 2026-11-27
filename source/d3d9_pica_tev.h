@@ -29,6 +29,9 @@
 /* Internal menu material slot: ambient+emissive folded from the color1
  * varying.  It is not a D3D9 constant register and does not change caps. */
 #define D9_PICA_TEV_AMBIENT_CONST 8u
+/* External TEV rows are folded into per-stage literal RGBA8 colours by the
+ * citro3d backend, so the only limit is the host float bank (32 rows). */
+#define D9_PICA_TEV_MAX_EXTERNAL_REG 31u
 
 typedef enum {
     D9_PICA_TEV_OK = 0,

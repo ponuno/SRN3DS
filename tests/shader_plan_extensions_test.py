@@ -74,6 +74,29 @@ class ExtensionsTest(unittest.TestCase):
         }], constants=[0, 7])
         self.assertEqual(self.errors(row), [])
 
+    def test_high_derived_slots_and_dst_alias(self):
+        # GFx packs use derived c9..c16; earlier plans spell the destination
+        # "dst" instead of "dst_reg".
+        row = entry(constant_ops=[{
+            "dst": 9,
+            "op": "pack",
+            "src": [{"reg": 0, "swizzle": "zwzw"}],
+        }], constants=[0, 1, 9], stages=3,
+            stage_data=[stage(const_reg=0), stage(const_reg=1),
+                        stage(const_reg=9)])
+        self.assertEqual(self.errors(row), [])
+        row = entry(constant_ops=[{
+            "dst_reg": 16,
+            "op": "pack",
+            "src": [{"reg": 0, "swizzle": "xyzw"}],
+        }], constants=[0, 16])
+        self.assertEqual(self.errors(row), [])
+        too_high = entry(constant_ops=[{
+            "dst_reg": 32, "op": "pack",
+            "src": [{"reg": 0, "swizzle": "xyzw"}],
+        }], constants=[0])
+        self.assertTrue(any("0..31" in e for e in self.errors(too_high)))
+
     def test_derived_ops_reject_bad_swizzle_and_source(self):
         bad_swizzle = entry(constant_ops=[{
             "dst_reg": 7, "op": "pack",

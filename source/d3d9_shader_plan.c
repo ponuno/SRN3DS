@@ -192,6 +192,7 @@ int d9_shader_plan_draw_allowed(const D9ShaderPlan *plan,
                      (unsigned)D9_SHADER_PLAN_MAX_CONST_OPS);
         return -1;
     }
+    uint32_t derived_mask = 0;
     for (unsigned i = 0; i < plan->const_op_count; ++i) {
         const D9ShaderPlanConstOp *op = &plan->const_op[i];
         if (op->dst_reg >= D9_SHADER_PLAN_CONST_REGS) {
@@ -241,6 +242,29 @@ int d9_shader_plan_draw_allowed(const D9ShaderPlan *plan,
                              (unsigned)src->negate);
                 return -1;
             }
+        }
+        derived_mask |= 1u << op->dst_reg;
+    }
+    /* A derived register must not overwrite a raw guest constant another stage
+     * still reads (GFx keeps c0..c3 material data alongside derived c9+). */
+    if (derived_mask) {
+        uint32_t raw_mask = 0;
+        for (unsigned i = 0; i < plan->tev.constants; ++i) {
+            unsigned reg = plan->tev.constant_reg[i];
+            if (reg < D9_SHADER_PLAN_CONST_REGS &&
+                !(derived_mask & (1u << reg)))
+                raw_mask |= 1u << reg;
+        }
+        uint32_t clash = raw_mask & derived_mask;
+        if (clash) {
+            unsigned reg = 0;
+            while (!(clash & (1u << reg))) ++reg;
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "plan %s: derived c%u collides with a raw constant "
+                         "used by a stage", plan->id ? plan->id : "(unnamed)",
+                         reg);
+            return -1;
         }
     }
     if (plan->pass_count) {

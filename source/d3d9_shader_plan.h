@@ -27,7 +27,7 @@
  * the guest never uploads (for example c0.zwzw) from the c0..c7 bank. */
 #define D9_SHADER_PLAN_MAX_CONST_OPS 8u
 #define D9_SHADER_PLAN_MAX_CONST_SRC 3u
-#define D9_SHADER_PLAN_CONST_REGS 8u
+#define D9_SHADER_PLAN_CONST_REGS 32u
 /* Multi-pass: one draw call re-submits the same geometry through 2..4 TEV
  * programs with per-pass blend/depth state.  Six hardware stages per pass. */
 #define D9_SHADER_PLAN_MAX_PASSES 4u

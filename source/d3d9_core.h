@@ -684,6 +684,11 @@ int d9_get_tev_constants(const D9Device *d,float out[9][4]);
  * or flow-control opcode, so no accepted program consumes them.  Counts are
  * vectors for F/I and individual BOOLs for B; n==0 is a valid no-op. */
 #define D9_PS_CONST_F_REGS 8u
+/* Host-side TEV constant rows.  PICA200 has no indexable per-draw TEV uniform
+ * bank: the citro3d backend folds each referenced row into a per-stage literal
+ * RGBA8 colour, so 32 rows cost host memory only.  Derived plan registers may
+ * address up to row 31. */
+#define D9_TEV_CONSTANT_ROWS 32u
 #define D9_PS_CONST_I_REGS 8u
 #define D9_PS_CONST_B_REGS 8u
 #define D9_VS_CONST_F_REGS 256u

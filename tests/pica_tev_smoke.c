@@ -655,14 +655,19 @@ static void test_menu_descriptors(void) {
     check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) < 0 &&
           reason == D9_PICA_TEV_SAMPLER, "menu: duplicate/missing s1 rejected");
 
-    /* Negative: external constant outside c0..c8. */
+    /* Negative: external constant outside the 32-row derived bank. */
     p = menu_fixed_plan(0);
     p.stage[0].const_is_literal = 0;
-    p.stage[0].const_reg = 9;
+    p.stage[0].const_reg = 32;
     p.stage[0].src_rgb[1] = p.stage[0].src_a[1] = D9TEV_SRC_CONST;
     check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) < 0 &&
           reason == D9_PICA_TEV_EXTERNAL_CONSTANT &&
-          strstr(why, "c9") != NULL, "menu: external c9 rejected");
+          strstr(why, "c32") != NULL, "menu: external c32 rejected");
+    /* c9..c31 are legal derived-plan rows: the backend folds them into a
+     * per-stage literal colour, so there is no eight-row hardware bank. */
+    p.stage[0].const_reg = 9;
+    check(d9_pica_tev_validate(&p, &d, &reason, why, sizeof why) == 0,
+          "menu: external c9 accepted");
 
     /* Negative: color1 without the menu-light ambient fold. */
     p = menu_fixed_plan(0);

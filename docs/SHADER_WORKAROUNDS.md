@@ -29,10 +29,10 @@ Fields:
 
 | field | meaning |
 | --- | --- |
-| `dst_reg` | destination D3D `c#`, `0..7` (the TEV constant bank) |
+| `dst_reg` (alias `dst`) | destination D3D `c#`, `0..31` (32-row derived bank) |
 | `op` | `pack`, `add`, `mul`, `lerp` |
 | `src[]` | 1 source for `pack`, 2 for `add`/`mul`, 3 for `lerp` |
-| `src[].reg` | source `c#`, `0..7` |
+| `src[].reg` | source `c#`, `0..31` |
 | `src[].swizzle` | four lanes from `x/y/z/w`, in destination order |
 | `src[].negate` | `1` subtracts the swizzled source |
 
@@ -84,7 +84,7 @@ still returns the guest's values.
 ### Gate behaviour
 
 `d9_shader_plan_draw_allowed` rejects a malformed op by name (destination
-outside `c0..c7`, wrong source count, bad swizzle lane, `negate` not 0/1).
+outside `c0..c31`, wrong source count, bad swizzle lane, `negate` not 0/1).
 The per-draw gate additionally refuses with a named reason when a source was
 never uploaded:
 
@@ -94,6 +94,14 @@ but c0 was never uploaded by SetPixelShaderConstantF
 ```
 
 No partial draw is submitted.
+
+The derived bank has 32 rows.  Rows `c9..c31` are the normal allocation for
+GFx-style plans: guest material constants `c0..c3` stay untouched and a
+stage keeps reading them directly.  A derived destination that would shadow a
+raw constant another stage still uses is refused by name.  PICA200 exposes no
+indexable per-draw TEV uniform bank — the citro3d backend folds every
+referenced row into a per-stage literal RGBA8 colour — so 32 rows cost host
+memory only.
 
 ## 2. `passes[]`
 

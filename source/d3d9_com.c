@@ -3543,8 +3543,9 @@ static int plan_draw_state(void){
         if(plan->const_op_count){
             float src[D9_SHADER_PLAN_CONST_REGS][4],derived[D9_SHADER_PLAN_CONST_REGS][4];
             uint32_t mask=0;
+            memset(src,0,sizeof src);
             if(d9_get_ps_constants_f(g.device,0,&src[0][0],
-                                     D9_SHADER_PLAN_CONST_REGS)||
+                                     D9_PS_CONST_F_REGS)||
                d9_shader_plan_build_constants(plan,(const float (*)[4])src,
                                               d9_ps_constants_f_mask(g.device),
                                               derived,&mask,why,sizeof why)){

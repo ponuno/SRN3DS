@@ -188,6 +188,14 @@ def validate_entry(entry: dict, errors: list, where: str) -> None:
             fail("uniform_registers must be 0..%d" % MAX_VS_UNIFORMS)
 
 
+def _op_dst(op: dict):
+    if not isinstance(op, dict):
+        return None
+    if "dst_reg" in op:
+        return op.get("dst_reg")
+    return op.get("dst")
+
+
 def _validate_constant_ops(entry: dict, const_regs: set, fail) -> None:
     """Mirror the schema's $defs/constant_op and check source availability."""
     ops = entry.get("constant_ops")
@@ -196,14 +204,14 @@ def _validate_constant_ops(entry: dict, const_regs: set, fail) -> None:
     if not isinstance(ops, list) or len(ops) > 8:
         fail("constant_ops must be a list of at most 8 operations")
         return
-    dst_regs = {op.get("dst_reg") for op in ops if isinstance(op, dict)}
+    dst_regs = {_op_dst(op) for op in ops if isinstance(op, dict)}
     for index, op in enumerate(ops):
         if not isinstance(op, dict):
             fail("constant op %d is not an object" % index)
             continue
-        dst = op.get("dst_reg")
-        if not isinstance(dst, int) or not 0 <= dst <= 7:
-            fail("constant op %d dst_reg must be 0..7" % index)
+        dst = _op_dst(op)
+        if not isinstance(dst, int) or not 0 <= dst <= 31:
+            fail("constant op %d dst_reg must be 0..31" % index)
         name = op.get("op")
         if name not in ("pack", "add", "mul", "lerp"):
             fail("constant op %d op must be pack/add/mul/lerp" % index)
@@ -218,8 +226,8 @@ def _validate_constant_ops(entry: dict, const_regs: set, fail) -> None:
                 fail("constant op %d src %d is not an object" % (index, lane))
                 continue
             reg = item.get("reg")
-            if not isinstance(reg, int) or not 0 <= reg <= 7:
-                fail("constant op %d src %d reg must be 0..7" % (index, lane))
+            if not isinstance(reg, int) or not 0 <= reg <= 31:
+                fail("constant op %d src %d reg must be 0..31" % (index, lane))
                 continue
             swizzle = item.get("swizzle")
             if not (isinstance(swizzle, str) and len(swizzle) == 4
@@ -232,6 +240,11 @@ def _validate_constant_ops(entry: dict, const_regs: set, fail) -> None:
             if reg not in const_regs and reg not in dst_regs:
                 fail("constant op %d reads c%d, which no constant or derived "
                      "register provides" % (index, reg))
+    raw = set(const_regs) - dst_regs
+    clash = raw & dst_regs
+    if clash:
+        fail("derived c%d collides with a raw constant used by a stage"
+             % min(clash))
 
 
 def _validate_passes(entry: dict, fail) -> None:

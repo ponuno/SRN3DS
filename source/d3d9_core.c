@@ -99,7 +99,7 @@ struct D9Device {
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
-    float tev_constants[9][4];
+    float tev_constants[D9_TEV_CONSTANT_ROWS][4];
     /* Derived plan constants written by d9_set_derived_constants().  The mask
      * is cleared whenever the raw SetPixelShaderConstantF bank changes, so a
      * stale derivation can never leak into the next draw. */
@@ -2307,7 +2307,7 @@ int d9_set_tev_constants(D9Device *d,const float values[9][4]){
     (void)d9_set_derived_constants(d,NULL,0);
     for(unsigned i=0;i<9;++i)for(unsigned j=0;j<4;++j)
         if(!isfinite(values[i][j]))return D9_INVALID;
-    memcpy(d->tev_constants,values,sizeof d->tev_constants);
+    memcpy(d->tev_constants,values,9u*sizeof d->tev_constants[0]);
     /* SetPixelShaderConstantF is the authoritative pixel-shader bank.  The
      * legacy VS/ambient upload must not silently undo those writes. */
     for(unsigned i=0;i<D9_PS_CONST_F_REGS;++i)
@@ -2317,7 +2317,7 @@ int d9_set_tev_constants(D9Device *d,const float values[9][4]){
 }
 int d9_get_tev_constants(const D9Device *d,float out[9][4]){
     if(!d||!out)return D9_INVALID;
-    memcpy(out,d->tev_constants,sizeof d->tev_constants);
+    memcpy(out,d->tev_constants,9u*sizeof d->tev_constants[0]);
     return D9_OK;
 }
 static int const_range(const D9Device *d,const char *method,const char *label,
@@ -3310,7 +3310,7 @@ int d9_draw_plan_passes(D9Device *d,const struct D9ShaderPlan *plan,const D9Plan
     }
     D9DrawState saved_state=d->state;
     const D9TevProgram *saved_ps=d->pixel_shader;
-    float saved_const[9][4];
+    float saved_const[D9_TEV_CONSTANT_ROWS][4];
     memcpy(saved_const,d->tev_constants,sizeof saved_const);
     UpSource up;
     memset(&up,0,sizeof up);

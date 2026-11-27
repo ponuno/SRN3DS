@@ -949,7 +949,8 @@ def _const_ops_to_c(ops: Sequence[dict], indent: str) -> str:
             srcs.append("{%d,{%d,%d,%d,%d},%d}" % (
                 s["reg"], sw[0], sw[1], sw[2], sw[3], s.get("negate", 0)))
         lines.append("%s        {%d, %d, %d, {%s}}," % (
-            indent, op["dst_reg"], CONST_OP_NAMES[op["op"]], len(op["src"]),
+            indent, op.get("dst_reg", op.get("dst", 0)),
+            CONST_OP_NAMES[op["op"]], len(op["src"]),
             ", ".join(srcs)))
     lines.append("%s    }," % indent)
     return "\n".join(lines)
