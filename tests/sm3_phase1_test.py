@@ -173,7 +173,15 @@ class PackPartitionTest(unittest.TestCase):
                 + coverage["refused"], data["unique_hashes"], name)
         total_draws = sum(d["coverage"]["draw-enabled"]
                           for d in index["packs"].values())
-        self.assertEqual(total_draws, 1)
+        # The canonical copy is always draw-enabled; certified one-stage
+        # post-process plans may add more.
+        self.assertGreaterEqual(total_draws, 1)
+        runtime = json.load(open(plan_verify.PLANS_PATH, encoding="utf-8"))
+        for entry in runtime["entries"]:
+            if entry.get("draw_enabled") == 1:
+                self.assertEqual(entry["kind"], "tev", entry["id"])
+                if entry.get("quality") is not None:
+                    self.assertEqual(entry["quality"], "exact", entry["id"])
 
 
 class MeasuredDifferentialTest(unittest.TestCase):

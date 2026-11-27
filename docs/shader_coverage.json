@@ -54,15 +54,12 @@
    "owner": "sm3-agent-sky-water",
    "chunks": 82,
    "unique_hashes": 45,
-   "translated": 0,
+   "translated": 14,
    "draw_enabled": 0,
-   "refused": 45,
+   "refused": 31,
    "contract_only": 0,
    "refused_classes": {
-    "def_literal_out_of_range": 39,
-    "unsupported_opcode": 3,
-    "dataflow": 2,
-    "multiple_output_writes (2)": 1
+    "def_literal_out_of_range": 31
    },
    "needs": [
     "literal range rewrite (def outside RGBA8 [0,1])",
@@ -76,12 +73,12 @@
    "owner": "sm3-agent-terrain",
    "chunks": 327,
    "unique_hashes": 247,
-   "translated": 0,
+   "translated": 19,
    "draw_enabled": 0,
-   "refused": 247,
+   "refused": 228,
    "contract_only": 0,
    "refused_classes": {
-    "def_literal_out_of_range": 247
+    "def_literal_out_of_range": 228
    },
    "needs": [
     "literal range rewrite (def outside RGBA8 [0,1])"
@@ -115,12 +112,12 @@
    "owner": "sm3-agent-lighting",
    "chunks": 7459,
    "unique_hashes": 4991,
-   "translated": 4,
+   "translated": 34,
    "draw_enabled": 0,
-   "refused": 4987,
+   "refused": 4957,
    "contract_only": 130,
    "refused_classes": {
-    "def_literal_out_of_range": 4802,
+    "def_literal_out_of_range": 4772,
     "pica_vs": 130,
     "unsupported_opcode": 31,
     "too_many_vs_varyings (8 > 7)": 17,
@@ -136,10 +133,22 @@
    ]
   }
  ],
+ "extra_plans": {
+  "plans": 19,
+  "draw_enabled": 3,
+  "by_pack": {
+   "ui": {
+    "plans": 19,
+    "draw_enabled": 3,
+    "exact": 15,
+    "approx": 4
+   }
+  }
+ },
  "total": {
-  "translated": 114,
+  "translated": 177,
   "draw-enabled": 7,
-  "refused": 6538,
+  "refused": 6475,
   "chunks": 10475,
   "unique_hashes": 6659
  },

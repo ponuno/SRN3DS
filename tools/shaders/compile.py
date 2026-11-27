@@ -918,24 +918,24 @@ def plan_to_c(plan: dict, indent: str = "    ") -> str:
                     s["scale_rgb"], s["scale_a"], s["const_reg"],
                     s["const_is_literal"], s["const_rgba8"]))
         lines.append("%s        }," % indent)
-        lines.append("%s    %d," % (indent, len(plan["textures"])))
+        lines.append("%s    %d," % (indent, len(plan.get("textures") or [])))
         lines.append("%s        {" % indent)
-        for t in plan["textures"]:
+        for t in plan.get("textures") or []:
             lines.append("%s            {%d,%d,%d}," % (
                 indent, t["texcoord_reg"], t["sampler_reg"], t["sampler_type"]))
         lines.append("%s        }," % indent)
-        lines.append("%s    %d," % (indent, len(plan["inputs"])))
+        lines.append("%s    %d," % (indent, len(plan.get("inputs") or [])))
         lines.append("%s        {" % indent)
-        for i in plan["inputs"]:
+        for i in plan.get("inputs") or []:
             lines.append("%s            {%d,%d,%d,%d}," % (
                 indent, i["usage"], i["usage_index"], i["reg_index"],
                 i["tev_source"]))
         lines.append("%s        }," % indent)
-        lines.append("%s    %d," % (indent, len(plan["constants"])))
-        consts = list(plan["constants"]) + [0] * (8 - len(plan["constants"]))
+        lines.append("%s    %d," % (indent, len(plan.get("constants") or [])))
+        consts = list(plan.get("constants") or []) + [0] * (8 - len(plan.get("constants") or []))
         lines.append("%s    {%s}," % (indent, ",".join(str(c) for c in consts)))
         lines.append("%s    %d,%d,%d,0x%08xu," % (
-            indent, plan["uses_vertex_color"], plan["requires_alpha_fixup"],
+            indent, plan.get("uses_vertex_color", 0), plan.get("requires_alpha_fixup", 0),
             TEV_MAX_STAGES, (1 if plan.get("family") == "menu_light" else 0)))
         lines.append("%s    }," % indent)
     else:
