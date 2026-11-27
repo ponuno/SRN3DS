@@ -39,32 +39,43 @@ class SkinningCatalogTest(unittest.TestCase):
 
     def test_counts(self):
         coverage = self.doc["coverage"]
-        self.assertEqual(coverage["translated"], 83)
+        self.assertEqual(coverage["translated"], 177)
         self.assertEqual(coverage["draw_enabled"], 3)
-        self.assertEqual(coverage["refused"], 1111)
+        self.assertEqual(coverage["refused"], 1017)
         self.assertEqual(coverage["translated"] + coverage["refused"],
                          self.manifest["unique_hashes"])
 
-    def test_every_plan_is_a_schema_valid_vs_contract(self):
+    def test_every_plan_is_a_schema_valid_contract(self):
         schema = plan_verify.load_schema()
         for entry in self.doc["entries"]:
             errors = []
             plan_verify.validate_entry(entry, errors, entry["id"])
             self.assertEqual(errors, [], entry["id"])
-            self.assertEqual(entry["stage"], "vs_3_0")
-            self.assertEqual(entry["kind"], "pica_vs")
-            self.assertLessEqual(len(entry["outputs"]), 7)
-            self.assertLessEqual(len(entry["inputs"]), 16)
-            self.assertLessEqual(entry["uniform_registers"], 96)
-            self.assertTrue(entry["skinning"], entry["id"])
-            self.assertIn(entry["codegen"], ("pending", "emitted-verified"))
-            if entry["codegen"] == "emitted-verified":
-                self.assertEqual(entry["draw_enabled"], 1, entry["id"])
-                self.assertEqual(plan_verify.derive_status(entry),
-                                 "draw-enabled", entry["id"])
-                self.assertIn("emitted_code_upload_path", entry["preconditions"])
+            self.assertIn(entry["quality"], ("exact", "approx"), entry["id"])
+            if entry["kind"] == "pica_vs":
+                self.assertEqual(entry["stage"], "vs_3_0")
+                self.assertLessEqual(len(entry["outputs"]), 7)
+                self.assertLessEqual(len(entry["inputs"]), 16)
+                self.assertLessEqual(entry["uniform_registers"], 96)
+                self.assertTrue(entry["skinning"], entry["id"])
+                self.assertIn(entry["codegen"], ("pending", "emitted-verified"))
+                if entry["codegen"] == "emitted-verified":
+                    self.assertEqual(entry["draw_enabled"],
+                                     1 if entry["id"] in pack_plans.DRAWN else 0)
+                    if entry["draw_enabled"] == 1:
+                        self.assertEqual(plan_verify.derive_status(entry),
+                                         "draw-enabled", entry["id"])
+                        self.assertIn("emitted_code_upload_path",
+                                      entry["preconditions"])
+                else:
+                    self.assertEqual(entry["draw_enabled"], 0, entry["id"])
             else:
+                self.assertEqual(entry["kind"], "tev")
+                self.assertEqual(entry["stage"], "ps_3_0")
                 self.assertEqual(entry["draw_enabled"], 0, entry["id"])
+                # The PS class is a documented basic-tint approximation.
+                self.assertEqual(entry["quality"], "approx", entry["id"])
+                self.assertTrue(entry.get("approximation"), entry["id"])
         self.assertEqual(schema["$defs"]["entry"]["properties"]["kind"]
                          ["enum"], ["tev", "pica_vs"])
 
@@ -75,9 +86,12 @@ class SkinningCatalogTest(unittest.TestCase):
             self.assertTrue(refusal["needs"])
             self.assertEqual(refusal["class"], classes[refusal["sha256"]])
         reasons = {r["reason"] for r in self.doc["refusals"]}
-        self.assertIn("def_literal_out_of_range", reasons)
-        self.assertIn("unsupported_opcode", reasons)
+        classes = {r["class"] for r in self.doc["refusals"]}
+        self.assertIn("def_literal_out_of_range", classes)
+        self.assertIn("unsupported_opcode", classes)
+        self.assertIn("pica_vs", classes)
         self.assertIn("pica_vs_output_envelope", reasons)
+        self.assertIn("ps_texture_budget", reasons)
 
     def test_no_hash_is_both_planned_and_refused(self):
         plans = {e["sha256"] for e in self.doc["entries"]}

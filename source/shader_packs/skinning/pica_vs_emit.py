@@ -75,11 +75,15 @@ SWZ = "xyzw"
 #: The three representatives: position-only, position+UV1, position+UV0+UV2.
 REPRESENTATIVES = ["skin.vs.f8ffaecd", "skin.vs.20f4db07", "skin.vs.60dbd11a"]
 
-SUPPORTED = {"mov", "mul", "mad", "frc", "mova", "dp4"}
+SUPPORTED = {"mov", "mul", "mad", "frc", "mova", "dp4", "dp3", "add",
+             "min", "max", "slt", "sge", "sub", "abs", "nrm", "lrp",
+             "rcp", "rsq"}
 INPUT_USAGE = {0: "position", 1: "blendweight", 2: "blendindices",
-               3: "normal", 5: "texcoord", 10: "color"}
+               3: "normal", 5: "texcoord", 6: "tangent", 7: "binormal",
+               10: "color"}
 OUTPUT_NAME = {0: "outpos"}          # usage 0
 TEX_OUTPUT = {0: "outtc0", 1: "outtc1", 2: "outtc2"}
+COLOR_OUTPUT = {0: "outclr"}
 
 
 class Refusal(Exception):
@@ -149,8 +153,14 @@ def _out_map(plan: dict) -> Dict[Tuple[int, int], str]:
             if name is None:
                 raise Refusal("output_texcoord%d_unmapped" % item["usage_index"])
             out[(item["type"], item["reg_index"])] = name
-        elif item["usage"] == 10 and item["usage_index"] == 0:
-            out[(item["type"], item["reg_index"])] = "outclr"
+        elif item["usage"] == 10:
+            name = COLOR_OUTPUT.get(item["usage_index"])
+            if name is None:
+                # PICA has a single raster colour; the second colour cannot be
+                # produced by a VS output semantic (picasso: "invalid output
+                # type: color1").
+                raise Refusal("output_color%d_unmapped" % item["usage_index"])
+            out[(item["type"], item["reg_index"])] = name
         else:
             raise Refusal("output_%s%d_unmapped"
                           % (item["usage_name"], item["usage_index"]))
@@ -268,7 +278,12 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
     def relative_component(ins, src_index: int) -> str:
         """D3D SM3 encodes the a0 component in the address token after the
         relative constant source.  Dropping it silently collapses all four
-        bone influences onto a0.x."""
+        bone influences onto a0.x.  ``asm.Src.relative`` carries it directly
+        since the relative-tuple decoder change; keep the older next-source
+        REG_ADDR form as a fallback."""
+        rel = ins.srcs[src_index].relative
+        if rel is not None and getattr(rel, "component", None):
+            return rel.component
         if src_index + 1 < len(ins.srcs):
             address = ins.srcs[src_index + 1]
             if address.reg_type == asm.REG_ADDR and address.swizzle:
@@ -416,6 +431,60 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
                     lines.append("    mov %s, %s" % (scratch, c[0]))
                     c = (scratch, "reg")
                 lines.append("    mad %s, %s, %s, %s" % (dst, a[0], b[0], c[0]))
+        elif ins.name == "dp3":
+            a, b = ops[0], ops[1]
+            if b[1] != "reg":
+                if a[1] == "reg":
+                    a, b = b, a
+                else:
+                    lines.append("    mov %s, %s" % (scratch, b[0]))
+                    b = (scratch, "reg")
+            lines.append("    dp3 %s, %s, %s" % (dst, a[0], b[0]))
+        elif ins.name in ("add", "min", "max", "slt", "sge"):
+            binary(ins.name, dst, ops[0], ops[1])
+        elif ins.name in ("rcp", "rsq"):
+            src = ops[0]
+            if src[1] != "reg":
+                lines.append("    mov %s, %s" % (scratch, src[0]))
+                src = (scratch, "reg")
+            lines.append("    %s %s, %s.xxxx" % (ins.name, dst, src[0]))
+        elif ins.name == "sub":
+            a, b = ops[0], ops[1]
+            if b[1] != "reg":
+                if a[1] == "reg":
+                    a, b = b, a
+                else:
+                    lines.append("    mov %s, %s" % (scratch, b[0]))
+                    b = (scratch, "reg")
+            lines.append("    add %s, %s, %s" % (dst, a[0], negate(b[0])))
+        elif ins.name == "abs":
+            src = ops[0]
+            if src[1] != "reg":
+                lines.append("    mov %s, %s" % (scratch, src[0]))
+                src = (scratch, "reg")
+            lines.append("    max %s, %s, %s"
+                         % (dst, src[0], negate(src[0])))
+        elif ins.name == "nrm":
+            if scratch2 is None:
+                raise Refusal("no_second_temporary")
+            src = ops[0]
+            if src[1] != "reg":
+                lines.append("    mov %s, %s" % (scratch, src[0]))
+                src = (scratch, "reg")
+            lines.append("    dp3 %s, %s, %s" % (scratch2, src[0], src[0]))
+            lines.append("    rsq %s, %s.xxxx" % (scratch2, scratch2))
+            lines.append("    mul %s, %s, %s" % (dst, src[0], scratch2))
+        elif ins.name == "lrp":
+            # D3D lrp: dst = a*(1-c) + b*c = a + (b-a)*c.
+            a, b, c = ops[0], ops[1], ops[2]
+            if scratch2 is None:
+                raise Refusal("no_second_temporary")
+            if a[1] != "reg":
+                lines.append("    mov %s, %s" % (scratch, a[0]))
+                a = (scratch, "reg")
+            lines.append("    add %s, %s, %s" % (scratch2, b[0], negate(a[0])))
+            lines.append("    mad %s, %s, %s, %s"
+                         % (dst, scratch2, c[0], a[0]))
         index += 1
     # PICA clip space differs from D3D9: the top-LCD is rotated and PICA z is
     # [-w,0], the same convention d9_pica_transform() applies to fixed draws.
@@ -471,8 +540,11 @@ def interpret_ir(ir: C.IR, inputs: dict, consts: dict,
                 continue
             relative = None
             if src.reg_type == asm.REG_CONST and src.relative:
-                # SM3 puts an a0.<component> token immediately after cN[a0.*].
-                if i + 1 < len(ins.srcs) and \
+                # SM3 keeps the a0.<component> token on the relative source.
+                comp_name = getattr(src.relative, "component", None)
+                if comp_name:
+                    comp = SWZ.index(comp_name)
+                elif i + 1 < len(ins.srcs) and \
                         ins.srcs[i + 1].reg_type == asm.REG_ADDR:
                     comp = SWZ.index(ins.srcs[i + 1].swizzle[0])
                 relative = comp
@@ -500,6 +572,35 @@ def interpret_ir(ir: C.IR, inputs: dict, consts: dict,
         elif ins.name == "dp4":
             dot = sum(ops[0][i] * ops[1][i] for i in range(4))
             result = [dot] * 4
+        elif ins.name == "dp3":
+            dot = sum(ops[0][i] * ops[1][i] for i in range(3))
+            result = [dot] * 4
+        elif ins.name == "add":
+            result = [ops[0][i] + ops[1][i] for i in range(4)]
+        elif ins.name == "sub":
+            result = [ops[0][i] - ops[1][i] for i in range(4)]
+        elif ins.name == "min":
+            result = [min(ops[0][i], ops[1][i]) for i in range(4)]
+        elif ins.name == "max":
+            result = [max(ops[0][i], ops[1][i]) for i in range(4)]
+        elif ins.name == "slt":
+            result = [1.0 if ops[0][i] < ops[1][i] else 0.0 for i in range(4)]
+        elif ins.name == "sge":
+            result = [1.0 if ops[0][i] >= ops[1][i] else 0.0 for i in range(4)]
+        elif ins.name == "abs":
+            result = [abs(v) for v in ops[0]]
+        elif ins.name == "rcp":
+            result = [1.0 / v if v else 0.0 for v in ops[0]]
+        elif ins.name == "rsq":
+            result = [1.0 / math.sqrt(v) if v > 0 else 0.0 for v in ops[0]]
+        elif ins.name == "nrm":
+            length = math.sqrt(sum(ops[0][i] * ops[0][i] for i in range(3)))
+            scale = 1.0 / length if length else 0.0
+            result = [ops[0][0] * scale, ops[0][1] * scale,
+                      ops[0][2] * scale, ops[0][3]]
+        elif ins.name == "lrp":
+            result = [ops[0][i] * (1.0 - ops[2][i]) + ops[1][i] * ops[2][i]
+                      for i in range(4)]
         else:
             raise Refusal("reference_opcode_%s" % ins.name)
         dst = ins.dst
@@ -623,6 +724,21 @@ def interpret_pica(text: str, inputs: dict, consts: dict,
             result = [v - math.floor(v) for v in ops[0]]
         elif op == "flr":
             result = [math.floor(v) for v in ops[0]]
+        elif op == "dp3":
+            dot = sum(ops[0][i] * ops[1][i] for i in range(3))
+            result = [dot] * 4
+        elif op == "min":
+            result = [min(ops[0][i], ops[1][i]) for i in range(4)]
+        elif op == "max":
+            result = [max(ops[0][i], ops[1][i]) for i in range(4)]
+        elif op == "slt":
+            result = [1.0 if ops[0][i] < ops[1][i] else 0.0 for i in range(4)]
+        elif op == "sge":
+            result = [1.0 if ops[0][i] >= ops[1][i] else 0.0 for i in range(4)]
+        elif op == "rsq":
+            result = [1.0 / math.sqrt(v) if v > 0 else 0.0 for v in ops[0]]
+        elif op == "rcp":
+            result = [1.0 / v if v else 0.0 for v in ops[0]]
         elif op == "mova":
             _write("a0", ops[0], env)
             continue
@@ -651,6 +767,10 @@ def build_sample(rng, plan: dict, bones: int):
             index = rng.randrange(bones)
             inputs[reg] = [index / 255.0] * 4
         elif usage == 3:
+            vec = [rng.uniform(-1.0, 1.0) for _ in range(3)]
+            length = math.sqrt(sum(v * v for v in vec)) or 1.0
+            inputs[reg] = [v / length for v in vec] + [0.0]
+        elif usage in (6, 7):
             vec = [rng.uniform(-1.0, 1.0) for _ in range(3)]
             length = math.sqrt(sum(v * v for v in vec)) or 1.0
             inputs[reg] = [v / length for v in vec] + [0.0]
@@ -703,8 +823,10 @@ def _out_name(item: dict) -> str:
         return "outpos"
     if item["usage"] == 5:
         return TEX_OUTPUT[item["usage_index"]]
-    if item["usage"] == 10 and item["usage_index"] == 0:
-        return "outclr"
+    if item["usage"] == 10:
+        name = COLOR_OUTPUT.get(item["usage_index"])
+        if name:
+            return name
     raise Refusal("compare_output_%s" % item["usage_name"])
 
 
@@ -793,17 +915,26 @@ def emit_all(out_dir: str = GENERATED, data_dir: str = "",
     plans = load_plans()
     os.makedirs(out_dir, exist_ok=True)
     entries = []
-    for plan_id in REPRESENTATIVES:
-        plan = plans.get(plan_id)
-        if plan is None:
-            raise Refusal("representative_%s_missing" % plan_id)
+    for plan_id in sorted(plans):
+        plan = plans[plan_id]
         ir = find_ir(plan["sha256"], data_dir)
-        text = emit(plan, ir)
+        try:
+            text = emit(plan, ir)
+        except Refusal as exc:
+            # A shape the PICA VS envelope cannot express (second colour,
+            # texcoord3+, a non-floor frc) stays `codegen: pending`.
+            plan.setdefault("_emit_refusal", str(exc))
+            continue
         path = os.path.join(out_dir, "%s.v.pica" % plan_id)
         with open(path, "w", encoding="ascii", newline="\n") as handle:
             handle.write(text)
-        entry, shbin = verify(plan, ir, samples)
-        if shbin:
+        try:
+            entry, shbin = verify(plan, ir, samples)
+        except Refusal as exc:
+            os.remove(path)
+            plan.setdefault("_emit_refusal", str(exc))
+            continue
+        if shbin and entry["status"] == "pass":
             with open(os.path.join(out_dir, "%s.shbin" % plan_id), "wb") as handle:
                 handle.write(shbin)
         entries.append(entry)

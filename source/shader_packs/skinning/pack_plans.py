@@ -45,12 +45,13 @@ from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
-for path in (REPO, os.path.join(REPO, "tools"),
+for path in (HERE, REPO, os.path.join(REPO, "tools"),
              os.path.join(REPO, "tools", "shaders")):
     if path not in sys.path:
         sys.path.insert(0, path)
 
 from shaders import asm, compile as C, plan_verify  # noqa: E402
+import ps_tint  # noqa: E402
 
 PACK = "skinning"
 ARCHIVE = "Skyrim - Shaders.bsa"
@@ -61,6 +62,9 @@ EMITTER_REPORT = os.path.join(HERE, "emitter_report.json")
 DEFAULT_DATA = [r"F:\Skyrim\Data",
                 r"E:\SteamLibrary\steamapps\common\Skyrim\Data"]
 MAX_ENTRIES = 16
+#: The three representatives are the only programs allowed to enter the
+#: runtime upload table today; the rest are verified descriptors (draw 0).
+DRAWN = {"skin.vs.f8ffaecd", "skin.vs.20f4db07", "skin.vs.60dbd11a"}
 
 
 def _load(path: str):
@@ -150,6 +154,7 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
     entry["source_key"] = key
     if plan["kind"] == "pica_vs":
         entry["codegen"] = "pending"
+        entry["quality"] = "exact"
         entry["note"] = (
             "PICA VS contract: %d varying(s), %d uniform register(s); "
             "native codegen pending, draw disabled"
@@ -162,8 +167,10 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
         emitted = _emitter_verified().get(plan["sha256"])
         if emitted is not None and emitted.get("shbin_sha256"):
             entry["codegen"] = "emitted-verified"
+            entry["quality"] = "exact"
             entry["emitted_asm"] = "generated/%s.v.pica" % entry["id"]
-            entry["draw_enabled"] = 1
+            entry["draw_enabled"] = 1 if entry["id"] in DRAWN else 0
+            entry["runtime"] = 1 if entry["draw_enabled"] else 0
             entry["emitter"] = {
                 "samples": emitted["samples"],
                 "tolerance": emitted["tolerance"],
@@ -197,11 +204,23 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
                 "emitted_code_upload_path",
             ]
     else:
+        entry["quality"] = plan.get("quality", "exact")
+        if plan.get("approximation"):
+            entry["approximation"] = plan["approximation"]
         entry["note"] = (
             "TEV plan reproduced offline; draw needs the material contract "
             "(texture and constant registers) at the draw site")
-        entry["preconditions"] = ["material_constants", "texture0_2d"]
+        entry["preconditions"] = plan.get("preconditions") or [
+            "material_constants", "texture0_2d"]
     return entry
+
+
+def translate(ir):
+    """Pack-owned planner: PS basic tint class + the shared PICA VS contract."""
+    if ir.kind == "ps":
+        plan, why = ps_tint.plan(ir)
+        return plan, ("tev_basic_tint" if plan is not None else None), why
+    return C.plan_vs(ir)
 
 
 def _refusal(sha: str, row: dict, why: str, ir) -> dict:
@@ -221,6 +240,10 @@ def _refusal(sha: str, row: dict, why: str, ir) -> dict:
                         "varying or use a multi-pass VS")
     elif reason == "no_output_write":
         out["needs"] = "shader writes no colour output"
+    elif reason.startswith("ps_"):
+        out["needs"] = ("basic tint class only: straight-line, <=3 2D textures; "
+                        "other PS need a dataflow scheduler and opcode "
+                        "lowering (nrm/rcp/rsq/pow/cmp/branches)")
     else:
         out["needs"] = "shared planner work"
     return out
@@ -247,8 +270,7 @@ def generate(data_dir: str) -> dict:
             raise SystemExit("hash %s is in the pack but not in the archive" % sha)
         if ir.kind == "ps" and row["kind"] != "ps":
             raise SystemExit("%s: pack says ps, IR says %s" % (sha, ir.kind))
-        plan, _cls, why = (C.plan_ps(ir) if ir.kind == "ps"
-                           else C.plan_vs(ir))
+        plan, _cls, why = translate(ir)
         # plan_vs counts only the usage != 0 varyings against PICA's 7; the
         # d9-shader-plan-v1 schema counts every output, including position.
         # Keep the catalog schema-clean: refuse the overflow by name.
@@ -432,8 +454,7 @@ def verify_symbolic(doc: dict, data_dir: str) -> dict:
         for chunk in package.chunks:
             ir = C.build_ir(chunk.code)
             if ir.sha256 in wanted and ir.sha256 not in found:
-                plan, _cls, why = (C.plan_ps(ir) if ir.kind == "ps"
-                                   else C.plan_vs(ir))
+                plan, _cls, why = translate(ir)
                 found[ir.sha256] = (plan, why, ir)
     problems = []
     for sha, committed in wanted.items():
@@ -463,6 +484,10 @@ def emit_runtime(doc: dict) -> dict:
     verified = []
     for entry in doc.get("entries", []):
         if entry.get("codegen") != "emitted-verified":
+            continue
+        if entry.get("draw_enabled") != 1:
+            # Verified descriptors that are not draw-enabled do not consume a
+            # runtime upload slot.
             continue
         emitter = entry.get("emitter") or {}
         if not emitter.get("shbin") or not emitter.get("shbin_sha256"):

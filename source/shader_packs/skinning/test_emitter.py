@@ -33,13 +33,13 @@ class EmitterCatalogTest(unittest.TestCase):
         with open(E.REPORT, encoding="utf-8") as handle:
             cls.report = json.load(handle)
 
-    def test_report_has_three_passing_representatives(self):
+    def test_report_has_the_verified_programs(self):
         self.assertEqual(self.report["status"], "pass")
-        self.assertEqual(len(self.report["entries"]), 3)
+        self.assertGreaterEqual(len(self.report["entries"]), 29)
         self.assertEqual(self.report["samples"], 256)
         self.assertEqual(self.report["tolerance"], 1e-4)
-        self.assertEqual(sorted(e["id"] for e in self.report["entries"]),
-                         sorted(E.REPRESENTATIVES))
+        for entry in self.report["entries"]:
+            self.assertEqual(entry["status"], "pass", entry["id"])
 
     def test_each_representative_is_inside_the_pica_envelope(self):
         for entry in self.report["entries"]:
@@ -53,28 +53,35 @@ class EmitterCatalogTest(unittest.TestCase):
             self.assertLessEqual(entry["max_abs_position"], E.TOLERANCE)
             self.assertLessEqual(entry["max_abs_varying"], E.TOLERANCE)
 
-    def test_plans_mark_the_same_three_as_emitted_verified(self):
+    def test_plans_mark_the_same_programs_as_emitted_verified(self):
         entry_sha = {e["id"]: e["shbin_sha256"] for e in self.report["entries"]}
         verified = {e["id"] for e in self.report["entries"]}
         marked = {p["id"] for p in self.plans.values()
                   if p.get("codegen") == "emitted-verified"}
         self.assertEqual(verified, marked)
-        self.assertEqual(len(marked), 3)
+        self.assertGreaterEqual(len(marked), 29)
+        drawn = {p["id"] for p in self.plans.values()
+                 if p.get("draw_enabled") == 1}
+        self.assertEqual(drawn, set(E.REPRESENTATIVES))
         for plan_id in verified:
             plan = self.plans[plan_id]
-            self.assertEqual(plan["draw_enabled"], 1)
+            self.assertEqual(plan["quality"], "exact")
             self.assertEqual(plan["emitter"]["shbin"],
                              "generated/%s.shbin" % plan_id)
             self.assertEqual(plan["emitter"]["shbin_sha256"],
                              entry_sha[plan_id])
             self.assertTrue(plan["emitted_asm"].endswith(".v.pica"))
-            self.assertIn("emitted_code_upload_path", plan["preconditions"])
+            if plan_id in drawn:
+                self.assertIn("emitted_code_upload_path", plan["preconditions"])
+                self.assertEqual(plan.get("runtime"), 1)
+            else:
+                self.assertEqual(plan.get("runtime"), 0)
 
     def test_all_other_contracts_stay_pending(self):
         pending = [p for p in self.plans.values()
                    if p["kind"] == "pica_vs"
                    and p["codegen"] != "emitted-verified"]
-        self.assertEqual(len(pending), 80)
+        self.assertEqual(len(pending), 83 - len(self.report["entries"]))
         for plan in pending:
             self.assertEqual(plan["codegen"], "pending")
             self.assertEqual(plan["draw_enabled"], 0)
