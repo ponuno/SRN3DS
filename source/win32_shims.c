@@ -888,17 +888,24 @@ static void s_SetCurrentDirectoryA(CPU *c){
     if(!*path)FAIL(ERR_INVALID_PARAMETER,0,1);
     if(path[0]=='/'||path[0]=='\\'||(isalpha((unsigned char)path[0])&&path[1]==':'))FAIL(ERR_INVALID_PARAMETER,0,1);
     if(!strcmp(path,"."))RET(1,1);
-    if(strlen(path)>=sizeof cwd)FAIL(ERR_INVALID_PARAMETER,0,1);
+    char clean[512];size_t cl=0;
     const char *p=path;
     while(*p){
         const char *s=p;while(*p&&*p!='/'&&*p!='\\')++p;
         size_t n=(size_t)(p-s);
-        if(!n||(n==1&&*s=='.')||(n==2&&s[0]=='.'&&s[1]=='.'))FAIL(ERR_INVALID_PARAMETER,0,1);
+        /* "." is a no-op component; ".." would escape the sandbox. */
+        if(n==1&&*s=='.'){if(*p)++p;continue;}
+        if(!n||(n==2&&s[0]=='.'&&s[1]=='.'))FAIL(ERR_INVALID_PARAMETER,0,1);
+        if(cl+n+2>=sizeof clean)FAIL(ERR_INVALID_PARAMETER,0,1);
+        if(cl)clean[cl++]='/';
+        memcpy(clean+cl,s,n);cl+=n;
         if(*p)++p;
     }
-    size_t rl=strlen(cwd);if(rl+1+strlen(path)>=sizeof cwd)FAIL(ERR_INVALID_PARAMETER,0,1);
+    if(!cl)RET(1,1);
+    clean[cl]=0;
+    size_t rl=strlen(cwd);if(rl+1+cl>=sizeof cwd)FAIL(ERR_INVALID_PARAMETER,0,1);
     if(cwd[rl-1]!='/'&&cwd[rl-1]!='\\')cwd[rl++]='/';
-    memcpy(cwd+rl,path,strlen(path)+1);
+    memcpy(cwd+rl,clean,cl+1);
     RET(1,1);
 }
 /* Code pages: CP_ACP (1252) is fully mapped, UTF-8 is supported. CP_OEMCP is
@@ -1444,7 +1451,14 @@ static int path_for_impl(const char *name,char *out,size_t cap) {
     while(*p) {
         const char *start=p;while(*p && *p!='/' && *p!='\\'){if(*p==':')return -1;++p;}
         size_t n=(size_t)(p-start);
-        if(!n || (n==1 && *start=='.') || (n==2 && !memcmp(start,"..",2)) || len+n+1>=cap)return -1;
+        /* Windows treats "." components as no-ops; TESV really emits
+         * LocalAppData\Skyrim\.\Plugins.txt.  ".." stays rejected because
+         * resolving it is what could escape the sandbox. */
+        if(n==1 && *start=='.'){
+            if(*p)++p;
+            continue;
+        }
+        if(!n || (n==2 && !memcmp(start,"..",2)) || len+n+1>=cap)return -1;
         memcpy(out+len,start,n);len+=n;
         if(*p){
             ++p;

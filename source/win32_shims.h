@@ -15,8 +15,10 @@ void win32_set_external_resolver(PeImportResolve resolver,void *ctx);
  * chain is full so the caller does not claim a shim that is not reachable. */
 int win32_add_external_resolver(PeImportResolve resolver,void *ctx);
 /* Map a guest relative path (or a recognised C:\Skyrim\ virtual root) to the
- * configured sandbox root.  Rejects '..', empty segments, drive/absolute paths
- * outside the virtual root, and any result that escapes `root`.  Returns 0 and
+ * configured sandbox root.  "." components are dropped (Windows semantics;
+ * TESV emits LocalAppData\Skyrim\.\Plugins.txt), while '..', empty segments,
+ * drive/absolute paths outside the virtual root, and any result that escapes
+ * `root` are rejected.  Returns 0 and
  * writes a NUL-terminated host path, or one of WIN32_GUEST_PATH_* below. */
 enum {
     WIN32_GUEST_PATH_OK = 0,

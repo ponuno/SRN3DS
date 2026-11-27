@@ -9,10 +9,11 @@
 /* Bounded, in-memory ADVAPI32 registry compatibility.
  *
  * This is not a Windows registry and it is not a view of the host registry.
- * Exactly one piece of install state is preloaded, because a real installation
- * writes it: HKLM\Software\Bethesda Softworks\Skyrim sBasePath = "C:\\Skyrim\\"
- * (the virtual root the guest also sees through GetModuleFileNameA). Everything
- * else exists only when the guest itself creates or writes it. Missing keys and
+ * Exactly one install key is preloaded, because a real installation writes it:
+ * HKLM\Software\Bethesda Softworks\Skyrim with sBasePath and Installed Path
+ * (both REG_SZ = "C:\\Skyrim\\", the virtual root the guest also sees through
+ * GetModuleFileNameA). Everything else exists only when the guest itself
+ * creates or writes it. Missing keys and
  * values are reported as ERROR_FILE_NOT_FOUND, never fabricated, and every
  * distinct missing value is logged once so the next run says exactly what the
  * engine wanted.

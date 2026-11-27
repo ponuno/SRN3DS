@@ -218,6 +218,24 @@ int main(void) {
     CHECK(err == ERROR_SUCCESS);
     CHECK(!read32(type_slot, &result) && result == REG_SZ);
     CHECK(!read32(size_slot, &result) && result == (uint32_t)strlen("C:\\Skyrim\\") + 1u);
+    /* A real installation also writes "Installed Path" (REG_SZ, same root).
+     * Lookup is case-insensitive, so the engine's spelling cannot miss it. */
+    put_str(value_name, "Installed Path");
+    write32(size_slot, 64u);
+    write32(type_slot, 0);
+    query_value(&cpu, seed_handle, value_name, type_slot, data_slot, size_slot, &err);
+    CHECK(err == ERROR_SUCCESS);
+    CHECK(!read32(type_slot, &result) && result == REG_SZ);
+    CHECK(!read32(size_slot, &result) && result == (uint32_t)strlen("C:\\Skyrim\\") + 1u);
+    {
+        char got[16];
+        CHECK(!guest_read(test_mem, data_slot, got, strlen("C:\\Skyrim\\") + 1u));
+        CHECK(!strcmp(got, "C:\\Skyrim\\"));
+    }
+    put_str(value_name, "Sbasepath");
+    write32(size_slot, 64u);
+    query_value(&cpu, seed_handle, value_name, type_slot, data_slot, size_slot, &err);
+    CHECK(err == ERROR_SUCCESS);
     close_key(&cpu, seed_handle, &err);
     CHECK(err == ERROR_SUCCESS);
 

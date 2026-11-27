@@ -386,27 +386,44 @@ static int value_find(RegKey *key, const char *name) {
 }
 
 /* The virtual install root the guest sees (GetModuleFileNameA reports
- * C:\Skyrim\<module>). sBasePath is the value TESV requested in WinMain. */
+ * C:\Skyrim\<module>).  A real installer writes both the documented
+ * "Installed Path" value (observed as REG_SZ in HKLM\Software\WOW6432Node\
+ * Bethesda Softworks\Skyrim) and the engine's own "sBasePath".  Both are the
+ * same install root here; the sandbox maps C:\Skyrim\ onto the real game
+ * directory.  No language value is invented: on a real install the language
+ * lives in SkyrimPrefs.ini (sLanguage), not in this key. */
+static int seed_value(RegKey *key, const char *name, const char *data) {
+    int vi = value_find(key, name);
+    if (vi < 0) {
+        if (key->value_count >= WIN32_REGISTRY_MAX_VALUES) return -1;
+        for (unsigned i = 0; i < WIN32_REGISTRY_MAX_VALUES; ++i)
+            if (!key->values[i].used) { vi = (int)i; break; }
+        if (vi < 0) return -1;
+        ++key->value_count;
+        key->values[vi].used = 1;
+        copy_text(key->values[vi].name, sizeof key->values[vi].name, name);
+    }
+    size_t n = strlen(data) + 1;
+    if (n > WIN32_REGISTRY_MAX_VALUE_BYTES) return -1;
+    memcpy(key->values[vi].data, data, n);
+    key->values[vi].type = REG_SZ;
+    key->values[vi].size = (uint16_t)n;
+    return 0;
+}
+
 static void seed_install_key(void) {
     int ki = key_find(2, "Software\\Bethesda Softworks\\Skyrim");
     if (ki < 0) return;
     RegKey *key = &g.keys[ki];
-    int vi = value_find(key, "sBasePath");
-    if (vi < 0) {
-        for (unsigned i = 0; i < WIN32_REGISTRY_MAX_VALUES; ++i)
-            if (!key->values[i].used) { vi = (int)i; break; }
-        if (vi < 0) return;
-        ++key->value_count;
-        key->values[vi].used = 1;
-        copy_text(key->values[vi].name, sizeof key->values[vi].name, "sBasePath");
-    }
     const char *data = "C:\\Skyrim\\";
-    size_t n = strlen(data) + 1;
-    memcpy(key->values[vi].data, data, n);
-    key->values[vi].type = REG_SZ;
-    key->values[vi].size = (uint16_t)n;
+    if (seed_value(key, "sBasePath", data) ||
+        seed_value(key, "Installed Path", data)) {
+        fprintf(diagnostics(), "[registry] install state refused: value table "
+                "full\n");
+        return;
+    }
     fprintf(diagnostics(), "[registry] install state: HKLM\\Software\\Bethesda "
-            "Softworks\\Skyrim sBasePath=%s\n", data);
+            "Softworks\\Skyrim sBasePath=%s Installed Path=%s\n", data, data);
 }
 
 static int access_bad(uint32_t access) {

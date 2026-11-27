@@ -23,12 +23,13 @@ No enumeration, delete or security APIs.
 
 * Bounded in-memory tree: 64 keys, 16 handles, 8 values/key, 512 B/value,
   192 B paths, case-insensitive. Static arrays, no per-call host allocation.
-* **One piece of install state is preloaded** because a real installation
-  writes it:
-  `HKLM\Software\Bethesda Softworks\Skyrim` with `sBasePath` (REG_SZ) =
-  `C:\Skyrim\` — the virtual root the guest already sees through
-  `GetModuleFileNameA`. This value was discovered at runtime; TESV asked for
-  `sBasePath` as soon as the key existed.
+* **Install state is preloaded** because a real installation writes it:
+  `HKLM\Software\Bethesda Softworks\Skyrim` with `sBasePath` (REG_SZ) and
+  `Installed Path` (REG_SZ), both `C:\Skyrim\` — the virtual root the guest
+  already sees through `GetModuleFileNameA`. `sBasePath` was discovered at
+  runtime; `Installed Path` is the documented installer value (observed in the
+  host's `WOW6432Node` view of the same key). No language value is invented:
+  on a real install the language lives in `SkyrimPrefs.ini` (`sLanguage`).
 * Everything else exists only when the guest writes it.
 * Missing keys/values return `ERROR_FILE_NOT_FOUND`; each distinct missing
   value is logged once. No fabricated values, no host registry, no filesystem.
