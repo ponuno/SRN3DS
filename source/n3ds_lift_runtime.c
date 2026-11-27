@@ -118,21 +118,31 @@ static uint32_t menu_rd32(uint32_t a){uint32_t v=0;if(memory)(void)guest_read32(
 static void menu_trace(CPU *c,uint32_t addr){
     if(!menu_trace_on()||!c)return;
     static const uint32_t va[]={
-        0x0069de08u,0x00876f60u,0x00876fc0u,0x00876b90u,0x00a60c80u,0x00a60c10u,
+        0x0069de08u,0x006982c0u,0x006f3e20u,0x006f3ea0u,0x006ebc10u,
+        0x006f3f00u,0x006f3f80u,0x0069cbd0u,0x004352d0u,0x00696810u,
+        0x00699b20u,0x00691410u,0x00898430u,0x00892da0u,0x006f44a0u,0x006f44d0u,
+        0x00a5d370u,0x0068c8e0u,0x006e3e30u,0x00649820u,0x0078a0a0u,0x006dc680u,
+        0x00690f90u,0x008e1950u,0x00431b00u,0x00a4b470u,0x00a4b500u,0x00a4b5c0u,
+        0x00876f60u,0x00876fc0u,0x00876b90u,0x00a60c80u,0x00a60c10u,
         0x00a5eaa0u,0x00a5ed20u,0x008779d0u,0x00877a50u,0x008765f0u,0x00876bf0u,
         0x00876a50u,0x00a64ba0u,0x00a64940u};
     unsigned i,n=sizeof va/sizeof va[0];
     for(i=0;i<n&&va[i]!=addr;++i);
     if(i==n)return;
     static unsigned seen[sizeof va/sizeof va[0]];
-    unsigned cap=(addr==0x008779d0u)?24u:6u;
+    unsigned cap=(addr==0x008779d0u)?24u:8u;
     if(seen[i]>=cap)return;
     ++seen[i];
     uint32_t from=menu_rd32(c->r[4]);
     uint32_t sing=menu_rd32(0x1b3fc98u),flag94=menu_rd32(0x1b3fc94u);
     uint32_t a0=menu_rd32(c->r[4]+4),a1=menu_rd32(c->r[4]+8);
-    fprintf(stderr,"[menu] enter %08x from=%08x singleton=%08x flag94=%u a0=%08x a1=%08x ecx=%08x\n",
-            (unsigned)addr,(unsigned)from,(unsigned)sing,(unsigned)(flag94&0xffu),
+    uint32_t mode20=menu_rd32(0x1b39120u),mode24=menu_rd32(0x1b39124u);
+    uint32_t prog=menu_rd32(0x1b39128u),inload=menu_rd32(0x12e3561u);
+    uint32_t lstate=menu_rd32(0x12e3562u),phase=menu_rd32(0x1ba75f8u);
+    fprintf(stderr,"[menu] enter %08x from=%08x mode=%u/%u prog=%u inload=%u lstate=%u phase=%u singleton=%08x flag94=%u a0=%08x a1=%08x ecx=%08x\n",
+            (unsigned)addr,(unsigned)from,(unsigned)mode20,(unsigned)mode24,(unsigned)prog,
+            (unsigned)(inload&0xffu),(unsigned)(lstate&0xffu),(unsigned)phase,
+            (unsigned)sing,(unsigned)(flag94&0xffu),
             (unsigned)a0,(unsigned)a1,(unsigned)c->r[1]);
     if(addr==0x00a5ed20u){
         char name[256];name[0]=0;
@@ -977,6 +987,7 @@ static void trace_indirect_fault(CPU *c,uint32_t target){
 }
 void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return;
+    menu_trace(c, addr);
     g_last_call=addr; g_last_cpu=c;
     const FnEntry *e=lookup(addr);
     if(e){*cache=e;e->fn(c);return;}
