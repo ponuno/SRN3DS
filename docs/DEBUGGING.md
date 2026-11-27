@@ -109,6 +109,24 @@ powershell -ExecutionPolicy Bypass -File tools\summarize_run.ps1 `
 addresses to show. Counts are literal token matches (a header such as
 "Present scales to 400x240" counts as one `Present`), not decoded D3D9 calls.
 
+### mem snapshot table
+
+`tools/memlog_summary.py` parses the `mem tag=... key=value ...` snapshots from
+`source/mem_stats.c` (counter definitions in `docs/MEMORY_BUDGET_178.md`, §8).
+It prints one row per snapshot — guest used/peak, IRC, decoded IR, resident
+BSA, guest/GPU texture, allocation failures, VA-backed peak — followed by
+`init → fault/exit` deltas and the peak guest, peak texture GPU and failure
+total. Byte columns are MiB (2 d.p.), counts stay integers; `--json` retains
+exact bytes and adds per-log deltas. Embedded `mem` lines are found even when
+the surrounding log adds prefixes, so device `Skyrim_N3DS_mem.log` and host
+capture logs both work.
+
+```powershell
+python tools/memlog_summary.py -Log E:\mem_ev\mem.log `
+  -Log E:\menu_capture\last_run.log
+python tools/memlog_summary.py -Log E:\mem_ev\mem.log --json
+```
+
 ### Luma3DS crash dumps
 
 Hardware crashes are saved as `sdmc:/luma/dumps/arm11/crash_dump_*.dmp`.
