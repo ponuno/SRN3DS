@@ -7,10 +7,14 @@
 #include "d9shader_shbin.h"
 #include "d9shader_color_shbin.h"
 #include "d9shader_cube_shbin.h"
+#include "d9shader_sr_shbin.h"
 #include "d3d9_pica_citro3d.h"
 #include "d3d9_color_tev.h"
 #include "d3d9_cube_coords.h"
 #include "d3d9_pica_vs_device.h"
+#include "n3ds_sr.h"
+#include "fsr3ds.h"
+#include <stdarg.h>
 
 #define FRAME_VERTICES 16384u
 #define FRAME_INDICES 262144u
@@ -30,6 +34,10 @@
 typedef struct {float x,y,z,dx,dy,dz,r,g,b,a;} D9CubeVertex;
 #define TRANSFER (GX_TRANSFER_FLIP_VERT(0)|GX_TRANSFER_OUT_TILED(0)|GX_TRANSFER_RAW_COPY(0)| \
  GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8)|GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8)|GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
+/* Three texcoords per vertex: the TEV kernels read T0/T1/T2 for the
+ * centre/-tap/+tap samples, exactly like the reference blit shader. */
+typedef struct { float x, y, z, u0, v0, u1, v1, u2, v2; } SrVertex;
+
 struct D9Citro {
     C3D_RenderTarget *target;
     void *active_target; /* NativeTarget* or NULL for the implicit screen target */
@@ -53,6 +61,10 @@ struct D9Citro {
     int program_cube_ready,uniform_cube;
     D9CubeVertex *arena_cube;
     size_t cursor_cube;
+    /* PICA-SR post-processing vertex program: position + three texcoords. */
+    DVLB_s *shader_sr;
+    shaderProgram_s program_sr;
+    int program_sr_ready,uniform_sr;
     /* Indexed menu draws: 16-bit indices are copied into this per-frame linear
      * arena and passed to C3D_DrawElements.  Reset in begin(), never freed
      * before the GPU consumes them. */
@@ -64,7 +76,215 @@ struct D9Citro {
     const D9PicaVsProgram *pica_vs_program;
     uint8_t *arena_skin;
     size_t cursor_skin;
+    /* PICA-SR (libFSR3DS v0.3): the guest still thinks the back buffer is
+     * 400x240; guest screen draws go to a scaled colour target and end()
+     * upscales it onto the real 240x400 LCD framebuffer.  sr_ready==0 is the
+     * byte-for-byte previous direct path (SR off or allocation failure). */
+    N3dsSrConfig sr;
+    N3dsSrPass sr_plan[4];
+    int sr_passes;
+    int sr_ready;
+    int sr_redirect;      /* guest screen draws currently target sr_scene_rt */
+    unsigned sr_draws;    /* guest draws into the SR target this frame */
+    C3D_Tex sr_scene_tex, sr_scratch_tex;
+    C3D_RenderTarget *sr_scene_rt, *sr_scratch_rt;
+    unsigned sr_pct;      /* active scale, DRS index applied */
+    unsigned sr_w, sr_h;  /* active content size (portrait storage) */
+    unsigned sr_tex_w, sr_tex_h;
+    unsigned sr_max_w, sr_max_h;
+    unsigned sr_index;
+    double sr_frame_ms;
+    uint64_t sr_tick;
+    SrVertex *sr_quad;
 };
+/* ------------------------------------------------------------------------- */
+/* PICA-SR: internal-resolution rendering + upscale on present               */
+/* ------------------------------------------------------------------------- */
+
+/* Guest back buffer and the portrait PICA framebuffer of the top LCD. */
+#define SR_BACK_W 400u
+#define SR_BACK_H 240u
+#define SR_STORE_W 240u
+#define SR_STORE_H 400u
+
+static void sr_log(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    fputs("[d3d9-citro] PICA-SR: ", stderr);
+    vfprintf(stderr, fmt, ap);
+    fputc('\n', stderr);
+    va_end(ap);
+}
+
+/* Every startup decision is also appended to sdmc:/N3DS_SR.log: the Azahar
+ * window screenshot is the visual evidence, this file is the named trace. */
+static void sr_log_file(const char *line)
+{
+    FILE *f = fopen("sdmc:/N3DS_SR.log", "a");
+    if (!f)
+        return;
+    fputs(line, f);
+    fputc('\n', f);
+    fclose(f);
+}
+
+static void sr_config_from_env(N3dsSrConfig *cfg)
+{
+    n3ds_sr_config_defaults(cfg);
+    const char *mode = getenv("N3DS_SR");
+    const char *scale = getenv("N3DS_SR_SCALE");
+    const char *drs = getenv("N3DS_SR_DRS");
+    if (mode && *mode)
+    {
+        int m = n3ds_sr_mode_from_name(mode);
+        if (m < 0)
+        {
+            sr_log("N3DS_SR='%s' is not off|nearest|bilinear|tev2d|tev2dq; staying off", mode);
+            cfg->mode = N3DS_SR_OFF;
+            return;
+        }
+        cfg->mode = (unsigned)m;
+    }
+    if (scale && *scale && n3ds_sr_config_key(cfg, "scale", scale))
+        sr_log("N3DS_SR_SCALE='%s' is not 0.5..1.0; using %u%%", scale, cfg->scale_pct);
+    if (drs && *drs && n3ds_sr_config_key(cfg, "drs", drs))
+        sr_log("N3DS_SR_DRS='%s' is not 0/1; using %u", drs, cfg->drs);
+}
+
+/* The 3DS/Azahar process environment normally carries no custom variables, so
+ * a `sdmc:/N3DS_SR.cfg` file is read when N3DS_SR is not set.  Format: one
+ * key=value per line (mode, scale, drs), '#' comments. */
+static void sr_config_from_file(N3dsSrConfig *cfg)
+{
+    FILE *f = fopen("sdmc:/N3DS_SR.cfg", "r");
+    if (!f)
+        return;
+    char line[128];
+    unsigned n = 0;
+    while (n < 16 && fgets(line, sizeof line, f))
+    {
+        ++n;
+        if (n3ds_sr_config_line(cfg, line) < 0)
+            sr_log("N3DS_SR.cfg line %u ignored: %s", n, line);
+    }
+    fclose(f);
+    sr_log("configuration read from sdmc:/N3DS_SR.cfg");
+}
+
+static int sr_tex_alloc(C3D_Tex *tex, unsigned w, unsigned h)
+{
+    C3D_TexInitParams params = {(u16)w, (u16)h, 0, GPU_RGBA8, GPU_TEX_2D, true};
+    if (!C3D_TexInitWithParams(tex, NULL, params))
+        return -1;
+    C3D_TexSetFilter(tex, GPU_LINEAR, GPU_LINEAR);
+    C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    return 0;
+}
+
+static void sr_release(D9Citro *c)
+{
+    C3D_FrameSync();
+    if (c->sr_scene_rt) { C3D_RenderTargetDelete(c->sr_scene_rt); c->sr_scene_rt = NULL; }
+    if (c->sr_scratch_rt) { C3D_RenderTargetDelete(c->sr_scratch_rt); c->sr_scratch_rt = NULL; }
+    if (c->sr_scene_tex.data) { C3D_TexDelete(&c->sr_scene_tex); memset(&c->sr_scene_tex, 0, sizeof c->sr_scene_tex); }
+    if (c->sr_scratch_tex.data) { C3D_TexDelete(&c->sr_scratch_tex); memset(&c->sr_scratch_tex, 0, sizeof c->sr_scratch_tex); }
+    c->sr_ready = 0;
+    c->sr_redirect = 0;
+}
+
+/* Active scaled content size (portrait storage orientation). */
+static void sr_active_dims(D9Citro *c)
+{
+    c->sr_pct = n3ds_sr_drs_scale_pct(&c->sr, c->sr_index);
+    n3ds_sr_scene_size(SR_STORE_W, SR_STORE_H, c->sr_pct, &c->sr_w, &c->sr_h);
+}
+
+/* Framebuffer that currently stands in for the implicit back buffer. */
+static C3D_RenderTarget *screen_rt(D9Citro *c)
+{
+    return (c->sr_redirect && c->sr_ready && c->sr_scene_rt) ? c->sr_scene_rt : c->target;
+}
+
+/* Allocate the scaled scene target (and the scratch target for multi-pass
+ * kernels).  Any failure is a named log line and a permanent fall back to the
+ * direct path; the guest never sees an error. */
+static int sr_init(D9Citro *c)
+{
+    if (c->sr.mode == N3DS_SR_OFF)
+        return 0;
+
+    n3ds_sr_scene_size(SR_STORE_W, SR_STORE_H, c->sr.scale_pct, &c->sr_max_w, &c->sr_max_h);
+    unsigned tw = n3ds_sr_pow2(c->sr_max_w);
+    unsigned th = n3ds_sr_pow2(c->sr_max_h);
+    if (tw > 1024 || th > 1024)
+    {
+        sr_log("%ux%u storage exceeds the 1024 PICA texture limit; SR off", tw, th);
+        return -1;
+    }
+
+    c->sr_passes = n3ds_sr_plan(c->sr.mode, tw, th, c->sr_plan, 4);
+    if (c->sr_passes < 1)
+    {
+        sr_log("mode %s has no valid pass plan; SR off", n3ds_sr_mode_name(c->sr.mode));
+        return -1;
+    }
+
+    if (sr_tex_alloc(&c->sr_scene_tex, tw, th))
+    {
+        sr_log("scene target %ux%u allocation failed (vram free %u KiB); SR off",
+               tw, th, (unsigned)(vramSpaceFree() >> 10));
+        return -1;
+    }
+    c->sr_scene_rt = C3D_RenderTargetCreateFromTex(&c->sr_scene_tex, GPU_TEXFACE_2D, 0,
+                                                   GPU_RB_DEPTH24_STENCIL8);
+    if (!c->sr_scene_rt)
+    {
+        sr_log("scene target %ux%u depth attachment failed (vram free %u KiB); SR off",
+               tw, th, (unsigned)(vramSpaceFree() >> 10));
+        sr_release(c);
+        return -1;
+    }
+
+    if (c->sr_passes > 1)
+    {
+        if (sr_tex_alloc(&c->sr_scratch_tex, tw, th))
+        {
+            sr_log("scratch target %ux%u allocation failed (vram free %u KiB); SR off",
+                   tw, th, (unsigned)(vramSpaceFree() >> 10));
+            sr_release(c);
+            return -1;
+        }
+        c->sr_scratch_rt = C3D_RenderTargetCreateFromTex(&c->sr_scratch_tex, GPU_TEXFACE_2D,
+                                                         0, -1);
+        if (!c->sr_scratch_rt)
+        {
+            sr_log("scratch render target %ux%u failed; SR off", tw, th);
+            sr_release(c);
+            return -1;
+        }
+    }
+
+    c->sr_tex_w = tw;
+    c->sr_tex_h = th;
+    c->sr_index = 0;
+    c->sr_ready = 1;
+    c->sr_redirect = 0;
+    c->sr_draws = 0;
+    sr_active_dims(c);
+
+    char text[160];
+    n3ds_sr_describe(&c->sr, text, sizeof text);
+    sr_log("%s: backbuffer %ux%u -> %ux%u, POT %ux%u, %d pass(es), %u DRS step(s), libFSR3DS %s",
+           text, SR_BACK_W, SR_BACK_H, c->sr_w, c->sr_h, tw, th, c->sr_passes,
+           n3ds_sr_drs_steps(&c->sr), fsr3dsVersion());
+    sr_log_file(text);
+    fprintf(stderr, "PICA_SR_ACTIVE mode=%s scale=%u%% texture=%ux%u passes=%d steps=%u\n",
+            n3ds_sr_mode_name(c->sr.mode), c->sr_pct, tw, th, c->sr_passes,
+            n3ds_sr_drs_steps(&c->sr));
+    return 0;
+}
+
 D9Citro *d9_citro_open(void){
     D9Citro *c=calloc(1,sizeof *c);if(!c)return NULL;
     if(!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE)){free(c);return NULL;}
@@ -88,17 +308,28 @@ D9Citro *d9_citro_open(void){
     c->arena_cube=linearAlloc(FRAME_VERTICES*sizeof(D9CubeVertex));if(!c->arena_cube)goto fail;
     c->arena_index=linearAlloc(FRAME_INDICES*sizeof(uint16_t));if(!c->arena_index)goto fail;
     c->arena_skin=linearAlloc(FRAME_SKIN_BYTES);if(!c->arena_skin)goto fail;
+    c->sr_quad=linearAlloc(6*sizeof *c->sr_quad);if(!c->sr_quad)goto fail;
+    c->shader_sr=DVLB_ParseFile((u32 *)d9shader_sr_shbin,d9shader_sr_shbin_size);if(!c->shader_sr)goto fail;
+    if(R_FAILED(shaderProgramInit(&c->program_sr)))goto fail;c->program_sr_ready=1;
+    if(R_FAILED(shaderProgramSetVsh(&c->program_sr,&c->shader_sr->DVLE[0])))goto fail;
+    c->uniform_sr=shaderInstanceGetUniformLocation(c->program_sr.vertexShader,"clip");if(c->uniform_sr<0)goto fail;
+    sr_config_from_env(&c->sr);
+    if(c->sr.mode==N3DS_SR_OFF&&!(getenv("N3DS_SR")&&*getenv("N3DS_SR")))sr_config_from_file(&c->sr);
+    if(sr_init(c)){c->sr.mode=N3DS_SR_OFF;c->sr_ready=0;}
     return c;
 fail:d9_citro_close(c);return NULL;
 }
 void d9_citro_close(D9Citro *c){
     if(!c)return;if(c->scene)C3D_FrameEnd(0);C3D_FrameSync();
+    sr_release(c);
     if(c->arena)linearFree(c->arena);
     if(c->arena_color)linearFree(c->arena_color);
     if(c->arena_cube)linearFree(c->arena_cube);
     if(c->arena_index)linearFree(c->arena_index);
     if(c->arena_skin)linearFree(c->arena_skin);
+    if(c->sr_quad)linearFree(c->sr_quad);
     d9_pica_vs_device_close(&c->pica_vs);
+    if(c->program_sr_ready)shaderProgramFree(&c->program_sr);if(c->shader_sr)DVLB_Free(c->shader_sr);
     if(c->program_cube_ready)shaderProgramFree(&c->program_cube);if(c->shader_cube)DVLB_Free(c->shader_cube);
     if(c->program_color_ready)shaderProgramFree(&c->program_color);if(c->shader_color)DVLB_Free(c->shader_color);
     if(c->program_ready)shaderProgramFree(&c->program);if(c->shader)DVLB_Free(c->shader);
@@ -212,12 +443,90 @@ static void prepare_draw(D9Citro *c){
     AttrInfo_AddLoader(attr,0,GPU_FLOAT,3);AttrInfo_AddLoader(attr,1,GPU_FLOAT,2);
     C3D_BufInfo *buf=C3D_GetBufInfo();BufInfo_Init(buf);BufInfo_Add(buf,c->arena,sizeof(D9Vertex),2,0x10);
 }
+/* One PICA-SR pass.  Positions are clip space (identity matrix), so the
+ * destination viewport maps NDC straight onto the scaled storage region.
+ * d9shader_sr.v.pica emits texcoord.y = 1 - v (the guest convention), hence
+ * the v inversion below and the sign swap on the tap offsets. */
+static int sr_pass(D9Citro *c,C3D_Tex *src,C3D_RenderTarget *dst,int to_screen,
+                   const N3dsSrPass *p,int nearest){
+    if(!c->sr_quad||!C3D_FrameDrawOn(dst))return -1;
+    C3D_SetViewport(0,0,to_screen?SR_STORE_W:c->sr_w,to_screen?SR_STORE_H:c->sr_h);
+    GPU_TEXTURE_FILTER_PARAM f=nearest?GPU_NEAREST:GPU_LINEAR;
+    C3D_TexSetFilter(src,f,f);
+    C3D_TexBind(0,src);C3D_TexBind(1,src);C3D_TexBind(2,src);
+    switch(p->op){
+    case N3DS_SR_OP_LITE:fsr3dsTevKernel(FSR3DS_KERNEL_LITE,0);break;
+    case N3DS_SR_OP_UP_LOW:fsr3dsTevKernel(FSR3DS_KERNEL_UP_LOW,N3DS_SR_2DQ_LOW_GAIN255);break;
+    case N3DS_SR_OP_UP_SHARP:fsr3dsTevKernel(FSR3DS_KERNEL_UP_SHARP,N3DS_SR_2DQ_SHARP_GAIN255);break;
+    default:fsr3dsTevKernel(FSR3DS_KERNEL_REPLACE,0);break;
+    }
+    C3D_BindProgram(&c->program_sr);
+    C3D_AttrInfo *attr=C3D_GetAttrInfo();AttrInfo_Init(attr);
+    AttrInfo_AddLoader(attr,0,GPU_FLOAT,3);
+    AttrInfo_AddLoader(attr,1,GPU_FLOAT,2);
+    AttrInfo_AddLoader(attr,2,GPU_FLOAT,2);
+    AttrInfo_AddLoader(attr,3,GPU_FLOAT,2);
+    C3D_BufInfo *buf=C3D_GetBufInfo();BufInfo_Init(buf);
+    BufInfo_Add(buf,c->sr_quad,sizeof(SrVertex),4,0x3210);
+    C3D_Mtx m;
+    m.r[0]=FVec4_New(1.0f,0.0f,0.0f,0.0f);m.r[1]=FVec4_New(0.0f,1.0f,0.0f,0.0f);
+    m.r[2]=FVec4_New(0.0f,0.0f,1.0f,0.0f);m.r[3]=FVec4_New(0.0f,0.0f,0.0f,1.0f);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_sr,&m);
+    float u1=(float)c->sr_w/(float)c->sr_tex_w;
+    float v1=(float)c->sr_h/(float)c->sr_tex_h;
+    static const float corner[4][2]={{-1.0f,-1.0f},{1.0f,-1.0f},{1.0f,1.0f},{-1.0f,1.0f}};
+    SrVertex q[4];
+    for(int i=0;i<4;++i){
+        float u=(corner[i][0]+1.0f)*0.5f*u1;
+        float vin=1.0f-(corner[i][1]+1.0f)*0.5f*v1;
+        q[i].x=corner[i][0];q[i].y=corner[i][1];q[i].z=0.0f;
+        q[i].u0=u;q[i].v0=vin;
+        q[i].u1=u-p->du;q[i].v1=vin+p->dv;
+        q[i].u2=u+p->du;q[i].v2=vin-p->dv;
+    }
+    SrVertex *o=c->sr_quad;
+    o[0]=q[0];o[1]=q[1];o[2]=q[2];o[3]=q[0];o[4]=q[2];o[5]=q[3];
+    GSPGPU_FlushDataCache(o,6*sizeof *o);
+    C3D_DepthTest(false,GPU_ALWAYS,GPU_WRITE_COLOR);
+    C3D_CullFace(GPU_CULL_NONE);
+    C3D_AlphaTest(false,GPU_ALWAYS,0);
+    C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,GPU_ONE,GPU_ZERO,GPU_ONE,GPU_ZERO);
+    C3D_DrawArrays(GPU_TRIANGLES,0,6);
+    d9_pica_citro3d_restore_tev();
+    return 0;
+}
+/* Present: run the planned chain from the scaled scene texture onto the real
+ * LCD framebuffer.  Called from end() while the frame is still open. */
+static void sr_present(D9Citro *c){
+    if(!c->sr_ready||!c->sr_passes)return;
+    sr_active_dims(c);
+    C3D_Tex *src=&c->sr_scene_tex;
+    for(int i=0;i<c->sr_passes;++i){
+        const N3dsSrPass *p=&c->sr_plan[i];
+        int last=i==c->sr_passes-1;
+        C3D_Tex *dst_tex=(src==&c->sr_scene_tex)?&c->sr_scratch_tex:&c->sr_scene_tex;
+        C3D_RenderTarget *dst=last?c->target:
+            (dst_tex==&c->sr_scratch_tex?c->sr_scratch_rt:c->sr_scene_rt);
+        if(!dst){return;}
+        if(sr_pass(c,src,dst,last,p,c->sr.mode==N3DS_SR_NEAREST))return;
+        if(!last)src=dst_tex;
+    }
+    /* Leave the LCD framebuffer bound for the display transfer in FrameEnd. */
+    C3D_FrameDrawOn(c->target);
+}
+
 static int begin(void *ctx,uint32_t argb){
     D9Citro *c=ctx;if(c->scene||!C3D_FrameBegin(C3D_FRAME_SYNCDRAW))return -1;
     c->scene=1;c->cursor=0;c->cursor_color=0;c->cursor_cube=0;c->cursor_index=0;c->cursor_skin=0;c->active_target=NULL;
+    /* SR: the guest frame is rendered into the scaled target unless a scene
+     * later binds an explicit/retained target.  With SR off this is exactly
+     * the old direct path. */
+    c->sr_redirect=c->sr_ready?1:0;
+    c->sr_draws=0;
+    C3D_RenderTarget *screen=screen_rt(c);
     uint32_t rgba=(argb<<8)|(argb>>24);
-    C3D_RenderTargetClear(c->target,C3D_CLEAR_ALL,rgba,0);
-    if(!C3D_FrameDrawOn(c->target)){C3D_FrameEnd(0);c->scene=0;return -1;}
+    C3D_RenderTargetClear(screen,C3D_CLEAR_ALL,rgba,0);
+    if(!C3D_FrameDrawOn(screen)){C3D_FrameEnd(0);c->scene=0;return -1;}
     prepare_draw(c);
     C3D_DepthTest(true,GPU_GEQUAL,GPU_WRITE_ALL);C3D_CullFace(GPU_CULL_NONE);
     d9_pica_citro3d_restore_tev();
@@ -277,6 +586,7 @@ static int apply_shader_alpha_test(const D9DrawState *s) {
 
 static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *texture,const D9DrawState *state){
     D9Citro *c=ctx;if(!c->scene||n>FRAME_VERTICES-c->cursor)return -1;
+    if(c->sr_redirect)++c->sr_draws;
     memcpy(c->arena+c->cursor,v,n*sizeof *v);GSPGPU_FlushDataCache(c->arena+c->cursor,n*sizeof *v);
     D9Matrix mtx=*clip;orient_clip(c,&mtx);
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
@@ -346,6 +656,7 @@ static int draw_color_stages(void *ctx,const D9ColorVertex *v,size_t n,const D9M
     if(state->pixel_shader)return -1;
     if(d9_color_tev_stage0(state,texture!=NULL,&plan,&why))return -1;
     if(second&&d9_color_tev_stage0(second,texture1!=NULL,&second_plan,&why))return -1;
+    if(c->sr_redirect)++c->sr_draws;
     memcpy(c->arena_color+c->cursor_color,v,n*sizeof *v);
     GSPGPU_FlushDataCache(c->arena_color+c->cursor_color,n*sizeof *v);
     prepare_draw_color(c);
@@ -443,6 +754,7 @@ static int draw_cube(void *ctx,const D9ColorVertex *vertices,size_t count,
         return -1;
     }
     if(count>FRAME_VERTICES-c->cursor_cube)return -1;
+    if(c->sr_redirect)++c->sr_draws;
     for(size_t i=0;i<count;++i){
         if(faces[i]>=D9_CUBE_FACES){
             fprintf(stderr,"[d3d9-citro] draw_cube: face index %u is outside 0..5\n",faces[i]);
@@ -492,6 +804,7 @@ static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
     }
     if(count>FRAME_MENU_VERTICES-c->cursor_color)return -1;
     if(indices&&index_count>FRAME_INDICES-c->cursor_index)return -1;
+    if(c->sr_redirect)++c->sr_draws;
     static int menu_clip_logged;
     if(!menu_clip_logged){
         menu_clip_logged=1;
@@ -567,6 +880,7 @@ static int draw_pica_vs(void *ctx,const D9SkinVertex *vertices,size_t count,
     if(!c||!c->scene||!vertices||!draw||!draw->program||!draw->decl||
        !draw->bank||!draw->rows||!draw->row_mask||!count||count%3||
        count>FRAME_SKIN_VERTICES||count>65535u)return -1;
+    if(c->sr_redirect)++c->sr_draws;
     const D9PicaVsProgram *program=draw->program;
     if(c->pica_vs_program!=program){
         char why[192];
@@ -604,7 +918,31 @@ static int draw_pica_vs(void *ctx,const D9SkinVertex *vertices,size_t count,
     prepare_draw(c);
     return 0;
 }
-static void end(void *ctx){D9Citro *c=ctx;if(c->scene){C3D_FrameEnd(0);c->scene=0;}c->active_target=NULL;}
+static void end(void *ctx){
+    D9Citro *c=ctx;
+    if(c->scene){
+        /* SR: upscale the guest frame onto the LCD before the frame closes.
+         * Any allocation failure already left sr_ready==0, so this is a no-op
+         * on the direct path. */
+        if(c->sr_ready&&c->sr_redirect&&c->sr_draws){
+            if(c->sr.drs){
+                uint64_t now=svcGetSystemTick();
+                if(c->sr_tick){
+                    double ms=1000.0*(double)(now-c->sr_tick)/(double)SYSCLOCK_ARM11;
+                    c->sr_frame_ms=c->sr_frame_ms>0.0?c->sr_frame_ms*0.9+ms*0.1:ms;
+                    int idx=(int)c->sr_index;
+                    unsigned steps=n3ds_sr_drs_steps(&c->sr);
+                    if(fsr3dsDrsUpdate(c->sr_frame_ms,&idx,(int)steps,60,1.0/60.0))
+                        c->sr_index=(unsigned)idx;
+                }
+                c->sr_tick=now;
+            }
+            sr_present(c);
+        }
+        C3D_FrameEnd(0);c->scene=0;
+    }
+    c->active_target=NULL;c->sr_redirect=0;
+}
 static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
     (void)ctx;if(!native||w<8||h<8||w>1024||h>1024||(w&(w-1))||(h&(h-1))||
        (format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))return -1;
@@ -690,7 +1028,8 @@ static void *target_texture(void *ctx,void *native){
 static int target_bind(void *ctx,void *native){
     D9Citro *c=ctx;if(!c||!c->scene)return -1;
     NativeTargetHead *h=native;
-    C3D_RenderTarget *target=h?h->target:c->target;
+    c->sr_redirect=(!native&&c->sr_ready)?1:0;
+    C3D_RenderTarget *target=native?h->target:screen_rt(c);
     if(!target||!C3D_FrameDrawOn(target))return -1;
     c->active_target=native;return 0;
 }
@@ -776,7 +1115,7 @@ static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
 static int depth_clear(void *ctx,unsigned flags,uint32_t depth_stencil){
     D9Citro *c=ctx;
     if(!c||!c->scene||!(flags&6u)||(flags&~7u))return -1;
-    C3D_RenderTarget *rt=c->active_target?((NativeTargetHead *)c->active_target)->target:c->target;
+    C3D_RenderTarget *rt=c->active_target?((NativeTargetHead *)c->active_target)->target:screen_rt(c);
     if(!rt)return -1;
     C3D_RenderTargetClear(rt,C3D_CLEAR_DEPTH,0,depth_stencil);
     return 0;
@@ -788,6 +1127,14 @@ static int depth_clear(void *ctx,unsigned flags,uint32_t depth_stencil){
 static int target_viewport(void *ctx,unsigned w,unsigned h){
     D9Citro *c=ctx;
     if(!c||!c->scene||!w||!h||w>4096||h>4096)return -1;
+    /* The guest's logical back buffer is 400x240; while SR renders into the
+     * scaled target, the same viewport is scaled by the active percentage so
+     * the guest's frame keeps its exact framing inside the smaller storage. */
+    if(c->sr_redirect&&c->sr_ready&&!c->active_target){
+        sr_active_dims(c);
+        C3D_SetViewport(0,0,n3ds_sr_scaled(w,c->sr_pct),n3ds_sr_scaled(h,c->sr_pct));
+        return 0;
+    }
     C3D_SetViewport(0,0,w,h);
     return 0;
 }

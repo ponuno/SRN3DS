@@ -1,0 +1,40 @@
+; PICA-SR post-processing vertex shader.
+; Inputs: position (v0), three pre-offset texture coordinates (v1..v3).
+; The three coordinates implement the TEV kernels' C / -tap / +tap samples
+; without arithmetic in the shader (PICA200 has no fragment shaders).
+; texcoord0.y is inverted to match source/d9shader.v.pica, so a caller
+; passing v in [0,1] with 0 at the top of the image gets the tex3ds layout.
+
+.fvec clip[4]
+
+.constf ones1(1.0, 1.0, 1.0, 1.0)
+.alias ones ones1.xxxx
+
+.out outpos position
+.out uv0 texcoord0
+.out uv1 texcoord1
+.out uv2 texcoord2
+.out outclr color
+
+.alias inpos v0
+.alias t0 v1
+.alias t1 v2
+.alias t2 v3
+
+.proc main
+    mov r0.xyz, inpos
+    mov r0.w,  ones.x
+    dp4 outpos.x, clip[0], r0
+    dp4 outpos.y, clip[1], r0
+    dp4 outpos.z, clip[2], r0
+    dp4 outpos.w, clip[3], r0
+
+    mov uv0.x, t0.x
+    add uv0.y, ones.x, -t0.y
+    mov uv1.x, t1.x
+    add uv1.y, ones.x, -t1.y
+    mov uv2.x, t2.x
+    add uv2.y, ones.x, -t2.y
+    mov outclr, ones
+    end
+.end
