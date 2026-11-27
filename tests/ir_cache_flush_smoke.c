@@ -60,9 +60,11 @@ int main(void) {
     IrExecBlock first;
     if (n3ds_ir_fetch_block(&c, BASE, BASE + sizeof img, &first))
         return fail("fetch first block");
-    if (!first.stream_words || first.stream_words > 8)
+    if (!first.stream_words || first.stream_words > 32) {
+        printf("ir cache flush smoke: first block words=%u\n", first.stream_words);
         return fail("first block size");
-    uint32_t snap[8];
+    }
+    uint32_t snap[32];
     memcpy(snap, first.stream, first.stream_words * sizeof snap[0]);
 
     /* A guest thread is now executing this block (possibly suspended inside a
