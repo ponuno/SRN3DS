@@ -636,6 +636,29 @@ static void test_timeout_paths(void) {
     close_h(e1); close_h(e2);
 }
 
+/* ------------------------------------------------- watchdog progress signal */
+/* A lone runnable thread yields to itself and a long host-side asset job never
+ * blocks, so the watchdog must accept interpreter and IO progress instead of
+ * only scheduler switches.  The predicate is pure; check every field. */
+static void test_watchdog_progress_signal(void) {
+    N3dsWatchdogSample a = {100, 4096, 0x00c40150u, 0x008c0c80u};
+    N3dsWatchdogSample b = a;
+    CHECK(!n3ds_watchdog_progressed(&a, &b), "identical sample is not progress");
+    b.blocks = a.blocks + 1;
+    CHECK(n3ds_watchdog_progressed(&a, &b), "a completed IR block is progress");
+    b = a; b.io_bytes = a.io_bytes + 65536;
+    CHECK(n3ds_watchdog_progressed(&a, &b), "new ReadFile bytes are progress");
+    b = a; b.ir_ip = a.ir_ip + 1;
+    CHECK(n3ds_watchdog_progressed(&a, &b), "a moved guest PC is progress");
+    b = a; b.last_call = a.last_call + 1;
+    CHECK(n3ds_watchdog_progressed(&a, &b), "a new recent call is progress");
+    /* The case the watchdog still has to catch: one block that never ends. */
+    b = a;
+    CHECK(!n3ds_watchdog_progressed(&a, &b),
+          "a frozen block (all four flat) is still a hang");
+    printf("PASS watchdog progress accepts IR/IO progress, not only switches\n");
+}
+
 /* ---------------------------------------------------------------- memory */
 static void report_memory(void) {
     reset_state();
@@ -694,6 +717,7 @@ int main(void) {
     test_ir_compute_loop_yields();
     test_aot_loop_yields();
     test_critical_section_waits();
+    test_watchdog_progress_signal();
     report_memory();
 
     printf("SUMMARY checks=%d failures=%d\n", checks, failures);

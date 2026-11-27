@@ -202,6 +202,16 @@ static volatile int g_watchdog_armed;
 static unsigned g_watchdog_ms;
 static unsigned g_dump_after_ms;
 static void activity(void) { g_activity_ms = win32_thread_now_ms(); }
+/* Everything the watchdog is willing to call progress, sampled cheaply enough
+ * for the 50 ms monitor loop. See N3dsWatchdogSample in win32_thread.h. */
+static N3dsWatchdogSample watchdog_sample(void) {
+    N3dsWatchdogSample s;
+    s.blocks = n3ds_ir_blocks_run;
+    s.io_bytes = n3ds_io_bytes_total();
+    s.ir_ip = n3ds_lift_current_ip();
+    s.last_call = n3ds_lift_last_call();
+    return s;
+}
 
 static const char *state_name(unsigned s) {
     switch (s) {
@@ -252,9 +262,11 @@ static void dump_thread(const char *role, W32Thread *t) {
     }
     fputc('\n', stderr);
 }
-static void hang_dump(unsigned elapsed) {
-    fprintf(stderr, "[hang] Guest hang: no scheduling progress for %lu ms "
+static void hang_dump(unsigned elapsed, const char *why, int is_hang) {
+    fprintf(stderr, "[hang] %s: %s for %lu ms "
                     "(TESV_HANG_WATCHDOG_MS=%u); dumping every guest thread\n",
+            is_hang ? "Guest hang" : "Diagnostic dump",
+            why ? why : "no scheduling progress",
             (unsigned long)elapsed, g_watchdog_ms);
     fprintf(stderr, "[hang] current=%lu last_call=%08x ir_ip=%08x live_threads=%u\n",
             (unsigned long)(cur ? cur->id : 0), (unsigned)n3ds_lift_last_call(),
@@ -266,6 +278,7 @@ static void hang_dump(unsigned elapsed) {
         if (threads[i].state != ST_FREE) dump_thread("thread", &threads[i]);
     n3ds_lift_dump_recent_calls(stderr);
     n3ds_lift_dump_stream(stderr);
+    n3ds_io_dump(stderr);
     win32_sync_dump(stderr);
     win32_cs_dump(stderr);
     win32_icx_dump(stderr);
@@ -276,11 +289,23 @@ static DWORD WINAPI watchdog_proc(LPVOID unused) {
     (void)unused;
     uint64_t start = win32_thread_now_ms();
     uint64_t last_trace = start;
+    N3dsWatchdogSample last_sample = watchdog_sample();
     for (;;) {
         Sleep(50);
         uint64_t now = win32_thread_now_ms();
         int64_t gap = (int64_t)(now - g_activity_ms);
         if (gap < 0) gap = 0;
+        /* Scheduling events are not the only progress: a lone runnable thread
+         * yields to itself and a host-side asset job can run for minutes.  Any
+         * completed IR block, moved PC, or new ReadFile byte is progress and
+         * refreshes the activity clock, so only a thread frozen inside ONE
+         * block still trips the watchdog. */
+        N3dsWatchdogSample sample = watchdog_sample();
+        int progressed = n3ds_watchdog_progressed(&last_sample, &sample);
+        if (progressed) {
+            g_activity_ms = now;
+            last_sample = sample;
+        }
         if (sched_trace_on() && now - last_trace >= 1000) {
             last_trace = now;
             fprintf(stderr, "[sched] t=%llums cur=%lu activity_age=%llums "
@@ -298,7 +323,11 @@ static DWORD WINAPI watchdog_proc(LPVOID unused) {
             fflush(stderr);
         }
         if (g_dump_after_ms && now - start > g_dump_after_ms) {
-            hang_dump((unsigned)(now - start));
+            fprintf(stderr, "[hang] timed diagnostic dump after %llu ms "
+                            "(TESV_DUMP_AFTER_MS=%u, progress=%s)\n",
+                    (unsigned long long)(now - start), g_dump_after_ms,
+                    progressed ? "yes" : "no");
+            hang_dump((unsigned)(now - start), "timed diagnostic dump", 0);
             fprintf(stderr, "[hang] timed dump aborting the run (diagnostic only)\n");
             fflush(stderr);
             ExitProcess(70);
@@ -310,7 +339,7 @@ static DWORD WINAPI watchdog_proc(LPVOID unused) {
          * "hang". Compare signed and never report a negative gap. */
         int64_t hang_gap = (int64_t)(now - last);
         if (g_watchdog_armed && hang_gap > (int64_t)g_watchdog_ms) {
-            hang_dump((unsigned)hang_gap);
+            hang_dump((unsigned)hang_gap, "no guest progress", 1);
             fprintf(stderr, "[hang] watchdog aborting the run (diagnostic only)\n");
             fflush(stderr);
             ExitProcess(70);

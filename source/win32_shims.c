@@ -2218,6 +2218,126 @@ static int file_trace_on(void){
     return v;
 }
 static uint32_t file_caller(CPU *c){uint32_t r=0;if(mem&&c)(void)guest_read32(mem,c->r[4],&r);return r;}
+
+/* ---- IO telemetry (hang-dump + N3DS_IO_TRACE) --------------------------- */
+/* Counters are always on: they are a handful of adds per ReadFile, and a hang
+ * dump must be able to tell "a big load is still moving" (bytes climb) from
+ * "the reader stopped" (bytes flat).  N3DS_IO_TRACE=1 also prints a line every
+ * 8 MiB or 5 s, and one line per read >= 1 MiB with the path and the guest
+ * caller, which is what identifies the slow asset.  The last-read path table
+ * samples every successful read (a detailed ESM parse is thousands of small
+ * reads, and those still identify the phase). */
+#define IO_TRACE_PATH_MAX 192
+#define IO_TRACE_PATHS 8u
+#define IO_TRACE_SAMPLE_MIN 1u
+#define IO_TRACE_BIG (1024u * 1024u)
+#define IO_TRACE_PERIOD_BYTES (8u * 1024u * 1024u)
+#define IO_TRACE_PERIOD_MS 5000u
+typedef struct {
+    char path[IO_TRACE_PATH_MAX];
+    uint64_t bytes, reads, last_seq;
+} IoTracePath;
+static struct {
+    int inited, enabled;
+    uint64_t bytes, sample_bytes, reads, start_ms, last_trace_ms;
+    uint64_t next_trace_bytes, seq, big_reads;
+    uint8_t handle_seen[MAX_FILES];
+    unsigned handles;
+    IoTracePath paths[IO_TRACE_PATHS];
+    unsigned path_count;
+} g_io;
+static void io_init(void) {
+    if (g_io.inited) return;
+    g_io.inited = 1;
+    g_io.start_ms = g_io.last_trace_ms = win32_thread_now_ms();
+    g_io.next_trace_bytes = IO_TRACE_PERIOD_BYTES;
+    const char *v = getenv("N3DS_IO_TRACE");
+    g_io.enabled = v && *v && strcmp(v, "0") != 0;
+}
+uint64_t n3ds_io_bytes_total(void) { io_init(); return g_io.bytes; }
+uint64_t n3ds_io_reads_total(void) { io_init(); return g_io.reads; }
+static void io_path_note(const char *path, uint32_t got) {
+    if (!path || !path[0]) return;
+    unsigned slot = IO_TRACE_PATHS;
+    for (unsigned i = 0; i < g_io.path_count; ++i)
+        if (strncmp(g_io.paths[i].path, path, IO_TRACE_PATH_MAX) == 0) { slot = i; break; }
+    if (slot == IO_TRACE_PATHS) {
+        if (g_io.path_count < IO_TRACE_PATHS) slot = g_io.path_count++;
+        else {
+            slot = 0;
+            for (unsigned i = 1; i < IO_TRACE_PATHS; ++i)
+                if (g_io.paths[i].last_seq < g_io.paths[slot].last_seq) slot = i;
+        }
+        snprintf(g_io.paths[slot].path, sizeof g_io.paths[slot].path, "%s", path);
+        g_io.paths[slot].bytes = g_io.paths[slot].reads = 0;
+    }
+    g_io.paths[slot].bytes += got;
+    g_io.paths[slot].reads += 1;
+    g_io.paths[slot].last_seq = ++g_io.seq;
+}
+/* Record one completed ReadFile.  `requested` is the guest buffer size; paths
+ * are sampled only for real chunks so the hot tiny-read path stays cheap. */
+static void io_note(uint32_t handle, const char *path, uint32_t requested,
+                    uint32_t got, uint32_t caller) {
+    io_init();
+    g_io.bytes += got;
+    g_io.reads += 1;
+    if (handle >= 0x100u && handle < 0x100u + MAX_FILES) {
+        unsigned i = handle - 0x100u;
+        if (!g_io.handle_seen[i]) { g_io.handle_seen[i] = 1; ++g_io.handles; }
+    }
+    if (requested >= IO_TRACE_SAMPLE_MIN) {
+        g_io.sample_bytes += got;
+        io_path_note(path, got);
+    }
+    uint64_t now = win32_thread_now_ms();
+    if (g_io.enabled && requested >= IO_TRACE_BIG) {
+        ++g_io.big_reads;
+        fprintf(stderr, "[io] big read h=%03x n=%lu got=%u caller=%08x path=%s\n",
+                (unsigned)handle, (unsigned long)requested, got, caller, path ? path : "?");
+    }
+    if (g_io.enabled && (g_io.bytes >= g_io.next_trace_bytes ||
+                         now - g_io.last_trace_ms >= IO_TRACE_PERIOD_MS)) {
+        while (g_io.next_trace_bytes <= g_io.bytes)
+            g_io.next_trace_bytes += IO_TRACE_PERIOD_BYTES;
+        double secs = (double)(now - g_io.start_ms) / 1000.0;
+        double mib = (double)g_io.bytes / (1024.0 * 1024.0);
+        fprintf(stderr, "[io] trace total=%.1f MiB reads=%llu handles=%u "
+                        "elapsed=%.1fs rate=%.2f MiB/s last=%s\n",
+                mib, (unsigned long long)g_io.reads, g_io.handles, secs,
+                secs > 0 ? mib / secs : 0.0, path ? path : "?");
+        fflush(stderr);
+        g_io.last_trace_ms = now;
+    }
+}
+void n3ds_io_dump(FILE *f) {
+    if (!f) return;
+    io_init();
+    uint64_t now = win32_thread_now_ms();
+    double secs = (double)(now - g_io.start_ms) / 1000.0;
+    double mib = (double)g_io.bytes / (1024.0 * 1024.0);
+    fprintf(f, "[io] totals: %.1f MiB / %llu reads, %u handles, %.2f MiB/s over %.1fs\n",
+            mib, (unsigned long long)g_io.reads, g_io.handles,
+            secs > 0 ? mib / secs : 0.0, secs);
+    /* Most recently read paths first: that is the asset the stalled reader was
+     * working on when the watchdog fired. */
+    int order[IO_TRACE_PATHS];
+    for (unsigned i = 0; i < g_io.path_count; ++i) {
+        unsigned j = i;
+        while (j > 0 && g_io.paths[order[j - 1]].last_seq < g_io.paths[i].last_seq) {
+            order[j] = order[j - 1];
+            --j;
+        }
+        order[j] = (int)i;
+    }
+    for (unsigned i = 0; i < g_io.path_count; ++i) {
+        const IoTracePath *p = &g_io.paths[order[i]];
+        fprintf(f, "[io] path %6.1f MiB %6llu reads  %s\n",
+                (double)p->bytes / (1024.0 * 1024.0),
+                (unsigned long long)p->reads, p->path);
+    }
+    fflush(f);
+}
 static int file_trace_path(const char *p){
     if(!p)return 0;
     return strstr(p,".bsa")||strstr(p,".BSA")||strstr(p,".swf")||strstr(p,".SWF")||
@@ -2306,12 +2426,14 @@ static void s_ReadFile(CPU *c){
         if(stream_host_note_read && vf->pos<0x100000000ull &&
            stream_host_note_read(file_path[h-0x100],(uint32_t)vf->pos,dst,n,&staged)){
             vf->pos+=staged;M32(bytes)=staged;
+            io_note(h,file_path[h-0x100],n,staged,file_caller(c));
             if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] stream read %lu bytes -> %u\n",(unsigned long)n,staged);}}
             set_error(c,0);RET(1,5);
         }
         int got=ov_file_read(vf,dst,n);
         if(got<0)FAIL(ERR_READ_FAULT,0,5);
         M32(bytes)=(uint32_t)got;
+        io_note(h,file_path[h-0x100],n,(uint32_t)got,file_caller(c));
         if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] bsa read %lu bytes -> %d\n",(unsigned long)n,got);}}
         if(file_trace_on() && file_trace_path(file_path[h-0x100])){
             static unsigned logged;
@@ -2324,6 +2446,8 @@ static void s_ReadFile(CPU *c){
         set_error(c,0);RET(1,5);
     }
     size_t read=n?fread(guest_ptr(mem,A(1),n),1,n,f):0;M32(bytes)=(uint32_t)read;
+    { uint32_t hi=A(0)-0x100;
+      io_note(A(0),hi<MAX_FILES?file_path[hi]:NULL,n,(uint32_t)read,file_caller(c)); }
     if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] read %lu bytes -> %lu\n",(unsigned long)n,(unsigned long)read);}}
     if(file_trace_on()){
         uint32_t hi=A(0)-0x100;

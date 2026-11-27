@@ -113,3 +113,25 @@ size_t win32_thread_struct_size(void);
 /* Measurement-only hang watchdog: start counting only once the first real
  * Present has been submitted. No-op unless TESV_HANG_WATCHDOG_MS is set. */
 void n3ds_hang_watchdog_arm(void);
+
+/* ---- hang-watchdog progress signal (diagnostics only) ------------------- */
+/* A scheduler event is not the only honest progress.  When the only runnable
+ * guest thread yields, the scheduler switches to itself, and a worker that is
+ * inside a long host-side job (a big asset load) can run for minutes without a
+ * blocking shim.  Count all of these as progress:
+ *   - a completed IR block          (the interpreter is executing)
+ *   - a changed guest PC / call     (the thread moved to another function)
+ *   - new bytes returned by ReadFile (the IO the thread waits for is moving)
+ * A thread stuck inside ONE block (an unbounded rep, a host spin) keeps all
+ * four flat, which is exactly what the watchdog must still report. */
+typedef struct {
+    unsigned long long blocks;
+    unsigned long long io_bytes;
+    uint32_t ir_ip;
+    uint32_t last_call;
+} N3dsWatchdogSample;
+static inline int n3ds_watchdog_progressed(const N3dsWatchdogSample *a,
+                                           const N3dsWatchdogSample *b) {
+    return a->blocks != b->blocks || a->io_bytes != b->io_bytes ||
+           a->ir_ip != b->ir_ip || a->last_call != b->last_call;
+}

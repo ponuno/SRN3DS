@@ -74,6 +74,14 @@ uint32_t win32_last_exit_from(void);
 void win32_cs_dump(FILE *f);
 /* Hang-watchdog diagnostic: recent InterlockedCompareExchange/Exchange words. */
 void win32_icx_dump(FILE *f);
+/* IO telemetry: every completed ReadFile counts.  n3ds_io_dump lists totals,
+ * throughput and the most recently read paths (largest first history of 8), so
+ * a hang dump can distinguish a slow-but-moving load from a stalled reader.
+ * N3DS_IO_TRACE=1 adds periodic lines (every 8 MiB or 5 s) and one line per
+ * read >= 1 MiB.  Counters are always maintained; the env only controls noise. */
+uint64_t n3ds_io_bytes_total(void);
+uint64_t n3ds_io_reads_total(void);
+void n3ds_io_dump(FILE *f);
 /* Process last-error slot for shim modules that run without a TEB. */
 void win32_set_last_error(uint32_t value);
 /* Allocation accounting: what the guest asked for and how much is live. */
