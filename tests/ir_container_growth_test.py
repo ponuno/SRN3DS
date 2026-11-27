@@ -52,7 +52,7 @@ def run(cmd, env=None):
 def build(clang, out):
     srcs = ["tests/ir_container_growth.c", "source/guest.c",
             "source/ir_container.c", "source/ir_decode.c", "source/ir_exec.c",
-            "source/ir_core.c", "source/n3ds_lift_runtime.c", "staged/fpu.c"]
+            "source/ir_core.c", "source/n3ds_lift_runtime.c", "source/rep_movs.c", "staged/fpu.c"]
     cmd = [clang, "-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-Itests",
            "-fwrapv", "-fno-strict-aliasing", "-Wno-deprecated-declarations",
            "-Wno-format", "-Wno-unused-function", "-Wno-unused-variable"]
