@@ -150,6 +150,8 @@ def validate_entry(entry: dict, errors: list, where: str) -> None:
         for i, texture in enumerate(entry.get("textures") or []):
             if texture.get("sampler_type") not in (2, 3, 4):
                 fail("texture %d sampler_type must be 2d/cube/volume" % i)
+        _validate_constant_ops(entry, const_regs, fail)
+        _validate_passes(entry, fail)
 
     if kind == "pica_vs":
         if entry.get("stage") != "vs_3_0":
@@ -184,6 +186,91 @@ def validate_entry(entry: dict, errors: list, where: str) -> None:
         uniform = entry.get("uniform_registers", 0)
         if not isinstance(uniform, int) or not 0 <= uniform <= MAX_VS_UNIFORMS:
             fail("uniform_registers must be 0..%d" % MAX_VS_UNIFORMS)
+
+
+def _validate_constant_ops(entry: dict, const_regs: set, fail) -> None:
+    """Mirror the schema's $defs/constant_op and check source availability."""
+    ops = entry.get("constant_ops")
+    if ops is None:
+        return
+    if not isinstance(ops, list) or len(ops) > 8:
+        fail("constant_ops must be a list of at most 8 operations")
+        return
+    dst_regs = {op.get("dst_reg") for op in ops if isinstance(op, dict)}
+    for index, op in enumerate(ops):
+        if not isinstance(op, dict):
+            fail("constant op %d is not an object" % index)
+            continue
+        dst = op.get("dst_reg")
+        if not isinstance(dst, int) or not 0 <= dst <= 7:
+            fail("constant op %d dst_reg must be 0..7" % index)
+        name = op.get("op")
+        if name not in ("pack", "add", "mul", "lerp"):
+            fail("constant op %d op must be pack/add/mul/lerp" % index)
+            continue
+        need = {"pack": 1, "add": 2, "mul": 2, "lerp": 3}[name]
+        src = op.get("src")
+        if not isinstance(src, list) or len(src) != need:
+            fail("constant op %d (%s) needs %d source(s)" % (index, name, need))
+            continue
+        for lane, item in enumerate(src):
+            if not isinstance(item, dict):
+                fail("constant op %d src %d is not an object" % (index, lane))
+                continue
+            reg = item.get("reg")
+            if not isinstance(reg, int) or not 0 <= reg <= 7:
+                fail("constant op %d src %d reg must be 0..7" % (index, lane))
+                continue
+            swizzle = item.get("swizzle")
+            if not (isinstance(swizzle, str) and len(swizzle) == 4
+                    and all(c in "xyzw" for c in swizzle)):
+                fail("constant op %d src %d swizzle must be 4 x/y/z/w lanes"
+                     % (index, lane))
+            if item.get("negate", 0) not in (0, 1):
+                fail("constant op %d src %d negate must be 0/1"
+                     % (index, lane))
+            if reg not in const_regs and reg not in dst_regs:
+                fail("constant op %d reads c%d, which no constant or derived "
+                     "register provides" % (index, reg))
+
+
+def _validate_passes(entry: dict, fail) -> None:
+    """Mirror the schema's $defs/pass and keep pass[0] == the main TEV plan."""
+    passes = entry.get("passes")
+    if passes is None:
+        return
+    if not isinstance(passes, list) or not 2 <= len(passes) <= 4:
+        fail("passes must be a list of 2..4 entries")
+        return
+    for index, item in enumerate(passes):
+        if not isinstance(item, dict):
+            fail("pass %d is not an object" % index)
+            continue
+        stage_data = item.get("stage_data")
+        if not isinstance(stage_data, list) or not 1 <= len(stage_data) <= MAX_STAGES:
+            fail("pass %d stage_data must hold 1..%d stages"
+                 % (index, MAX_STAGES))
+        textures = item.get("textures")
+        if not isinstance(textures, list) or len(textures) > 3:
+            fail("pass %d textures must be a list of at most 3" % index)
+        if not isinstance(item.get("constants"), list):
+            fail("pass %d constants must be a list" % index)
+        blend = item.get("blend")
+        if not isinstance(blend, dict):
+            fail("pass %d blend must be an object" % index)
+        else:
+            if blend.get("enable") not in (0, 1):
+                fail("pass %d blend.enable must be 0/1" % index)
+            for key in ("src", "dst"):
+                if not isinstance(blend.get(key), int) or not 1 <= blend[key] <= 11:
+                    fail("pass %d blend.%s must be D3DBLEND 1..11" % (index, key))
+            if not isinstance(blend.get("op"), int) or not 1 <= blend["op"] <= 5:
+                fail("pass %d blend.op must be D3DBLENDOP 1..5" % index)
+        if item.get("depth_write") not in (0, 1):
+            fail("pass %d depth_write must be 0/1" % index)
+    first = passes[0] if isinstance(passes[0], dict) else {}
+    if first.get("stage_data") != entry.get("stage_data"):
+        fail("passes[0].stage_data must mirror the main stage_data")
 
 
 def _validate_emitter(entry: dict, emitter: dict, fail) -> None:

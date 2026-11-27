@@ -1,4 +1,5 @@
 #include "d3d9_core.h"
+#include "d3d9_shader_plan.h"
 #include "d3d9_text_plan.h"
 #include "d3d9_adapter.h"
 #include "d3d9_bc.h"
@@ -99,6 +100,12 @@ struct D9Device {
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
     float tev_constants[9][4];
+    /* Derived plan constants written by d9_set_derived_constants().  The mask
+     * is cleared whenever the raw SetPixelShaderConstantF bank changes, so a
+     * stale derivation can never leak into the next draw. */
+    float plan_constants[D9_SHADER_PLAN_CONST_REGS][4];
+    uint32_t plan_constants_mask;
+    uint32_t plan_constants_dirty;
     float clip_planes[D9_MAX_CLIP_PLANES][4];
     unsigned clip_plane_enable;
     float ps_constants[D9_PS_CONST_F_REGS][4];
@@ -2252,8 +2259,52 @@ int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
     if(h&&!t->rt_target){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
     if(stage)d->texture1=h;else d->texture=h;return D9_OK;}
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
+int d9_set_derived_constants(D9Device *d,const float (*values)[4],uint32_t mask){
+    if(!d||(!values&&mask))return D9_INVALID;
+    mask&=0xFFu;
+    if(!mask&&d->plan_constants_mask){
+        /* Drop the previous derivation and restore the raw bank so a stale
+         * derived register cannot leak into a non-plan or different-plan draw. */
+        for(unsigned i=0;i<D9_SHADER_PLAN_CONST_REGS;++i){
+            if(!(d->plan_constants_mask&(1u<<i)))continue;
+            if(d->ps_constants_f_mask&(1u<<i))
+                memcpy(d->tev_constants[i],d->ps_constants[i],
+                       sizeof d->tev_constants[i]);
+            else
+                memset(d->tev_constants[i],0,sizeof d->tev_constants[i]);
+        }
+        d->plan_constants_mask=0;
+        d->plan_constants_dirty=0;
+    }
+    for(unsigned i=0;i<D9_SHADER_PLAN_CONST_REGS;++i){
+        if(!(mask&(1u<<i)))continue;
+        for(unsigned j=0;j<4;++j)
+            if(!isfinite(values[i][j]))return D9_INVALID;
+    }
+    for(unsigned i=0;i<D9_SHADER_PLAN_CONST_REGS;++i){
+        if(!(mask&(1u<<i))){
+            if(d->plan_constants_mask&(1u<<i)){
+                if(d->ps_constants_f_mask&(1u<<i))
+                    memcpy(d->tev_constants[i],d->ps_constants[i],
+                           sizeof d->tev_constants[i]);
+                else
+                    memset(d->tev_constants[i],0,sizeof d->tev_constants[i]);
+            }
+            d->plan_constants_mask&=~(1u<<i);
+            continue;
+        }
+        memcpy(d->plan_constants[i],values[i],sizeof d->plan_constants[i]);
+        memcpy(d->tev_constants[i],values[i],sizeof d->tev_constants[i]);
+        d->plan_constants_mask|=1u<<i;
+    }
+    d->plan_constants_dirty=0;
+    return D9_OK;
+}
+unsigned d9_plan_constants_mask(const D9Device *d){return d?d->plan_constants_mask:0u;}
+int d9_plan_constants_dirty(const D9Device *d){return d?d->plan_constants_dirty!=0:0;}
 int d9_set_tev_constants(D9Device *d,const float values[9][4]){
     if(!d||!values)return D9_INVALID;
+    (void)d9_set_derived_constants(d,NULL,0);
     for(unsigned i=0;i<9;++i)for(unsigned j=0;j<4;++j)
         if(!isfinite(values[i][j]))return D9_INVALID;
     memcpy(d->tev_constants,values,sizeof d->tev_constants);
@@ -2303,6 +2354,11 @@ int d9_set_ps_constants_f(D9Device *d,unsigned start,const float *values,unsigne
     d->ps_constants_f_mask|=((1u<<count)-1u)<<start;
     for(unsigned i=0;i<count;++i)
         memcpy(d->tev_constants[start+i],d->ps_constants[start+i],16);
+    /* The raw bank changed: any plan-derived register is stale until the next
+     * draw recomputes it from these sources.  Restore the raw values now so a
+     * stale derivation cannot survive into a non-plan draw. */
+    (void)d9_set_derived_constants(d,NULL,0);
+    d->plan_constants_dirty=1;
     set_diagnosis(d,"");
     return D9_OK;
 }
@@ -3219,6 +3275,72 @@ static int draw_skinned(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
     }
     set_diagnosis(d,"");
     return D9_OK;
+}
+static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,
+                unsigned primitives,int indexed,int limited,unsigned min,
+                unsigned count,const UpSource *up);
+int d9_draw_plan_passes(D9Device *d,const struct D9ShaderPlan *plan,const D9PlanDraw *desc){
+    if(!d||!plan||!desc||plan->pass_count<2u)return D9_INVALID;
+    if(plan->pass_count>D9_SHADER_PLAN_MAX_PASSES)return D9_INVALID;
+    /* Validate every pass before the first submit: a bad descriptor, blend
+     * state or missing texture is a named refusal with no partial batch. */
+    for(unsigned i=0;i<plan->pass_count;++i){
+        const D9ShaderPlanPass *p=&plan->pass[i];
+        if(!p->tev.stages||p->tev.stages>D9TEV_MAX_STAGES||
+           p->tev.textures>D9TEV_MAX_TEXTURES||
+           p->tev.constants>D9TEV_MAX_CONSTANTS){
+            char why[160];
+            snprintf(why,sizeof why,
+                     "multi-pass plan %s pass %u has an invalid TEV descriptor",
+                     plan->id?plan->id:"(unnamed)",i);
+            set_diagnosis(d,why);
+            return D9_UNSUPPORTED;
+        }
+        if(p->blend>1u||p->depth_write>1u||
+           (p->blend&&(p->src_blend<1u||p->src_blend>11u||
+                       p->dst_blend<1u||p->dst_blend>11u||
+                       p->blend_op<1u||p->blend_op>5u))){
+            char why[160];
+            snprintf(why,sizeof why,
+                     "multi-pass plan %s pass %u has an invalid blend/depth state",
+                     plan->id?plan->id:"(unnamed)",i);
+            set_diagnosis(d,why);
+            return D9_UNSUPPORTED;
+        }
+    }
+    D9DrawState saved_state=d->state;
+    const D9TevProgram *saved_ps=d->pixel_shader;
+    float saved_const[9][4];
+    memcpy(saved_const,d->tev_constants,sizeof saved_const);
+    UpSource up;
+    memset(&up,0,sizeof up);
+    up.vertices=desc->vertex_data;
+    up.stride=desc->vertex_stride;
+    up.count=desc->vertex_count;
+    up.indices=desc->index_data;
+    up.index_size=desc->index_format==D9_INDEX32?4u:2u;
+    int rc=D9_OK;
+    for(unsigned i=0;i<plan->pass_count;++i){
+        const D9ShaderPlanPass *p=&plan->pass[i];
+        d->state=saved_state;
+        d->state.blend=p->blend;
+        if(p->blend){
+            d->state.src_blend=p->src_blend;
+            d->state.dst_blend=p->dst_blend;
+            d->state.blend_op=p->blend_op;
+        }
+        d->state.z_write=p->depth_write;
+        d->pixel_shader=&p->tev;
+        rc=draw(d,desc->type,desc->base,desc->start,desc->primitives,
+                desc->indexed,desc->limited,desc->min,desc->count,
+                desc->vertex_data?&up:NULL);
+        if(rc)break;
+    }
+    /* Intermediate TEV/blend/depth state never leaks into the next draw. */
+    d->state=saved_state;
+    d->pixel_shader=saved_ps;
+    memcpy(d->tev_constants,saved_const,sizeof saved_const);
+    return rc;
 }
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     unsigned max_prims=(indexed&&up&&up->indices)?MAX_INDEXED_MENU_INDICES/3u:MAX_DRAW_VERTICES/3u;

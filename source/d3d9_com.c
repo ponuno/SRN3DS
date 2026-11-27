@@ -3501,6 +3501,9 @@ static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2
  * refusals before the batch, never a partial submit. */
 static int plan_draw_state(void){
     char why[192];
+    /* A derived register from the previous plan must never survive into this
+     * draw; raw SetPixelShaderConstantF values are restored first. */
+    (void)d9_set_derived_constants(g.device,NULL,0);
     if(g.vs&&g.vs->pica_vs){
         /* Full emitted-PICA-VS contract in one host-testable gate: verified
          * .shbin, active declaration with position/weight/index, 4-bone/WVP
@@ -3537,19 +3540,43 @@ static int plan_draw_state(void){
             snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",why);
             return D9_UNSUPPORTED;
         }
-        for(unsigned i=0;i<plan->tev.textures;++i){
-            Obj *tex=i==0?g.tex:i==1?g.tex1:NULL;
-            if(!tex){
+        if(plan->const_op_count){
+            float src[D9_SHADER_PLAN_CONST_REGS][4],derived[D9_SHADER_PLAN_CONST_REGS][4];
+            uint32_t mask=0;
+            if(d9_get_ps_constants_f(g.device,0,&src[0][0],
+                                     D9_SHADER_PLAN_CONST_REGS)||
+               d9_shader_plan_build_constants(plan,(const float (*)[4])src,
+                                              d9_ps_constants_f_mask(g.device),
+                                              derived,&mask,why,sizeof why)){
                 snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
-                         "pixel plan %s: texture stage %u is not bound",
-                         plan->id?plan->id:"(unnamed)",i);
+                         "pixel plan %s: %s",plan->id?plan->id:"(unnamed)",
+                         why[0]?why:"derived constants cannot be built");
                 return D9_UNSUPPORTED;
             }
-            if(!menu_texture_ldr(tex)){
+            if(d9_set_derived_constants(g.device,(const float (*)[4])derived,mask)){
                 snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
-                         "pixel plan %s: texture stage %u is not an LDR 2D texture",
-                         plan->id?plan->id:"(unnamed)",i);
+                         "pixel plan %s: derived constants are not finite",
+                         plan->id?plan->id:"(unnamed)");
                 return D9_UNSUPPORTED;
+            }
+        }
+        unsigned pass_count=plan->pass_count?plan->pass_count:1u;
+        for(unsigned pass=0;pass<pass_count;++pass){
+            const D9TevProgram *tev=plan->pass_count?&plan->pass[pass].tev:&plan->tev;
+            for(unsigned i=0;i<tev->textures;++i){
+                Obj *tex=i==0?g.tex:i==1?g.tex1:NULL;
+                if(!tex){
+                    snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                             "pixel plan %s: pass %u texture stage %u is not bound",
+                             plan->id?plan->id:"(unnamed)",pass,i);
+                    return D9_UNSUPPORTED;
+                }
+                if(!menu_texture_ldr(tex)){
+                    snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                             "pixel plan %s: pass %u texture stage %u is not an LDR 2D texture",
+                             plan->id?plan->id:"(unnamed)",pass,i);
+                    return D9_UNSUPPORTED;
+                }
             }
         }
     }
@@ -3751,17 +3778,26 @@ static uint32_t shader_gate(const char *method){
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: shader state rejected",method);
     return hr(rc);
 }
+/* A multi-pass plan replays the same draw through every pass.  Single-pass and
+ * legacy plans keep the existing core entry points unchanged. */
+static const D9ShaderPlan *multi_pass_plan(void){
+    return g.ps&&g.ps->plan&&g.ps->plan->pass_count>1?g.ps->plan:NULL;
+}
 static void draw_primitive(CPU *c){draw_probe(c,"DrawPrimitive");
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf))RET(INVALID,4);
     uint32_t gate=shader_gate("DrawPrimitive");if(gate!=OK)RET(gate,4);
-    int rc=d9_draw_primitive(g.device,A(1),A(2),A(3));
+    const D9ShaderPlan *plan=multi_pass_plan();
+    int rc=plan?d9_draw_plan_passes(g.device,plan,&(D9PlanDraw){.type=A(1),.start=A(2),.primitives=A(3)})
+               :d9_draw_primitive(g.device,A(1),A(2),A(3));
     if(rc==D9_OK)capture_draw(A(1),A(2),A(3),0,0,0,0,0);
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitive: %s",d9_last_draw_diagnostic(g.device));
     RET(hr(rc),4);}
 static void draw_indexed(CPU *c){draw_probe(c,"DrawIndexedPrimitive");
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!A(4))RET(INVALID,7);
     uint32_t gate=shader_gate("DrawIndexedPrimitive");if(gate!=OK)RET(gate,7);
-    int rc=d9_draw_indexed_range(g.device,A(1),(int32_t)A(2),A(3),A(4),A(5),A(6));
+    const D9ShaderPlan *plan=multi_pass_plan();
+    int rc=plan?d9_draw_plan_passes(g.device,plan,&(D9PlanDraw){.type=A(1),.base=(int32_t)A(2),.start=A(5),.primitives=A(6),.indexed=1,.limited=1,.min=A(3),.count=A(4)})
+               :d9_draw_indexed_range(g.device,A(1),(int32_t)A(2),A(3),A(4),A(5),A(6));
     if(rc==D9_OK)capture_draw(A(1),A(5),A(6),1,(int32_t)A(2),A(3),A(4),A(5));
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitive: %s",d9_last_draw_diagnostic(g.device));
     RET(hr(rc),7);}
@@ -3790,7 +3826,9 @@ static void draw_primitive_up(CPU *c){draw_probe(c,"DrawPrimitiveUP");
     uint32_t gate=shader_gate("DrawPrimitiveUP");if(gate!=OK)RET(gate,5);
     void *data=ptr(A(3),(size_t)vertices*stride);
     if(!data){d3d_log("DrawPrimitiveUP","vertex stream zero data is null or outside guest memory");RET(INVALID,5);}
-    int rc=d9_draw_primitive_up(g.device,type,primitives,data,stride);
+    const D9ShaderPlan *plan=multi_pass_plan();
+    int rc=plan?d9_draw_plan_passes(g.device,plan,&(D9PlanDraw){.type=type,.primitives=primitives,.vertex_data=data,.vertex_stride=stride,.vertex_count=vertices})
+               :d9_draw_primitive_up(g.device,type,primitives,data,stride);
     /* There is no bound vertex buffer to record; the decoded vertices are still
      * captured from the core. */
     if(rc==D9_OK)capture_draw(type,0,primitives,0,0,0,0,0);
@@ -3809,7 +3847,9 @@ static void draw_indexed_up(CPU *c){draw_probe(c,"DrawIndexedPrimitiveUP");
     isize=fmt==D9_INDEX32?4u:2u;used=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;
     void *idesc=ptr(A(5),(size_t)used*isize),*vdata=ptr(A(7),need*stride);
     if(!idesc||!vdata){d3d_log("DrawIndexedPrimitiveUP","index or vertex stream zero data is null or outside guest memory");RET(INVALID,9);}
-    int rc=d9_draw_indexed_primitive_up(g.device,type,min,count,primitives,idesc,fmt,vdata,stride);
+    const D9ShaderPlan *plan=multi_pass_plan();
+    int rc=plan?d9_draw_plan_passes(g.device,plan,&(D9PlanDraw){.type=type,.primitives=primitives,.indexed=1,.limited=1,.min=min,.count=count,.index_data=idesc,.index_format=fmt,.vertex_data=vdata,.vertex_stride=stride,.vertex_count=(unsigned)need})
+               :d9_draw_indexed_primitive_up(g.device,type,min,count,primitives,idesc,fmt,vdata,stride);
     if(rc==D9_OK)capture_draw(type,0,primitives,0,0,0,0,0);
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitiveUP: %s",d9_last_draw_diagnostic(g.device));
     RET(hr(rc),9);}

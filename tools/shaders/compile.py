@@ -24,6 +24,7 @@ from . import asm
 # ---------------------------------------------------------------------------
 
 TEV_MAX_STAGES = 6
+CONST_OP_NAMES = {"pack": 0, "add": 1, "mul": 2, "lerp": 3}
 TEV_MAX_TEXTURES = 3
 TEV_MAX_CONSTANTS = 8
 VS_MAX_INPUTS = 16
@@ -896,6 +897,82 @@ def menu_light_plan(ir: IR) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _tev_to_c(plan: dict, indent: str) -> str:
+    """Emit one ``D9TevProgram`` initializer (shared by plans and passes)."""
+    lines = []
+    lines.append("%s{0x%08xu, %d, %d," % (
+        indent, int(plan.get("version", "0xffff0300"), 16) & 0xFFFFFFFF,
+        plan.get("instructions", 0), len(plan.get("stage_data") or [])))
+    lines.append("%s    {" % indent)
+    for s in plan.get("stage_data") or []:
+        lines.append(
+            "%s        {%d,%d,{%d,%d,%d},{%d,%d,%d},{%d,%d,%d},{%d,%d,%d},%d,%d,%d,%d,0x%08xu}," % (
+                indent, s["func_rgb"], s["func_a"],
+                s["src_rgb"][0], s["src_rgb"][1], s["src_rgb"][2],
+                s["src_a"][0], s["src_a"][1], s["src_a"][2],
+                s["op_rgb"][0], s["op_rgb"][1], s["op_rgb"][2],
+                s["op_a"][0], s["op_a"][1], s["op_a"][2],
+                s["scale_rgb"], s["scale_a"], s.get("const_reg", 255),
+                s.get("const_is_literal", 0), s.get("const_rgba8", 0)))
+    lines.append("%s    }," % indent)
+    lines.append("%s%d," % (indent, len(plan.get("textures") or [])))
+    lines.append("%s    {" % indent)
+    for t in plan.get("textures") or []:
+        lines.append("%s        {%d,%d,%d}," % (
+            indent, t["texcoord_reg"], t["sampler_reg"], t["sampler_type"]))
+    lines.append("%s    }," % indent)
+    lines.append("%s%d," % (indent, len(plan.get("inputs") or [])))
+    lines.append("%s    {" % indent)
+    for i in plan.get("inputs") or []:
+        lines.append("%s        {%d,%d,%d,%d}," % (
+            indent, i["usage"], i["usage_index"], i["reg_index"],
+            i["tev_source"]))
+    lines.append("%s    }," % indent)
+    consts = list(plan.get("constants") or [])
+    consts += [0] * (8 - len(consts))
+    lines.append("%s%d," % (indent, len(plan.get("constants") or [])))
+    lines.append("%s{%s}," % (indent, ",".join(str(c) for c in consts)))
+    lines.append("%s%d,%d,%d,0x%08xu," % (
+        indent, plan.get("uses_vertex_color", 0),
+        plan.get("requires_alpha_fixup", 0), TEV_MAX_STAGES,
+        (1 if plan.get("family") == "menu_light" else 0)))
+    lines.append("%s}," % indent)
+    return "\n".join(lines)
+
+
+def _const_ops_to_c(ops: Sequence[dict], indent: str) -> str:
+    lines = [("%s%d," % (indent, len(ops))), ("%s    {" % indent)]
+    for op in ops:
+        srcs = []
+        for s in op["src"]:
+            sw = ["xyzw".index(c) for c in s["swizzle"]]
+            srcs.append("{%d,{%d,%d,%d,%d},%d}" % (
+                s["reg"], sw[0], sw[1], sw[2], sw[3], s.get("negate", 0)))
+        lines.append("%s        {%d, %d, %d, {%s}}," % (
+            indent, op["dst_reg"], CONST_OP_NAMES[op["op"]], len(op["src"]),
+            ", ".join(srcs)))
+    lines.append("%s    }," % indent)
+    return "\n".join(lines)
+
+
+def _passes_to_c(passes: Sequence[dict], plan: dict, indent: str) -> str:
+    lines = [("%s%d," % (indent, len(passes))), ("%s    {" % indent)]
+    for p in passes:
+        sub = dict(plan)
+        sub.update(p)
+        sub["stage_data"] = p["stage_data"]
+        sub.setdefault("version", plan.get("version", "0xffff0300"))
+        lines.append("%s        {" % indent)
+        lines.append(_tev_to_c(sub, indent + "            "))
+        blend = p["blend"]
+        lines.append("%s            %d, %d, %d, %d, %d," % (
+            indent, blend["enable"], blend["src"], blend["dst"], blend["op"],
+            p["depth_write"]))
+        lines.append("%s        }," % indent)
+    lines.append("%s    }," % indent)
+    return "\n".join(lines)
+
+
 def plan_to_c(plan: dict, indent: str = "    ") -> str:
     """Emit one ``D9ShaderPlan`` initializer for the runtime table."""
     lines = []
@@ -909,41 +986,12 @@ def plan_to_c(plan: dict, indent: str = "    ") -> str:
     note = plan.get("note", "").replace('"', "'")
     lines.append('%s    "%s",' % (indent, note[:150]))
     if plan["kind"] == "tev":
-        lines.append("%s    {0x%08xu, %d, %d," % (
-            indent, int(plan["version"], 16) & 0xFFFFFFFF,
-            plan["instructions"], plan["stages"]))
-        lines.append("%s        {" % indent)
-        for s in plan["stage_data"]:
-            lines.append(
-                "%s            {%d,%d,{%d,%d,%d},{%d,%d,%d},{%d,%d,%d},{%d,%d,%d},%d,%d,%d,%d,0x%08xu}," % (
-                    indent, s["func_rgb"], s["func_a"],
-                    s["src_rgb"][0], s["src_rgb"][1], s["src_rgb"][2],
-                    s["src_a"][0], s["src_a"][1], s["src_a"][2],
-                    s["op_rgb"][0], s["op_rgb"][1], s["op_rgb"][2],
-                    s["op_a"][0], s["op_a"][1], s["op_a"][2],
-                    s["scale_rgb"], s["scale_a"], s["const_reg"],
-                    s["const_is_literal"], s["const_rgba8"]))
-        lines.append("%s        }," % indent)
-        lines.append("%s    %d," % (indent, len(plan.get("textures") or [])))
-        lines.append("%s        {" % indent)
-        for t in plan.get("textures") or []:
-            lines.append("%s            {%d,%d,%d}," % (
-                indent, t["texcoord_reg"], t["sampler_reg"], t["sampler_type"]))
-        lines.append("%s        }," % indent)
-        lines.append("%s    %d," % (indent, len(plan.get("inputs") or [])))
-        lines.append("%s        {" % indent)
-        for i in plan.get("inputs") or []:
-            lines.append("%s            {%d,%d,%d,%d}," % (
-                indent, i["usage"], i["usage_index"], i["reg_index"],
-                i["tev_source"]))
-        lines.append("%s        }," % indent)
-        lines.append("%s    %d," % (indent, len(plan.get("constants") or [])))
-        consts = list(plan.get("constants") or []) + [0] * (8 - len(plan.get("constants") or []))
-        lines.append("%s    {%s}," % (indent, ",".join(str(c) for c in consts)))
-        lines.append("%s    %d,%d,%d,0x%08xu," % (
-            indent, plan.get("uses_vertex_color", 0), plan.get("requires_alpha_fixup", 0),
-            TEV_MAX_STAGES, (1 if plan.get("family") == "menu_light" else 0)))
-        lines.append("%s    }," % indent)
+        lines.append(_tev_to_c(plan, indent + "    "))
+        if plan.get("constant_ops") or plan.get("passes"):
+            lines.append(_const_ops_to_c(plan.get("constant_ops") or [],
+                                         indent + "    "))
+            lines.append(_passes_to_c(plan.get("passes") or [], plan,
+                                      indent + "    "))
     else:
         lines.append("%s    {0}," % indent)
     lines.append("%s}," % indent)

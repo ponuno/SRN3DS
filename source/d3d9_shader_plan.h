@@ -23,6 +23,14 @@
 #define D9_SHADER_PLAN_SHA256 65u
 #define D9_SHADER_PLAN_NOTE 160u
 #define D9_SHADER_PLAN_MAX_ENTRIES 64u
+/* Derived pixel-shader constants: a plan-level program that builds registers
+ * the guest never uploads (for example c0.zwzw) from the c0..c7 bank. */
+#define D9_SHADER_PLAN_MAX_CONST_OPS 8u
+#define D9_SHADER_PLAN_MAX_CONST_SRC 3u
+#define D9_SHADER_PLAN_CONST_REGS 8u
+/* Multi-pass: one draw call re-submits the same geometry through 2..4 TEV
+ * programs with per-pass blend/depth state.  Six hardware stages per pass. */
+#define D9_SHADER_PLAN_MAX_PASSES 4u
 
 enum {
     D9_SHADER_PLAN_STAGE_PS = 0,
@@ -34,7 +42,38 @@ enum {
     D9_SHADER_PLAN_PICA_VS = 2
 };
 
+/* constant_ops operator.  `pack` copies one swizzled source, `add`/`mul`
+ * combine two componentwise, and `lerp` is src0*(1-t)+src1*t with t taken from
+ * src2 componentwise. */
+enum {
+    D9_SHADER_PLAN_CONST_PACK = 0,
+    D9_SHADER_PLAN_CONST_ADD = 1,
+    D9_SHADER_PLAN_CONST_MUL = 2,
+    D9_SHADER_PLAN_CONST_LERP = 3
+};
+
 typedef struct {
+    uint8_t reg;                      /* source D3D c# (0..7) */
+    uint8_t swizzle[4];               /* per-lane x/y/z/w selector (0..3) */
+    uint8_t negate;                   /* 1: subtract the swizzled source */
+} D9ShaderPlanConstSrc;
+
+typedef struct {
+    uint8_t dst_reg;                  /* destination D3D c# (0..7) */
+    uint8_t op;                       /* D9_SHADER_PLAN_CONST_* */
+    uint8_t src_count;
+    D9ShaderPlanConstSrc src[D9_SHADER_PLAN_MAX_CONST_SRC];
+} D9ShaderPlanConstOp;
+
+typedef struct {
+    D9TevProgram tev;                 /* at most six stages and three textures */
+    uint8_t blend;                    /* D3DRS_ALPHABLENDENABLE 0/1 */
+    uint8_t src_blend, dst_blend;     /* D3DBLEND 1..11 */
+    uint8_t blend_op;                 /* D3DBLENDOP 1..5 */
+    uint8_t depth_write;              /* D3DRS_ZWRITEENABLE 0/1 */
+} D9ShaderPlanPass;
+
+typedef struct D9ShaderPlan {
     const char *id;
     const char *sha256;               /* lower-case hex, 64 chars */
     uint8_t stage;                    /* D9_SHADER_PLAN_STAGE_* */
@@ -42,6 +81,13 @@ typedef struct {
     uint8_t draw_enabled;             /* 0: named refusal at draw */
     const char *note;                 /* why it is blocked / what it needs */
     D9TevProgram tev;                 /* kind == TEV only; zero otherwise */
+    /* Optional plan-level derived registers (docs/SHADER_WORKAROUNDS.md). */
+    uint8_t const_op_count;
+    D9ShaderPlanConstOp const_op[D9_SHADER_PLAN_MAX_CONST_OPS];
+    /* Optional multi-pass program.  pass_count == 0 keeps the single-pass
+     * `tev` behaviour; pass[0] mirrors `tev` when present. */
+    uint8_t pass_count;
+    D9ShaderPlanPass pass[D9_SHADER_PLAN_MAX_PASSES];
 } D9ShaderPlan;
 
 /* Table bounds. */
@@ -60,6 +106,16 @@ int d9_shader_plan_lookup(unsigned stage, const char *sha256_hex,
  * descriptor is never draw-enabled until a native code emitter exists. */
 int d9_shader_plan_draw_allowed(const D9ShaderPlan *plan,
                                 char *why, size_t why_size);
+
+/* Evaluate the plan's derived constant program against the raw c0..c7 bank.
+ * `src_mask` has one bit per uploaded register (d9_ps_constants_f_mask).
+ * `out` must hold D9_SHADER_PLAN_CONST_REGS rows; *out_mask receives the
+ * written bits.  Returns 0, or -1 with a named reason when a source register
+ * was never uploaded, a swizzle is malformed, or a result is not finite. */
+int d9_shader_plan_build_constants(const D9ShaderPlan *plan,
+                                   const float (*src)[4], uint32_t src_mask,
+                                   float (*out)[4], uint32_t *out_mask,
+                                   char *why, size_t why_size);
 
 /* Hex comparison that accepts upper/lower case.  1 equal, 0 different. */
 int d9_shader_plan_sha256_equal(const char *a, const char *b);

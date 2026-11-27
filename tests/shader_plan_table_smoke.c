@@ -269,6 +269,133 @@ int main(void) {
         CHECK(d9_shader_pack_at(6) == NULL, "pack out-of-range returns NULL");
     }
 
+    /* Derived constants: c0.zwzw builds a register the guest never uploads. */
+    {
+        D9ShaderPlan plan;
+        memset(&plan, 0, sizeof plan);
+        plan.id = "unit.derived";
+        plan.sha256 = FOREIGN_SHA;
+        plan.kind = D9_SHADER_PLAN_TEV;
+        plan.draw_enabled = 1;
+        plan.tev.stages = 1;
+        plan.tev.textures = 0;
+        plan.tev.constants = 1;
+        plan.tev.constant_reg[0] = 0;
+        plan.const_op_count = 1;
+        plan.const_op[0].dst_reg = 7;
+        plan.const_op[0].op = D9_SHADER_PLAN_CONST_PACK;
+        plan.const_op[0].src_count = 1;
+        plan.const_op[0].src[0].reg = 0;
+        plan.const_op[0].src[0].swizzle[0] = 2; /* z */
+        plan.const_op[0].src[0].swizzle[1] = 3; /* w */
+        plan.const_op[0].src[0].swizzle[2] = 2;
+        plan.const_op[0].src[0].swizzle[3] = 3;
+        float bank[D9_SHADER_PLAN_CONST_REGS][4] = {{0}};
+        float out[D9_SHADER_PLAN_CONST_REGS][4] = {{0}};
+        bank[0][0] = 0.25f; bank[0][1] = 0.5f;
+        bank[0][2] = 0.75f; bank[0][3] = 1.0f;
+        uint32_t mask = 0;
+        why[0] = 0;
+        CHECK(d9_shader_plan_build_constants(&plan, bank, 1u, out, &mask,
+                                             why, sizeof why) == 0,
+              "c0.zwzw derives");
+        CHECK(mask == (1u << 7), "derived c7 is marked");
+        CHECK(out[7][0] == 0.75f && out[7][1] == 1.0f &&
+              out[7][2] == 0.75f && out[7][3] == 1.0f,
+              "c0.zwzw -> (z,w,z,w) numerically");
+        CHECK(d9_shader_plan_draw_allowed(&plan, why, sizeof why) == 0,
+              "derived plan passes the structural gate");
+        mask = 0xFFFFFFFFu;
+        why[0] = 0;
+        CHECK(d9_shader_plan_build_constants(&plan, bank, 0u, out, &mask,
+                                             why, sizeof why) == -1,
+              "missing source is refused");
+        CHECK(mask == 0 && strstr(why, "derived c7 needs source c0.zwzw"),
+              "missing-source refusal names c0.zwzw");
+
+        /* add/mul/lerp componentwise, including a negated source. */
+        bank[1][0] = 1.5f; bank[1][1] = -0.5f;
+        bank[1][2] = 2.0f; bank[1][3] = 0.0f;
+        memset(out, 0, sizeof out);
+        plan.const_op_count = 3;
+        plan.const_op[0].dst_reg = 4;
+        plan.const_op[0].op = D9_SHADER_PLAN_CONST_ADD;
+        plan.const_op[0].src_count = 2;
+        plan.const_op[0].src[0].reg = 0;
+        plan.const_op[0].src[0].swizzle[0] = 0;
+        plan.const_op[0].src[0].swizzle[1] = 1;
+        plan.const_op[0].src[0].swizzle[2] = 2;
+        plan.const_op[0].src[0].swizzle[3] = 3;
+        plan.const_op[0].src[1].reg = 1;
+        plan.const_op[0].src[1].swizzle[0] = 0;
+        plan.const_op[0].src[1].swizzle[1] = 0;
+        plan.const_op[0].src[1].swizzle[2] = 0;
+        plan.const_op[0].src[1].swizzle[3] = 0;
+        plan.const_op[1].dst_reg = 5;
+        plan.const_op[1].op = D9_SHADER_PLAN_CONST_MUL;
+        plan.const_op[1].src_count = 2;
+        plan.const_op[1].src[0] = plan.const_op[0].src[0];
+        plan.const_op[1].src[1] = plan.const_op[0].src[1];
+        plan.const_op[1].src[1].negate = 1;
+        plan.const_op[2].dst_reg = 6;
+        plan.const_op[2].op = D9_SHADER_PLAN_CONST_LERP;
+        plan.const_op[2].src_count = 3;
+        plan.const_op[2].src[0] = plan.const_op[0].src[0];
+        plan.const_op[2].src[1] = plan.const_op[0].src[0];
+        plan.const_op[2].src[1].negate = 1;
+        plan.const_op[2].src[2] = plan.const_op[0].src[1];
+        CHECK(d9_shader_plan_build_constants(&plan, bank, 3u, out, &mask,
+                                             why, sizeof why) == 0,
+              "add/mul/lerp derive");
+        CHECK(out[4][0] == 1.75f && out[5][0] == -0.375f &&
+              out[6][0] == 0.25f * (1.0f - 1.5f) + (-0.25f) * 1.5f,
+              "add/mul/lerp numeric results");
+        CHECK(d9_shader_plan_draw_allowed(&plan, why, sizeof why) == 0,
+              "three-op constant plan passes the gate");
+    }
+
+    /* Multi-pass: two six-plus-one style passes with per-pass blend/depth. */
+    {
+        D9ShaderPlan mp;
+        memset(&mp, 0, sizeof mp);
+        mp.id = "unit.multipass";
+        mp.sha256 = FOREIGN_SHA;
+        mp.kind = D9_SHADER_PLAN_TEV;
+        mp.draw_enabled = 1;
+        mp.tev.stages = 1;
+        mp.tev.textures = 0;
+        mp.pass_count = 2;
+        for (unsigned i = 0; i < 2; ++i) {
+            mp.pass[i].tev.stages = 1;
+            mp.pass[i].tev.textures = 0;
+            mp.pass[i].blend = i == 0 ? 0 : 1;
+            mp.pass[i].src_blend = 2; /* SRCALPHA */
+            mp.pass[i].dst_blend = 1; /* ZERO */
+            mp.pass[i].blend_op = 1;  /* ADD */
+            mp.pass[i].depth_write = i == 1 ? 1 : 0;
+        }
+        why[0] = 0;
+        CHECK(d9_shader_plan_draw_allowed(&mp, why, sizeof why) == 0,
+              "two-pass plan passes the gate");
+        mp.pass[1].tev.stages = 7;
+        why[0] = 0;
+        CHECK(d9_shader_plan_draw_allowed(&mp, why, sizeof why) == -1 &&
+              strstr(why, "pass 1 stages 7"),
+              "a seven-stage pass is refused by name");
+        mp.pass[1].tev.stages = 1;
+        mp.pass[1].src_blend = 0;
+        why[0] = 0;
+        CHECK(d9_shader_plan_draw_allowed(&mp, why, sizeof why) == -1 &&
+              strstr(why, "invalid blend/depth"),
+              "an invalid blend state is refused by name");
+        mp.pass[1].src_blend = 2;
+        mp.pass_count = 1;
+        why[0] = 0;
+        CHECK(d9_shader_plan_draw_allowed(&mp, why, sizeof why) == -1 &&
+              strstr(why, "passes outside 2..4"),
+              "a one-pass 'multipass' plan is refused by name");
+    }
+
     /* Caps are untouched by plan lookup/selection. */
     D9Caps9 caps;
     memset(&caps, 0xAA, sizeof caps);

@@ -653,6 +653,22 @@ int d9_get_unit_sampler(D9Device *d,unsigned stage,unsigned id,unsigned *value);
 int d9_set_texture(D9Device *d,D9Handle h);
 /* Borrowed ps_3_0 TEV program; NULL selects the fixed-function backend path. */
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program);
+/* Plan-derived constants: write computed c# rows into the TEV bank.  The mask
+ * is cleared (and the dirty flag set) by every raw SetPixelShaderConstantF. */
+int d9_set_derived_constants(D9Device *d,const float (*values)[4],uint32_t mask);
+unsigned d9_plan_constants_mask(const D9Device *d);
+int d9_plan_constants_dirty(const D9Device *d);
+/* One D3D9 draw call replayed through a multi-pass plan. */
+typedef struct {
+    unsigned type,start,primitives;
+    int32_t base;
+    unsigned indexed,limited,min,count,vertex_count;
+    const void *index_data;unsigned index_format;
+    const void *vertex_data;unsigned vertex_stride;
+} D9PlanDraw;
+struct D9ShaderPlan;
+int d9_draw_plan_passes(D9Device *d,const struct D9ShaderPlan *plan,
+                        const D9PlanDraw *desc);
 /* Material constants for menu TEV plans: c0..c7 are the D3D registers, c8 is
  * the internal ambient+emissive fold.  Values are copied; non-finite entries
  * are rejected.  This is evidence for the menu path, not a D3D9 cap.
