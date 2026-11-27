@@ -117,7 +117,14 @@ class PlanSchemaTest(unittest.TestCase):
         self.assertEqual(plan_verify.verify_document(self.doc, self.schema), [])
         status = plan_verify.status_table(self.doc)
         self.assertEqual(sum(status.values()), len(self.doc["entries"]))
-        self.assertEqual(status["draw-enabled"], 1)
+        # The canonical copy is always draw-enabled; pack catalogs may add
+        # exact runtime descriptors on top of it.
+        self.assertGreaterEqual(status["draw-enabled"], 1)
+        for entry in self.doc["entries"]:
+            if entry.get("draw_enabled") == 1:
+                self.assertEqual(entry["kind"], "tev", entry["id"])
+                if entry.get("quality") is not None:
+                    self.assertEqual(entry["quality"], "exact", entry["id"])
 
     def test_status_is_derived_not_trusted(self):
         doc = copy.deepcopy(self.doc)
