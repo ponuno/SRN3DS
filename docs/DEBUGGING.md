@@ -417,3 +417,41 @@ ELF and the runtime's own fault reports.
   guessing. The current generated table is in `docs/D3DX_PILOT_TABLE.md`.
 - A bypassed initializer is always printed and stored in the log/manifest.
   Never remove that note to make a run look cleaner.
+
+## 9. Preparing a separate worktree for builds
+
+Large generated inputs are not committed: a fresh worktree is missing
+`staged`, `pilot_out_mult` and `.venv`. A build there can then fail with a
+**false** guest fault at `0x802fa80` (missing staging/pilot code), not a real
+CPU/lifter bug. Link them from the main tree before building:
+
+```powershell
+# From the worktree (defaults: -Worktree = current dir,
+# -Main = C:\Users\vasya\Documents\Skyrim_N3DS)
+powershell -ExecutionPolicy Bypass -File tools\prepare_worktree.ps1
+
+# Explicit paths
+powershell -File tools\prepare_worktree.ps1 `
+  -Worktree C:\Users\vasya\Documents\Skyrim_N3DS_wt\wt-prep `
+  -Main C:\Users\vasya\Documents\Skyrim_N3DS
+```
+
+The script creates junctions (falls back to a copy if a junction fails) only
+when the target is absent, then checks and reports `staged\fpu.c`,
+`pilot_out_mult\D3DXMatrixMultiply\gen` and `.venv\Scripts\python.exe`.
+Exit code is `0` when all three are present, `1` when an input is missing
+(warning), `2` for a bad path. Re-running is safe: existing directories and
+junctions pointing elsewhere are left untouched. It never edits source,
+tests, `.git`, DevCaps or `F:`.
+
+```powershell
+# Remove only the junctions this tool created; real directories are kept.
+powershell -File tools\prepare_worktree.ps1 -Worktree <wt> -Clean
+```
+
+`-Clean` verifies the reparse point and its recorded target, then deletes the
+junction itself non-recursively (it does not follow the link into the main
+tree). Copies are never removed automatically. The creation record lives in
+`%TEMP%\prepare_worktree_state\`, not in the repo. Git lists junctions as
+untracked symlinks because the ignore rules for these directories have a
+trailing slash; run `-Clean` before committing, and do not stage them.
