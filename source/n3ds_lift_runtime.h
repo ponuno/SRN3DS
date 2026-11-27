@@ -15,6 +15,13 @@ int n3ds_lift_bind_modules(GuestMemory *m,const FnModule *modules,unsigned count
 int n3ds_lift_has_function(uint32_t address);
 /* One session per executable launch; caches are not reset on release. */
 void n3ds_lift_release(void);
+/* Forward `rep movsd` / `movs` helpers shared by the AOT prelude and the IR
+ * interpreter.  They obey the host-pointer lifetime rule documented in
+ * docs/IR.md: no guest pointer may be held across another guest-memory call. */
+void n3ds_rep_movsd(uint32_t n, uint32_t dst, uint32_t src);
+void n3ds_movs8(uint32_t dst, uint32_t src);
+void n3ds_movs16(uint32_t dst, uint32_t src);
+void n3ds_movs32(uint32_t dst, uint32_t src);
 void n3ds_lift_init_cpu(CPU *c,uint32_t stack_top,uint32_t teb);
 int n3ds_lift_invoke(CPU *c,uint32_t address,const uint32_t *args,size_t argc,uint32_t *result);
 /* Invoke a function through the interpreter even when the address is also an

@@ -17,6 +17,7 @@
 #include "n3ds_lift_runtime.h"
 #include "ir_core.h"
 #include "ir_corpus.h"
+#include "lift_prelude.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -33,6 +34,9 @@ void n3ds_pilot_tick(void) {}
 #define SCR_ADDR  0x60002000u
 #define SCR2_ADDR 0x60004000u
 #define MAT_ADDR  0x60006000u
+#define REP_ADDR  0x60050000u
+#define REP_END   (REP_ADDR + 3u)
+#define REP_DATA  0x60052000u
 #define STACK_TOP 0x60018000u
 #define TEB_ADDR  0x60020000u
 
@@ -268,6 +272,66 @@ static int test_cmc(void) {
     return 0;
 }
 
+/* `rep movsd` differential: the AOT prelude helper and the IR executor must
+ * agree on forward-overlap propagation, on dst<src copies and on a copy that
+ * crosses a page boundary (where lazy bridging used to invalidate the first
+ * host pointer).  Both tiers share n3ds_rep_movsd(); this keeps the shared
+ * entry wired correctly and guards the register update contract. */
+static void rep_fill(void) {
+    for (uint32_t k = 0; k < 0x1200u; ++k)
+        *(uint8_t *)n3ds_guest_ptr(REP_DATA + k, 1) = (uint8_t)(k * 7u + 3u);
+}
+
+static int rep_run(CPU *c, uint32_t dst, uint32_t src, uint32_t n, int ir,
+                   uint32_t *ret) {
+    n3ds_lift_init_cpu(c, STACK_TOP, TEB_ADDR);
+    rep_fill();
+    c->r[1] = n;
+    c->r[6] = src;
+    c->r[7] = dst;
+    if (!ir) {
+        rt_movsd(n, dst, src);
+        c->r[1] = 0;
+        c->r[6] = src + n * 4u;
+        c->r[7] = dst + n * 4u;
+        *ret = 0;
+        return 0;
+    }
+    return n3ds_ir_invoke(c, REP_ADDR, REP_END, NULL, 0, ret);
+}
+
+static int test_rep_movsd(void) {
+    static const struct { uint32_t dst, src, n; const char *name; } cases[] = {
+        {REP_DATA + 4u, REP_DATA, 8u, "overlap dst>src"},
+        {REP_DATA, REP_DATA + 4u, 8u, "overlap dst<src"},
+        {REP_DATA + 0x800u, REP_DATA + 4096u - 16u, 8u, "page boundary"},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+        uint32_t ra = 0, ri = 0;
+        CPU ca, ci;
+        int rca = rep_run(&ca, cases[i].dst, cases[i].src, cases[i].n, 0, &ra);
+        uint8_t a[0x1200];
+        memcpy(a, n3ds_guest_ptr(REP_DATA, sizeof a), sizeof a);
+        int rci = rep_run(&ci, cases[i].dst, cases[i].src, cases[i].n, 1, &ri);
+        const uint8_t *ip = n3ds_guest_ptr(REP_DATA, sizeof a);
+        if (rca || rci || ra != ri) {
+            printf("  FAIL rep movsd %s: rc %d/%d ret %08x/%08x\n",
+                   cases[i].name, rca, rci, ra, ri);
+            return 1;
+        }
+        if (memcmp(a, ip, sizeof a)) {
+            printf("  FAIL rep movsd %s: guest memory differs\n", cases[i].name);
+            return 1;
+        }
+        if (memcmp(&ca, &ci, sizeof ca)) {
+            printf("  FAIL rep movsd %s: CPU state differs\n", cases[i].name);
+            return 1;
+        }
+        printf("  ok rep movsd %s\n", cases[i].name);
+    }
+    return 0;
+}
+
 static int test_aot_ir_aot(void) {
     const IrCorpusFn *fn = find_fn("indirect");
     if (!fn) { printf("  FAIL aot->ir->aot: no indirect function\n"); return 1; }
@@ -316,6 +380,7 @@ int main(void) {
         guest_map(&mem, IN_ADDR, 0x1000) || guest_map(&mem, OUT_ADDR, 0x1000) ||
         guest_map(&mem, SCR_ADDR, 0x2000) || guest_map(&mem, SCR2_ADDR, 0x2000) ||
         guest_map(&mem, MAT_ADDR, 0x1000) || guest_map(&mem, 0x60010000u, 0x10000) ||
+        guest_map(&mem, REP_ADDR, 0x1000) || guest_map(&mem, REP_DATA, 0x2000) ||
         guest_map(&mem, TEB_ADDR, 0x1000)) {
         printf("map failed\n");
         return 1;
@@ -323,6 +388,11 @@ int main(void) {
     void *code = guest_ptr(&mem, IR_CORPUS_BASE, IR_CORPUS_BYTES);
     if (!code) { printf("code map failed\n"); return 1; }
     memcpy(code, ir_corpus_image, IR_CORPUS_BYTES);
+    /* rep movsd; ret -- the IR side of the string-copy differential. */
+    static const uint8_t rep_code[] = {0xf3, 0xa5, 0xc3};
+    uint8_t *rep = guest_ptr(&mem, REP_ADDR, sizeof rep_code);
+    if (!rep) { printf("rep code map failed\n"); return 1; }
+    memcpy(rep, rep_code, sizeof rep_code);
 
     naot = 0;
     for (unsigned i = 0; i < g_fn_count_ira; ++i) aot[naot++] = g_fn_table_ira[i];
@@ -333,9 +403,10 @@ int main(void) {
         while (j && aot[j - 1].addr > e.addr) { aot[j] = aot[j - 1]; --j; }
         aot[j] = e;
     }
-    static const IrFnEntry irtab[] = {{IR_HELPER_ADDR, IR_HELPER_END}};
+    static const IrFnEntry irtab[] = {{IR_HELPER_ADDR, IR_HELPER_END},
+                                      {REP_ADDR, REP_END}};
     if (n3ds_lift_bind(&mem, aot, naot)) { printf("bind AOT failed\n"); return 1; }
-    if (n3ds_ir_bind(irtab, 1)) { printf("bind IR failed\n"); return 1; }
+    if (n3ds_ir_bind(irtab, 2)) { printf("bind IR failed\n"); return 1; }
     if (n3ds_ir_cache_init(1u << 20)) { printf("cache init failed\n"); return 1; }
 
     int fail = 0;
@@ -353,6 +424,7 @@ int main(void) {
     if (test_trap()) fail = 1;
     if (test_unsupported()) fail = 1;
     if (test_aot_ir_aot()) fail = 1;
+    if (test_rep_movsd()) fail = 1;
 
     if (!fail) printf("IR equivalence PASS\n");
 done:

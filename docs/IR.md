@@ -191,7 +191,8 @@ The interpreter uses the same machine state as AOT:
   (checked). An unmapped access produces exactly
   `Guest fault at XXXXXXXX: unmapped guest memory`.
 - **String ops** reproduce the AOT lowering, including the `rep movsd`
-  `rt_movsd` fast path and `c->df` stepping.
+  `rt_movsd` fast path and `c->df` stepping. Both tiers call the same
+  `n3ds_rep_movsd()`; see the host-pointer rule below.
 - **`ret`** pops `4 + imm16` and returns from the interpreter frame; the popped
   value is ignored, exactly as the AOT `esp += 4 + n; return;` convention.
   Calls are C recursion; `ret` never dispatches on the stack value.
@@ -200,6 +201,46 @@ The interpreter uses the same machine state as AOT:
   AOT's `rt_call(c,target); return;` does.
 - **`int3`/`int`/divide-by-zero** fault explicitly; `n3ds_lift_exit` uses the
   same `longjmp` frame as AOT.
+
+### Host-pointer lifetime invariant (string copies)
+
+A pointer returned by `guest_ptr()` / `n3ds_guest_ptr()` is valid only until
+the next guest-memory call. Lazy commit can free host blocks while that
+pointer is held:
+
+- `slab_prepare()` bridges a multi-page range into one allocation and
+  `page_drop_preserve()` frees the page allocations it replaces (pages of an
+  old bridge outside the new range are reallocated at new addresses);
+- at `m->limit`, `page_back()` calls `slab_evict_one()`, which flushes and
+  frees another file-backed page.
+
+`rep movsd` used to fetch `src` and `dst` host pointers and copy through them.
+Fetching the second pointer could perform either operation, leaving the first
+pointer dangling: ASan reports a heap-use-after-free, and an unsanitised run
+may read a block the allocator already reused. This is not an x86 semantic;
+the guest still sees a forward `DF=0` copy with dword overlap propagation.
+
+Both tiers therefore call one helper, `n3ds_rep_movsd()` in
+`source/n3ds_lift_runtime.c`; AOT `rt_movsd` and IR `rep_movsd` only keep their
+watch tags. It never holds two raw pointers across a potential commit:
+
+- a range wholly inside one `GuestRegion` uses `memmove()` (region data is
+  allocated once and is not moved or freed while mapped);
+- otherwise non-overlapping copies move page-bounded chunks through a stack
+  buffer via `guest_read()` / `guest_write()`;
+- `dst > src` overlap reads a dword then writes it, which is the exact forward
+  `rep movsd` result; `ecx == 0` performs no access.
+
+Plain `movs`/`rep movsb`/`rep movsw` elements are emitted as
+`n3ds_movs8/16/32(dst, src)` by `tools/lift.py` (patched in
+`tools/stage_upstream.py`): the source value is read before the destination
+pointer is fetched, so a destination commit cannot invalidate the source.
+`stos`/`lods` touch one address and keep the direct lowering.
+
+Regression: `tests/rep_movs_smoke.c` forces eviction on every page commit
+inside a file-backed slab copy (deterministic byte mismatch on the old code;
+heap-use-after-free under `-Sanitize`), and `tests/ir_equiv.c` compares AOT and
+IR on forward overlap and on a copy crossing a page boundary.
 
 ### Function extent and exact-entry dispatch
 

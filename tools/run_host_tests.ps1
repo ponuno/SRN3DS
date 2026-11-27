@@ -524,6 +524,10 @@ Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "te
 # Havok SSE/x87 extension forms, differential AOT vs IR over the self-authored
 # corpus.  Deliberately independent of the D3DX pilot fixture so it always runs.
 Add-Test "ir_havok_ext" $liftCommon ($legacySources + @("tests/ir_havok_ext_smoke.c", "tests/ir_aot_fixture.c")) @()
+# rep movs host-pointer lifetime: force page eviction between the src and dst
+# pointer fetch and require correct bytes (See the comment in
+# source/n3ds_lift_runtime.c and docs/IR.md).
+Add-Test "rep_movs" $liftCommon ($legacySources + @("tests/rep_movs_smoke.c")) @()
 $irPilotGen = Join-Path $root "pilot_out_mult\D3DXMatrixMultiply\gen"
 if ((Test-Path (Join-Path $irPilotGen "pilot_00.c")) -and (Test-Path (Join-Path $irPilotGen "pilot_table.c"))) {
     $irPilotSrc = Get-ChildItem -Path $irPilotGen -Filter "pilot_*.c" | ForEach-Object { $_.FullName }

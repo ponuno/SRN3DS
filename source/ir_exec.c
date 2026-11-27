@@ -6,6 +6,7 @@
  */
 #include "ir_core.h"
 #include "guest.h"
+#include "n3ds_lift_runtime.h"
 #include "n3ds_atomic.h"
 #include "hprof.h"
 #include <stdio.h>
@@ -128,21 +129,15 @@ static int cc_true(unsigned cc, const Flags *f) {
     }
 }
 
-/* Exact copy of the AOT rep-movsd helper (lift_prelude.h rt_movsd) so the IR
- * and AOT tiers agree on overlapping forward copies. */
+/* Forward `rep movsd`; the copy itself lives in n3ds_rep_movsd() so AOT and
+ * IR share one host-pointer-safe implementation.  See the lifetime comment
+ * there: obtaining the second pointer can bridge or evict the first range. */
 static void rep_movsd(uint32_t n, uint32_t dst, uint32_t src) {
     if (!n) return;
     if (n > UINT32_MAX / 4) rt_unimpl(NULL, src, "rep movsd count");
-    (void)n3ds_guest_ptr(dst, (size_t)n * 4);
-    (void)n3ds_guest_ptr(src, (size_t)n * 4);
-    if (dst <= src || (uint64_t)dst >= (uint64_t)src + (uint64_t)n * 4) {
-        memmove(n3ds_guest_ptr(dst, (size_t)n * 4), n3ds_guest_ptr(src, (size_t)n * 4),
-                (size_t)n * 4);
-        IR_WATCH("ir-rep-movsd");
-    } else {
-        for (uint32_t k = 0; k < n; k++) M32(dst + 4 * k) = M32(src + 4 * k);
-        IR_WATCH("ir-rep-movsd-overlap");
-    }
+    int overlap = dst > src && (uint64_t)dst < (uint64_t)src + (uint64_t)n * 4;
+    n3ds_rep_movsd(n, dst, src);
+    IR_WATCH(overlap ? "ir-rep-movsd-overlap" : "ir-rep-movsd");
 }
 
 static void trace_indirect_ir(CPU *c,uint32_t target,uint32_t from){

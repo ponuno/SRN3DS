@@ -20,12 +20,20 @@ def stage(upstream, out):
         x86 = change(x86, f'({typ} *)(MEM + (uint32_t)(a))', f'({typ} *)n3ds_guest_ptr((uint32_t)(a), {size})', 1)
     x86 = change(x86, 'void *n3ds_guest_ptr(uint32_t addr, size_t bytes);',
                  'void *n3ds_guest_ptr(uint32_t addr, size_t bytes);\n'
+                 '/* Shared forward string-copy helpers.  The host pointer returned by\n'
+                 ' * n3ds_guest_ptr() dies on the next guest-memory call, so these never\n'
+                 ' * hold two pointers across a lazy page commit/eviction. */\n'
+                 'void n3ds_rep_movsd(uint32_t n, uint32_t dst, uint32_t src);\n'
+                 'void n3ds_movs8(uint32_t dst, uint32_t src);\n'
+                 'void n3ds_movs16(uint32_t dst, uint32_t src);\n'
+                 'void n3ds_movs32(uint32_t dst, uint32_t src);\n'
                  'static inline Xmm n3ds_xmm_read(uint32_t addr) { Xmm x; memcpy(&x, n3ds_guest_ptr(addr,16),16); return x; }', 1)
     pre = (runtime / 'lift_prelude.h').read_text(encoding='utf-8')
-    pre = change(pre, 'memmove(MEM + dst, MEM + src, (size_t)n * 4);',
-                 'memmove(n3ds_guest_ptr(dst,(size_t)n*4), n3ds_guest_ptr(src,(size_t)n*4),(size_t)n*4);', 1)
-    pre = change(pre, 'if (dst <= src || dst >= src + n * 4)',
-                 'if (!n) return;\n    if (n > UINT32_MAX/4) rt_unimpl(NULL,src,"rep movsd count");\n    (void)n3ds_guest_ptr(dst,(size_t)n*4);\n    (void)n3ds_guest_ptr(src,(size_t)n*4);\n    if (dst <= src || (uint64_t)dst >= (uint64_t)src + (uint64_t)n * 4)', 1)
+    pre = change(pre, '''    if (dst <= src || dst >= src + n * 4) memmove(MEM + dst, MEM + src, (size_t)n * 4);
+    else for (uint32_t k = 0; k < n; k++) M32(dst + 4 * k) = M32(src + 4 * k);''',
+                 '''    /* Forward copy with DF=0; n3ds_rep_movsd owns overlap semantics and
+     * never holds host pointers across a lazy page commit. */
+    n3ds_rep_movsd(n, dst, src);''', 1)
     # This subset supports only one guest thread. No AArch64 host memory path.
     pre = pre[:pre.index('/* Memory ordering')]+'''/* N3DS single-threaded subset. */
 #include "n3ds_atomic.h"
@@ -56,6 +64,10 @@ def stage(upstream, out):
     lift = change(lift, '(uint64_t *)(MEM + %s)', 'N3DS_PTR(uint64_t, %s)', 1)
     lift = change(lift, 'memcpy(MEM + %s, &%s, 16)', 'memcpy(n3ds_guest_ptr(%s,16), &%s, 16)', 2)
     lift = change(lift, '(*(Xmm *)(MEM + %s))', 'n3ds_xmm_read(%s)', 2)
+    # `movs` must read the source value before fetching the destination
+    # pointer: a lazy commit for the destination can move/free the source page.
+    lift = change(lift, 'body = "%s(edi) = %s(esi); esi += %s; edi += %s;" % (M, M, step, step)',
+                 'body = "n3ds_movs%d(edi, esi); esi += %s; edi += %s;" % (8 * size, step, step)', 1)
     # Only guest-memory atomics, not the native indirect-call pointer cache.
     for old, new, count in [
         ('__atomic_exchange_n(', 'N3DS_EXCHANGE(', 1),
