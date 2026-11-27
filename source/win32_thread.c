@@ -144,6 +144,7 @@ static volatile uint64_t g_activity_ms;
 static volatile int g_watchdog_running;
 static volatile int g_watchdog_armed;
 static unsigned g_watchdog_ms;
+static unsigned g_dump_after_ms;
 static void activity(void) { g_activity_ms = win32_thread_now_ms(); }
 
 static const char *state_name(unsigned s) {
@@ -213,9 +214,16 @@ static void hang_dump(unsigned elapsed) {
 #ifdef _WIN32
 static DWORD WINAPI watchdog_proc(LPVOID unused) {
     (void)unused;
+    uint64_t start = win32_thread_now_ms();
     for (;;) {
         Sleep(50);
         uint64_t now = win32_thread_now_ms();
+        if (g_dump_after_ms && now - start > g_dump_after_ms) {
+            hang_dump((unsigned)(now - start));
+            fprintf(stderr, "[hang] timed dump aborting the run (diagnostic only)\n");
+            fflush(stderr);
+            ExitProcess(70);
+        }
         uint64_t last = g_activity_ms;
         if (g_watchdog_armed && now - last > g_watchdog_ms) {
             hang_dump((unsigned)(now - last));
@@ -229,23 +237,25 @@ static DWORD WINAPI watchdog_proc(LPVOID unused) {
 static void watchdog_start(void) {
     if (g_watchdog_running) return;
     const char *v = getenv("TESV_HANG_WATCHDOG_MS");
-    if (!v || !*v) return;
-    unsigned long ms = strtoul(v, NULL, 0);
-    if (!ms) return;
-    g_watchdog_ms = ms > 3600000ul ? 3600000u : (unsigned)ms;
+    const char *d = getenv("TESV_DUMP_AFTER_MS");
+    unsigned long ms = v && *v ? strtoul(v, NULL, 0) : 0;
+    unsigned long dms = d && *d ? strtoul(d, NULL, 0) : 0;
+    if (!ms && !dms) return;
+    if (ms) g_watchdog_ms = ms > 3600000ul ? 3600000u : (unsigned)ms;
+    if (dms) g_dump_after_ms = dms > 3600000ul ? 3600000u : (unsigned)dms;
     g_watchdog_running = 1;
     activity();
 #ifdef _WIN32
     HANDLE h = CreateThread(NULL, 0, watchdog_proc, NULL, 0, NULL);
     if (h) CloseHandle(h);
 #else
-    fprintf(stderr, "[hang] TESV_HANG_WATCHDOG_MS is host-only; not started\n");
+    fprintf(stderr, "[hang] TESV_HANG_WATCHDOG_MS/TESV_DUMP_AFTER_MS are host-only; not started\n");
 #endif
 }
 /* Arm after the first real Present: loading has legitimate long gaps between
  * scheduler events, while the menu loop after Present must keep presenting. */
 void n3ds_hang_watchdog_arm(void) {
-    if (!g_watchdog_running || g_watchdog_armed) return;
+    if (!g_watchdog_running || g_watchdog_armed || !g_watchdog_ms) return;
     activity();
     g_watchdog_armed = 1;
 }
