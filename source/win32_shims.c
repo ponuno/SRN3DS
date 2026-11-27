@@ -4204,7 +4204,40 @@ static void s_BinkCopyToBufferRect(CPU *c){
     void *g;
     if(!s)rt_unimpl(c,A(0),"_BinkCopyToBufferRect@44: unknown Bink handle");
     g=guest_ptr(mem,dst,(size_t)pitch*dh);
-    if(!g)rt_unimpl(c,dst,"_BinkCopyToBufferRect@44: destination is not mapped guest memory");
+    if(!g){
+        /* The destination is often a locked surface or a partly committed
+         * buffer: the whole pitch*height span need not be mapped at once.
+         * Decode the rectangle into a host buffer and write it row by row
+         * through the checked guest helper. A row that is genuinely unmapped
+         * returns failure to the guest instead of faulting the whole thread. */
+        static unsigned row_logged;
+        if(sw&&sh&&pitch>=(size_t)dx*4u+(size_t)sw*4u){
+            size_t row=sw*4u,total=row*sh;
+            unsigned char *tmp=(unsigned char *)malloc(total);
+            if(tmp){
+                rc=bink_decode_copy_rect(&s->dec,s->cur,tmp,sw*4u,sh,0,0,sx,sy,sw,sh,flags);
+                if(rc==BINK_DECODE_OK){
+                    for(uint32_t y=0;y<sh;++y){
+                        uint32_t at=dst+(dy+y)*pitch+dx*4u;
+                        if(guest_write(mem,at,tmp+(size_t)y*row,row)){
+                            if(row_logged<4u){++row_logged;
+                                fprintf(stderr,"[bink] copy row %u/%u at %08x not mapped "
+                                               "(dst=%08x pitch=%u %ux%u)\n",
+                                        y,sh,at,dst,pitch,sw,sh);}
+                            free(tmp);RET(1,11);
+                        }
+                    }
+                    free(tmp);
+                    RET(0,11);
+                }
+                free(tmp);
+            }
+        }
+        if(row_logged<4u){++row_logged;
+            fprintf(stderr,"[bink] dest %08x %ux%u pitch=%u not mapped; copy refused\n",
+                    dst,sw,sh,pitch);}
+        RET(1,11);
+    }
     rc=bink_decode_copy_rect(&s->dec,s->cur,g,pitch,dh,dx,dy,sx,sy,sw,sh,flags);
     if(rc!=BINK_DECODE_OK){
         static unsigned logged;
