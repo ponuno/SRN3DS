@@ -241,6 +241,29 @@ python C:\Users\vasya\Documents\Skyrim_Android\tools\discover.py `
   -OutDir E:\Skyrim_N3DS_build\host
 ```
 
+### Static import / IAT coverage report
+
+`tools/iat_report.py` decodes the PE import directory with the standard library
+only (no `pefile`, no guest execution) and lists every function with its IAT
+RVA and VA (`image_base + RVA`). It compares each name against
+`source/win32_*.c` binding tables (`X("dll","name",...)`, `Import(...)`,
+`C(...)`/`K(...)` bodies, `{"dll","name",fn}` tables and stringified
+`DEF(Name)` tables) and against `source/d3dx_*`. Classes: **bound** (explicit
+binding/export table), **stub** (name only mentioned), **missing** (no mention).
+Ordinals are shown as `#N` and are checked against DLL-specific ordinal
+comments/cases. The nine D3DX math exports are bound by the pilot hotpatch
+table instead, so this narrower source scan reports them as missing.
+
+```powershell
+python tools/iat_report.py "E:\skyr\TESV.exe"
+python tools/iat_report.py --missing --strict   # exit 1 if any missing
+python tools/iat_report.py --json               # full machine-readable report
+```
+
+At `84b93da` the TESV.exe snapshot has 266 imports: 200 bound, 26 stub,
+40 missing (mostly WSOCK32 ordinals). `--strict` is a coverage tripwire, not
+a claim that an unbound import faults at runtime.
+
 `slice_functions.json` can be lifted with `staged/lift.py`; the report contains
 projected ARM size, import call sites and dynamic indirect sites. Treat the
 projection as an estimate until a 20–50 function sample is lifted and measured.
