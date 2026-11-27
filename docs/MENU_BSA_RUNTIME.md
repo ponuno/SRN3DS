@@ -158,13 +158,24 @@ Safety and bounded behaviour:
 * the reader checks that folder counts sum to the header file count, that folder
   names consume exactly `total_folder_name_length`, and that the name block ends
   exactly after the last NUL;
-* an internal case-insensitive index is built from the names.  The archive's
-  64-bit hash fields are kept opaque; no hash algorithm was guessed;
-* duplicate canonical paths are refused;
+* the resident index is a compact locator, not a name copy: per archive a u32
+  open-addressed table plus an 8-bit tag (max load 0.8), u32 name-block
+  checkpoints every 16 names and a 20-byte per-folder locator.  Folder names,
+  file base names and 16-byte file records stay in the archive and are read on
+  demand through a 32 KiB per-archive read-through cache;
+* lookup hashes the canonical path (case-folded FNV-1a-64 + avalanche), probes
+  the table and rejects a different tag without any archive read.  On a tag
+  match it reads the record and the exact folder/base name; a tag/hash
+  collision continues to the next slot and is resolved by the same
+  case-insensitive exact comparison.  The archive's 64-bit record hash is
+  returned to callers but never used as the lookup key, so no hash algorithm
+  was guessed;
+* duplicate canonical paths are refused during open by the same exact-name
+  comparison;
 * configurable caps: folders, files, name bytes, index bytes, one stored
-  payload, one unpacked payload.  Temporary folder-record and name-block
-  buffers release their index-budget charge before the permanent name index and
-  hash table are allocated;
+  payload, one unpacked payload.  `max_index_bytes` bounds the locator table,
+  tags, checkpoints and folder array; the fixed page cache is accounted
+  separately;
 * embedded-name prefix offsets are accumulated in 64-bit arithmetic and a
   payload start above the format's 32-bit file-offset field is refused, not
   truncated;
@@ -181,6 +192,58 @@ Safety and bounded behaviour:
 Named statuses include `BSA_ERR_MAGIC`, `BSA_ERR_VERSION`, `BSA_ERR_BOUNDS`,
 `BSA_ERR_COUNT`, `BSA_ERR_NAME`, `BSA_ERR_DUPLICATE`, `BSA_ERR_UNSUPPORTED`,
 `BSA_ERR_FORMAT`, `BSA_ERR_TRUNCATED`, `BSA_ERR_DEFLATE` and `BSA_ERR_BUDGET`.
+
+### 4.1 Resident index: 17.85 MiB -> 1.96 MiB
+
+Measured with `bsa_index_bytes()` over all 13 `E:\harness_skyrim\Data`
+archives (176,811 files, 5,454 folders), `tests/bsa_index_smoke.c`:
+
+| Archive | old KiB | new KiB |
+|---|---:|---:|
+| Dawnguard | 1,562.7 | 189.2 |
+| Dragonborn | 2,897.9 | 356.0 |
+| HearthFires | 253.3 | 24.1 |
+| Skyrim - Animations | 783.3 | 128.1 |
+| Skyrim - Interface | 14.5 | 1.6 |
+| Skyrim - Meshes | 2,244.0 | 197.7 |
+| Skyrim - Misc | 1,260.3 | 164.1 |
+| Skyrim - Shaders | 9.0 | 1.4 |
+| Skyrim - Sounds | 556.5 | 95.7 |
+| Skyrim - Textures | 1,813.3 | 180.4 |
+| Skyrim - Voices | 6,807.1 | 659.0 |
+| Skyrim - VoicesExtra | 47.7 | 5.2 |
+| Update | 25.2 | 3.9 |
+| **Total** | **18,274.8 (17.85 MiB)** | **2,006.3 (1.96 MiB)** |
+
+The old figure is entry structs (24 B/file) + folder structs (8 B/folder) +
+resident canonical names + resident folder-name block + a u32 table at a 0.5
+load.  The new figure is the u32 table + u8 tag at 0.8 max load, u32 name
+checkpoints every 16 names and 20 B/folder.  The separate read-through cache is
+13 x 32 KiB = 416 KiB.  Total resident directory cost is therefore **2.36 MiB**
+versus 17.85 MiB, and the 2 MiB index target is met with ~42 KiB spare.
+
+`tools/bsa_index_mem.py` independently parses the same archives and prints a
+projection (16.50 MiB old / 1.86 MiB compact); `tests/bsa_index_smoke.c` is the
+authority because it asks the reader itself, and it includes the reader's exact
+per-archive rounding (17.85 / 1.96 MiB).
+
+Lookup equivalence: the first run of `bsa_index` (old reader) dumped 81,411
+lines covering 24k real paths with upper-case and `/` variants, cross-archive
+duplicates, 2.5k misses and eight special paths, each tested against its owner
+and two other archives.  The new reader reproduced every line byte-for-byte
+(status, record hash, offset, stored size, folder index, record index and the
+returned canonical path).
+
+Timing (`bsa_find`, 100k calls, E: install, warm OS cache): 0.34 us/find old.
+The new reader is 1.45-1.56 us/find for the miss-heavy random-archive mix
+(4.3-4.6x, under the 5x budget) and 8.7-9.2 us/find for 100k cold
+same-archive hits (25-27x).
+The cost is entirely the exact-name verification: a cold hit reads the 16-byte
+record, the folder name and the base name.  Hot menu/assets paths hit the 32
+KiB cache; the miss-heavy case does no I/O at all because the tag rejects it.
+If cold random hits become the bottleneck, the next lever is a larger
+per-archive cache (128-256 KiB) or an 8 B/file offset+size mirror
+(+1.35 MiB, which would no longer fit the 2 MiB index target).
 
 ## 5. Runtime resolver and SWF header
 
@@ -298,7 +361,11 @@ The synthetic coverage is:
   bad zlib header, Adler mismatch and bounded prefix/full output;
 * bad magic, unsupported version, truncation, folder/file count limits, index
   budget, per-file budget, out-of-range record, zero folder-name length and
-  duplicate path; tight index budget after temporary blocks are released;
+  duplicate path; tight index budget equal to the final locator size;
+* `bsa_index` (real archives only): per-archive/total `bsa_index_bytes()`,
+  `%TEMP%\bsa_ref_<pid>.txt` dump of every old-index lookup, byte-for-byte
+  comparison on later runs, `BSA_INDEX_MAX_BYTES` threshold and two 100k
+  `bsa_find` timing runs (miss-heavy and same-archive hits);
 * FWS/CWS/ZWS, unknown signature, short header, version 0/99, FWS declared-size
   mismatch and CWS bad zlib prefix;
 * resolver: base-only, Update override, missing, present-but-unopenable

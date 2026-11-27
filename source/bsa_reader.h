@@ -16,9 +16,11 @@
  * 0x100 (embedded full name prefix).  The stored size includes every prefix.
  *
  * The reader never trusts a count, offset, length or name before checking it
- * against the archive size and the configured limits.  It also builds its own
- * case-insensitive name index; the archive's 64-bit hash records are kept
- * opaque (no guessed hash algorithm).
+ * against the archive size and the configured limits.  It builds a compact
+ * case-insensitive locator (open-addressed u32 table + 8-bit tag, name-block
+ * checkpoints, per-folder locator); names and records stay in the archive and
+ * are verified on demand through a fixed read-through cache.  The archive's
+ * 64-bit hash records are kept opaque (no guessed hash algorithm).
  */
 
 #include <stddef.h>
@@ -116,7 +118,9 @@ BsaStatus bsa_open_path(const char *path, const BsaOptions *options,
 void bsa_close(BsaArchive *archive);
 const BsaHeader *bsa_header(const BsaArchive *archive);
 uint32_t bsa_file_count(const BsaArchive *archive);
-/* Diagnostic: bytes currently charged to the archive's index budget. */
+/* Diagnostic: bytes currently charged to the archive's index budget (locator
+ * table + tags + checkpoints + folder array).  The fixed per-archive page
+ * cache is separate and deliberately not included. */
 size_t bsa_index_bytes(const BsaArchive *archive);
 
 /* Case- and separator-insensitive lookup ("interface/StartMenu.swf" works).

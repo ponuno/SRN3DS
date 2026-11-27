@@ -482,6 +482,10 @@ Add-Test "ini_overlay" $liftCommon ($legacySources + @("tests/win32_ini_overlay_
 Add-Test "win32_bsa_overlay" $liftCommon ($legacySources + @("tests/win32_bsa_overlay_smoke.c")) @()
 Add-Test "renderer_requirements" $common @("source/d3d9_renderer_requirements.c", "tests/renderer_requirements_smoke.c") @()
 Add-Test "menu_bsa" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/guest.c", "source/guest_heap.c", "tests/menu_bsa_smoke.c") @()
+# Real-archive BSA index: resident bytes, old/new reference equivalence and
+# 100k random bsa_find timing.  Skips when E:\harness_skyrim\Data is absent; the
+# first run dumps %TEMP%\bsa_ref_<pid>.txt and later runs compare byte-for-byte.
+Add-Test "bsa_index" $common @("source/bsa_reader.c", "tests/bsa_index_smoke.c") @()
 Add-Test "stream_range" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_range_smoke.c") @()
 Add-Test "stream_queue" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_queue_smoke.c") @()
 # Cell trigger: synthetic guest tuple + 2-cell index (P0, latch, trim, demand).

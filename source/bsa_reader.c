@@ -15,19 +15,25 @@
 #define BSA_FTELL ftello
 #endif
 
+/* Compact directory.  Paths stay in the archive: a lookup probes a u32
+ * open-addressed table, then reads the candidate's record/name through the
+ * bounded page cache to compare the exact name.  The archive's 64-bit record
+ * hash is returned to callers but the lookup key is our own case-folded path
+ * hash, so the on-disk hash algorithm is still never guessed. */
 typedef struct {
-    uint64_t hash;
-    uint32_t stored_size;
-    uint32_t offset;
-    uint32_t name_offset;   /* into archive->names */
-    uint32_t name_length;
-    uint32_t folder_index;
-} BsaEntryInternal;
-
-typedef struct {
-    uint32_t name_offset;   /* into archive->folder_names */
-    uint32_t name_length;
+    uint32_t records_at;    /* absolute offset of the first 16-byte record */
+    uint32_t name_at;       /* absolute offset of the raw folder name */
+    uint32_t first_entry;   /* first global entry index in this folder */
+    uint32_t count;         /* file records in this folder */
+    uint16_t name_stored;   /* stored bytes, including the trailing NUL */
+    uint16_t name_length;   /* canonical length, without the NUL */
 } BsaFolderInternal;
+
+/* Bounded read-through page cache.  Not charged to max_index_bytes: the
+ * resident index stays under 2 MiB while the cache is a separate, fixed cost
+ * (BSA_PAGE_CACHE_BYTES per archive). */
+#define BSA_PAGE_CACHE_BYTES (32u * 1024u)
+#define BSA_NAME_GROUP 16u
 
 struct BsaArchive {
     BsaReadAt read_at;
@@ -37,14 +43,20 @@ struct BsaArchive {
     uint64_t size;
     BsaOptions opt;
     BsaHeader header;
-    BsaEntryInternal *entries;
     BsaFolderInternal *folders;
-    char *folder_names;
-    char *names;
     uint32_t *table;
+    uint8_t *tags;              /* 8-bit fingerprint; skips name reads on miss */
     size_t table_size;
+    uint32_t *name_checkpoints;  /* block-relative offsets, every 16 names */
+    size_t name_checkpoint_count;
+    uint64_t name_block_at;
+    uint32_t name_block_len;
     size_t index_bytes;
     int alloc_budget;
+    uint8_t *page;
+    size_t page_cap;
+    uint64_t page_off;
+    size_t page_len;
 };
 
 static void set_reason(char *reason, size_t cap, const char *fmt, ...) {
@@ -134,16 +146,6 @@ static void *index_alloc(BsaArchive *a, size_t bytes) {
 
 static BsaStatus alloc_failure(const BsaArchive *a) {
     return a->alloc_budget ? BSA_ERR_BUDGET : BSA_ERR_IO;
-}
-
-/* Temporary parser blocks (folder records, name block) are charged while they
- * are live and released before the next allocation.  Accounting the release is
- * what keeps a tight max_index_bytes usable. */
-static void index_free(BsaArchive *a, void *p, size_t bytes) {
-    if (!p) return;
-    free(p);
-    if (a->index_bytes >= bytes) a->index_bytes -= bytes;
-    else a->index_bytes = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -558,14 +560,20 @@ static int path_equal(const char *a, const char *b) {
     return *a == 0 && *b == 0;
 }
 
-static uint32_t path_hash(const char *path) {
-    uint32_t h = 2166136261u;
+static uint64_t path_hash64(const char *path) {
+    uint64_t h = 1469598103934665603ull;
     for (const unsigned char *p = (const unsigned char *)path; *p; ++p) {
         unsigned char c = *p;
         if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
         h ^= c;
-        h *= 16777619u;
+        h *= 1099511628211ull;
     }
+    /* Final avalanche so the low bits used for the slot are well mixed. */
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdull;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53ull;
+    h ^= h >> 33;
     return h;
 }
 
@@ -575,100 +583,254 @@ static int name_has_separator(const char *s, size_t n) {
     return 0;
 }
 
-static BsaStatus index_insert(BsaArchive *a, uint32_t entry_index,
-                              char *reason, size_t reason_cap) {
-    const char *path = a->names + a->entries[entry_index].name_offset;
-    if (!path[0]) {
-        set_reason(reason, reason_cap, "empty archive path at record %u", entry_index);
+/* Read through the fixed per-archive cache.  `n` is always small here
+ * (16-byte records, name bytes); large payload reads keep using read_exact. */
+static BsaStatus cache_read(const BsaArchive *archive, uint64_t offset,
+                            void *dst, size_t bytes, char *reason,
+                            size_t reason_cap) {
+    BsaArchive *a = (BsaArchive *)(uintptr_t)archive;
+    if (!bytes) return BSA_OK;
+    if (offset > a->size || (uint64_t)bytes > a->size - offset)
+        return read_exact(a, offset, dst, bytes, reason, reason_cap);
+    if (!a->page || bytes > a->page_cap / 4u)
+        return read_exact(a, offset, dst, bytes, reason, reason_cap);
+    if (offset >= a->page_off && offset - a->page_off <= a->page_len &&
+        bytes <= a->page_len - (size_t)(offset - a->page_off)) {
+        memcpy(dst, a->page + (size_t)(offset - a->page_off), bytes);
+        return BSA_OK;
+    }
+    size_t want = a->page_cap;
+    if ((uint64_t)want > a->size - offset) want = (size_t)(a->size - offset);
+    BsaStatus st = read_exact(a, offset, a->page, want, reason, reason_cap);
+    if (st != BSA_OK) { a->page_len = 0; return st; }
+    a->page_off = offset;
+    a->page_len = want;
+    if (bytes <= want) {
+        memcpy(dst, a->page, bytes);
+        return BSA_OK;
+    }
+    memcpy(dst, a->page, want);
+    return read_exact(a, offset + want, (uint8_t *)dst + want, bytes - want,
+                      reason, reason_cap);
+}
+
+static const BsaFolderInternal *folder_for(const BsaArchive *a,
+                                           uint32_t entry_index) {
+    uint32_t lo = 0, hi = a->header.folder_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2u;
+        const BsaFolderInternal *f = &a->folders[mid];
+        if (entry_index < f->first_entry) {
+            hi = mid;
+        } else if (entry_index - f->first_entry >= f->count) {
+            lo = mid + 1u;
+        } else {
+            return f;
+        }
+    }
+    return NULL;
+}
+
+static BsaStatus read_record(const BsaArchive *archive, uint32_t entry_index,
+                             uint64_t *hash, uint32_t *stored_size,
+                             uint32_t *offset, uint32_t *folder_index,
+                             char *reason, size_t reason_cap) {
+    if (entry_index >= archive->header.file_count) {
+        set_reason(reason, reason_cap, "record %u is outside the archive",
+                   entry_index);
+        return BSA_ERR_ARGUMENT;
+    }
+    const BsaFolderInternal *f = folder_for(archive, entry_index);
+    if (!f) {
+        set_reason(reason, reason_cap, "record %u has no folder", entry_index);
+        return BSA_ERR_FORMAT;
+    }
+    uint8_t rec[16];
+    uint64_t at = (uint64_t)f->records_at +
+                  (uint64_t)(entry_index - f->first_entry) * 16u;
+    BsaStatus st = cache_read(archive, at, rec, sizeof rec, reason, reason_cap);
+    if (st != BSA_OK) return st;
+    if (hash) *hash = get_u64(rec);
+    if (stored_size) *stored_size = get_u32(rec + 8);
+    if (offset) *offset = get_u32(rec + 12);
+    if (folder_index)
+        *folder_index = (uint32_t)(f - archive->folders);
+    return BSA_OK;
+}
+
+static BsaStatus folder_name_canon(const BsaArchive *archive,
+                                   const BsaFolderInternal *f, char *out,
+                                   size_t cap, char *reason,
+                                   size_t reason_cap) {
+    char raw[BSA_PATH_MAX];
+    if (!f->name_stored || f->name_stored >= BSA_PATH_MAX) {
+        set_reason(reason, reason_cap, "stored folder name length is invalid");
         return BSA_ERR_NAME;
     }
-    uint32_t slot = path_hash(path) & (uint32_t)(a->table_size - 1);
+    BsaStatus st = cache_read(archive, f->name_at, raw, f->name_stored,
+                              reason, reason_cap);
+    if (st != BSA_OK) return st;
+    uint32_t n = f->name_stored;
+    if (raw[n - 1] == 0) --n;
+    raw[n] = 0;
+    out[0] = 0;
+    canonical_path(raw, out, cap);
+    return BSA_OK;
+}
+
+/* The base name of entry `i` lives in the file-name block.  Checkpoints every
+ * BSA_NAME_GROUP names bound the forward scan to 15 NULs. */
+static BsaStatus read_base_name(const BsaArchive *archive, uint32_t i,
+                                char *out, size_t cap, char *reason,
+                                size_t reason_cap) {
+    if (!archive->name_block_len || !archive->name_checkpoints) {
+        set_reason(reason, reason_cap, "archive has no file-name block");
+        return BSA_ERR_FORMAT;
+    }
+    size_t group = i / BSA_NAME_GROUP;
+    if (group >= archive->name_checkpoint_count) {
+        set_reason(reason, reason_cap, "record %u has no name checkpoint", i);
+        return BSA_ERR_FORMAT;
+    }
+    uint64_t pos = archive->name_block_at + archive->name_checkpoints[group];
+    uint64_t end = archive->name_block_at + archive->name_block_len;
+    unsigned skip = i % BSA_NAME_GROUP;
+    for (;;) {
+        size_t o = 0;
+        for (;;) {
+            if (pos >= end) {
+                set_reason(reason, reason_cap,
+                           "file-name block ends inside record %u", i);
+                return BSA_ERR_FORMAT;
+            }
+            uint8_t c;
+            BsaStatus st = cache_read(archive, pos++, &c, 1, reason, reason_cap);
+            if (st != BSA_OK) return st;
+            if (c == 0) break;
+            if (o + 1 >= cap) {
+                set_reason(reason, reason_cap,
+                           "base name of record %u is too long", i);
+                return BSA_ERR_NAME;
+            }
+            out[o++] = (char)c;
+        }
+        out[o] = 0;
+        if (!skip) {
+            if (!o) {
+                set_reason(reason, reason_cap,
+                           "record %u has an empty base name", i);
+                return BSA_ERR_NAME;
+            }
+            return BSA_OK;
+        }
+        --skip;
+    }
+}
+
+/* Exact, case-folded name of one entry, materialized on demand from the
+ * archive (folder name + base name, or the embedded prefix). */
+static BsaStatus entry_name(const BsaArchive *archive, uint32_t i, char *out,
+                            size_t cap, char *reason, size_t reason_cap) {
+    if (i >= archive->header.file_count) {
+        set_reason(reason, reason_cap, "record %u is outside the archive", i);
+        return BSA_ERR_ARGUMENT;
+    }
+    if (archive->name_block_len) {
+        const BsaFolderInternal *f = folder_for(archive, i);
+        if (!f) {
+            set_reason(reason, reason_cap, "record %u has no folder", i);
+            return BSA_ERR_FORMAT;
+        }
+        char fcan[BSA_PATH_MAX];
+        char base[BSA_PATH_MAX];
+        BsaStatus st = folder_name_canon(archive, f, fcan, sizeof fcan,
+                                         reason, reason_cap);
+        if (st != BSA_OK) return st;
+        st = read_base_name(archive, i, base, sizeof base, reason, reason_cap);
+        if (st != BSA_OK) return st;
+        size_t fl = strlen(fcan), bl = strlen(base);
+        if (!bl) {
+            set_reason(reason, reason_cap, "record %u has an empty path", i);
+            return BSA_ERR_NAME;
+        }
+        if (fl + (fl ? 1u : 0u) + bl >= cap) {
+            set_reason(reason, reason_cap, "path for record %u is too long", i);
+            return BSA_ERR_NAME;
+        }
+        if (fl) {
+            memcpy(out, fcan, fl);
+            out[fl] = '\\';
+            memcpy(out + fl + 1u, base, bl + 1u);
+        } else {
+            memcpy(out, base, bl + 1u);
+        }
+        return BSA_OK;
+    }
+
+    uint64_t hash;
+    uint32_t stored = 0, offset = 0;
+    BsaStatus st = read_record(archive, i, &hash, &stored, &offset, NULL,
+                               reason, reason_cap);
+    (void)hash;
+    if (st != BSA_OK) return st;
+    if (!stored) {
+        set_reason(reason, reason_cap, "entry %u has no embedded name prefix", i);
+        return BSA_ERR_FORMAT;
+    }
+    uint8_t head[1];
+    st = cache_read(archive, offset, head, 1, reason, reason_cap);
+    if (st != BSA_OK) return st;
+    uint32_t n = head[0];
+    if (!n || n >= BSA_PATH_MAX || (uint64_t)1u + n > stored) {
+        set_reason(reason, reason_cap,
+                   "record %u has invalid embedded name length %u", i, n);
+        return BSA_ERR_NAME;
+    }
+    char raw[BSA_PATH_MAX];
+    st = cache_read(archive, (uint64_t)offset + 1u, raw, n, reason, reason_cap);
+    if (st != BSA_OK) return st;
+    if (raw[n - 1] == 0) --n;
+    raw[n] = 0;
+    if (!canonical_path(raw, out, cap)) {
+        set_reason(reason, reason_cap, "record %u embedded name is invalid", i);
+        return BSA_ERR_NAME;
+    }
+    return BSA_OK;
+}
+
+static uint8_t path_tag(uint64_t hash) {
+    return (uint8_t)(hash >> 40);
+}
+
+/* Open addressing keyed by path_hash64().  Each slot keeps an 8-bit tag next
+ * to the u32 record index.  Only a matching tag can be the same path, so a
+ * lookup that misses reads no archive bytes at all; a hit still reads the
+ * record and exact name for the required verification. */
+static BsaStatus index_insert_path(BsaArchive *a, uint32_t entry_index,
+                                   uint64_t hash, const char *path,
+                                   char *reason, size_t reason_cap) {
+    uint8_t tag = path_tag(hash);
+    uint32_t slot = (uint32_t)hash & (uint32_t)(a->table_size - 1u);
     for (;;) {
         uint32_t existing = a->table[slot];
         if (existing == 0xffffffffu) {
             a->table[slot] = entry_index;
+            a->tags[slot] = tag;
             return BSA_OK;
         }
-        if (path_equal(a->names + a->entries[existing].name_offset, path)) {
-            set_reason(reason, reason_cap, "duplicate archive path '%s'", path);
-            return BSA_ERR_DUPLICATE;
+        if (a->tags[slot] == tag) {
+            char cand[BSA_PATH_MAX];
+            BsaStatus st = entry_name(a, existing, cand, sizeof cand,
+                                      reason, reason_cap);
+            if (st != BSA_OK) return st;
+            if (path_equal(cand, path)) {
+                set_reason(reason, reason_cap, "duplicate archive path '%s'",
+                           path);
+                return BSA_ERR_DUPLICATE;
+            }
         }
-        slot = (slot + 1) & (uint32_t)(a->table_size - 1);
+        slot = (slot + 1u) & (uint32_t)(a->table_size - 1u);
     }
-}
-
-static BsaStatus build_normal_names(BsaArchive *a, const uint8_t *block,
-                                    uint32_t block_len, char *reason,
-                                    size_t reason_cap) {
-    uint32_t pos = 0;
-    for (uint32_t i = 0; i < a->header.file_count; ++i) {
-        uint32_t begin = pos;
-        while (pos < block_len && block[pos]) ++pos;
-        if (pos >= block_len) {
-            set_reason(reason, reason_cap,
-                       "file-name block ends before record %u", i);
-            return BSA_ERR_FORMAT;
-        }
-        uint32_t len = pos - begin;
-        if (!len || len >= BSA_PATH_MAX) {
-            set_reason(reason, reason_cap,
-                       "file record %u has an invalid base name length %u", i, len);
-            return BSA_ERR_NAME;
-        }
-        if (name_has_separator((const char *)block + begin, len)) {
-            set_reason(reason, reason_cap,
-                       "file record %u base name contains a separator", i);
-            return BSA_ERR_NAME;
-        }
-        BsaEntryInternal *e = &a->entries[i];
-        e->name_offset = begin;       /* temporarily relative to block */
-        e->name_length = len;
-        ++pos;                        /* consume the NUL */
-    }
-    if (pos != block_len) {
-        set_reason(reason, reason_cap,
-                   "file-name block has %u trailing bytes", block_len - pos);
-        return BSA_ERR_FORMAT;
-    }
-
-    uint64_t total = 0;
-    for (uint32_t i = 0; i < a->header.file_count; ++i) {
-        BsaEntryInternal *e = &a->entries[i];
-        BsaFolderInternal *f = &a->folders[e->folder_index];
-        uint64_t path_len = (uint64_t)f->name_length + (f->name_length ? 1u : 0u) +
-                            e->name_length;
-        if (path_len >= BSA_PATH_MAX) {
-            set_reason(reason, reason_cap, "path for record %u is too long", i);
-            return BSA_ERR_NAME;
-        }
-        total += path_len + 1;
-        if (total > a->opt.max_name_bytes) {
-            set_reason(reason, reason_cap,
-                       "archive names need %llu bytes (limit %u)",
-                       (unsigned long long)total, a->opt.max_name_bytes);
-            return BSA_ERR_BUDGET;
-        }
-    }
-    a->names = (char *)index_alloc(a, (size_t)total);
-    if (!a->names) return alloc_failure(a);
-    uint32_t out = 0;
-    for (uint32_t i = 0; i < a->header.file_count; ++i) {
-        BsaEntryInternal *e = &a->entries[i];
-        BsaFolderInternal *f = &a->folders[e->folder_index];
-        uint32_t base_off = e->name_offset;   /* block-relative */
-        uint32_t base_len = e->name_length;
-        e->name_offset = out;
-        if (f->name_length) {
-            memcpy(a->names + out, a->folder_names + f->name_offset, f->name_length);
-            out += f->name_length;
-            a->names[out++] = '\\';
-        }
-        memcpy(a->names + out, block + base_off, base_len);
-        out += base_len;
-        e->name_length = out - e->name_offset;
-        a->names[out++] = 0;
-    }
-    return BSA_OK;
 }
 
 static BsaStatus entry_prefix(const BsaArchive *a, const BsaEntry *entry,
@@ -679,9 +841,15 @@ static BsaStatus entry_prefix(const BsaArchive *a, const BsaEntry *entry,
         set_reason(reason, reason_cap, "entry does not belong to this archive");
         return BSA_ERR_ARGUMENT;
     }
-    const BsaEntryInternal *internal = &a->entries[entry->record_index];
-    if (internal->offset != entry->offset ||
-        internal->stored_size != entry->stored_size) {
+    /* Re-read the 16-byte record from the archive; the compact index no longer
+     * mirrors offsets/sizes, so this also detects a changed record. */
+    uint64_t rec_hash;
+    uint32_t rec_stored = 0, rec_offset = 0;
+    BsaStatus st = read_record(a, entry->record_index, &rec_hash, &rec_stored,
+                               &rec_offset, NULL, reason, reason_cap);
+    (void)rec_hash;
+    if (st != BSA_OK) return st;
+    if (rec_offset != entry->offset || rec_stored != entry->stored_size) {
         set_reason(reason, reason_cap, "entry record was modified");
         return BSA_ERR_ARGUMENT;
     }
@@ -693,7 +861,7 @@ static BsaStatus entry_prefix(const BsaArchive *a, const BsaEntry *entry,
             return BSA_ERR_FORMAT;
         }
         uint8_t head[1];
-        BsaStatus st = read_exact(a, off, head, 1, reason, reason_cap);
+        st = cache_read(a, off, head, 1, reason, reason_cap);
         if (st != BSA_OK) return st;
         uint32_t name_len = head[0];
         if (!name_len || name_len >= BSA_PATH_MAX ||
@@ -704,13 +872,16 @@ static BsaStatus entry_prefix(const BsaArchive *a, const BsaEntry *entry,
         }
         if (a->opt.verify_embedded_names) {
             char raw[BSA_PATH_MAX];
-            st = read_exact(a, off + 1u, raw, name_len, reason, reason_cap);
+            st = cache_read(a, off + 1u, raw, name_len, reason, reason_cap);
             if (st != BSA_OK) return st;
             uint32_t visible = raw[name_len - 1] == 0 ? name_len - 1 : name_len;
             raw[visible] = 0;
             char canon[BSA_PATH_MAX];
+            char expect[BSA_PATH_MAX];
             if (!canonical_path(raw, canon, sizeof canon) ||
-                !path_equal(canon, a->names + internal->name_offset)) {
+                entry_name(a, entry->record_index, expect, sizeof expect,
+                           reason, reason_cap) != BSA_OK ||
+                !path_equal(canon, expect)) {
                 set_reason(reason, reason_cap,
                            "embedded name does not match archive path");
                 return BSA_ERR_NAME;
@@ -766,85 +937,83 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
 
     uint64_t cursor = h->data_start; /* set to the header offset by archive_parse */
     uint64_t folder_records_at = cursor;
-    cursor += (uint64_t)h->folder_count * 16u;
-    if (cursor > a->size) {
+    if ((uint64_t)h->folder_count * 16u > a->size - cursor) {
         set_reason(reason, reason_cap, "folder records run past EOF");
         return BSA_ERR_BOUNDS;
     }
+    cursor += (uint64_t)h->folder_count * 16u;
 
-    uint8_t *records = (uint8_t *)index_alloc(a, (size_t)h->folder_count * 16u);
-    if (h->folder_count && !records) return alloc_failure(a);
-    BsaStatus st = read_exact(a, folder_records_at, records,
-                              (size_t)h->folder_count * 16u, reason, reason_cap);
-    if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
+    /* Only the fixed locator array is resident; folder/file names stay in the
+     * archive and are read through the page cache when a lookup needs them. */
+    a->folders = (BsaFolderInternal *)index_alloc(
+        a, (size_t)h->folder_count * sizeof(BsaFolderInternal));
+    if (h->folder_count && !a->folders) return alloc_failure(a);
 
-    a->folder_names = (char *)index_alloc(a, (size_t)h->total_folder_name_length + 1u);
-    if (h->total_folder_name_length && !a->folder_names) {
-        index_free(a, records, (size_t)h->folder_count * 16u);
-        return alloc_failure(a);
-    }
     uint32_t folder_name_bytes = 0;
     uint32_t entry_index = 0;
-
     for (uint32_t i = 0; i < h->folder_count; ++i) {
         uint8_t name_len_byte;
-        st = read_exact(a, cursor, &name_len_byte, 1, reason, reason_cap);
-        if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
+        BsaStatus st = cache_read(a, cursor, &name_len_byte, 1, reason,
+                                  reason_cap);
+        if (st != BSA_OK) return st;
         ++cursor;
         uint32_t name_len = name_len_byte;
         if (!name_len || name_len >= BSA_PATH_MAX) {
             set_reason(reason, reason_cap,
                        "folder %u has invalid name length %u", i, name_len);
-            index_free(a, records, (size_t)h->folder_count * 16u);
             return BSA_ERR_NAME;
         }
         if (folder_name_bytes + name_len > h->total_folder_name_length) {
             set_reason(reason, reason_cap,
                        "folder %u name runs past the declared name block", i);
-            index_free(a, records, (size_t)h->folder_count * 16u);
             return BSA_ERR_FORMAT;
         }
+        if (cursor > UINT32_MAX || (uint64_t)name_len > a->size - cursor) {
+            set_reason(reason, reason_cap, "folder %u name runs past EOF", i);
+            return BSA_ERR_BOUNDS;
+        }
         char raw[BSA_PATH_MAX];
-        st = read_exact(a, cursor, raw, name_len, reason, reason_cap);
-        if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
+        st = cache_read(a, cursor, raw, name_len, reason, reason_cap);
+        if (st != BSA_OK) return st;
+        BsaFolderInternal *folder = &a->folders[i];
+        folder->name_at = (uint32_t)cursor;
+        folder->name_stored = (uint16_t)name_len;
         cursor += name_len;
         folder_name_bytes += name_len;
-        if (raw[name_len - 1] == 0) name_len--;
-        raw[name_len] = 0;
+        uint32_t visible = name_len;
+        if (raw[visible - 1] == 0) --visible;
+        raw[visible] = 0;
         char canon[BSA_PATH_MAX];
+        canon[0] = 0;
         size_t canon_len = canonical_path(raw, canon, sizeof canon);
-        if (!canon_len) {
-            /* An empty folder is tolerated: the path is just the base name. */
-            canon_len = 0;
-            canon[0] = 0;
-        }
-        BsaFolderInternal *folder = &a->folders[i];
-        folder->name_offset = (uint32_t)strlen(a->folder_names);
-        memcpy(a->folder_names + folder->name_offset, canon, canon_len + 1);
-        folder->name_length = (uint32_t)canon_len;
+        folder->name_length = (uint16_t)canon_len;
 
-        uint32_t count = get_u32(records + (size_t)i * 16u + 8u);
+        uint8_t rec[16];
+        st = cache_read(a, folder_records_at + (uint64_t)i * 16u, rec,
+                        sizeof rec, reason, reason_cap);
+        if (st != BSA_OK) return st;
+        uint32_t count = get_u32(rec + 8);
         if (count > h->file_count - entry_index) {
             set_reason(reason, reason_cap,
                        "folder %u count %u exceeds the %u remaining files",
                        i, count, h->file_count - entry_index);
-            index_free(a, records, (size_t)h->folder_count * 16u);
             return BSA_ERR_COUNT;
         }
-        for (uint32_t j = 0; j < count; ++j) {
-            uint8_t rec[16];
-            st = read_exact(a, cursor, rec, 16, reason, reason_cap);
-            if (st != BSA_OK) { index_free(a, records, (size_t)h->folder_count * 16u); return st; }
-            cursor += 16;
-            BsaEntryInternal *e = &a->entries[entry_index];
-            e->hash = get_u64(rec);
-            e->stored_size = get_u32(rec + 8);
-            e->offset = get_u32(rec + 12);
-            e->folder_index = i;
-            ++entry_index;
+        if ((uint64_t)count * 16u > a->size - cursor) {
+            set_reason(reason, reason_cap, "folder %u records run past EOF", i);
+            return BSA_ERR_BOUNDS;
         }
+        if (cursor > UINT32_MAX) {
+            set_reason(reason, reason_cap,
+                       "folder %u record offset exceeds 32 bits", i);
+            return BSA_ERR_BOUNDS;
+        }
+        folder->records_at = (uint32_t)cursor;
+        folder->first_entry = entry_index;
+        folder->count = count;
+        cursor += (uint64_t)count * 16u;
+        entry_index += count;
     }
-    index_free(a, records, (size_t)h->folder_count * 16u);
     if (folder_name_bytes != h->total_folder_name_length) {
         set_reason(reason, reason_cap,
                    "folder names consume %u bytes, header says %u",
@@ -858,17 +1027,25 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
         return BSA_ERR_COUNT;
     }
 
-    uint8_t *block = NULL;
     if (h->total_file_name_length) {
         if (h->total_file_name_length > a->opt.max_name_bytes) {
             set_reason(reason, reason_cap, "file-name block exceeds the name budget");
             return BSA_ERR_BUDGET;
         }
-        block = (uint8_t *)index_alloc(a, h->total_file_name_length);
-        if (!block) return alloc_failure(a);
-        st = read_exact(a, cursor, block, h->total_file_name_length,
-                        reason, reason_cap);
-        if (st != BSA_OK) { index_free(a, block, h->total_file_name_length); return st; }
+        if ((uint64_t)h->total_file_name_length > a->size - cursor ||
+            cursor > UINT32_MAX) {
+            set_reason(reason, reason_cap, "file-name block runs past EOF");
+            return BSA_ERR_BOUNDS;
+        }
+        a->name_block_at = cursor;
+        a->name_block_len = h->total_file_name_length;
+        a->name_checkpoint_count =
+            (size_t)(h->file_count + BSA_NAME_GROUP - 1u) / BSA_NAME_GROUP + 1u;
+        a->name_checkpoints = (uint32_t *)index_alloc(
+            a, a->name_checkpoint_count * sizeof(uint32_t));
+        if (!a->name_checkpoints) return alloc_failure(a);
+        memset(a->name_checkpoints, 0,
+               a->name_checkpoint_count * sizeof(uint32_t));
         cursor += h->total_file_name_length;
     } else if (h->file_count && !h->embedded_names) {
         set_reason(reason, reason_cap,
@@ -876,109 +1053,162 @@ static BsaStatus parse_directory(BsaArchive *a, char *reason, size_t reason_cap)
         return BSA_ERR_FORMAT;
     }
 
-    if (block) {
-        st = build_normal_names(a, block, h->total_file_name_length,
-                                reason, reason_cap);
-        index_free(a, block, h->total_file_name_length);
-        if (st != BSA_OK) return st;
-    } else if (h->file_count) {
-        /* Embedded-name-only archive: scan the bounded prefixes.  A path may
-         * not exceed BSA_PATH_MAX, so one stack buffer is enough. */
-        uint64_t total = 0;
-        for (uint32_t i = 0; i < h->file_count; ++i) {
-            BsaEntryInternal *e = &a->entries[i];
-            uint8_t head[1];
-            st = read_exact(a, e->offset, head, 1, reason, reason_cap);
-            if (st != BSA_OK) return st;
-            uint32_t len = head[0];
-            if (!len || len >= BSA_PATH_MAX || 1u + len > e->stored_size) {
-                set_reason(reason, reason_cap,
-                           "record %u has invalid embedded name length %u", i, len);
-                return BSA_ERR_NAME;
-            }
-            char raw[BSA_PATH_MAX];
-            st = read_exact(a, (uint64_t)e->offset + 1u, raw, len,
-                            reason, reason_cap);
-            if (st != BSA_OK) return st;
-            if (raw[len - 1] == 0) --len;
-            raw[len] = 0;
-            char canon[BSA_PATH_MAX];
-            size_t canon_len = canonical_path(raw, canon, sizeof canon);
-            if (!canon_len) {
-                set_reason(reason, reason_cap,
-                           "record %u embedded name is empty", i);
-                return BSA_ERR_NAME;
-            }
-            total += canon_len + 1;
-            if (total > a->opt.max_name_bytes) {
-                set_reason(reason, reason_cap, "embedded names exceed the name budget");
-                return BSA_ERR_BUDGET;
-            }
-        }
-        a->names = (char *)index_alloc(a, (size_t)total);
-        if (!a->names) return alloc_failure(a);
-        uint32_t out = 0;
-        for (uint32_t i = 0; i < h->file_count; ++i) {
-            BsaEntryInternal *e = &a->entries[i];
-            uint8_t head[1];
-            st = read_exact(a, e->offset, head, 1, reason, reason_cap);
-            if (st != BSA_OK) return st;
-            uint32_t len = head[0];
-            if (!len || len >= BSA_PATH_MAX ||
-                (uint64_t)1u + len > e->stored_size) {
-                set_reason(reason, reason_cap,
-                           "record %u embedded name changed to length %u", i, len);
-                return BSA_ERR_NAME;
-            }
-            char raw[BSA_PATH_MAX];
-            st = read_exact(a, (uint64_t)e->offset + 1u, raw, len,
-                            reason, reason_cap);
-            if (st != BSA_OK) return st;
-            if (raw[len - 1] == 0) --len;
-            raw[len] = 0;
-            char canon[BSA_PATH_MAX];
-            size_t canon_len = canonical_path(raw, canon, sizeof canon);
-            if (!canon_len || (uint64_t)out + canon_len + 1u > total) {
-                set_reason(reason, reason_cap,
-                           "record %u embedded name changed between reads", i);
-                return BSA_ERR_NAME;
-            }
-            e->name_offset = out;
-            memcpy(a->names + out, canon, canon_len);
-            out += (uint32_t)canon_len;
-            a->names[out++] = 0;
-            e->name_length = (uint32_t)canon_len;
-        }
-    }
-
     h->data_start = cursor;
-    for (uint32_t i = 0; i < h->file_count; ++i) {
-        BsaEntryInternal *e = &a->entries[i];
-        if (e->offset < h->data_start || e->offset > a->size ||
-            (uint64_t)e->stored_size > a->size - e->offset) {
-            set_reason(reason, reason_cap,
-                       "record %u data %u+%u is outside the data area %llu..%llu",
-                       i, e->offset, e->stored_size,
-                       (unsigned long long)h->data_start,
-                       (unsigned long long)a->size);
-            return BSA_ERR_BOUNDS;
+
+    /* Validate every record against the data area by streaming each folder's
+     * contiguous record block; nothing per-entry is kept. */
+    for (uint32_t fi = 0; fi < h->folder_count; ++fi) {
+        BsaFolderInternal *f = &a->folders[fi];
+        for (uint32_t j = 0; j < f->count; ++j) {
+            uint8_t rec[16];
+            BsaStatus st = cache_read(a, (uint64_t)f->records_at + (uint64_t)j * 16u,
+                                      rec, sizeof rec, reason, reason_cap);
+            if (st != BSA_OK) return st;
+            uint32_t stored = get_u32(rec + 8);
+            uint32_t off = get_u32(rec + 12);
+            uint32_t idx = f->first_entry + j;
+            if (off < h->data_start || off > a->size ||
+                (uint64_t)stored > a->size - off) {
+                set_reason(reason, reason_cap,
+                           "record %u data %u+%u is outside the data area %llu..%llu",
+                           idx, off, stored,
+                           (unsigned long long)h->data_start,
+                           (unsigned long long)a->size);
+                return BSA_ERR_BOUNDS;
+            }
         }
     }
 
     size_t want = 16;
-    while (want < (size_t)h->file_count * 2u) {
+    while ((uint64_t)want * 4u < (uint64_t)h->file_count * 5u) {
         if (want > (1u << 30)) return BSA_ERR_COUNT;
         want <<= 1;
     }
     a->table = (uint32_t *)index_alloc(a, want * sizeof(uint32_t));
     if (!a->table) return alloc_failure(a);
+    a->tags = (uint8_t *)index_alloc(a, want * sizeof(uint8_t));
+    if (!a->tags) return alloc_failure(a);
     a->table_size = want;
     memset(a->table, 0xff, want * sizeof(uint32_t));
-    for (uint32_t i = 0; i < h->file_count; ++i) {
-        st = index_insert(a, i, reason, reason_cap);
-        if (st != BSA_OK) return st;
+    memset(a->tags, 0, want * sizeof(uint8_t));
+    BsaStatus st = BSA_OK;
+
+    if (a->name_block_len) {
+        uint64_t pos = a->name_block_at;
+        uint64_t end = pos + a->name_block_len;
+        const BsaFolderInternal *cur_folder = NULL;
+        char fcan[BSA_PATH_MAX];
+        size_t fcan_len = 0;
+        uint64_t total = 0;
+        char path[BSA_PATH_MAX];
+        for (uint32_t i = 0; i < h->file_count; ++i) {
+            if ((i % BSA_NAME_GROUP) == 0)
+                a->name_checkpoints[i / BSA_NAME_GROUP] =
+                    (uint32_t)(pos - a->name_block_at);
+            char base[BSA_PATH_MAX];
+            size_t o = 0;
+            int done = 0;
+            while (!done) {
+                if (pos >= end) {
+                    set_reason(reason, reason_cap,
+                               "file-name block ends before record %u", i);
+                    st = BSA_ERR_FORMAT;
+                    break;
+                }
+                uint8_t c;
+                st = cache_read(a, pos++, &c, 1, reason, reason_cap);
+                if (st != BSA_OK) break;
+                if (c == 0) {
+                    done = 1;
+                } else if (o + 1 >= sizeof base) {
+                    set_reason(reason, reason_cap,
+                               "file record %u has an invalid base name length",
+                               i);
+                    st = BSA_ERR_NAME;
+                    break;
+                } else {
+                    base[o++] = (char)c;
+                }
+            }
+            if (st != BSA_OK) break;
+            base[o] = 0;
+            if (!o) {
+                set_reason(reason, reason_cap,
+                           "file record %u has an empty base name", i);
+                st = BSA_ERR_NAME;
+                break;
+            }
+            if (name_has_separator(base, o)) {
+                set_reason(reason, reason_cap,
+                           "file record %u base name contains a separator", i);
+                st = BSA_ERR_NAME;
+                break;
+            }
+            const BsaFolderInternal *f = folder_for(a, i);
+            if (!f) {
+                set_reason(reason, reason_cap, "record %u has no folder", i);
+                st = BSA_ERR_FORMAT;
+                break;
+            }
+            if (f != cur_folder) {
+                st = folder_name_canon(a, f, fcan, sizeof fcan, reason,
+                                       reason_cap);
+                if (st != BSA_OK) break;
+                fcan_len = strlen(fcan);
+                cur_folder = f;
+            }
+            uint64_t path_len = (uint64_t)fcan_len + (fcan_len ? 1u : 0u) + o;
+            if (path_len >= BSA_PATH_MAX) {
+                set_reason(reason, reason_cap, "path for record %u is too long", i);
+                st = BSA_ERR_NAME;
+                break;
+            }
+            total += path_len + 1u;
+            if (total > a->opt.max_name_bytes) {
+                set_reason(reason, reason_cap,
+                           "archive names need %llu bytes (limit %u)",
+                           (unsigned long long)total, a->opt.max_name_bytes);
+                st = BSA_ERR_BUDGET;
+                break;
+            }
+            if (fcan_len) {
+                memcpy(path, fcan, fcan_len);
+                path[fcan_len] = '\\';
+                memcpy(path + fcan_len + 1u, base, o + 1u);
+            } else {
+                memcpy(path, base, o + 1u);
+            }
+            uint64_t hash = path_hash64(path);
+            st = index_insert_path(a, i, hash, path, reason, reason_cap);
+            if (st != BSA_OK) break;
+        }
+        if (st == BSA_OK && pos != end) {
+            set_reason(reason, reason_cap,
+                       "file-name block has %llu trailing bytes",
+                       (unsigned long long)(end - pos));
+            st = BSA_ERR_FORMAT;
+        }
+    } else if (h->file_count) {
+        uint64_t total = 0;
+        for (uint32_t i = 0; i < h->file_count; ++i) {
+            char path[BSA_PATH_MAX];
+            st = entry_name(a, i, path, sizeof path, reason, reason_cap);
+            if (st != BSA_OK) break;
+            size_t len = strlen(path);
+            total += (uint64_t)len + 1u;
+            if (total > a->opt.max_name_bytes) {
+                set_reason(reason, reason_cap,
+                           "embedded names exceed the name budget");
+                st = BSA_ERR_BUDGET;
+                break;
+            }
+            uint64_t hash = path_hash64(path);
+            st = index_insert_path(a, i, hash, path, reason, reason_cap);
+            if (st != BSA_OK) break;
+        }
     }
-    return BSA_OK;
+
+    return st;
 }
 
 static BsaStatus archive_parse(BsaArchive *a, char *reason, size_t reason_cap) {
@@ -1039,12 +1269,19 @@ static BsaStatus archive_parse(BsaArchive *a, char *reason, size_t reason_cap) {
         return BSA_ERR_BUDGET;
     }
 
-    a->entries = (BsaEntryInternal *)index_alloc(
-        a, (size_t)a->header.file_count * sizeof(BsaEntryInternal));
-    if (a->header.file_count && !a->entries) return alloc_failure(a);
     a->folders = (BsaFolderInternal *)index_alloc(
         a, (size_t)a->header.folder_count * sizeof(BsaFolderInternal));
     if (a->header.folder_count && !a->folders) return alloc_failure(a);
+
+    /* Page cache is deliberately outside max_index_bytes: it is a bounded
+     * (BSA_PAGE_CACHE_BYTES), non-resident-index cost.  If malloc fails the
+     * reader still works, just with one read per access. */
+    a->page_cap = a->size < BSA_PAGE_CACHE_BYTES
+                      ? (size_t)a->size
+                      : BSA_PAGE_CACHE_BYTES;
+    a->page = (uint8_t *)malloc(a->page_cap);
+    a->page_off = 0;
+    a->page_len = 0;
 
     a->header.data_start = header_offset;
     st = parse_directory(a, reason, reason_cap);
@@ -1172,11 +1409,11 @@ void bsa_close(BsaArchive *archive) {
     if (!archive) return;
     if (archive->file) fclose(archive->file);
     free(archive->owned_ctx);
-    free(archive->entries);
     free(archive->folders);
-    free(archive->folder_names);
-    free(archive->names);
     free(archive->table);
+    free(archive->tags);
+    free(archive->name_checkpoints);
+    free(archive->page);
     free(archive);
 }
 
@@ -1197,23 +1434,38 @@ BsaStatus bsa_find(const BsaArchive *archive, const char *path, BsaMatch *out) {
     char canon[BSA_PATH_MAX];
     size_t len = canonical_path(path, canon, sizeof canon);
     if (!len) return BSA_ERR_NOT_FOUND;
-    uint32_t slot = path_hash(canon) & (uint32_t)(archive->table_size - 1);
+    uint64_t hash = path_hash64(canon);
+    uint8_t tag = path_tag(hash);
+    uint32_t slot = (uint32_t)hash & (uint32_t)(archive->table_size - 1u);
+    char reason[BSA_REASON_MAX];
+    reason[0] = 0;
     for (;;) {
         uint32_t index = archive->table[slot];
         if (index == 0xffffffffu) return BSA_ERR_NOT_FOUND;
-        const BsaEntryInternal *e = &archive->entries[index];
-        if (path_equal(canon, archive->names + e->name_offset)) {
+        if (archive->tags[slot] != tag) {
+            slot = (slot + 1u) & (uint32_t)(archive->table_size - 1u);
+            continue;
+        }
+        char cand[BSA_PATH_MAX];
+        BsaStatus st = entry_name(archive, index, cand, sizeof cand, reason,
+                                  sizeof reason);
+        if (st != BSA_OK) return st;
+        if (path_equal(canon, cand)) {
+            uint64_t rec_hash = 0;
+            uint32_t stored = 0, offset = 0, folder_index = 0;
+            st = read_record(archive, index, &rec_hash, &stored, &offset,
+                             &folder_index, reason, sizeof reason);
+            if (st != BSA_OK) return st;
             memset(out, 0, sizeof *out);
-            out->entry.hash = e->hash;
-            out->entry.stored_size = e->stored_size;
-            out->entry.offset = e->offset;
-            out->entry.folder_index = e->folder_index;
+            out->entry.hash = rec_hash;
+            out->entry.stored_size = stored;
+            out->entry.offset = offset;
+            out->entry.folder_index = folder_index;
             out->entry.record_index = index;
-            memcpy(out->path, archive->names + e->name_offset, e->name_length);
-            out->path[e->name_length] = 0;
+            memcpy(out->path, cand, strlen(cand) + 1u);
             return BSA_OK;
         }
-        slot = (slot + 1) & (uint32_t)(archive->table_size - 1);
+        slot = (slot + 1u) & (uint32_t)(archive->table_size - 1u);
     }
 }
 

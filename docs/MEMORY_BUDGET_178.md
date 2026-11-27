@@ -61,7 +61,7 @@ guest pages:
 |---|---:|---|
 | IRC index (90,900 functions × 40 B) | **3.5 MiB** | `tesv.irc` header: `nfun=90900`, `entry_bytes=40` |
 | IRC record cache | **4 MiB** (64 records) | `source/ir_container.h`: `N3DS_IRC_DEFAULT_CACHE_BYTES (4u<<20)`, `..._RECORDS 64`; slice calls `n3ds_ir_cache_init(4u<<20)` at `tesv_slice_main.c:176` |
-| BSA overlay index (13 archives, measured on `E:\harness_skyrim`) | **~17.5 MiB** | `8a8f743` report; cap is **96 MiB** |
+| BSA overlay index (13 archives, measured on `E:\harness_skyrim`) | **1.96 MiB** (was ~17.5) | `bsa-paged` / `bsa_index`: 2,054,436 B, 176,811 files; plus 0.41 MiB page cache (13 × 32 KiB) |
 | Stream staged cache | **2 MiB** default | `source/asset_stream.h:46` |
 | Stream per-descriptor window | **256 KiB** default | `asset_stream.h:200` |
 | Stream quantum | **64 KiB** default | `asset_stream.h:199` |
@@ -72,8 +72,13 @@ guest pages:
 On-disk (SD, not RAM) for reference: `tesv.irc` is **64,445,696 B = 61.5 MiB**
 (index 3.5 MiB + records 58.0 MiB).
 
-Nothing in the tree shrinks or evicts the BSA index today, and the IRC record
-cache is a fixed 4 MiB.
+The BSA index is no longer a resident name copy.  `source/bsa_reader.c` keeps a
+u32 open-addressed table + 8-bit tag, u32 name-block checkpoints every 16 names
+and a 20-byte folder locator; names and records live in the archive and are read
+through a bounded 32 KiB per-archive cache.  Measured 17.85 MiB -> 1.96 MiB
+index (+0.41 MiB cache): a 16.4 MiB saving with byte-for-byte lookup
+equivalence on 81,411 old-index results.  The IRC record cache remains fixed at
+4 MiB.
 
 ## 5. GPU-visible memory: VRAM (6 MiB) and linear heap (8 MiB)
 
@@ -133,19 +138,20 @@ CPU budget inside newlib:
 | IRC index | 3.5 | 90,900 × 40 B |
 | IRC record cache | 4 | keep until miss rate is measured |
 | Decoded-IR cache | 4 | `n3ds_ir_cache_init(4u << 20)` |
-| Resident BSA index | **2** | target after paging the index to SD; measured today ≈ 17.5 |
+| Resident BSA index | **2** | met: **1.96** measured on 13 archives (2,054,436 B); page cache 0.41 separate |
 | Stream staged cache | 2 | current default |
 | Other host allocations and temporary copies | 8.5 | D3D CPU copies, decode, metadata, load peaks — needs measurement |
 | Untouchable newlib reserve | **4** | check at the cell-transition peak |
 | **Total** | **120** | |
 
-Consequence: with today's BSA index the same layout loses 15.5 MiB → 76.5 MiB
-left for guest under 120 MiB, 52.5 MiB under the current 96 MiB. That is a
-simultaneous-peak estimate, not an observed high-water mark, and it explains why
-raising `guest_budget` alone does not help. **The first change to make is the BSA
-index**: keep an archive catalog and a bounded page cache in RAM, page the rest
-from SD, and verify lookup equivalence against the current overlay including mod
-priority.
+The BSA lever is now taken: the same layout substitutes **1.96 MiB + 0.41 MiB**
+instead of 17.5 MiB, returning **~15.5 MiB**. Under the 120 MiB profile that
+leaves roughly 92 MiB for guest (120 - 28 MiB of named host residents) instead
+of 76.5 MiB; under the current 96 MiB it leaves ~68 MiB instead of 52.5 MiB.
+Lookup equivalence was checked against the old index on 81,411 result lines
+(hits, misses, case/separator variants and cross-archive duplicates). The
+remaining BSA cost is the 32 KiB/archive page cache; raising it improves cold
+random-hit latency but must be charged to the host-resident total.
 
 GPU budget for 24 MiB linear:
 
