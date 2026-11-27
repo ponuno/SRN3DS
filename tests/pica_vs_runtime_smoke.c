@@ -59,7 +59,8 @@ static void skin_decl(D9Decl *decl, unsigned index_type) {
 }
 
 int main(void) {
-    CHECK(d9_pica_vs_count() == 24, "three skin + five GFx menu + sixteen BSA UI programs");
+    CHECK(d9_pica_vs_count() == 30,
+          "three skin + five GFx menu + sixteen BSA UI + six contract programs");
 
     for (unsigned i = 0; i < d9_pica_vs_count(); ++i) {
         const D9PicaVsProgram *p = d9_pica_vs_at(i);
@@ -76,7 +77,7 @@ int main(void) {
                       "ui shbin size equals the generated array length");
             }
             CHECK(seen, "generated ui size fixture covers every ui program");
-        } else if (p->bone_rows == 0) {
+        } else if (p->bone_rows == 0 && strncmp(p->id, "menu.gfx.", 9) == 0) {
             /* Menu sizes are generated from the actual embedded arrays, not
              * hand-written here. */
             unsigned j, seen = 0;
@@ -87,6 +88,10 @@ int main(void) {
                       "menu shbin size equals the generated array length");
             }
             CHECK(seen, "generated size fixture covers every menu program");
+        } else if (p->bone_rows == 0) {
+            CHECK(p->shbin_size > 0u, "contract shbin is non-empty");
+            CHECK(p->uniform_rows >= 1u && p->uniform_rows <= 32u,
+                  "contract identity bank is 1..32 rows");
         } else {
             CHECK(p->shbin_size == 500u || p->shbin_size == 532u ||
                   p->shbin_size == 548u, "skin shbin size is the emitter's");

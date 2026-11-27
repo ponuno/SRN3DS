@@ -266,9 +266,9 @@
  },
  "note": "Form labels are pack-local derived metadata.  The census class column is the phase-1 planner's first refusal, not a shape.",
  "plans": {
-  "translated": 107,
-  "draw_enabled": 0,
-  "refused": 4884,
+  "translated": 231,
+  "draw_enabled": 6,
+  "refused": 4754,
   "exact_full_contract": 5,
   "approx": 100,
   "approx_classes": {
@@ -298,6 +298,20 @@
    }
   },
   "loop_truncated": 24,
-  "rcp_rsq_sampled": 83
+  "rcp_rsq_sampled": 83,
+  "vs_contracts": {
+   "emitted": 130,
+   "exact": 33,
+   "approx": 97,
+   "refused": 0,
+   "draw_enabled": 6,
+   "runtime": 6,
+   "varyings_packed_or_remapped": 97
+  },
+  "ps_plans": {
+   "translated": 107,
+   "exact_full_contract": 5,
+   "approx": 100
+  }
  }
 }

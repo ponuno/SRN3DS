@@ -6,7 +6,7 @@ menu/UI pixel and vertex shaders: A8 atlas copies, text tint, simple colour math
 
 * census families: `ui/interface`
 * chunks: **314** / unique hashes: **113**
-* pack catalog coverage: **113 translated** (24 `translated` + 89
+* pack catalog coverage: **113 translated** (34 `translated` + 79
   draw-enabled), 0 refused
 * first step: re-plug the certified A8 text plan; keep draw blocked
 
@@ -32,10 +32,10 @@ python -m unittest discover -s source\shader_packs\ui -p "test_*.py"
 
 | stage | plans | exact | approx | draw-enabled / `runtime: 1` |
 |---|---:|---:|---:|---:|
-| VS `pica_vs` contract | 40 | 40 | 0 | 0 |
-| VS emitted-verified | 16 (of 40) | 16 | 0 | **16** |
+| VS `pica_vs` contract | 40 | 14 | 26 | 0 |
+| VS emitted-verified | 40 (of 40) | 14 | 26 | **6** |
 | PS TEV | 73 | 1 | 72 | **73** |
-| **total** | **113** | **41** | **72** | **89** |
+| **total** | **113** | **15** | **98** | **79** |
 
 Every entry has `quality`.  An approximate PS also has an `approximation`
 string and explicit `preconditions`; a draw-enabled PS carries a complete
@@ -74,16 +74,20 @@ reads `v0.z`/`v0.w` arithmetically, or samples with a PS-computed coordinate,
 is therefore physically inexpressible 1:1.  Those terms are replaced by 1.0 /
 the base varying and recorded; nothing is silently clamped or dropped.
 
-### VS: 16 emitted and numerically verified, 24 exact contracts still pending
+### VS: 40 emitted and numerically verified
 
 `bsa_vs_emit.py` (adapted from the skinning emitter, `bones = 0`) emits the
 canonical vs_3_0 IR to picasso and verifies it three ways: structure/picasso,
 a D3D vs_3_0 reference interpreter, and an interpreter over the emitted PICA
 text on 256 samples (tolerance 1e-4).  `bsa_vs_report.json` pins the
-`.shbin` SHA-256 and byte count for every pass.  The 16 cover
-position/texgen/UI-colour programs plus `frc` (lowered to `x - flr(x)`) and
-the `rcp`/`rsq` normalisation programs.  The other 24 keep an **exact
-`pica_vs` contract** (`codegen: pending`, draw 0) with a named lever:
+`.shbin` SHA-256 and byte count for every pass.  All 40 are emitted; the
+shared non-skinned emitter lowers `frc` to `x - flr(x)`, `pow` to
+`lg2`/`ex2`, handles `sincos`, source `abs`/`neg`, destination saturate and
+the PICA varying envelope.  Six exact `position/texcoord0/color` programs
+are runtime/draw-enabled through the combined contract table; the other 34
+remain `emitted-verified` with `draw_enabled: 0` because their D3D semantics
+need more than the runtime's single-texture declaration.  The historical
+levers are kept here for the audit trail:
 
 | reason | hashes | physical lever |
 |---|---:|---|
@@ -106,7 +110,8 @@ arm-none-eabi-gcc -c -O2 -std=gnu11 -march=armv6k -mfloat-abi=hard `
 
 `source/d3d9_pica_vs.c` includes `d3d9_pica_vs_ui_table.inc` /
 `d3d9_pica_vs_ui_shbin.inc` next to the skin and GFx menu rows, so
-`d9_pica_vs_lookup()` resolves the 16 UI hashes at runtime.
+`d9_pica_vs_lookup()` resolves the six runtime UI VS hashes through the
+combined contract catalog.
 
 ## StartMenu / GFx priority set (phase 2)
 
@@ -210,5 +215,5 @@ all 113 `ui/interface` hashes.  `docs/shader_coverage.json` and
 intentionally not rewritten from this pack; run
 `python tools\shader_packs.py manifest` + `coverage` at integration time to
 refresh the aggregate totals (the pack manifest itself is already updated:
-113 translated, 89 draw-enabled, 0 refused).
+113 translated, 79 draw-enabled, 0 refused).
 

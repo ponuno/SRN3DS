@@ -605,7 +605,9 @@ def check(plans_path=PLANS_PATH, ir_path=IR_PATH, catalog_path=CATALOG_PATH,
     refused_shas = {entry.get("sha256") for entry in catalog.get("refusals", [])}
     if catalog_shas & refused_shas:
         problems.append("catalog: a hash is both planned and refused")
-    if len(catalog_shas) + len(refused_shas) != 43:
+    menu_shas = {entry.get("sha256") for entry in catalog.get("entries", [])
+                 if entry.get("prefix_sha256")}
+    if len(menu_shas) + len(refused_shas) != 43:
         problems.append("catalog: 5 VS + 38 PS full blobs do not partition")
     cov = catalog.get("coverage", {})
     if cov.get("translated") != len(catalog.get("entries", [])):

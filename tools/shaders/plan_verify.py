@@ -308,10 +308,23 @@ def _validate_emitter(entry: dict, emitter: dict, fail) -> None:
             fail("emitter %s must be non-negative" % key)
     rows = emitter.get("uniforms")
     if emitter.get("bones") == 0:
-        # GFx menu VS: no bone palette, identity c0..cN bank (4/6/8 rows).
+        # GFx menu VS / non-skinned contract: the default bank is identity
+        # c0..cN.  A compact indexed-palette contract keeps c0..cN as the
+        # relative window and then packs the absolute bank, recorded by the
+        # explicit row map.
         count = emitter.get("uniform_rows", 0)
         if not isinstance(count, int) or not 1 <= count <= 32:
             fail("emitter uniform_rows must be 1..32 for a menu program")
+        elif emitter.get("uniform_map") == "compact_palette":
+            if not isinstance(rows, list) or len(rows) != count:
+                fail("compact emitter uniforms do not cover %r rows" % count)
+            elif [r.get("row") for r in rows] != list(range(count)):
+                fail("compact emitter uniform rows are not 0..N-1")
+            elif any(not isinstance(r.get("d3d"), int) or
+                     not 0 <= r["d3d"] <= 255 for r in rows):
+                fail("compact emitter d3d row out of range")
+            elif len({r["d3d"] for r in rows}) != len(rows):
+                fail("compact emitter rows reuse a D3D register")
         elif rows != [{"row": row, "d3d": row} for row in range(count)]:
             fail("emitter uniform rows are not the menu identity mapping")
     elif not isinstance(rows, list) or len(rows) < 16:

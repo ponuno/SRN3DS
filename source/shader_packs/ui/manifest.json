@@ -14,8 +14,8 @@
   "vs": 119
  },
  "coverage": {
-  "translated": 24,
-  "draw-enabled": 89,
+  "translated": 34,
+  "draw-enabled": 79,
   "refused": 0,
   "contract_only": 0
  },
@@ -70,7 +70,7 @@
   },
   {
    "id": "ui.vs.0c652cc5",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "0c652cc5a5fde0f461337836cc7e2cbe48c1158e7715f1aeccf1d37dbc6de292"
@@ -252,7 +252,7 @@
   },
   {
    "id": "ui.vs.3b640fd5",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "3b640fd5ba4a222edea057ae054be616a9524f07b5aef548776be54480ac6e6e"
@@ -378,7 +378,7 @@
   },
   {
    "id": "ui.vs.5e26c2ae",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "5e26c2ae4f5039ee2b5b27443a2f9870aab0c537c70d7e310015a1e66cb0cee8"
@@ -448,7 +448,7 @@
   },
   {
    "id": "ui.vs.7d4ce3f5",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "7d4ce3f5cd5c1306790ca7506c8bc69c1d9d971432fcb53469958b394787dbdd"
@@ -469,7 +469,7 @@
   },
   {
    "id": "ui.vs.82a42749",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "82a42749f735970a29989f4c660d0e237a68569f1f7836f50f10de11e9b68024"
@@ -518,7 +518,7 @@
   },
   {
    "id": "ui.vs.9f2ad8de",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "9f2ad8de1990802ad91f9d6a252cd150864b73f16b8668f96c04e389988f0ab8"
@@ -714,7 +714,7 @@
   },
   {
    "id": "ui.vs.dd20e9fa",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "dd20e9fa3883fdddada48c8878d90eb4e33a6c1df2fcf903043237cde712a226"
@@ -749,7 +749,7 @@
   },
   {
    "id": "ui.vs.e9a03df8",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "e9a03df8f61009319cff1db584078b459571a58cb4df85b01c5ca7d1d7bb4a03"
@@ -805,7 +805,7 @@
   },
   {
    "id": "ui.vs.fbc84bf4",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "fbc84bf49604a1f3d92de3a624328317335b157a0b741aace38bbaad2956e619"
@@ -819,7 +819,7 @@
   },
   {
    "id": "ui.vs.ff1f00eb",
-   "status": "draw-enabled",
+   "status": "translated",
    "kind": "pica_vs",
    "family": "ui",
    "sha256": "ff1f00eb066ea874f6a7e36960e4e03652eb622bab9078466b7314b2bce7887c"

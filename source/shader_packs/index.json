@@ -6,10 +6,10 @@
    "chunks": 314,
    "unique_hashes": 113,
    "coverage": {
-    "translated": 0,
-    "draw-enabled": 0,
-    "refused": 113,
-    "contract_only": 40
+    "translated": 34,
+    "draw-enabled": 79,
+    "refused": 0,
+    "contract_only": 0
    }
   },
   "blit_post": {
@@ -61,10 +61,10 @@
    "chunks": 7459,
    "unique_hashes": 4991,
    "coverage": {
-    "translated": 107,
-    "draw-enabled": 0,
-    "refused": 4884,
-    "contract_only": 130
+    "translated": 231,
+    "draw-enabled": 6,
+    "refused": 4754,
+    "contract_only": 0
    }
   }
  },

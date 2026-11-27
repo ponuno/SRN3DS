@@ -37,9 +37,12 @@ class CommittedPlansTest(unittest.TestCase):
             cls.doc = json.load(handle)
         with open(COVERAGE, encoding="utf-8") as handle:
             cls.coverage = json.load(handle)
-        cls.exact = [e for e in cls.doc["entries"]
+        cls.tev = [e for e in cls.doc["entries"] if e.get("kind") == "tev"]
+        cls.vs = [e for e in cls.doc["entries"]
+                  if e.get("kind") == "pica_vs"]
+        cls.exact = [e for e in cls.tev
                      if e.get("quality") == "exact"]
-        cls.approx = [e for e in cls.doc["entries"]
+        cls.approx = [e for e in cls.tev
                       if e.get("quality") == "approx"]
 
     def test_exact_recipes_and_full_contract(self):
@@ -90,10 +93,19 @@ class CommittedPlansTest(unittest.TestCase):
             self.assertLessEqual(err["max_abs_error"], 1.0, entry["id"])
 
     def test_no_draw_or_runtime_claim(self):
-        for entry in self.doc["entries"]:
+        for entry in self.tev:
             self.assertEqual(entry["draw_enabled"], 0, entry["id"])
             self.assertNotEqual(entry.get("runtime"), 1, entry["id"])
             self.assertEqual(plan_verify.derive_status(entry), "translated")
+            self.assertTrue(entry["preconditions"])
+        drawn = [e for e in self.vs if e["draw_enabled"] == 1]
+        self.assertEqual(len(drawn), 6)
+        for entry in self.vs:
+            if entry["draw_enabled"] == 1:
+                self.assertEqual(entry["runtime"], 1, entry["id"])
+                self.assertEqual(entry["quality"], "exact", entry["id"])
+                self.assertEqual(entry["codegen"], "emitted-verified",
+                                 entry["id"])
             self.assertTrue(entry["preconditions"])
 
     def test_schema_and_limits(self):
@@ -101,11 +113,41 @@ class CommittedPlansTest(unittest.TestCase):
         errors = []
         for entry in self.doc["entries"]:
             plan_verify.validate_entry(entry, errors, entry["id"])
+        for entry in self.tev:
             self.assertLessEqual(entry["stages"], plan_verify.MAX_STAGES)
             self.assertLessEqual(len(entry["textures"]), C.TEV_MAX_TEXTURES)
             self.assertLessEqual(len(entry["constants"]), C.TEV_MAX_CONSTANTS)
         self.assertEqual(errors, [])
         self.assertTrue(schema)
+
+    def test_pica_vs_contracts_are_emitted(self):
+        self.assertEqual(len(self.vs), 130)
+        self.assertTrue(all(e["codegen"] == "emitted-verified"
+                            for e in self.vs))
+        self.assertEqual(sum(1 for e in self.vs if e["draw_enabled"] == 1), 6)
+        self.assertTrue(all((e.get("runtime", 0) == 1)
+                            == (e["draw_enabled"] == 1) for e in self.vs))
+        exact = [e for e in self.vs if e["quality"] == "exact"]
+        approx = [e for e in self.vs if e["quality"] == "approx"]
+        self.assertEqual(len(exact) + len(approx), 130)
+        for entry in self.vs:
+            emitter = entry["emitter"]
+            self.assertEqual(emitter["picasso"], "pass", entry["id"])
+            self.assertGreater(emitter["shbin_bytes"], 0, entry["id"])
+            self.assertLessEqual(emitter["max_abs_position"], 1e-4, entry["id"])
+            self.assertLessEqual(emitter["uniform_rows"], 16, entry["id"])
+            self.assertLessEqual(len(entry["outputs"]), 7, entry["id"])
+            path = os.path.join(HERE, emitter["shbin"])
+            self.assertTrue(os.path.exists(path), path)
+            if entry["quality"] == "approx":
+                self.assertTrue(entry.get("approximation"), entry["id"])
+            self.assertTrue(entry.get("varying_map"), entry["id"])
+        with open(os.path.join(HERE, "vs_contracts_report.json"),
+                  encoding="utf-8") as handle:
+            report = json.load(handle)
+        self.assertEqual(report["contracts"], 130)
+        self.assertEqual(report["emitted"], 130)
+        self.assertEqual(report["refused"], 0)
 
     def test_refusals_partition_the_pack(self):
         with open(os.path.join(HERE, "refusals.json"), encoding="utf-8") as h:

@@ -8,17 +8,11 @@
    "owner": "sm3-agent-ui",
    "chunks": 314,
    "unique_hashes": 113,
-   "translated": 0,
-   "draw_enabled": 0,
-   "refused": 113,
-   "contract_only": 40,
-   "refused_classes": {
-    "pica_vs": 40,
-    "unsupported_opcode": 37,
-    "dataflow": 17,
-    "def_literal_out_of_range": 13,
-    "tev_prebake": 6
-   },
+   "translated": 34,
+   "draw_enabled": 79,
+   "refused": 0,
+   "contract_only": 0,
+   "refused_classes": {},
    "needs": [
     "opcode lowering (cmp/if/loop/rcp/derivatives)",
     "multi-temp dataflow -> scheduler or software fallback",
@@ -81,16 +75,13 @@
    "owner": "sm3-agent-skinning",
    "chunks": 2162,
    "unique_hashes": 1194,
-   "translated": 174,
+   "translated": 199,
    "draw_enabled": 3,
-   "refused": 1017,
-   "contract_only": 14,
+   "refused": 992,
+   "contract_only": 0,
    "refused_classes": {
     "def_literal_out_of_range": 962,
-    "unsupported_opcode": 30,
-    "pica_vs": 14,
-    "too_many_vs_varyings (8 > 7)": 9,
-    "too_many_vs_varyings (9 > 7)": 2
+    "unsupported_opcode": 30
    },
    "needs": [
     "literal range rewrite (def outside RGBA8 [0,1])",
@@ -104,13 +95,12 @@
    "owner": "sm3-agent-lighting",
    "chunks": 7459,
    "unique_hashes": 4991,
-   "translated": 107,
-   "draw_enabled": 0,
-   "refused": 4884,
-   "contract_only": 130,
+   "translated": 231,
+   "draw_enabled": 6,
+   "refused": 4754,
+   "contract_only": 0,
    "refused_classes": {
     "def_literal_out_of_range": 4700,
-    "pica_vs": 130,
     "unsupported_opcode": 31,
     "too_many_vs_varyings (8 > 7)": 17,
     "too_many_vs_varyings (9 > 7)": 5,
@@ -127,20 +117,20 @@
  ],
  "extra_plans": {
   "plans": 43,
-  "draw_enabled": 40,
+  "draw_enabled": 43,
   "by_pack": {
    "ui": {
     "plans": 43,
-    "draw_enabled": 40,
+    "draw_enabled": 43,
     "exact": 15,
     "approx": 28
    }
   }
  },
  "total": {
-  "translated": 481,
-  "draw-enabled": 55,
-  "refused": 6123,
+  "translated": 664,
+  "draw-enabled": 140,
+  "refused": 5855,
   "chunks": 10475,
   "unique_hashes": 6659
  },

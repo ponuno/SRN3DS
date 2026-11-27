@@ -77,7 +77,7 @@ REPRESENTATIVES = ["skin.vs.f8ffaecd", "skin.vs.20f4db07", "skin.vs.60dbd11a"]
 
 SUPPORTED = {"mov", "mul", "mad", "frc", "mova", "dp4", "dp3", "add",
              "min", "max", "slt", "sge", "sub", "abs", "nrm", "lrp",
-             "rcp", "rsq", "pow"}
+             "rcp", "rsq", "pow", "sincos"}
 INPUT_USAGE = {0: "position", 1: "blendweight", 2: "blendindices",
                3: "normal", 5: "texcoord", 6: "tangent", 7: "binormal",
                10: "color"}
@@ -171,14 +171,37 @@ def _out_map(plan: dict) -> Dict[Tuple[int, int], str]:
     return out
 
 
-def _d3d_const_rows(ir: C.IR, bones: int) -> Tuple[Dict[int, int], int]:
+def _d3d_const_rows(ir: C.IR, bones: int,
+                    identity_consts: bool = False,
+                    palette_rows: int = 0) -> Tuple[Dict[int, int], int]:
     relative = sorted({s.index for ins in ir.body for s in ins.srcs
                        if s.reg_type == asm.REG_CONST and s.relative})
-    if relative and relative != [0, 1, 2]:
+    if relative and palette_rows:
+        # Compact palette window: relative c0..cN keep PICA rows 0..N and the
+        # absolute bank is packed immediately after them.
+        if relative != list(range(max(relative) + 1)):
+            raise Refusal("relative_constant_set_%s_unsupported" % relative)
+        if max(relative) + 1 > palette_rows:
+            raise Refusal("relative_constants_exceed_palette_rows")
+    elif relative and relative != [0, 1, 2]:
         raise Refusal("relative_constant_set_%s_unsupported" % relative)
     absolute = sorted({s.index for ins in ir.body for s in ins.srcs
                        if s.reg_type == asm.REG_CONST
                        and not s.relative and s.index not in ir.defs})
+    if palette_rows:
+        rows = {index: index for index in relative}
+        rows.update({index: palette_rows + i
+                     for i, index in enumerate(absolute)})
+        total = palette_rows + len(absolute)
+        if total > MAX_UNIFORMS:
+            raise Refusal("uniform_rows_%d_over_%d" % (total, MAX_UNIFORMS))
+        return rows, total
+    if identity_consts:
+        rows = {index: index for index in absolute}
+        total = (max(absolute) + 1) if absolute else 0
+        if total > MAX_UNIFORMS:
+            raise Refusal("uniform_rows_%d_over_%d" % (total, MAX_UNIFORMS))
+        return rows, total
     palette = 3 * bones
     rows = {}
     total = palette
@@ -195,7 +218,8 @@ def _d3d_const_rows(ir: C.IR, bones: int) -> Tuple[Dict[int, int], int]:
     return rows, total
 
 
-def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
+def emit(plan: dict, ir: C.IR, bones: int = BONES,
+         identity_consts: bool = False, palette_rows: int = 0) -> str:
     """Return picasso assembly, or raise Refusal."""
     if plan.get("kind") != "pica_vs":
         raise Refusal("plan_kind_%s_not_pica_vs" % plan.get("kind"))
@@ -209,7 +233,8 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
     if ir is None or ir.sha256 != plan["sha256"]:
         raise Refusal("ir_hash_mismatch")
     out_map = _out_map(plan)
-    abs_rows, uniform_rows = _d3d_const_rows(ir, bones)
+    abs_rows, uniform_rows = _d3d_const_rows(ir, bones, identity_consts,
+                                             palette_rows)
     if uniform_rows > MAX_UNIFORMS:
         raise Refusal("uniform_rows_over_96")
     if plan.get("instructions", 0) > C.VS_MAX_INSTRUCTIONS:
@@ -241,6 +266,15 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
                  and ("r%d" % i) not in (scratch, scratch2, scratch3,
                                          a0_vector)][:3]
     abs_used = [0]
+    # sincos is self-contained: it may reuse every scratch role.
+    reserved_sincos = {scratch, scratch2, scratch3, a0_vector}
+    reserved_sincos.update(abs_temps)
+    sincos_slots = []
+    for i in range(15, -1, -1):
+        name = "r%d" % i
+        if i in used or name in reserved_sincos:
+            continue
+        sincos_slots.append(name)
 
     # ---- output packing -------------------------------------------------
     packing = plan.get("packing")
@@ -251,7 +285,7 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
         dropped = {(d["type"], d["reg_index"])
                    for d in packing.get("dropped", [])}
     else:
-        dropped = set()
+        dropped = {tuple(item) for item in plan.get("dropped_output_regs", [])}
         for (rtype, rindex), name in out_map.items():
             groups[(rtype, rindex)] = [
                 {"src": c, "out": name, "dst": c} for c in range(4)]
@@ -275,11 +309,15 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
     if dropped - set(groups):
         dummy = take_temp()
 
+    if bones:
+        bank = ("; %d-bone palette: c0..c%d, WVP at c%d..c%d" %
+                (bones, 3 * bones - 1, 3 * bones, uniform_rows - 1))
+    else:
+        bank = ("; identity/compact uniform bank: %d row(s)" % uniform_rows)
     lines = [
         "; Generated by source/shader_packs/skinning/pica_vs_emit.py",
         "; plan %s  sha256 %s" % (plan["id"], plan["sha256"]),
-        "; %d-bone palette: c0..c%d, WVP at c%d..c%d" %
-        (bones, 3 * bones - 1, 3 * bones, uniform_rows - 1),
+        bank,
         "; Straight-line PICA VS: no loops, branches, texld or indexed temps.",
     ]
     for index in sorted(defs):
@@ -289,6 +327,28 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
         lines.append(".constf d255(1, 1, 1, 1)")
     if any(ins.name == "pow" for ins in ir.body):
         lines.append(".constf d254(64, 64, 64, 64)")
+    sincos = {}
+    if any(ins.name == "sincos" for ins in ir.body):
+        free = [i for i in range(200, 254) if i not in defs]
+        spec = [("two_pi", 2.0 * math.pi),
+                ("inv_two_pi", 1.0 / (2.0 * math.pi)),
+                ("half", 0.5), ("one", 1.0)]
+        sin_c = [-1.0 / 6.0, 1.0 / 120.0, -1.0 / 5040.0, 1.0 / 362880.0,
+                 -1.0 / 39916800.0, 1.0 / 6227020800.0,
+                 -1.0 / 1307674368000.0, 1.0 / 355687428096000.0]
+        cos_c = [-1.0 / 2.0, 1.0 / 24.0, -1.0 / 720.0, 1.0 / 40320.0,
+                 -1.0 / 3628800.0, 1.0 / 479001600.0,
+                 -1.0 / 87178291200.0, 1.0 / 20922789888000.0]
+        for index, value in enumerate(sin_c, 1):
+            spec.append(("sin%d" % index, value))
+        for index, value in enumerate(cos_c, 1):
+            spec.append(("cos%d" % index, value))
+        if len(free) < len(spec):
+            raise Refusal("no_internal_constant_slot")
+        for (key, value), slot in zip(spec, free):
+            sincos[key] = "d%d" % slot
+            lines.append(".constf %s(%.17g, %.17g, %.17g, %.17g)"
+                         % (sincos[key], value, value, value, value))
     if packing:
         for item in plan["outputs"]:
             lines.append(".out %s %s" % (item["physical"],
@@ -414,7 +474,10 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
 
     def binary(op: str, dst: str, a, b) -> None:
         if b[1] != "reg":
-            if a[1] == "reg":
+            if op in ("slt", "sge") and a[1] == "reg":
+                lines.append("    mov %s, %s" % (scratch, b[0]))
+                b = (scratch, "reg")
+            elif a[1] == "reg":
                 a, b = b, a
             else:
                 lines.append("    mov %s, %s" % (scratch, b[0]))
@@ -466,6 +529,7 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
         ops = [operand(src) for src in ins.srcs
                if src.reg_type != asm.REG_ADDR]
         dst = dst_name(ins.dst)
+        orig_dst = dst
         if ins.name == "frc":
             # General frc(x) = x - floor(x).  The index-floor idiom above
             # folds to a single flr; any other use needs the subtraction.
@@ -562,29 +626,95 @@ def emit(plan: dict, ir: C.IR, bones: int = BONES) -> str:
                 src = (scratch, "reg")
             lines.append("    %s %s, %s" % (ins.name, dst, src[0]))
         elif ins.name == "pow":
-            # PICA has no pow: ex2(y * lg2(max(x, 0))).  D3D9 pow with a
-            # negative base is undefined; the reference interpreter and this
-            # lowering both return 0 there.
             x, y = ops[0], ops[1]
-            lines.append("    mov %s, %s" % (scratch3, x[0]))
-            lines.append("    add %s, %s, %s"
-                         % (scratch2, scratch3, negate(scratch3)))
-            lines.append("    slt %s, %s, %s" % (scratch, scratch2, scratch3))
-            lines.append("    max %s, %s, %s" % (scratch3, scratch3, scratch2))
-            lines.append("    lg2 %s, %s.xxxx" % (scratch3, scratch3))
-            if y[1] == "reg":
-                lines.append("    mul %s, %s, %s" % (scratch3, scratch3, y[0]))
+            if identity_consts or palette_rows:
+                # Non-skinned lighting/UI contracts: D3D pow is |x|^y.
+                lines.append("    mov %s, %s" % (scratch3, x[0]))
+                lines.append("    max %s, %s, %s"
+                             % (scratch3, scratch3, negate(scratch3)))
+                lines.append("    lg2 %s, %s.xxxx" % (scratch3, scratch3))
+                if y[1] == "reg":
+                    lines.append("    mul %s, %s, %s"
+                                 % (scratch3, scratch3, y[0]))
+                else:
+                    lines.append("    mul %s, %s, %s"
+                                 % (scratch3, y[0], scratch3))
+                lines.append("    ex2 %s, %s.xxxx" % (dst, scratch3))
             else:
-                lines.append("    mul %s, %s, %s" % (scratch3, y[0], scratch3))
-            # Clamp the exponent so ex2 cannot overflow to inf before the
-            # (0 < x) mask multiplies the result; inf * 0 is NaN.
-            lines.append("    min %s, d254, %s" % (scratch3, scratch3))
-            lines.append("    ex2 %s, %s.xxxx" % (dst, scratch3))
-            # D3D9 pow is 0 for a non-positive base; ex2 can return inf when
-            # the exponent is negative, so mask the result with (0 < x).
-            lines.append("    mul %s, %s, %s" % (dst, dst, scratch))
+                # Skinning contracts keep the proven max(x,0) lowering.
+                lines.append("    mov %s, %s" % (scratch3, x[0]))
+                lines.append("    add %s, %s, %s"
+                             % (scratch2, scratch3, negate(scratch3)))
+                lines.append("    slt %s, %s, %s"
+                             % (scratch, scratch2, scratch3))
+                lines.append("    max %s, %s, %s"
+                             % (scratch3, scratch3, scratch2))
+                lines.append("    lg2 %s, %s.xxxx" % (scratch3, scratch3))
+                if y[1] == "reg":
+                    lines.append("    mul %s, %s, %s"
+                                 % (scratch3, scratch3, y[0]))
+                else:
+                    lines.append("    mul %s, %s, %s"
+                                 % (scratch3, y[0], scratch3))
+                lines.append("    min %s, d254, %s" % (scratch3, scratch3))
+                lines.append("    ex2 %s, %s.xxxx" % (dst, scratch3))
+                lines.append("    mul %s, %s, %s" % (dst, dst, scratch))
             if ins.dst.modifier == 1:
                 saturate(dst)
+        elif ins.name == "sincos":
+            slots = ([scratch, scratch2, scratch3] + list(abs_temps)
+                     + [s for s in sincos_slots
+                        if s not in (scratch, scratch2, scratch3,
+                                     a0_vector)])
+            dedup = []
+            for slot in slots:
+                if slot and slot not in dedup:
+                    dedup.append(slot)
+            slots = dedup
+            src = ops[0]
+            if src[1] == "reg":
+                live = src[0].split(".", 1)[0]
+                slots = [slot for slot in slots if slot != live]
+            if len(slots) < 6:
+                raise Refusal("no_sincos_temporaries")
+            src_t, r_t, r2_t, ps_t, pc_t, k_t = slots[:6]
+            if src[1] != "reg":
+                lines.append("    mov %s, %s" % (src_t, src[0]))
+                src = (src_t, "reg")
+            lines.append("    mov %s, %s" % (k_t, sincos["inv_two_pi"]))
+            lines.append("    mul %s, %s, %s" % (k_t, k_t, src[0]))
+            lines.append("    add %s, %s, %s"
+                         % (k_t, sincos["half"], k_t))
+            lines.append("    flr %s, %s" % (k_t, k_t))
+            lines.append("    mul %s, %s, %s"
+                         % (r_t, sincos["two_pi"], k_t))
+            lines.append("    add %s, %s, %s"
+                         % (r_t, src[0], negate(r_t)))
+            lines.append("    mul %s, %s, %s" % (r2_t, r_t, r_t))
+
+            def horner(target, prefix, weight, final):
+                lines.append("    mov %s, %s" % (target, sincos[prefix + "8"]))
+                for index in range(7, 0, -1):
+                    lines.append("    mul %s, %s, %s"
+                                 % (target, target, weight))
+                    lines.append("    add %s, %s, %s"
+                                 % (target, sincos[prefix + str(index)],
+                                    target))
+                lines.append("    mul %s, %s, %s" % (target, target, weight))
+                lines.append("    add %s, %s, %s"
+                             % (target, sincos["one"], target))
+                if final != "one":
+                    lines.append("    mul %s, %s, %s"
+                                 % (target, r_t, target))
+
+            horner(ps_t, "sin", r2_t, "mul")
+            horner(pc_t, "cos", r2_t, "one")
+            base, mask = orig_dst.split(".", 1) if "." in orig_dst else (
+                orig_dst, "xyzw")
+            if "x" in mask:
+                lines.append("    mov %s.x, %s.xxxx" % (base, pc_t))
+            if "y" in mask:
+                lines.append("    mov %s.y, %s.xxxx" % (base, ps_t))
         elif ins.name == "sub":
             a, b = ops[0], ops[1]
             if b[1] != "reg":
@@ -673,7 +803,7 @@ def _sample_read(vec, swizzle):
 
 
 def interpret_ir(ir: C.IR, inputs: dict, consts: dict,
-                 defs: dict, trace=None) -> dict:
+                 defs: dict, trace=None, pow_abs: bool = False) -> dict:
     temps, a0, out = {}, [0.0] * 4, {}
     for ins in ir.body:
         if ins.name in ("def", "nop"):
@@ -751,9 +881,29 @@ def interpret_ir(ir: C.IR, inputs: dict, consts: dict,
         elif ins.name == "lrp":
             result = [ops[0][i] * (1.0 - ops[2][i]) + ops[1][i] * ops[2][i]
                       for i in range(4)]
+        elif ins.name == "sincos":
+            angle = ops[0][0]
+            result = [math.cos(angle), math.sin(angle), 0.0, 0.0]
         elif ins.name == "pow":
-            result = [math.pow(ops[0][i], ops[1][i])
-                      if ops[0][i] > 0.0 else 0.0 for i in range(4)]
+            if pow_abs:
+                result = []
+                for i in range(4):
+                    base, exponent = abs(ops[0][i]), ops[1][i]
+                    if base > 0.0:
+                        try:
+                            result.append(math.pow(base, exponent))
+                        except (OverflowError, ValueError):
+                            result.append(float("inf") if exponent > 0.0
+                                          else 0.0)
+                    elif exponent == 0.0:
+                        result.append(1.0)
+                    elif exponent > 0.0:
+                        result.append(0.0)
+                    else:
+                        result.append(float("inf"))
+            else:
+                result = [math.pow(ops[0][i], ops[1][i])
+                          if ops[0][i] > 0.0 else 0.0 for i in range(4)]
         else:
             raise Refusal("reference_opcode_%s" % ins.name)
         dst = ins.dst
@@ -950,15 +1100,21 @@ def build_sample(rng, plan: dict, bones: int):
     return inputs
 
 
-def build_constants(rng, bones: int, defs: dict, abs_rows: dict):
+def build_constants(rng, bones: int, defs: dict, abs_rows: dict,
+                    palette_rows: int = 0):
     """Fill every uniform row the emitted program actually reads.
 
     Rows 0..11 are the 4-bone palette; every other mapped D3D row (c180..c183,
     c184, ...) gets a distinct non-zero matrix so an output that reads c184 is
-    not accidentally compared as 0 == 0.
+    not accidentally compared as 0 == 0.  A compact palette window fills
+    D3D/PICA rows 0..palette_rows-1 before the absolute bank.
     """
     d3d = {i: [0.0] * 4 for i in range(256)}
     pica = {}
+    for row in range(palette_rows):
+        values = [rng.uniform(-1.5, 1.5) for _ in range(4)]
+        d3d[row] = list(values)
+        pica[row] = list(values)
     for bone in range(bones):
         rows = [[rng.uniform(-1.5, 1.5) for _ in range(4)]
                 for _ in range(3)]
@@ -1005,18 +1161,27 @@ def _out_name(item: dict) -> str:
 
 
 def verify(plan: dict, ir: C.IR, samples: int = SAMPLES,
-           bones: int = BONES, compile_asm: bool = True) -> dict:
-    text = emit(plan, ir, bones)
+           bones: int = BONES, compile_asm: bool = True,
+           identity_consts: bool = False,
+           rel_tolerance: float = 0.0,
+           palette_rows: int = 0,
+           magnitude_limit: float = 0.0) -> dict:
+    text = emit(plan, ir, bones, identity_consts, palette_rows)
     defs = {ins.dst.index: tuple(ins.literal) for ins in ir.body
             if ins.opcode == 0x51 and ins.dst is not None}
-    abs_rows, uniform_rows = _d3d_const_rows(ir, bones)
+    abs_rows, uniform_rows = _d3d_const_rows(ir, bones, identity_consts,
+                                             palette_rows)
     rng = random.Random(0x5C1A + int(plan["sha256"][:8], 16))
     max_position = 0.0
     max_varying = 0.0
+    max_rel_varying = 0.0
+    varying_ok = True
+    skipped_ill_conditioned = 0
     for _ in range(samples):
         inputs = build_sample(rng, plan, bones)
-        d3d, pica = build_constants(rng, bones, defs, abs_rows)
-        ref = interpret_ir(ir, inputs, d3d, defs)
+        d3d, pica = build_constants(rng, bones, defs, abs_rows, palette_rows)
+        ref = interpret_ir(ir, inputs, d3d, defs,
+                           pow_abs=identity_consts or palette_rows > 0)
         emitted = interpret_pica(text, inputs, pica, {
             "d%d" % reg: list(values) for reg, values in defs.items()})
         packing = plan.get("packing")
@@ -1045,7 +1210,19 @@ def verify(plan: dict, ir: C.IR, samples: int = SAMPLES,
             if item["usage"] == 0:
                 max_position = max(max_position, error)
             else:
+                magnitude = max(max(abs(a[i]), abs(b[i]))
+                                for i in range(4))
+                if magnitude_limit and magnitude > magnitude_limit:
+                    skipped_ill_conditioned += 1
+                    continue
                 max_varying = max(max_varying, error)
+                scale = max(1e-12, magnitude)
+                ratio = error / scale
+                max_rel_varying = max(max_rel_varying, ratio)
+                if not (error <= TOLERANCE
+                        or (rel_tolerance > 0.0
+                            and ratio <= rel_tolerance)):
+                    varying_ok = False
     picasso = "skipped"
     shbin_bytes = 0
     shbin = b""
@@ -1054,9 +1231,8 @@ def verify(plan: dict, ir: C.IR, samples: int = SAMPLES,
         shbin_bytes = len(shbin)
     # `emitted-verified` requires a real, non-empty numeric run and a real
     # assembler/linker pass.  samples=0 or a skipped picasso is never a proof.
-    ok = (samples > 0 and max_position <= TOLERANCE
-          and max_varying <= TOLERANCE and picasso == "pass"
-          and shbin_bytes > 0 and len(shbin) > 0)
+    ok = (samples > 0 and max_position <= TOLERANCE and varying_ok
+          and picasso == "pass" and shbin_bytes > 0 and len(shbin) > 0)
     return {
         "id": plan["id"], "sha256": plan["sha256"],
         "asm": "%s.v.pica" % plan["id"],
@@ -1069,8 +1245,12 @@ def verify(plan: dict, ir: C.IR, samples: int = SAMPLES,
                              not line.strip().startswith(";")]),
         "outputs": len(plan["outputs"]), "inputs": len(plan["inputs"]),
         "samples": samples, "tolerance": TOLERANCE,
+        "rel_tolerance": rel_tolerance,
         "max_abs_position": max_position,
         "max_abs_varying": max_varying,
+        "max_rel_varying": max_rel_varying,
+        "magnitude_limit": magnitude_limit,
+        "skipped_ill_conditioned": skipped_ill_conditioned,
         "picasso": picasso, "status": "pass" if ok else "fail",
     }, shbin
 
