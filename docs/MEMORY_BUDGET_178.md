@@ -61,8 +61,8 @@ guest pages:
 |---|---:|---|
 | IRC index (90,900 functions × 40 B) | **3.5 MiB** | `tesv.irc` header: `nfun=90900`, `entry_bytes=40` |
 | IRC record cache | **4 MiB** (64 records) | `source/ir_container.h`: `N3DS_IRC_DEFAULT_CACHE_BYTES (4u<<20)`, `..._RECORDS 64`; slice calls `n3ds_ir_cache_init(4u<<20)` at `tesv_slice_main.c:176` |
-| BSA overlay index (13 archives, measured on `E:\harness_skyrim`) | **1.96 MiB** (was ~17.5) | `bsa-paged` / `bsa_index`: 2,054,436 B, 176,811 files; plus 0.41 MiB page cache (13 × 32 KiB) |
-| Stream staged cache | **2 MiB** default | `source/asset_stream.h:46` |
+| BSA overlay index (13 archives, measured on `E:\harness_skyrim`) | **1.96 MiB index** (was ~17.5) | `bsa_index` / `bsa_resident_stats`: 2,054,436 B index, 425,984 B page cache (13 × 32 KiB), 12,272 B struct/context overhead; 2,492,692 B resident cold. Range cache is bounded at 8 MiB and measured separately |
+| Stream staged cache | **2 MiB** default | `STREAM_CACHE_LIMIT_DEFAULT`, reported as `stream_staged` |
 | Stream per-descriptor window | **256 KiB** default | `asset_stream.h:200` |
 | Stream quantum | **64 KiB** default | `asset_stream.h:199` |
 | Stream rate | **7,000,000 B/s** default | `asset_stream.h:47` |
@@ -79,6 +79,30 @@ through a bounded 32 KiB per-archive cache.  Measured 17.85 MiB -> 1.96 MiB
 index (+0.41 MiB cache): a 16.4 MiB saving with byte-for-byte lookup
 equivalence on 81,411 old-index results.  The IRC record cache remains fixed at
 4 MiB.
+
+### What is measured now
+
+`bsa_resident_stats()` walks the live allocations of one open archive; the
+overlay sums it over every archive it has opened. `stream_stats_snapshot()`
+samples the queue/caches, and `mem_stats` prints both on `boot`/`start`/every
+`N3DS_MEM_EVERY` frames/`exit`.
+
+| Field | Source | 13-archive harness, 2026-11-27 |
+|---|---|---:|
+| `bsa_index` | locator table + tags + checkpoints + folder array | 2,054,436 B (1.959 MiB) |
+| `bsa_page_cache` | `page_cap` per open archive (32 KiB) | 425,984 B |
+| `bsa_range_cache` | resident inflated records in the bounded LRU (8 MiB max) | 0 cold; 1,057,557 B after the 1.06 MiB `inn01.nif` |
+| (overhead) | `sizeof(BsaArchive)` + owned I/O context | 12,272 B |
+| `bsa_resident` | sum of the four | 2,492,692 B cold (2.377 MiB) |
+| `bsa_mounted` / `have_bsa` | archives actually opened / any opened | 13 / 1 |
+| `stream_queued` | descriptors in `QUEUED` | 0 idle |
+| `stream_staged` | live READY/QUEUED window bytes (≤ 2 MiB) | 65,536 B after one prefetch |
+| `stream_reads` / `stream_bytes` | executor `bsa_read_range` calls / bytes charged | 1 / 65,536 B |
+| `stream_misses`, `stream_demand_hits`, `stream_demand_bytes`, `stream_prefetch_demand_hits`, `stream_cancelled`, `stream_budget_denied` | `StreamMetrics` | 0 / 1 / 1,024 / 1 / 0 / 0 |
+
+The 2 MiB profile line is the **index**; page cache, range cache and struct
+overhead are separate, bounded costs. A cold 13-archive overlay is 2.38 MiB
+total, of which 1.96 MiB is the index.
 
 ## 5. GPU-visible memory: VRAM (6 MiB) and linear heap (8 MiB)
 
@@ -138,8 +162,8 @@ CPU budget inside newlib:
 | IRC index | 3.5 | 90,900 × 40 B |
 | IRC record cache | 4 | keep until miss rate is measured |
 | Decoded-IR cache | 4 | `n3ds_ir_cache_init(4u << 20)` |
-| Resident BSA index | **2** | met: **1.96** measured on 13 archives (2,054,436 B); page cache 0.41 separate |
-| Stream staged cache | 2 | current default |
+| Resident BSA index | **2** | met: **1.96** index measured on 13 archives (2,054,436 B); page cache 0.41, range cache ≤ 8 and 12 KiB overhead are separate |
+| Stream staged cache | 2 | default, measured live as `stream_staged` |
 | Other host allocations and temporary copies | 8.5 | D3D CPU copies, decode, metadata, load peaks — needs measurement |
 | Untouchable newlib reserve | **4** | check at the cell-transition peak |
 | **Total** | **120** | |
@@ -251,7 +275,8 @@ One line per snapshot, `key=value`, fixed order:
 | `vram_live`, `vram_peak`, `vram_free`, `vram_min_free`, `vram_fail_*` | same for `vramSpaceFree()`, only the `onVram=true` paths |
 | `arenas_bytes`, `arena_vertex/colour/cube/index/skin/srquad` | actual bytes: 16384×20, 65536×40, 16384×40, 262144×2, 4096×80, 6×36 |
 | `irc_bytes`, `irc_records`, `irdec_bytes`, `irdec_blocks` | live IRC index/record cache (`n3ds_lift_container_stats`) and decoded-IR cache (`n3ds_ir_cache_stats`) |
-| `bsa_resident`, `bsa_archives`, `have_bsa` | `have_bsa=0` is honest: the overlay exposes archive count, not resident index bytes |
+| `bsa_resident`, `bsa_index`, `bsa_page_cache`, `bsa_range_cache`, `bsa_archives`, `bsa_mounted`, `have_bsa` | measured by `bsa_resident_stats()` over every archive the overlay opened; `have_bsa=1` iff `bsa_mounted>0` |
+| `stream_queued`, `stream_staged`, `stream_reads`, `stream_bytes`, `stream_misses`, `stream_demand_hits`, `stream_demand_bytes`, `stream_prefetch_demand_hits`, `stream_cancelled`, `stream_budget_denied` | `stream_stats_snapshot()` over the registered mount; see `docs/STREAMING.md` |
 | `tex_guest`, `tex_gpu`, `tex_*_peak`, `tex_guest_limit`, `tex_gpu_limit`, `tex_trims`, `tex_trim_evictions`, `tex_evictions_gpu` | `d9_texcache_set_limits()` policy and LRU counters |
 | `os_region_used/free/size`, `have_os_region` | `osGetMemRegionUsed/Free/Size(MEMREGION_APPLICATION)` on device |
 | `alloc_failures` | total failed requests; the event line also has `fail_kind=` and `fail_bytes=` |

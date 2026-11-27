@@ -71,8 +71,24 @@ void mem_stats_set_newlib(size_t used, size_t free_bytes);
 void mem_stats_note_arena(const char *name, size_t bytes);
 void mem_stats_set_irc(uint64_t bytes, uint64_t records);
 void mem_stats_set_irdecode(uint64_t bytes, uint64_t blocks);
-/* resident bytes are not exposed by the overlay; archives is the honest part. */
+/* `resident_bytes` is measured (bsa_resident_bytes() summed over open archives),
+ * never an estimate.  This compatibility overload takes `archives` as both the
+ * configured and mounted count; prefer mem_stats_set_bsa_detail() when the
+ * overlay reports how many sources are actually open. */
 void mem_stats_set_bsa(uint64_t resident_bytes, unsigned archives);
+/* Same, with the component breakdown from BsaResidentStats.  `mounted` counts
+ * archives actually open; have_bsa = mounted > 0. */
+void mem_stats_set_bsa_detail(uint64_t resident_bytes, uint64_t index_bytes,
+                              uint64_t page_cache_bytes,
+                              uint64_t range_cache_bytes, unsigned archives,
+                              unsigned mounted);
+/* Streaming counters (see StreamStatsSnapshot).  Flat arguments keep mem_stats
+ * free of asset_stream.h; pass zeros when no mount exists. */
+void mem_stats_set_stream(unsigned queued, uint64_t staged_bytes,
+                          uint64_t physical_reads, uint64_t physical_bytes,
+                          uint64_t misses, uint64_t demand_hits,
+                          uint64_t demand_bytes, uint64_t prefetch_demand_hits,
+                          uint64_t cancelled, uint64_t budget_denied);
 void mem_stats_set_os_region(uint64_t size, uint64_t used, uint64_t free_bytes);
 void mem_stats_set_texcache(size_t guest_bytes, size_t gpu_bytes,
                             size_t guest_peak, size_t gpu_peak,

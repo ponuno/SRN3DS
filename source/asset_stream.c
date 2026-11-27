@@ -77,6 +77,8 @@ struct StreamMount {
     uint64_t last_tail;
 };
 
+static StreamMount *g_global_mount;
+
 static uint64_t default_clock_ns(void *ctx) {
     (void)ctx;
     clock_t now = clock();
@@ -806,11 +808,15 @@ StreamStatus stream_mount_open(const StreamIndex *index, const char *data_dir,
                           mount->config.max_accrual_quanta;
     mount->budget_ns = mount->clock(mount->clock_ctx);
     *out = mount;
+    /* The newest mount is the one diagnostic snapshots sample; a second mount
+     * can still override with stream_set_global_mount(). */
+    g_global_mount = mount;
     return STREAM_OK;
 }
 
 void stream_mount_close(StreamMount *mount) {
     if (!mount) return;
+    if (g_global_mount == mount) g_global_mount = NULL;
     for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
         if (mount->requests[i].used && mount->requests[i].data) {
             free(mount->requests[i].data);
@@ -1675,4 +1681,34 @@ void stream_mount_metrics(const StreamMount *mount, StreamMetrics *out) {
     if (!out) return;
     if (mount) *out = mount->metrics;
     else memset(out, 0, sizeof *out);
+}
+
+void stream_set_global_mount(StreamMount *mount) { g_global_mount = mount; }
+
+void stream_stats_snapshot(const StreamMount *mount, StreamStatsSnapshot *out) {
+    if (!out) return;
+    memset(out, 0, sizeof *out);
+    if (!mount) return;
+    const StreamMount *m = mount; /* requests are only read, never mutated */
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        if (!m->requests[i].used) continue;
+        if (m->requests[i].state == STREAM_REQ_QUEUED) ++out->queued;
+        else if (m->requests[i].state == STREAM_REQ_READING) ++out->reading;
+    }
+    out->descriptors = m->descriptors;
+    out->staged_bytes = m->cache_bytes;
+    out->staged_limit_bytes = m->config.cache_limit_bytes;
+    out->peak_staged_bytes = m->peak_cache_bytes;
+    out->physical_reads = m->metrics.physical_reads;
+    out->physical_bytes = m->metrics.quantum_bytes;
+    out->physical_misses = m->metrics.misses;
+    out->demand_hits = m->metrics.demand_hits;
+    out->demand_bytes = m->metrics.demand_hit_bytes;
+    out->prefetch_demand_hits = m->metrics.prefetch_demand_hits;
+    out->cancelled = m->metrics.cancelled;
+    out->budget_denied = m->metrics.budget_denied;
+}
+
+void stream_stats_global(StreamStatsSnapshot *out) {
+    stream_stats_snapshot(g_global_mount, out);
 }

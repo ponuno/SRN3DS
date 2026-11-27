@@ -295,6 +295,9 @@ function Add-Test($name, $flags, $sources, $testArgs) {
 
 Add-Test "host" $common @("source/probe.c", "source/guest.c", "source/pe_image.c", "source/guest_heap.c", "source/guest_call.c", "tests/host.c") @()
 Add-Test "mem_stats" $common @("source/mem_stats.c", "tests/mem_stats_test.c") @()
+# Measured BSA resident/index/page/range bytes over E:\harness_skyrim\Data plus
+# a real compressed record driven through the stream snapshot; skips without it.
+Add-Test "mem_stats_bsa" $common @("source/mem_stats.c", "source/bsa_reader.c", "source/asset_stream.c", "tests/mem_stats_bsa_smoke.c") @()
 Add-Test "tesv_tls_policy" $common @("tests/tesv_tls_policy.c") @()
 Add-Test "tesv_sm3_probe" $common @("source/guest.c", "source/tesv_sm3_probe.c", "tests/tesv_sm3_probe_smoke.c") @()
 Add-Test "tesv_cube_probe" $common @("source/guest.c", "source/tesv_cube_probe.c", "tests/tesv_cube_probe_smoke.c") @()

@@ -39,6 +39,7 @@ int win32_ini_overlay_merge_text(const char *spec,const char *name,char *buf,
  * [Archive] plus Data\*Cooked*.bsa (and, for the host harness, every Data\*.bsa
  * when TESV_BSA_OVERLAY_ALL=1).  Loose files win unless
  * TESV_BSA_OVERLAY_FIRST=1.  The overlay never writes an archive. */
+#define WIN32_BSA_OVERLAY_MAX_ARCHIVES 64u
 typedef struct {
     uint64_t stat_resolves;   /* GetFileAttributes* answered from an archive */
     uint64_t open_resolves;   /* CreateFileA answered from an archive */
@@ -48,6 +49,16 @@ typedef struct {
     uint64_t read_errors;
     uint32_t archives;        /* configured sources */
     uint32_t archives_failed; /* sources skipped for access/format errors */
+    /* Resident memory of the archives that are actually open, measured by
+     * bsa_resident_stats().  Archives are opened lazily, so `resident_archives`
+     * can be smaller than `archives`. */
+    uint64_t resident_bytes;
+    uint64_t index_bytes;
+    uint64_t page_cache_bytes;
+    uint64_t range_cache_bytes;
+    uint32_t resident_archives;
+    /* Per configured slot, in source order; 0 for a slot that is not open. */
+    uint64_t archive_resident[WIN32_BSA_OVERLAY_MAX_ARCHIVES];
 } Win32BsaOverlayStats;
 void win32_bsa_overlay_stats(Win32BsaOverlayStats *out);
 /* Diagnostic mode: bind unknown imports to a trap that faults on call with the

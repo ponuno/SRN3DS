@@ -57,6 +57,7 @@ struct BsaArchive {
     BsaReadAt read_at;
     void *ctx;
     void *owned_ctx;
+    size_t owned_ctx_size;
     FILE *file;
     uint64_t size;
     BsaOptions opt;
@@ -1428,6 +1429,7 @@ BsaStatus bsa_open_memory(const void *data, size_t size,
                                    reason, reason_cap);
     if (st != BSA_OK) { free(ctx); return st; }
     (*out)->owned_ctx = ctx;
+    (*out)->owned_ctx_size = sizeof *ctx;
     return BSA_OK;
 }
 
@@ -1473,6 +1475,7 @@ BsaStatus bsa_open_path(const char *path, const BsaOptions *options,
                                    out, reason, reason_cap);
     if (st != BSA_OK) { free(ctx); fclose(file); return st; }
     (*out)->owned_ctx = ctx;
+    (*out)->owned_ctx_size = sizeof *ctx;
     (*out)->file = file;
     return BSA_OK;
 }
@@ -1501,6 +1504,25 @@ uint32_t bsa_file_count(const BsaArchive *archive) {
 
 size_t bsa_index_bytes(const BsaArchive *archive) {
     return archive ? archive->index_bytes : 0;
+}
+
+void bsa_resident_stats(const BsaArchive *archive, BsaResidentStats *out) {
+    if (!out) return;
+    memset(out, 0, sizeof *out);
+    if (!archive) return;
+    out->index = archive->index_bytes;
+    /* page_cap is what malloc owned, whether or not the window is full. */
+    out->page_cache = archive->page ? archive->page_cap : 0;
+    out->range_cache = archive->range_bytes;
+    out->overhead =
+        (uint64_t)sizeof *archive + (uint64_t)archive->owned_ctx_size;
+    out->total = out->index + out->page_cache + out->range_cache + out->overhead;
+}
+
+size_t bsa_resident_bytes(const BsaArchive *archive) {
+    BsaResidentStats stats;
+    bsa_resident_stats(archive, &stats);
+    return (size_t)stats.total;
 }
 
 BsaStatus bsa_find(const BsaArchive *archive, const char *path, BsaMatch *out) {

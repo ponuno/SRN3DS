@@ -1561,7 +1561,7 @@ static uint64_t size_of(const struct stat *st){return S_ISDIR(st->st_mode)?0:(ui
  * 0x100..0x100+MAX_FILES handle table.  Partial reads go through
  * bsa_read_range(); a compressed entry (where range reads are refused) is
  * materialized once with bsa_read() and cached for the handle's lifetime. */
-#define OV_MAX_ARCHIVES 64
+#define OV_MAX_ARCHIVES WIN32_BSA_OVERLAY_MAX_ARCHIVES
 #define OV_ATTR_ARCHIVE 0x20u
 
 typedef struct {
@@ -1922,6 +1922,25 @@ void win32_bsa_overlay_stats(Win32BsaOverlayStats *out) {
     if (!out) return;
     memset(out, 0, sizeof *out);
     *out = ov_stats;
+    /* Resident bytes are measured on demand so the numbers follow the live
+     * page/range caches instead of a snapshot taken at open time. */
+    out->index_bytes = 0;
+    out->page_cache_bytes = 0;
+    out->range_cache_bytes = 0;
+    out->resident_bytes = 0;
+    out->resident_archives = 0;
+    for (size_t i = 0; i < ov_archive_count; ++i) {
+        BsaArchive *a = ov_archives[i].archive;
+        if (!a) continue;
+        BsaResidentStats rs;
+        bsa_resident_stats(a, &rs);
+        out->archive_resident[i] = rs.total;
+        out->index_bytes += rs.index;
+        out->page_cache_bytes += rs.page_cache;
+        out->range_cache_bytes += rs.range_cache;
+        out->resident_bytes += rs.total;
+        ++out->resident_archives;
+    }
 }
 
 static int64_t file_tell(FILE *f){

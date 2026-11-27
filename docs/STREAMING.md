@@ -206,6 +206,34 @@ N3DS_STREAM_DATA=sdmc:/Skyrim/Data               # по умолчанию
 Demand не создаёт новых запросов, поэтому prefetch не дублируется.
 Loose-файлы и записи вне индекса идут старым путём.
 
+## 5a. Снапшот памяти (`StreamStatsSnapshot`)
+
+`stream_stats_snapshot(mount, &out)` снимает живые значения очереди и кэшей;
+`stream_mount_open()` регистрирует последний mount глобально, поэтому
+`mem_refresh()` в `tesv_slice_main.c` печатает их на `boot`/`start`/каждых
+`N3DS_MEM_EVERY` кадрах/`exit` через `stream_stats_global()` и
+`mem_stats_set_stream()`.
+
+| Поле снапшота | Ключ `mem_stats` | Смысл |
+|---|---|---|
+| `queued` | `stream_queued` | дескрипторы в `STREAM_REQ_QUEUED` |
+| `reading` | — | дескрипторы с активным `bsa_read_range` (`READING`) |
+| `descriptors` | — | живые дескрипторы, включая терминальные |
+| `staged_bytes` | `stream_staged` | живые READY/QUEUED окна (`cache_bytes`), бюджет по умолчанию 2 MiB |
+| `staged_limit_bytes` | — | `cache_limit_bytes` из `StreamConfig` |
+| `peak_staged_bytes` | — | максимум `staged_bytes` за сессию |
+| `physical_reads` | `stream_reads` | успешные `bsa_read_range` исполнителя |
+| `physical_bytes` | `stream_bytes` | байты, реально прочитанные и списанные с rate-бюджета (`quantum_bytes`) |
+| `physical_misses` | `stream_misses` | промахи `StreamMetrics.misses` |
+| `demand_hits` | `stream_demand_hits` | чтения, обслуженные из READY-окна |
+| `demand_bytes` | `stream_demand_bytes` | байты этих demand-hit |
+| `prefetch_demand_hits` | `stream_prefetch_demand_hits` | demand-hit, чьё окно было prefetch |
+| `cancelled` | `stream_cancelled` | явные cancel + вытесненные P2 |
+| `budget_denied` | `stream_budget_denied` | pump не получил байтовых токенов |
+
+Счётчики монотонны, кроме `queued`/`staged_bytes`, которые отражают текущее
+состояние. Проверка на реальном архиве: `mem_stats_bsa` (см. §6).
+
 ## 6. Тесты
 
 ```
@@ -221,6 +249,8 @@ powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
 |---|---|
 | `stream_range_smoke` | 91 checks, 0 failures |
 | `stream_queue_smoke` | 67 checks, 0 failures |
+| `mem_stats_bsa` | 13 архивов: index 2,054,436 B, page 425,984 B, resident 2,492,692 B; range_cache 0 → 1,057,557 B; stream reads=1, staged=65,536 B, demand_hits=1 |
+| `mem_stats` | unit-счётчики BSA/stream без файлов |
 | `stream_cell_smoke` | 69 checks, 0 failures (2 interior + 2 exterior rows, schema 1 reparse) |
 | `stream_cell_real_prefetch` (Riverwood exterior 5,-11, r1) | 27 checks, 0 failures, 9 rows/8 ids, prefetch=39, skipped=0, physical_reads=33 |
 | `stream_index_build_test.py` | 422 checks, 0 failures |

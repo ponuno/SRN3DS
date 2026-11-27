@@ -193,6 +193,50 @@ typedef struct {
 
 typedef struct StreamMount StreamMount;
 
+/* One-line view used by the memory snapshot.  All fields are sampled from the
+ * live queue / caches, not from cumulative estimates:
+ *   queued                 descriptors waiting for the executor (QUEUED)
+ *   reading                descriptors with a read in flight (READING)
+ *   descriptors            live descriptors, including terminal ones
+ *   staged_bytes           live READY/QUEUED window bytes (= cache_bytes)
+ *   staged_limit_bytes     configured staged-byte budget
+ *   peak_staged_bytes      high-water mark of staged_bytes
+ *   physical_reads         successful bsa_read_range() calls by the executor
+ *   physical_bytes         bytes actually read and charged to the rate budget
+ *   physical_misses        demand/read misses (StreamMetrics.misses)
+ *   demand_hits            reads served from a READY window
+ *   demand_bytes           bytes served by those demand hits
+ *   prefetch_demand_hits   demand hits whose window was prefetched
+ *   cancelled              explicit cancels and unreferenced P2 drops
+ *   budget_denied          pumps refused for lack of byte tokens
+ */
+typedef struct {
+    uint32_t queued;
+    uint32_t reading;
+    uint32_t descriptors;
+    uint32_t staged_bytes;
+    uint32_t staged_limit_bytes;
+    uint32_t peak_staged_bytes;
+    uint64_t physical_reads;
+    uint64_t physical_bytes;
+    uint64_t physical_misses;
+    uint64_t demand_hits;
+    uint64_t demand_bytes;
+    uint64_t prefetch_demand_hits;
+    uint64_t cancelled;
+    uint64_t budget_denied;
+} StreamStatsSnapshot;
+
+/* Sample the live mount.  A NULL mount produces an all-zero snapshot. */
+void stream_stats_snapshot(const StreamMount *mount, StreamStatsSnapshot *out);
+
+/* Optional process-wide mount for boot/frame snapshots (mem_stats refresh).
+ * stream_mount_open() registers the newest mount automatically; use this to
+ * override it.  The caller keeps ownership; NULL clears the registration. */
+void stream_set_global_mount(StreamMount *mount);
+/* Same sample from the registered mount; zeros when none is registered. */
+void stream_stats_global(StreamStatsSnapshot *out);
+
 /* Ordering is strict: demand before P0 before P1 before P2. */
 typedef enum {
     STREAM_PRIO_DEMAND = 0,

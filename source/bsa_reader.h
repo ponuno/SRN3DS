@@ -129,6 +129,26 @@ uint32_t bsa_file_count(const BsaArchive *archive);
  * cache is separate and deliberately not included. */
 size_t bsa_index_bytes(const BsaArchive *archive);
 
+/* Resident memory of one open archive, measured from the live allocations
+ * rather than from limits:
+ *   index        bsa_index_bytes() (locator + tags + checkpoints + folders)
+ *   page_cache   malloc'd read-through page buffer (0 if allocation failed)
+ *   range_cache  inflated records currently kept by the compressed LRU
+ *   overhead     sizeof(BsaArchive) + the reader's owned I/O context
+ *   total        sum of the four
+ * Caller-owned contexts, stdio FILE buffers and caller memory blobs are not
+ * counted.  A closed/NULL archive reports every field as 0. */
+typedef struct {
+    uint64_t index;
+    uint64_t page_cache;
+    uint64_t range_cache;
+    uint64_t overhead;
+    uint64_t total;
+} BsaResidentStats;
+void bsa_resident_stats(const BsaArchive *archive, BsaResidentStats *out);
+/* Convenience: index + page_cache + range_cache + overhead. */
+size_t bsa_resident_bytes(const BsaArchive *archive);
+
 /* Case- and separator-insensitive lookup ("interface/StartMenu.swf" works).
  * Returns BSA_ERR_NOT_FOUND without touching `out` when absent. */
 BsaStatus bsa_find(const BsaArchive *archive, const char *path, BsaMatch *out);

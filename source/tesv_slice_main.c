@@ -17,6 +17,7 @@
 #include "ir_core.h"
 #include "hprof.h"
 #include "mem_stats.h"
+#include "asset_stream.h"
 #include "n3ds_lift_runtime.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
@@ -130,11 +131,20 @@ static void mem_refresh(void *ctx) {
                                    tc.pinned_refusals);
         }
     }
-    /* The overlay reports archives, not resident index bytes; report exactly
-     * what the existing API knows (have_bsa stays 0). */
+    /* Measured resident bytes of the archives that are actually open, plus
+     * their component split.  The overlay opens sources lazily, so
+     * have_bsa follows bsa_mounted, not the configured source count. */
     Win32BsaOverlayStats ov = {0};
     win32_bsa_overlay_stats(&ov);
-    mem_stats_set_bsa(0, ov.archives);
+    mem_stats_set_bsa_detail(ov.resident_bytes, ov.index_bytes,
+                             ov.page_cache_bytes, ov.range_cache_bytes,
+                             ov.archives, ov.resident_archives);
+    StreamStatsSnapshot ss = {0};
+    stream_stats_global(&ss);
+    mem_stats_set_stream(ss.queued, ss.staged_bytes, ss.physical_reads,
+                         ss.physical_bytes, ss.physical_misses, ss.demand_hits,
+                         ss.demand_bytes, ss.prefetch_demand_hits,
+                         ss.cancelled, ss.budget_denied);
     size_t tg = 0, tp = 0;
     const char *gs = getenv("N3DS_TEX_GUEST_LIMIT");
     const char *gg = getenv("N3DS_TEX_GPU_LIMIT");

@@ -83,6 +83,9 @@ static void test_guest_and_format(void)
     mem_stats_set_irc(4u << 20, 64);
     mem_stats_set_irdecode(1234, 9);
     mem_stats_set_bsa(0, 13);
+    mem_stats_set_bsa_detail(3000000u, 2000000u, 524288u, 476512u, 13u, 12u);
+    mem_stats_set_stream(3, 256u * 1024u, 11, 65536u * 4u, 2, 7, 4096u, 5, 1,
+                         9);
     mem_stats_set_texcache(100, 200, 300, 400, 2, 1, 7);
     mem_stats_set_tex_limits(4u << 20, 2u << 20);
     mem_stats_set_os_region(178u << 20, 60u << 20, 118u << 20);
@@ -93,7 +96,7 @@ static void test_guest_and_format(void)
     mem_stats_note_arena("skin", 4096u * 80u);
     mem_stats_note_arena("srquad", 6u * 36u);
 
-    char line[2048];
+    char line[3072];
     size_t n = mem_stats_format(line, sizeof line, "test", "extra_key=42");
     CHECK(n > 0);
     CHECK(line[n - 1] == '\n');
@@ -108,7 +111,22 @@ static void test_guest_and_format(void)
     CHECK(strstr(line, "irdec_bytes=1234") != NULL);
     CHECK(strstr(line, "irdec_blocks=9") != NULL);
     CHECK(strstr(line, "bsa_archives=13") != NULL);
-    CHECK(strstr(line, "have_bsa=0") != NULL);
+    CHECK(strstr(line, "bsa_mounted=12") != NULL);
+    CHECK(strstr(line, "have_bsa=1") != NULL);
+    CHECK(strstr(line, "bsa_resident=3000000") != NULL);
+    CHECK(strstr(line, "bsa_index=2000000") != NULL);
+    CHECK(strstr(line, "bsa_page_cache=524288") != NULL);
+    CHECK(strstr(line, "bsa_range_cache=476512") != NULL);
+    CHECK(strstr(line, "stream_queued=3") != NULL);
+    CHECK(strstr(line, "stream_staged=262144") != NULL);
+    CHECK(strstr(line, "stream_reads=11") != NULL);
+    CHECK(strstr(line, "stream_bytes=262144") != NULL);
+    CHECK(strstr(line, "stream_misses=2") != NULL);
+    CHECK(strstr(line, "stream_demand_hits=7") != NULL);
+    CHECK(strstr(line, "stream_demand_bytes=4096") != NULL);
+    CHECK(strstr(line, "stream_prefetch_demand_hits=5") != NULL);
+    CHECK(strstr(line, "stream_cancelled=1") != NULL);
+    CHECK(strstr(line, "stream_budget_denied=9") != NULL);
     CHECK(strstr(line, "tex_guest_limit=4194304") != NULL);
     CHECK(strstr(line, "tex_gpu_limit=2097152") != NULL);
     CHECK(strstr(line, "tex_trim_evictions=1") != NULL);
@@ -125,7 +143,7 @@ static void test_guest_and_format(void)
     CHECK(strstr(line, "\nextra_key") == NULL);
 
     /* One key=value per token; every token contains '='. */
-    char copy[2048];
+    char copy[3072];
     snprintf(copy, sizeof copy, "%s", line);
     unsigned tokens = 0;
     for (char *tok = strtok(copy, " \n"); tok; tok = strtok(NULL, " \n")) {
@@ -134,6 +152,61 @@ static void test_guest_and_format(void)
         CHECK(strchr(tok, '=') != NULL);
     }
     CHECK(tokens > 30);
+}
+
+static void test_bsa_stream_counters(void)
+{
+    mem_stats_configure(120, 24, 4);
+    char line[3072];
+
+    /* Fresh configure: nothing measured yet, and have_bsa stays false. */
+    mem_stats_format(line, sizeof line, "cold", NULL);
+    CHECK(strstr(line, "bsa_resident=0") != NULL);
+    CHECK(strstr(line, "bsa_index=0") != NULL);
+    CHECK(strstr(line, "bsa_mounted=0") != NULL);
+    CHECK(strstr(line, "have_bsa=0") != NULL);
+    CHECK(strstr(line, "stream_queued=0") != NULL);
+    CHECK(strstr(line, "stream_staged=0") != NULL);
+    CHECK(strstr(line, "stream_cancelled=0") != NULL);
+
+    /* Components are reported verbatim; resident is the caller's measured
+     * sum, not recomputed from the components (an archive may also include
+     * struct/context overhead). */
+    mem_stats_set_bsa_detail(2600000u, 2054436u, 425984u, 120000u, 13u, 13u);
+    mem_stats_format(line, sizeof line, "warm", NULL);
+    CHECK(strstr(line, "bsa_resident=2600000") != NULL);
+    CHECK(strstr(line, "bsa_index=2054436") != NULL);
+    CHECK(strstr(line, "bsa_page_cache=425984") != NULL);
+    CHECK(strstr(line, "bsa_range_cache=120000") != NULL);
+    CHECK(strstr(line, "bsa_archives=13") != NULL);
+    CHECK(strstr(line, "bsa_mounted=13") != NULL);
+    CHECK(strstr(line, "have_bsa=1") != NULL);
+
+    /* Configured but no archive open: not mounted. */
+    mem_stats_set_bsa_detail(0, 0, 0, 0, 13u, 0u);
+    mem_stats_format(line, sizeof line, "configured", NULL);
+    CHECK(strstr(line, "bsa_archives=13") != NULL);
+    CHECK(strstr(line, "bsa_mounted=0") != NULL);
+    CHECK(strstr(line, "have_bsa=0") != NULL);
+
+    /* Stream counters: a second snapshot reflects new values without
+     * accumulating them. */
+    mem_stats_set_stream(4, 131072u, 20, 65536u * 6u, 3, 9, 8192u, 6, 2, 5);
+    mem_stats_format(line, sizeof line, "stream1", NULL);
+    CHECK(strstr(line, "stream_queued=4") != NULL);
+    CHECK(strstr(line, "stream_staged=131072") != NULL);
+    CHECK(strstr(line, "stream_reads=20") != NULL);
+    CHECK(strstr(line, "stream_bytes=393216") != NULL);
+    CHECK(strstr(line, "stream_misses=3") != NULL);
+    CHECK(strstr(line, "stream_demand_hits=9") != NULL);
+    CHECK(strstr(line, "stream_demand_bytes=8192") != NULL);
+    CHECK(strstr(line, "stream_prefetch_demand_hits=6") != NULL);
+    CHECK(strstr(line, "stream_cancelled=2") != NULL);
+    CHECK(strstr(line, "stream_budget_denied=5") != NULL);
+    mem_stats_format(line, sizeof line, "stream2", NULL);
+    CHECK(strstr(line, "stream_queued=4") != NULL);
+    CHECK(strstr(line, "stream_reads=20") != NULL);
+    CHECK(strstr(line, "stream_budget_denied=5") != NULL);
 }
 
 static void install_fake(FakeHeap *f)
@@ -201,6 +274,7 @@ int main(void)
     test_profile_table();
     test_parse();
     test_guest_and_format();
+    test_bsa_stream_counters();
     test_space_accounting();
     if (g_failures) {
         fprintf(stderr, "mem_stats: %d failure(s)\n", g_failures);

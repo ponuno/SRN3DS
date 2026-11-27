@@ -463,6 +463,20 @@ static void test_root(void) {
     CHECK(st.range_reads >= 3u);
     CHECK(st.full_reads == 0u);
     CHECK(st.bytes_read >= strlen(k_nif));
+    CHECK(st.resident_archives >= 1u);
+    CHECK(st.index_bytes > 0u);
+    CHECK(st.page_cache_bytes > 0u);
+    CHECK(st.resident_bytes >= st.index_bytes + st.page_cache_bytes +
+                                st.range_cache_bytes);
+    CHECK(st.resident_bytes <= st.index_bytes + st.page_cache_bytes +
+                                st.range_cache_bytes +
+                                (uint64_t)st.resident_archives * 2048u);
+    {
+        uint64_t per_archive = 0;
+        for (unsigned i = 0; i < WIN32_BSA_OVERLAY_MAX_ARCHIVES; ++i)
+            per_archive += st.archive_resident[i];
+        CHECK(per_archive == st.resident_bytes);
+    }
     if (failures)
         fprintf(stderr, "overlay stats: archives=%u failed=%u stat=%llu open=%llu range=%llu full=%llu bytes=%llu\n",
                 st.archives, st.archives_failed,
@@ -528,6 +542,22 @@ static void test_real_install(void) {
     CHECK(st.archives >= 10u);
     CHECK(st.open_resolves >= 3u);
     CHECK(st.bytes_read >= 800000u);
+    CHECK(st.resident_archives >= 1u);
+    CHECK(st.index_bytes > 0u);
+    /* The nif/DDS reads above go through the compressed range cache. */
+    CHECK(st.range_cache_bytes > 0u);
+    CHECK(st.resident_bytes >= st.index_bytes + st.page_cache_bytes +
+                                st.range_cache_bytes);
+    CHECK(st.resident_bytes <= st.index_bytes + st.page_cache_bytes +
+                                st.range_cache_bytes +
+                                (uint64_t)st.resident_archives * 2048u);
+    CHECK(st.index_bytes <= 2u * 1024u * 1024u);
+    printf("win32_bsa_overlay: resident=%llu index=%llu page=%llu range=%llu "
+           "(%u open archive(s))\n",
+           (unsigned long long)st.resident_bytes,
+           (unsigned long long)st.index_bytes,
+           (unsigned long long)st.page_cache_bytes,
+           (unsigned long long)st.range_cache_bytes, st.resident_archives);
     win32_shutdown();
     env_set("TESV_BSA_OVERLAY_ALL", "0");
     env_set("TESV_BSA_OVERLAY_FIRST", "0");

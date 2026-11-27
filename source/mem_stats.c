@@ -48,8 +48,16 @@ typedef struct {
     uint64_t irc_bytes, irc_records;
     uint64_t irdec_bytes, irdec_blocks;
     uint64_t bsa_resident;
-    unsigned bsa_archives;
+    uint64_t bsa_index, bsa_page_cache, bsa_range_cache;
+    unsigned bsa_archives, bsa_mounted;
     int have_bsa;
+
+    unsigned stream_queued;
+    uint64_t stream_staged;
+    uint64_t stream_reads, stream_bytes, stream_misses;
+    uint64_t stream_demand_hits, stream_demand_bytes;
+    uint64_t stream_prefetch_demand_hits;
+    uint64_t stream_cancelled, stream_budget_denied;
 
     size_t tex_guest, tex_gpu, tex_guest_peak, tex_gpu_peak;
     size_t tex_guest_limit, tex_gpu_limit;
@@ -201,13 +209,39 @@ void mem_stats_set_irdecode(uint64_t bytes, uint64_t blocks)
     g.irdec_blocks = blocks;
 }
 
-void mem_stats_set_bsa(uint64_t resident_bytes, unsigned archives)
-{
+void mem_stats_set_bsa(uint64_t resident_bytes, unsigned archives) {
+    mem_stats_set_bsa_detail(resident_bytes, 0, 0, 0, archives,
+                              archives ? 1u : 0u);
+}
+
+void mem_stats_set_bsa_detail(uint64_t resident_bytes, uint64_t index_bytes,
+                              uint64_t page_cache_bytes,
+                              uint64_t range_cache_bytes, unsigned archives,
+                              unsigned mounted) {
     g.bsa_resident = resident_bytes;
+    g.bsa_index = index_bytes;
+    g.bsa_page_cache = page_cache_bytes;
+    g.bsa_range_cache = range_cache_bytes;
     g.bsa_archives = archives;
-    /* The overlay exposes archive count and total index cap, not resident
-     * bytes.  Keep have_bsa = 0 until such an API exists. */
-    g.have_bsa = 0;
+    g.bsa_mounted = mounted;
+    g.have_bsa = mounted > 0;
+}
+
+void mem_stats_set_stream(unsigned queued, uint64_t staged_bytes,
+                          uint64_t physical_reads, uint64_t physical_bytes,
+                          uint64_t misses, uint64_t demand_hits,
+                          uint64_t demand_bytes, uint64_t prefetch_demand_hits,
+                          uint64_t cancelled, uint64_t budget_denied) {
+    g.stream_queued = queued;
+    g.stream_staged = staged_bytes;
+    g.stream_reads = physical_reads;
+    g.stream_bytes = physical_bytes;
+    g.stream_misses = misses;
+    g.stream_demand_hits = demand_hits;
+    g.stream_demand_bytes = demand_bytes;
+    g.stream_prefetch_demand_hits = prefetch_demand_hits;
+    g.stream_cancelled = cancelled;
+    g.stream_budget_denied = budget_denied;
 }
 
 void mem_stats_set_os_region(uint64_t size, uint64_t used, uint64_t free_bytes)
@@ -407,10 +441,28 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
         APPEND(" arena_%s=%llu", g.arena[i].name,
                (unsigned long long)g.arena[i].bytes);
     APPEND(" irc_bytes=%llu irc_records=%llu irdec_bytes=%llu irdec_blocks=%llu "
-           "bsa_resident=%llu bsa_archives=%u have_bsa=%d",
+           "bsa_resident=%llu bsa_index=%llu bsa_page_cache=%llu "
+           "bsa_range_cache=%llu bsa_archives=%u bsa_mounted=%u have_bsa=%d",
            (unsigned long long)g.irc_bytes, (unsigned long long)g.irc_records,
            (unsigned long long)g.irdec_bytes, (unsigned long long)g.irdec_blocks,
-           (unsigned long long)g.bsa_resident, g.bsa_archives, g.have_bsa);
+           (unsigned long long)g.bsa_resident,
+           (unsigned long long)g.bsa_index,
+           (unsigned long long)g.bsa_page_cache,
+           (unsigned long long)g.bsa_range_cache, g.bsa_archives, g.bsa_mounted,
+           g.have_bsa);
+    APPEND(" stream_queued=%u stream_staged=%llu stream_reads=%llu "
+           "stream_bytes=%llu stream_misses=%llu stream_demand_hits=%llu "
+           "stream_demand_bytes=%llu stream_prefetch_demand_hits=%llu "
+           "stream_cancelled=%llu stream_budget_denied=%llu",
+           g.stream_queued, (unsigned long long)g.stream_staged,
+           (unsigned long long)g.stream_reads,
+           (unsigned long long)g.stream_bytes,
+           (unsigned long long)g.stream_misses,
+           (unsigned long long)g.stream_demand_hits,
+           (unsigned long long)g.stream_demand_bytes,
+           (unsigned long long)g.stream_prefetch_demand_hits,
+           (unsigned long long)g.stream_cancelled,
+           (unsigned long long)g.stream_budget_denied);
     APPEND(" tex_guest=%llu tex_gpu=%llu tex_guest_peak=%llu tex_gpu_peak=%llu "
            "tex_guest_limit=%llu tex_gpu_limit=%llu "
            "tex_trims=%u tex_trim_evictions=%u tex_evictions_gpu=%u "
@@ -437,7 +489,7 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
 void mem_stats_snapshot(const char *tag, const char *extra)
 {
     if (!g.enabled) return;
-    char line[2048];
+    char line[3072];
     mem_stats_format(line, sizeof line, tag, extra);
     FILE *f = g.log ? g.log : stderr;
     fputs(line, f);
