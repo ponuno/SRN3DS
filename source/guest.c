@@ -201,8 +201,8 @@ typedef struct { uint8_t *ptr; uint32_t bytes; uint32_t first, count; } SlabAllo
 void guest_init(GuestMemory *m, size_t limit) {
     memset(m, 0, sizeof *m);
     m->limit = limit;
-    guest_watch.memory = m;
     memset(&guest_watch, 0, sizeof guest_watch);
+    guest_watch.memory = m;
     const char *address = getenv("N3DS_WATCH_ADDR");
     if (address && *address) {
         const char *target = getenv("N3DS_WATCH_VALUE");

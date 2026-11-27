@@ -13,6 +13,17 @@ static const IrFnEntry *g_fns;
 /* Host-installed cooperative time-slice hook (see ir_core.h).  Defined here
  * rather than in ir_exec.c because ir_container.c includes ir_exec.c. */
 void (*n3ds_ir_yield_hook)(void);
+/* Host-installed diagnostic PC ring (see ir_core.h).  Same reasoning as the
+ * yield hook: both executors include this object, guest.c/win32_thread.c do not
+ * have to be linked. */
+void (*n3ds_ir_pc_note_hook)(uint32_t pc, unsigned thread, uint32_t esp,
+                             uint32_t ecx, uint32_t eax);
+uint32_t (*n3ds_ir_thread_id_hook)(void);
+void n3ds_ir_note_pc(uint32_t pc, uint32_t esp, uint32_t ecx, uint32_t eax) {
+    if (n3ds_ir_pc_note_hook)
+        n3ds_ir_pc_note_hook(pc, n3ds_ir_thread_id_hook ? n3ds_ir_thread_id_hook() : 0u,
+                             esp, ecx, eax);
+}
 static unsigned g_nfns;
 /* Direct-mapped memo for the immutable bound table. The table is rebound only
  * at boot (or by a test), and n3ds_ir_bind clears this. */

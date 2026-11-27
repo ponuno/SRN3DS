@@ -41,9 +41,6 @@ void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
                          int is_irc);
 void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
                            uint32_t next, int is_irc);
-/* Cooperative guest thread id (win32_thread.c); used only by the optional
- * per-thread block ring. */
-unsigned win32_thread_current_id(void);
 /* Cached trace switch (see n3ds_lift_runtime.c): -1 unknown, 1 off, 2 on. */
 extern int g_a43f_trace_on;
 void n3ds_a43f_trace_prime(void);
@@ -1465,11 +1462,11 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
     n3ds_ir_cur_func_end = func_end;
     if (g_a43f_trace_on < 0) n3ds_a43f_trace_prime();
     int trace = g_a43f_trace_on;
-    guest_pc_ring_note(addr, win32_thread_current_id(), c->r[4], c->r[1], c->r[0]);
+    n3ds_ir_note_pc(addr, c->r[4], c->r[1], c->r[0]);
     for (;;) {
         IrExecBlock b;
         g_ir_ip = ip;
-        guest_pc_ring_note(ip, win32_thread_current_id(), c->r[4], c->r[1], c->r[0]);
+        n3ds_ir_note_pc(ip, c->r[4], c->r[1], c->r[0]);
         HP_START(hp_fetch);
         if (n3ds_ir_fetch_block(c, ip, func_end, &b)) {
             HP_ADD(HP_FETCH, hp_fetch);

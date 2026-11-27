@@ -13,6 +13,7 @@
 #include "guest_process.h" /* GP_TEB/GP_PEB/GP_TLS layout constants */
 #include "n3ds_lift_runtime.h"
 #include "ir_core.h"
+#include "guest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -603,6 +604,10 @@ int win32_thread_init(GuestMemory *m) {
     reap_pending = NULL;
     win32_sync_set_current_thread(MAIN_THREAD_ID);
     win32_sync_set_waker(win32_thread_wake);
+    /* Diagnostic PC ring (N3DS_PC_RING=1).  Installed here so the IR executors
+     * keep linking without guest.c/win32_thread.c in standalone tools. */
+    n3ds_ir_pc_note_hook = guest_pc_ring_note;
+    n3ds_ir_thread_id_hook = win32_thread_current_id;
     /* Time-slice guest IR execution.  The executors call this between blocks so
      * a guest loop with no blocking call cannot own the CPU: TESV's stream/menu
      * worker spins in a hash walk and otherwise starves the init thread and

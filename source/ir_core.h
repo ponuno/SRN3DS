@@ -178,6 +178,16 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end);
 #define N3DS_IR_YIELD_INTERVAL 4096u
 extern void (*n3ds_ir_yield_hook)(void);
 
+/* Diagnostic PC ring (N3DS_PC_RING=1).  Defined here so ir_exec.c and
+ * ir_container.c never reference guest.c/win32_thread.c directly: the
+ * standalone container tools link both executors without those modules.
+ * win32_thread_init() installs the guest note function and the thread-id
+ * provider; with both NULL the call is a branch and nothing else. */
+extern void (*n3ds_ir_pc_note_hook)(uint32_t pc, unsigned thread, uint32_t esp,
+                                    uint32_t ecx, uint32_t eax);
+extern uint32_t (*n3ds_ir_thread_id_hook)(void);
+void n3ds_ir_note_pc(uint32_t pc, uint32_t esp, uint32_t ecx, uint32_t eax);
+
 /* Runtime dispatch (implemented in n3ds_lift_runtime.c): resolve AOT, IR or
  * import and invoke. Returns 0 when invoked, -1 when the address is neither
  * (the caller then raises the appropriate fault). */

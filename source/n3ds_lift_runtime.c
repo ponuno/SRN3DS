@@ -1,5 +1,6 @@
 #include "n3ds_lift_runtime.h"
 #include "win32_shims.h"
+#include "ir_core.h"
 /* Optional measurement hook; absent from ordinary host/ARM test binaries. */
 extern void *tesv_sm3_probe_level_ptr(uint32_t address, size_t bytes)
     __attribute__((weak));
@@ -31,9 +32,6 @@ static GuestMemory *memory;
 static const FnModule *modules;
 static unsigned module_count;
 static int ever_bound;
-/* Cooperative guest thread id (win32_thread.c); used only by the optional
- * per-thread block ring. */
-unsigned win32_thread_current_id(void);
 #if defined(__ELF__) || defined(__3DS__) || defined(_WIN32)
 /* The hybrid build links a generated table of interpreter function ranges. It
  * is optional: a pure-AOT build simply leaves both symbols undefined. */
@@ -723,7 +721,7 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
                     fprintf(stderr,"[guest] last_block_pc=%08x\n",(unsigned)guest_watch_last_pc());
                     guest_pc_ring_dump(stderr);
                     {
-                        unsigned tid = win32_thread_current_id();
+                        unsigned tid = n3ds_ir_thread_id_hook ? n3ds_ir_thread_id_hook() : 0u;
                         fprintf(stderr,"[guest] fault thread=%u\n", tid);
                         guest_pc_ring_dump_thread(stderr, tid);
                     }
@@ -985,8 +983,7 @@ int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
         }
     }
     g_last_call=addr; g_last_cpu=c;
-    guest_pc_ring_note(addr, win32_thread_current_id(), c?c->r[4]:0,
-                      c?c->r[1]:0, c?c->r[0]:0);
+    n3ds_ir_note_pc(addr, c?c->r[4]:0, c?c->r[1]:0, c?c->r[0]:0);
     /* The recent-call ring (including its guest stack read) is consumed only by
      * the hang watchdog dump. Reading the return address on every dispatch costs
      * a checked guest read; skip both when no watchdog/dump env is armed. */
@@ -1056,8 +1053,7 @@ void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return;
     menu_trace(c, addr);
     g_last_call=addr; g_last_cpu=c;
-    guest_pc_ring_note(addr, win32_thread_current_id(), c?c->r[4]:0,
-                      c?c->r[1]:0, c?c->r[0]:0);
+    n3ds_ir_note_pc(addr, c?c->r[4]:0, c?c->r[1]:0, c?c->r[0]:0);
     const FnEntry *e=lookup(addr);
     if(e){*cache=e;e->fn(c);return;}
     int slice = n3ds_ir_has(addr) != 0;
