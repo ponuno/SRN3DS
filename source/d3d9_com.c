@@ -3749,8 +3749,19 @@ static int shader_state(void){
     if(menu_vs)return menu_vs;
     int menu_ps=menu_ps_state();
     if(menu_ps)return menu_ps;
-    int needs_texture=g.ps&&(!g.ps->has_tev||g.ps->tev.textures!=0);if(needs_texture&&!g.tex)return D9_INVALID;if(!g.vs)return d9_set_shader_clip(g.device,NULL);
-    if((g.constants_mask&0xFu)!=0xFu)return D9_INVALID;return d9_set_shader_clip(g.device,&g.constants);}
+    int needs_texture=g.ps&&(!g.ps->has_tev||g.ps->tev.textures!=0);
+    if(needs_texture&&!g.tex){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "draw needs a bound texture on stage 0 (the pixel stage samples it)");
+        return D9_INVALID;
+    }
+    if(!g.vs)return d9_set_shader_clip(g.device,NULL);
+    if((g.constants_mask&0xFu)!=0xFu){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "fixed-function clip needs vertex constants c0..c3 (SetVertexShaderConstantF)");
+        return D9_INVALID;
+    }
+    return d9_set_shader_clip(g.device,&g.constants);}
 #if D9_CAPTURE_HOOK
 /* ---- first-draw capture -------------------------------------------------- */
 /* Enabled only when TESV_D3D9_CAPTURE_DRAWS is a positive integer.  The
@@ -3967,10 +3978,13 @@ static void shader_draw_trace(const char *method, int rc) {
 
 static uint32_t shader_gate(const char *method){
     int rc=shader_state();
-    if(rc)shader_draw_trace(method, rc);
     if(!rc)return OK;
+    /* Name the refusal before the observation trace: the trace reads
+     * g.last_diagnostic, so filling it afterwards printed
+     * `refusal=DrawIndexedPrimitive: ` with no reason. */
     if(!g.last_diagnostic[0])
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: shader state rejected",method);
+    shader_draw_trace(method, rc);
     return hr(rc);
 }
 /* A multi-pass plan replays the same draw through every pass.  Single-pass and
@@ -3988,15 +4002,54 @@ static void draw_primitive(CPU *c){draw_probe(c,"DrawPrimitive");
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitive: %s",d9_last_draw_diagnostic(g.device));
     shader_draw_trace("DrawPrimitive",rc);
     RET(hr(rc),4);}
+/* Observation-only argument trace (N3DS_SHADER_DRAW_TRACE=1).  The shader
+ * trace alone says the draw was refused but not which D3D9 arguments and which
+ * objects were bound; this line answers that for the first real-slice draws. */
+static void draw_args_trace(const char *method,const char *where,
+                            unsigned a1,unsigned a2,unsigned a3,unsigned a4,
+                            unsigned a5,unsigned a6){
+    if(!d9_shader_draw_trace_enabled())return;
+    unsigned cop=0,carg1=0,carg2=0,aop=0,aarg1=0,aarg2=0,tc=0,s1op=0;
+    if(g.device){
+        (void)d9_get_texture_stage_state(g.device,0,D9_TSS_COLOROP,&cop);
+        (void)d9_get_texture_stage_state(g.device,0,D9_TSS_COLORARG1,&carg1);
+        (void)d9_get_texture_stage_state(g.device,0,D9_TSS_COLORARG2,&carg2);
+        (void)d9_get_texture_stage_state(g.device,0,D9_TSS_ALPHAOP,&aop);
+        (void)d9_get_texture_stage_state(g.device,0,D9_TSS_ALPHAARG1,&aarg1);
+        (void)d9_get_texture_stage_state(g.device,0,D9_TSS_ALPHAARG2,&aarg2);
+        (void)d9_get_texture_stage_state(g.device,0,D9_TSS_TEXCOORDINDEX,&tc);
+        (void)d9_get_texture_stage_state(g.device,1,D9_TSS_COLOROP,&s1op);
+    }
+    fprintf(stderr,"[d3d9-draw] %s %s args=%u,%u,%u,%u,%u,%u fvf=%08x "
+                   "vs=%s ps=%s tex=%s tex1=%s ib=%s stage0=%u/%u/%u-%u/%u/%u "
+                   "tc=%u stage1op=%u diag=\"%s\"\n",
+            method,where,a1,a2,a3,a4,a5,a6,g.fvf,
+            g.vs?"bound":"null",g.ps?"bound":"null",g.tex?"bound":"null",
+            g.tex1?"bound":"null",g.ib?"bound":"null",
+            cop,carg1,carg2,aop,aarg1,aarg2,tc,s1op,g.last_diagnostic);
+}
 static void draw_indexed(CPU *c){draw_probe(c,"DrawIndexedPrimitive");
-    if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!A(4))RET(INVALID,7);
-    uint32_t gate=shader_gate("DrawIndexedPrimitive");if(gate!=OK)RET(gate,7);
+    unsigned a1=A(1),a2=A(2),a3=A(3),a4=A(4),a5=A(5),a6=A(6);
+    draw_args_trace("DrawIndexedPrimitive","pre",a1,a2,a3,a4,a5,a6);
+    if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!a4){
+        const char *why="no device or the draw is outside BeginScene/EndScene";
+        if(!g.declaration&&!g.fvf)why="no FVF or vertex declaration is bound";
+        else if(!g.ib)why="no index buffer is bound";
+        else if(g.ib->lock_guest)why="the index buffer is locked";
+        else if(!a4)why="NumVertices is zero";
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitive: %s",why);
+        draw_args_trace("DrawIndexedPrimitive","refused",a1,a2,a3,a4,a5,a6);
+        RET(INVALID,7);
+    }
+    uint32_t gate=shader_gate("DrawIndexedPrimitive");
+    if(gate!=OK){draw_args_trace("DrawIndexedPrimitive","gate",a1,a2,a3,a4,a5,a6);RET(gate,7);}
     const D9ShaderPlan *plan=multi_pass_plan();
     int rc=plan?d9_draw_plan_passes(g.device,plan,&(D9PlanDraw){.type=A(1),.base=(int32_t)A(2),.start=A(5),.primitives=A(6),.indexed=1,.limited=1,.min=A(3),.count=A(4)})
                :d9_draw_indexed_range(g.device,A(1),(int32_t)A(2),A(3),A(4),A(5),A(6));
     if(rc==D9_OK)capture_draw(A(1),A(5),A(6),1,(int32_t)A(2),A(3),A(4),A(5));
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitive: %s",d9_last_draw_diagnostic(g.device));
     shader_draw_trace("DrawIndexedPrimitive",rc);
+    draw_args_trace("DrawIndexedPrimitive","post",a1,a2,a3,a4,a5,a6);
     RET(hr(rc),7);}
 /* Number of stream-zero vertices a D3D9 triangle primitive consumes. */
 static int up_geometry(unsigned type,unsigned primitives,unsigned *vertices){
@@ -4033,12 +4086,20 @@ static void draw_primitive_up(CPU *c){draw_probe(c,"DrawPrimitiveUP");
     RET(hr(rc),5);}
 static void draw_indexed_up(CPU *c){draw_probe(c,"DrawIndexedPrimitiveUP");
     unsigned type=A(1),min=A(2),count=A(3),primitives=A(4),fmt=A(6),stride=A(8),indices=0,used,isize;
+    draw_args_trace("DrawIndexedPrimitiveUP","pre",type,min,count,primitives,fmt,stride);
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||
        indexed_up_geometry(type,primitives,&indices)||!count||min>UINT32_MAX-count||
        (fmt!=D9_INDEX16&&fmt!=D9_INDEX32)||!stride||stride>4096u){
-        d3d_log("DrawIndexedPrimitiveUP","invalid scene, vertex format, index format/range, primitive count or vertex stride");RET(INVALID,9);
+        const char *why="invalid scene, vertex format, index format/range, primitive count or vertex stride";
+        if(!g.declaration&&!g.fvf)why="no FVF or vertex declaration is bound";
+        else if(indexed_up_geometry(type,primitives,&indices))why="primitive type/count is outside the UP draw bound";
+        else if(!count)why="NumVertices is zero";
+        else if(fmt!=D9_INDEX16&&fmt!=D9_INDEX32)why="index format is neither D3DFMT_INDEX16 nor D3DFMT_INDEX32";
+        else if(!stride||stride>4096u)why="vertex stride is zero or above 4,096";
+        d3d_log("DrawIndexedPrimitiveUP",why);RET(INVALID,9);
     }
-    uint32_t gate=shader_gate("DrawIndexedPrimitiveUP");if(gate!=OK)RET(gate,9);
+    uint32_t gate=shader_gate("DrawIndexedPrimitiveUP");
+    if(gate!=OK){draw_args_trace("DrawIndexedPrimitiveUP","gate",type,min,count,primitives,fmt,stride);RET(gate,9);}
     size_t need=(size_t)min+count;
     if(need>SIZE_MAX/stride){d3d_log("DrawIndexedPrimitiveUP","vertex range overflows the stream-zero byte size");RET(INVALID,9);}
     isize=fmt==D9_INDEX32?4u:2u;used=type==D9_TRIANGLELIST?primitives*3u:primitives+2u;
@@ -4049,6 +4110,7 @@ static void draw_indexed_up(CPU *c){draw_probe(c,"DrawIndexedPrimitiveUP");
                :d9_draw_indexed_primitive_up(g.device,type,min,count,primitives,idesc,fmt,vdata,stride);
     if(rc==D9_OK)capture_draw(type,0,primitives,0,0,0,0,0);
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitiveUP: %s",d9_last_draw_diagnostic(g.device));
+    draw_args_trace("DrawIndexedPrimitiveUP","post",type,min,count,primitives,fmt,stride);
     RET(hr(rc),9);}
 
 #define FUNCTIONS(X) X(unsupported) X(direct_create) X(query) X(addref) X(release_fn) X(adapter_count) X(display_mode) X(check_format) X(create_device) \
