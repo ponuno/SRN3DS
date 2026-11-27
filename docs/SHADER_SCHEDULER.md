@@ -43,7 +43,7 @@ in `tools/shaders/compile.py` and the per-family pack recipes:
 | `nrm` | unnormalised vector, `nrm_lowered_to_unnormalised_vector` | approx |
 | `rcp` | constant/linear fit on `[0.25,4]`, coefficients recorded | approx |
 | `rsq` | constant/linear fit on `[0.0625,16]` | approx |
-| `pow(x,e)` | integer `e` expanded to `e-1` multiplies; other exponents use base | exact for integer e (approx if drop) |
+| `pow(x,e)` | integer `e` expanded to `e-1` multiplies; other exponents use base | approx wrapper, exact algebra for integer e |
 | `cmp` | then arm (`cmp_lowered_to_then_arm`) | approx |
 | `slt/sge` | zero constant (`slt_lowered_to_zero`) | approx |
 | `min/max` | clamp forms fold to REPLACE; others keep first operand | approx |
@@ -93,7 +93,7 @@ Measured over `Skyrim - Shaders.bsa` (base archive, 2026-11-27):
 | draw-enabled | 10 | 10 |
 | refused | 6,189 | **217** |
 | pixel-shader refusals | 5,975 | **0** |
-| scheduler catalog rows | -- | 5,972 (9 exact, 5,963 approx, 23 multipass) |
+| scheduler catalog rows | -- | 5,972 (12 exact, 5,960 approx, 18 multipass) |
 
 All 5,975 previously refused PS hashes now have a plan: exact where the
 expression is symbolically inside the TEV op set, otherwise an approximation
