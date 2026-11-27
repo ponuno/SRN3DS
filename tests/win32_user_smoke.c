@@ -308,6 +308,28 @@ int main(void) {
     CALL("user32.dll","SetForegroundWindow",a,1,&r);
     CHECK(r==0 && last_error()==1400,"SetForegroundWindow zero invalid");
 
+    /* ---- a shown window is the active/foreground window ---------------
+     * The retail WinMain only calls its frame pump (0x69cbd0) when
+     * GetActiveWindow() equals the handle it stored.  A single-window virtual
+     * desktop must therefore activate the game's own shown window. */
+    a[0]=win;a[1]=5; /* SW_SHOW */
+    CALL("user32.dll","ShowWindow",a,2,&r);
+    CHECK(r==0,"ShowWindow first show returns hidden state");
+    CALL("user32.dll","GetActiveWindow",NULL,0,&r);
+    CHECK(r==win,"shown window becomes active");
+    CALL("user32.dll","GetForegroundWindow",NULL,0,&r);
+    CHECK(r==win,"shown window becomes foreground");
+    a[0]=0;a[1]=CLASS_NAME;a[2]=TITLE;a[3]=0x10000000u|0x00CF0000u;
+    a[4]=0;a[5]=0;a[6]=64;a[7]=64;a[8]=0;a[9]=0;a[10]=0;a[11]=0;
+    CALL("user32.dll","CreateWindowExA",a,12,&r);
+    uint32_t win2=r;
+    CHECK(win2==0x00010001u,"second window handle");
+    CALL("user32.dll","GetActiveWindow",NULL,0,&r);
+    CHECK(r==win,"WS_VISIBLE does not steal an existing active window");
+    a[0]=win2;
+    CALL("user32.dll","DestroyWindow",a,1,&r);
+    CHECK(r==1,"DestroyWindow second");
+
     /* ---- FindWindow and GDI ---- */
     a[0]=CLASS_NAME;a[1]=TITLE;
     CALL("user32.dll","FindWindowA",a,2,&r);

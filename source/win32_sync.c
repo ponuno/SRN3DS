@@ -233,6 +233,7 @@ static uint32_t wait_common_raw(CPU *c, const uint32_t *h, unsigned n, int all,
         if (idx >= 0) return WAIT_OBJECT_0 + (uint32_t)idx;
         if (ms == 0) return WAIT_TIMEOUT;
         if (!blocker) return wait_unavailable(c, h[0], ms);
+        win32_thread_wait_note("Wait", (unsigned)M32(c->r[4]), h[0], n, ms);
         {
             static unsigned block_logged;
             if (block_logged < 400) {

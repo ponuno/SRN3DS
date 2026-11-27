@@ -202,6 +202,50 @@ static volatile int g_watchdog_armed;
 static unsigned g_watchdog_ms;
 static unsigned g_dump_after_ms;
 static void activity(void) { g_activity_ms = win32_thread_now_ms(); }
+
+/* ---- last blocking shim call site (diagnostics only) -------------------- */
+/* A timed block with an empty handle set (Sleep, the critical-section spin)
+ * leaves no trace in the wait object table.  Record the caller so the hang
+ * dump can name it instead of printing "wait_n=0". */
+#define WAIT_NOTE_MAX (1 + MAX_THREADS)
+typedef struct {
+    uint32_t id;
+    uint32_t caller, a0, a1, ms;
+    char what[20];
+} WaitNote;
+static WaitNote wait_notes[WAIT_NOTE_MAX];
+static unsigned wait_note_n;
+int n3ds_frame_trace_on(void) {
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("N3DS_FRAME_TRACE"); v = e && *e && strcmp(e, "0"); }
+    return v;
+}
+static WaitNote *wait_note_for(uint32_t id, int create) {
+    for (unsigned i = 0; i < wait_note_n; ++i)
+        if (wait_notes[i].id == id) return &wait_notes[i];
+    if (!create || wait_note_n >= WAIT_NOTE_MAX) return NULL;
+    WaitNote *n = &wait_notes[wait_note_n++];
+    memset(n, 0, sizeof *n);
+    n->id = id;
+    return n;
+}
+void win32_thread_wait_note(const char *what, uint32_t caller, uint32_t a0,
+                            uint32_t a1, uint32_t ms) {
+    uint32_t id = cur ? cur->id : MAIN_THREAD_ID;
+    WaitNote *n = wait_note_for(id, 1);
+    if (!n) return;
+    n->caller = caller; n->a0 = a0; n->a1 = a1; n->ms = ms;
+    snprintf(n->what, sizeof n->what, "%s", what ? what : "?");
+}
+static const char *wait_note_text(uint32_t id) {
+    static char buf[160];
+    WaitNote *n = wait_note_for(id, 0);
+    if (!n) return "";
+    snprintf(buf, sizeof buf, " note=%s caller=%08x a0=%08x a1=%08x ms=%lu",
+             n->what, (unsigned)n->caller, (unsigned)n->a0, (unsigned)n->a1,
+             (unsigned long)n->ms);
+    return buf;
+}
 /* Everything the watchdog is willing to call progress, sampled cheaply enough
  * for the 50 ms monitor loop. See N3dsWatchdogSample in win32_thread.h. */
 static N3dsWatchdogSample watchdog_sample(void) {
@@ -240,7 +284,14 @@ static void dump_thread(const char *role, W32Thread *t) {
                 t->wait_n, t->wait_all, (unsigned)t->timed, t->wait_status);
         for (unsigned k = 0; k < t->wait_n; ++k)
             fprintf(stderr, "%s%03x", k ? "," : "", (unsigned)t->wait_h[k]);
+        if (t->timed) {
+            uint64_t now = win32_thread_now_ms();
+            fprintf(stderr, " deadline=%llu left=%lld",
+                    (unsigned long long)t->deadline,
+                    (long long)((int64_t)t->deadline - (int64_t)now));
+        }
     }
+    fprintf(stderr, "%s", wait_note_text(t->id));
     fputc('\n', stderr);
     uint32_t esp = t->cpu.r[4];
     if (!mem || !esp) return;
@@ -510,6 +561,16 @@ static int block_current(const uint32_t *handles, unsigned count, int wait_all,
     W32Thread *t = cur;
     if (!t) return WAIT_NO_SCHED;
     activity();
+    if (n3ds_frame_trace_on() && t == &main_thread) {
+        static unsigned logged;
+        if (logged < 200) {
+            ++logged;
+            fprintf(stderr, "[frame] main block n=%u ms=%lu", count,
+                    (unsigned long)timeout_ms);
+            for (unsigned i = 0; i < count; ++i) fprintf(stderr, " h=%03x", (unsigned)handles[i]);
+            fputc('\n', stderr);
+        }
+    }
     if (t->suspends) return WAIT_DEADLOCK; /* cannot be resumed while blocked */
     if (count > MAX_WAIT) count = MAX_WAIT;
     memset(t->wait_h, 0, sizeof t->wait_h);
@@ -593,6 +654,15 @@ void win32_thread_wake(uint32_t handle) {
         hit[i]->wait_status = WAIT_SIGNALED;
         enqueue(hit[i]);
     }
+    if (n3ds_frame_trace_on()) {
+        static unsigned logged;
+        for (unsigned i = 0; i < n; ++i)
+            if (hit[i] == &main_thread && logged < 200) {
+                ++logged;
+                fprintf(stderr, "[frame] main wake h=%03x thread=%lu\n", (unsigned)handle,
+                        (unsigned long)(cur ? cur->id : 0));
+            }
+    }
     if (n || handle == 0x537u || handle == 0x504u)
         fprintf(stderr, "[wake] h=%03x waiters=%u thread=%lu\n", (unsigned)handle, n,
                 (unsigned long)(cur ? cur->id : 0));
@@ -654,6 +724,11 @@ static void thread_trampoline(void *arg) {
     }
     t->state = ST_EXITED;
     t->in_ready = 0;
+    if (n3ds_frame_trace_on()) {
+        fprintf(stderr, "[frame] thread id=%lu exited code=%08x\n",
+                (unsigned long)t->id, (unsigned)t->exit_code);
+        win32_cs_thread_exit(t->id);
+    }
     win32_thread_wake(t->handle);
     reap_pending = t;
     for (;;) {

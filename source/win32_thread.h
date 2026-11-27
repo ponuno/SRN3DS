@@ -114,6 +114,15 @@ size_t win32_thread_struct_size(void);
  * Present has been submitted. No-op unless TESV_HANG_WATCHDOG_MS is set. */
 void n3ds_hang_watchdog_arm(void);
 
+/* Diagnostics: remember the shim call site the current guest thread is blocked
+ * in.  The hang dump prints it next to the thread state, so a wait with no
+ * handle (Sleep/EnterCriticalSection spin) still names its caller.  Purely
+ * informational: it never changes scheduling or guest state. */
+void win32_thread_wait_note(const char *what, uint32_t caller, uint32_t a0,
+                            uint32_t a1, uint32_t ms);
+/* Debug trace switch for frame/pump stalls (N3DS_FRAME_TRACE). */
+int n3ds_frame_trace_on(void);
+
 /* ---- hang-watchdog progress signal (diagnostics only) ------------------- */
 /* A scheduler event is not the only honest progress.  When the only runnable
  * guest thread yields, the scheduler switches to itself, and a worker that is

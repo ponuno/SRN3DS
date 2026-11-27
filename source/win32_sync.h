@@ -4,6 +4,7 @@
 #include "x86.h"
 #include "guest.h"
 #include "win32_shims.h" /* WIN32_THUNK_BASE */
+#include "win32_thread.h" /* win32_thread_wait_note (diagnostics only) */
 
 /* Private thunk window for the single-thread Win32 synchronization subset.
  * It is disjoint from the main win32_shims table, whose win32_lookup returns

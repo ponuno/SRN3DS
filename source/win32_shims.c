@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 200809L
+﻿#define _POSIX_C_SOURCE 200809L
 #include "win32_shims.h"
 #include "tesv_tls_policy.h"
 #include "win32_sync.h"
@@ -773,16 +773,44 @@ static void s_GetSystemTimeAsFileTime(CPU *c){
 /* Sleep is a scheduling point: other guest threads run while this one waits.
  * An infinite Sleep can only be ended by an APC, which this port does not
  * implement, so it stays an explicit fault. */
+static void sleep_spin_log(CPU *c){
+    static unsigned spin_logged;
+    uint32_t lock=c->r[6];
+    fprintf(stderr,"[lock] spin sleep lock=%08x owner=%08x rec=%08x thread=%u\n",
+            lock,lock?M32(lock):0u,lock?M32(lock+4):0u,win32_thread_current_id());
+    if(!spin_logged&&lock){
+        spin_logged=1;
+#ifdef _WIN32
+        {void *frames[20];unsigned short n=(unsigned short)RtlCaptureStackBackTrace(0,20,frames,NULL);void *mod=GetModuleHandleA(NULL);fprintf(stderr,"[lock] bt=%u",(unsigned)n);for(unsigned k=0;k<n;++k)fprintf(stderr," %llx",(unsigned long long)((uintptr_t)frames[k]-(uintptr_t)mod));fprintf(stderr,"\n");}
+#else
+        fprintf(stderr,"[lock] bt=unavailable on this host\n");
+#endif
+        fprintf(stderr,"[lock] lock[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(lock-8),M32(lock-4),M32(lock),M32(lock+4),M32(lock+8),M32(lock+12),M32(lock+16),M32(lock+20),M32(lock+24),M32(lock+28));
+        uint32_t o=M32(lock);
+        if(o&&guest_ptr(mem,o,4))
+            fprintf(stderr,"[lock] owner[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(o-8),M32(o-4),M32(o),M32(o+4),M32(o+8),M32(o+12),M32(o+16),M32(o+20),M32(o+24),M32(o+28));
+        else if(o)fprintf(stderr,"[lock] owner=%08x is not a guest pointer (thread id or stale value); owner dump skipped\n",o);
+    }
+}
 static void s_Sleep(CPU *c){
     uint32_t ms=A(0);
     if(ms==UINT32_MAX)rt_unimpl(c,0,"infinite Sleep cannot be ended (no APCs)");
-    if(ms>=1u){static unsigned logged;if(logged<20u){++logged;uint32_t ret=M32(c->r[4]);if(ret==0x00401755u){static unsigned spin_logged;uint32_t lock=c->r[6];fprintf(stderr,"[lock] spin sleep lock=%08x owner=%08x rec=%08x thread=%u\n",lock,lock?M32(lock):0u,lock?M32(lock+4):0u,win32_thread_current_id());if(!spin_logged&&lock){spin_logged=1;
-#ifdef _WIN32
-{void *frames[20];unsigned short n=(unsigned short)RtlCaptureStackBackTrace(0,20,frames,NULL);void *mod=GetModuleHandleA(NULL);fprintf(stderr,"[lock] bt=%u",(unsigned)n);for(unsigned k=0;k<n;++k)fprintf(stderr," %llx",(unsigned long long)((uintptr_t)frames[k]-(uintptr_t)mod));fprintf(stderr,"\n");}
-#else
-fprintf(stderr,"[lock] bt=unavailable on this host\n");
-#endif
-fprintf(stderr,"[lock] lock[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(lock-8),M32(lock-4),M32(lock),M32(lock+4),M32(lock+8),M32(lock+12),M32(lock+16),M32(lock+20),M32(lock+24),M32(lock+28));uint32_t o=M32(lock);if(o&&guest_ptr(mem,o,4)){fprintf(stderr,"[lock] owner[-8..+24]=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",M32(o-8),M32(o-4),M32(o),M32(o+4),M32(o+8),M32(o+12),M32(o+16),M32(o+20),M32(o+24),M32(o+28));}else if(o)fprintf(stderr,"[lock] owner=%08x is not a guest pointer (thread id or stale value); owner dump skipped\n",o);}else fprintf(stderr,"[sync] Sleep %lu ms from %08x thread=%u\n",(unsigned long)ms,ret,win32_thread_current_id());}}}
+    win32_thread_wait_note("Sleep", M32(c->r[4]), ms, 0, ms);
+    if(ms>=1u){
+        static unsigned logged;
+        if(logged<400u){
+            ++logged;
+            uint32_t ret=M32(c->r[4]);
+            if(ret==0x00401755u)sleep_spin_log(c);
+            else fprintf(stderr,"[sync] Sleep %lu ms from %08x thread=%u\n",
+                         (unsigned long)ms,ret,win32_thread_current_id());
+        }
+    }else if(n3ds_frame_trace_on()){
+        static unsigned logged0;
+        if(logged0<64u){++logged0;
+            fprintf(stderr,"[sync] Sleep(0) from %08x thread=%u\n",
+                    M32(c->r[4]),win32_thread_current_id());}
+    }
     win32_thread_sleep(ms);
     RET(0,1);
 }
@@ -842,6 +870,7 @@ static void cs_track_add(uint32_t p){
 static void cs_track_del(uint32_t p){
     for(unsigned i=0;i<cs_tracked_n;++i)if(cs_tracked[i]==p){cs_tracked[i]=cs_tracked[--cs_tracked_n];return;}
 }
+static void cs_init(CPU *c,uint32_t p,uint32_t spin);
 /* Hang-watchdog diagnostic: tracked critical sections and their owners. */
 void win32_cs_dump(FILE *f){
     if(!f)return;
@@ -853,6 +882,18 @@ void win32_cs_dump(FILE *f){
         if(!guest_read32(mem,p+12,&held)){}
         fprintf(f,"[hang] cs %08x owner=%08x rec=%lu held=%lu\n",p,owner,
                 (unsigned long)rec,(unsigned long)held);
+    }
+}
+/* Diagnostic: a guest thread that terminates while still owning a tracked
+ * critical section leaves every later waiter spinning forever.  Report it by
+ * name at exit instead of only in the hang dump. */
+void win32_cs_thread_exit(uint32_t thread){
+    for(unsigned i=0;i<cs_tracked_n;++i){
+        uint32_t p=cs_tracked[i],owner=0,rec=0;
+        if(!guest_read32(mem,p+4,&owner)||!guest_read32(mem,p+8,&rec))continue;
+        if(owner==thread)
+            fprintf(stderr,"[cs] thread %lu exited holding cs %08x rec=%lu\n",
+                    (unsigned long)thread,p,(unsigned long)rec);
     }
 }
 static void cs_init(CPU *c,uint32_t p,uint32_t spin){
@@ -875,6 +916,7 @@ static void s_EnterCriticalSection(CPU *c){
     if(owner!=0xffffffffu && owner!=me){
         if(!win32_thread_scheduler_ready())
             rt_unimpl(c,p,"EnterCriticalSection held by another guest thread (no scheduler)");
+        win32_thread_wait_note("EnterCS", M32(c->r[4]), p, owner, 1);
         unsigned waited_ms=0;
         for(unsigned spin=0;;++spin){
             if(spin<64u){win32_thread_yield();}
@@ -890,7 +932,10 @@ static void s_EnterCriticalSection(CPU *c){
     }
     if(owner==0xffffffffu){M32(p+4)=me;M32(p+8)=1;}
     else M32(p+8)+=1;
-    M32(p+12)=1;RET(0,1);
+    M32(p+12)=1;
+    if(n3ds_frame_trace_on()){static unsigned t;if(t<400u){++t;
+        fprintf(stderr,"[cs] enter cs=%08x thread=%u rec=%lu\n",p,(unsigned)me,(unsigned long)M32(p+8));}}
+    RET(0,1);
 }
 static void s_LeaveCriticalSection(CPU *c){
     uint32_t p=A(0),me=win32_sync_current_thread();checked(c,p,CS_BYTES);
@@ -912,6 +957,8 @@ static void s_LeaveCriticalSection(CPU *c){
     if(M32(p+4)!=me)rt_unimpl(c,p,"LeaveCriticalSection from a non-owning guest thread");
     if(rec==1){M32(p+4)=0xffffffffu;M32(p+8)=0;M32(p+12)=0;}
     else M32(p+8)=rec-1;
+    if(n3ds_frame_trace_on()&&rec==1){static unsigned t;if(t<400u){++t;
+        fprintf(stderr,"[cs] leave cs=%08x thread=%u\n",p,(unsigned)me);}}
     RET(0,1);
 }
 static void s_GetCurrentDirectoryA(CPU *c){
@@ -1225,7 +1272,10 @@ static void s_CoInitializeEx(CPU *c){
 static void s_CoInitialize(CPU *c){uint32_t reserved=A(0);if(reserved)FAIL(ERR_INVALID_PARAMETER,0x80070057u,1);unsigned old=com_refs;if(com_refs<0xffffffffu)++com_refs;RET(old?1u:0u,1);}
 static void s_CoUninitialize(CPU *c){if(com_refs)--com_refs;RET(0,0);}
 static void s_CoCreateInstance(CPU *c){set_error(c,0);RET(0x80040154u,5); /* REGDB_E_CLASSNOTREG */ }
-static void s_GetActiveWindow(CPU *c){RET(0,0);}
+/* GetActiveWindow lives in win32_user.c, which tracks the single virtual
+ * window.  A zero-returning copy here used to shadow it (win32_resolve consults
+ * this table first), so the engine saw "window not active" forever and parked
+ * its frame pump in Sleep(50). */
 static void s_DispatchMessageA(CPU *c){RET(0,1); /* minimal message loop: nothing queued */ }
 static void s_GetUserNameA(CPU *c){
     uint32_t buf=A(0),pcb=A(1);if(!pcb)FAIL(ERR_INVALID_PARAMETER,0,2);
@@ -3887,7 +3937,8 @@ static void s_GetDiskFreeSpaceExA(CPU *c){
 static void s_SleepEx(CPU *c){
     uint32_t ms=A(0),alert=A(1);
     if(ms==UINT32_MAX)rt_unimpl(c,0,"SleepEx(INFINITE) cannot be ended (no APCs)");
-    if(ms>=1u){static unsigned logged;if(logged<20u){++logged;fprintf(stderr,"[sync] SleepEx %lu ms from %08x thread=%u\n",(unsigned long)ms,M32(c->r[4]),win32_thread_current_id());}}
+    win32_thread_wait_note("SleepEx", M32(c->r[4]), ms, 0, ms);
+    if(ms>=1u||n3ds_frame_trace_on()){static unsigned logged;if(logged<200u){++logged;fprintf(stderr,"[sync] SleepEx %lu ms from %08x thread=%u\n",(unsigned long)ms,M32(c->r[4]),win32_thread_current_id());}}
     win32_thread_sleep(ms);
     (void)alert;set_error(c,0);RET(0,2); /* no APCs are ever queued */
 }
@@ -4384,7 +4435,7 @@ static void s_BinkCopyToBufferRect(CPU *c){
  X("kernel32.dll","FlsAlloc",FlsAlloc) X("kernel32.dll","FlsFree",FlsFree) X("kernel32.dll","FlsSetValue",FlsSetValue) X("kernel32.dll","FlsGetValue",FlsGetValue) \
  X("kernel32.dll","SetHandleCount",SetHandleCount) X("kernel32.dll","CopyFileA",CopyFileA) \
  X("advapi32.dll","GetUserNameA",GetUserNameA) \
- X("user32.dll","GetActiveWindow",GetActiveWindow) X("user32.dll","DispatchMessageA",DispatchMessageA) \
+ X("user32.dll","DispatchMessageA",DispatchMessageA) \
  X("ole32.dll","CoInitialize",CoInitialize) X("ole32.dll","CoInitializeEx",CoInitializeEx) X("ole32.dll","CoUninitialize",CoUninitialize) X("ole32.dll","CoCreateInstance",CoCreateInstance) \
  X("kernel32.dll","GetSystemInfo",GetSystemInfo) X("kernel32.dll","GetLogicalProcessorInformation",GetLogicalProcessorInformation) X("kernel32.dll","GetSystemTimeAsFileTime",GetSystemTimeAsFileTime) \
  X("kernel32.dll","ExitProcess",ExitProcess) X("kernel32.dll","GetCommandLineA",GetCommandLineA) X("kernel32.dll","GetCommandLineW",GetCommandLineW) \

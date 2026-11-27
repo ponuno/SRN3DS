@@ -51,6 +51,7 @@ typedef struct {
 
 typedef struct {
     int used;
+    int visible;
     unsigned cls;
     int32_t x,y,w,h;
     char title[MAX_TITLE];
@@ -168,8 +169,16 @@ static void s_CreateWindowExA(CPU *c) {
     if(n>=MAX_TITLE)n=MAX_TITLE-1;
     memcpy(w->title,title,n);
     w->title[n]=0;
+    uint32_t hwnd=HWND_BASE+i;
+    if(((uint32_t)A(3))&0x10000000u){ /* WS_VISIBLE */
+        w->visible=1;
+        if(!active_window)active_window=hwnd;
+        if(!foreground_window)foreground_window=hwnd;
+    }
+    fprintf(stderr,"[user] CreateWindowExA cls=%.24s hwnd=%08x style=%08x visible=%d active=%08x\n",
+            name,hwnd,(unsigned)A(3),w->visible,active_window);
     set_error(c,0);
-    RET(HWND_BASE+i,12);
+    RET(hwnd,12);
 }
 static void s_DestroyWindow(CPU *c) {
     uint32_t hwnd=A(0);
@@ -215,6 +224,11 @@ static void s_SetWindowPos(CPU *c) {
     uint32_t flags=A(6);
     if(!(flags&SWP_NOMOVE)){w->x=(int32_t)A(2);w->y=(int32_t)A(3);}
     if(!(flags&SWP_NOSIZE)){w->w=(int32_t)A(4);w->h=(int32_t)A(5);}
+    if(flags&0x0040u){ /* SWP_SHOWWINDOW */
+        w->visible=1;
+        if(!active_window)active_window=A(0);
+        if(!foreground_window)foreground_window=A(0);
+    }
     set_error(c,0);
     RET(1,7);
 }
@@ -300,16 +314,37 @@ static void s_GetWindowThreadProcessId(CPU *c) {
     RET(1,2);
 }
 static void s_ShowWindow(CPU *c) {
-    if(!win_for(A(0)))FAIL(ERR_INVALID_WINDOW_HANDLE,0,2);
+    UserWindow *w=win_for(A(0));
+    if(!w)FAIL(ERR_INVALID_WINDOW_HANDLE,0,2);
+    int32_t cmd=(int32_t)A(1);
+    int was_visible=w->visible;
+    w->visible = cmd!=0; /* SW_HIDE == 0 */
+    if(w->visible){
+        /* A single-window virtual desktop has one focused top-level window.
+         * The shell that would normally send WM_ACTIVATE does not exist here,
+         * so the game's own shown window becomes active and foreground. */
+        if(!active_window)active_window=A(0);
+        if(!foreground_window)foreground_window=A(0);
+        fprintf(stderr,"[user] window %08x shown cmd=%ld active=%08x fg=%08x\n",
+                (unsigned)A(0),(long)cmd,(unsigned)active_window,
+                (unsigned)foreground_window);
+    }
     set_error(c,0);
-    RET(1,2);
+    RET(was_visible?1:0,2);
 }
 static void s_UpdateWindow(CPU *c) {
     if(!win_for(A(0)))FAIL(ERR_INVALID_WINDOW_HANDLE,0,1);
     set_error(c,0);
     RET(1,1);
 }
-static void s_GetActiveWindow(CPU *c) {RET(active_window,0);}
+static void s_GetActiveWindow(CPU *c) {
+    if(!active_window)
+        for(unsigned i=0;i<MAX_WINDOWS;++i)
+            if(windows[i].used && windows[i].visible){
+                active_window=HWND_BASE+i;break;
+            }
+    RET(active_window,0);
+}
 static void s_SetActiveWindow(CPU *c) {
     uint32_t hwnd=A(0);
     if(hwnd && !win_for(hwnd))FAIL(ERR_INVALID_WINDOW_HANDLE,0,1);
@@ -318,7 +353,14 @@ static void s_SetActiveWindow(CPU *c) {
     set_error(c,0);
     RET(old,1);
 }
-static void s_GetForegroundWindow(CPU *c) {RET(foreground_window,0);}
+static void s_GetForegroundWindow(CPU *c) {
+    if(!foreground_window)
+        for(unsigned i=0;i<MAX_WINDOWS;++i)
+            if(windows[i].used && windows[i].visible){
+                foreground_window=HWND_BASE+i;break;
+            }
+    RET(foreground_window,0);
+}
 static void s_SetForegroundWindow(CPU *c) {
     uint32_t hwnd=A(0);
     if(!win_for(hwnd))FAIL(ERR_INVALID_WINDOW_HANDLE,0,1);

@@ -1,5 +1,6 @@
 #include "n3ds_lift_runtime.h"
 #include "win32_shims.h"
+#include "win32_thread.h"
 #include "ir_core.h"
 /* Optional measurement hook; absent from ordinary host/ARM test binaries. */
 extern void *tesv_sm3_probe_level_ptr(uint32_t address, size_t bytes)
@@ -143,12 +144,13 @@ static void menu_trace(CPU *c,uint32_t addr){
         0x00690f90u,0x008e1950u,0x00431b00u,0x00a4b470u,0x00a4b500u,0x00a4b5c0u,
         0x00876f60u,0x00876fc0u,0x00876b90u,0x00a60c80u,0x00a60c10u,
         0x00a5eaa0u,0x00a5ed20u,0x008779d0u,0x00877a50u,0x008765f0u,0x00876bf0u,
-        0x00876a50u,0x00a64ba0u,0x00a64940u};
+        0x00876a50u,0x00a64ba0u,0x00a64940u,0x00401710u,0x006f3f9du,0x006f3fd8u,
+        0x006f3fe8u,0x0069df7eu,0x0069dfe7u,0x0069e015u};
     unsigned i,n=sizeof va/sizeof va[0];
     for(i=0;i<n&&va[i]!=addr;++i);
     if(i==n)return;
     static unsigned seen[sizeof va/sizeof va[0]];
-    unsigned cap=(addr==0x008779d0u)?24u:8u;
+    unsigned cap=(addr==0x008779d0u)?24u:(addr==0x00401710u?400u:(addr==0x0069df7eu?64u:8u));
     if(seen[i]>=cap)return;
     ++seen[i];
     uint32_t from=menu_rd32(c->r[4]);
@@ -186,6 +188,27 @@ static void menu_trace(CPU *c,uint32_t addr){
         uint32_t obj=sing?menu_rd32(sing+8):0;
         fprintf(stderr,"[menu] FadeInMenu menu=%08x menu+8=%08x [[menu+8]+10]=%08x\n",
                 (unsigned)sing,(unsigned)obj,(unsigned)(obj?menu_rd32(obj+0x10):0));
+    }
+    if(addr==0x00401710u){
+        uint32_t lock=c->r[1]; /* __thiscall: ecx = lock */
+        uint32_t owner=menu_rd32(lock),depth=menu_rd32(lock+4);
+        fprintf(stderr,"[menu] lock=%08x owner=%08x depth=%08x thread=%u\n",
+                (unsigned)lock,(unsigned)owner,(unsigned)depth,
+                (unsigned)win32_thread_current_id());
+    }
+    if(addr==0x0069df7eu){
+        uint32_t app=menu_rd32(0x1b2e860u);
+        fprintf(stderr,"[menu] winmain sleep gate a=%08x b=%02x c=%02x "
+                "app+4=%02x app+5=%02x app+a=%02x inload=%u lstate=%u phase=%u\n",
+                (unsigned)menu_rd32(0x1b2e8ecu),
+                (unsigned)(menu_rd32(0x1272eb8u)&0xffu),
+                (unsigned)(c?menu_rd32(c->r[4]+0x13u)&0xffu:0),
+                (unsigned)(app?menu_rd32(app+4)&0xffu:0xff),
+                (unsigned)(app?menu_rd32(app+5)&0xffu:0xff),
+                (unsigned)(app?menu_rd32(app+0xau)&0xffu:0xff),
+                (unsigned)(menu_rd32(0x12e3561u)&0xffu),
+                (unsigned)(menu_rd32(0x12e3562u)&0xffu),
+                (unsigned)menu_rd32(0x1ba75f8u));
     }
 }
 #define RT_CALL_RING 12u

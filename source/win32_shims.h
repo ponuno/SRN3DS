@@ -72,6 +72,8 @@ uint32_t win32_last_exit_code(void);
 uint32_t win32_last_exit_from(void);
 /* Hang-watchdog diagnostic: tracked critical sections and their owners. */
 void win32_cs_dump(FILE *f);
+/* Diagnostic: report tracked critical sections a terminating thread still owns. */
+void win32_cs_thread_exit(uint32_t thread);
 /* Hang-watchdog diagnostic: recent InterlockedCompareExchange/Exchange words. */
 void win32_icx_dump(FILE *f);
 /* IO telemetry: every completed ReadFile counts.  n3ds_io_dump lists totals,
