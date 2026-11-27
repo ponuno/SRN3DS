@@ -113,8 +113,10 @@ int n3ds_env_cfg_parse(const char *text, N3dsEnvCfg *cfg, size_t *ignored) {
             char line[ENV_CFG_LINE_CAP];
             memcpy(line, p, len);
             line[len] = 0;
-            if (!*trim(line) || *trim(line) == '#' || *trim(line) == ';') continue;
-            if (!parse_line(line, cfg)) count_ignored(ignored);
+            char *start = trim(line);
+            if (*start && *start != '#' && *start != ';') {
+                if (!parse_line(line, cfg)) count_ignored(ignored);
+            }
         }
         if (!end) break;
         p = end + 1;
