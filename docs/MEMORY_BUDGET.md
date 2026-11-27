@@ -3,6 +3,10 @@
 Investigation: `E:\Skyrim_N3DS_membudget\REPORT.md`, 67 logged runs. Host
 binary with the container tier, `TESV_MEMPROBE=1`.
 
+> For the current device ledger (heap/linear split, IRC/BSA/stream residents,
+> GPU-visible texture and target budget, and open levers) see
+> `docs/MEMORY_BUDGET_178.md`.
+
 ## The gate
 
 TESV calls `GlobalMemoryStatusEx` at `0x00a48a5d` (IAT `0x0106b274`) and
