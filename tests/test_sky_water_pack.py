@@ -13,7 +13,9 @@ Layers:
   the manifest agrees;
 * **honesty** - ``quality=approx`` requires a non-empty ``approximation``;
   ``quality=exact`` requires ``contract=full``, preconditions and constant
-  bindings; nothing is draw-enabled or runtime-enabled;
+  bindings; a draw-enabled approximate row needs a ``contract`` (the pack uses
+  ``lite``) and a recorded ``def_policy`` with ``clamped: 0``; no row claims a
+  runtime slot;
 * **plan vs IR** - instruction count, declared sampler/texcoord types, and for
   exact rows a symbolic comparison of the final ``oC0`` expression between the
   IR and the TEV stage data (INTERPOLATE is expanded to the same lrp form).
@@ -294,8 +296,15 @@ def validate_pack(manifest, plans_doc, refusals_doc, ir_index=None):
         planned[sha] = entry
         if entry.get("draw_enabled") not in (0, 1):
             errors.append("%s: bad draw_enabled" % where)
-        if entry.get("draw_enabled") == 1 and entry.get("contract") != "full":
-            errors.append("%s: draw_enabled=1 without a full contract" % where)
+        if entry.get("draw_enabled") == 1:
+            # A draw-enabled row must say which contract it satisfies.  Exact
+            # rows use "full"; the deliberately simplified water/sky rows use
+            # "lite" and must carry the loss list in ``approximation``.
+            if entry.get("contract") not in ("full", "lite"):
+                errors.append("%s: draw_enabled=1 without a declared contract" % where)
+            elif entry.get("contract") == "lite" and not entry.get("approximation"):
+                errors.append("%s: draw_enabled=1 lite contract without approximation"
+                              % where)
         if entry.get("runtime") not in (0, None):
             errors.append("%s: runtime=1 is not claimed by this pack" % where)
         if entry.get("quality") == "approx":
@@ -312,6 +321,12 @@ def validate_pack(manifest, plans_doc, refusals_doc, ir_index=None):
                 errors.append("%s: exact row needs preconditions" % where)
         else:
             errors.append("%s: quality must be exact or approx" % where)
+        policy = entry.get("def_policy")
+        if policy is not None:
+            if policy.get("clamped") != 0:
+                errors.append("%s: def_policy clamps a literal" % where)
+            if not isinstance(policy.get("original_literals"), list):
+                errors.append("%s: def_policy lacks original_literals" % where)
         if entry.get("stages") != len(entry.get("stage_data", [])):
             errors.append("%s: stage count mismatch" % where)
         if not 1 <= entry.get("stages", 0) <= 3:
@@ -399,16 +414,26 @@ class SkyWaterPackTest(unittest.TestCase):
         self.assertEqual(self.manifest["chunks"], 82)
         errors = validate_pack(self.manifest, self.plans, self.refusals)
         self.assertEqual(errors, [])
-        self.assertEqual(len(self.plans["entries"]), 14)
-        self.assertEqual(len(self.refusals["refusals"]), 31)
+        self.assertEqual(len(self.plans["entries"]), 45)
+        self.assertEqual(len(self.refusals["refusals"]), 0)
         self.assertEqual(self.plans["summary"]["exact"], 3)
-        self.assertEqual(self.plans["summary"]["approx"], 11)
+        self.assertEqual(self.plans["summary"]["approx"], 42)
+        self.assertEqual(self.plans["summary"]["hashes"], 45)
+        self.assertEqual(self.refusals["coverage"]["translated"], 45)
+        self.assertEqual(self.refusals["coverage"]["refused"], 0)
 
-    def test_no_draw_or_runtime_claim(self):
+    def test_draw_and_runtime_claims(self):
         for entry in self.plans["entries"]:
-            self.assertEqual(entry["draw_enabled"], 0, entry["id"])
+            self.assertEqual(entry["draw_enabled"], 1, entry["id"])
             self.assertEqual(entry.get("runtime", 0), 0, entry["id"])
-        self.assertEqual(self.refusals["coverage"]["draw_enabled"], 0)
+            if entry["quality"] == "exact":
+                self.assertEqual(entry.get("contract"), "full", entry["id"])
+            else:
+                self.assertEqual(entry.get("contract"), "lite", entry["id"])
+                self.assertTrue(entry["approximation"], entry["id"])
+            self.assertEqual(entry["def_policy"]["clamped"], 0, entry["id"])
+        self.assertEqual(self.refusals["coverage"]["draw_enabled"], 45)
+        self.assertEqual(self.refusals["coverage"]["refused"], 0)
 
     def test_plan_vs_ir(self):
         if not self.ir:
@@ -422,7 +447,10 @@ class SkyWaterPackTest(unittest.TestCase):
                 continue
             self.assertTrue(entry["preconditions"], entry["id"])
             self.assertTrue(entry["constant_bindings"], entry["id"])
+            self.assertTrue(entry.get("constant_ops"), entry["id"])
             self.assertLessEqual(entry["stages"], 2, entry["id"])
+            dst = {op["dst_reg"] for op in entry["constant_ops"]}
+            self.assertTrue(dst <= {6, 7}, entry["id"])
 
     # -- negative cases -----------------------------------------------------
     def test_negative_missing_approximation(self):
@@ -436,8 +464,9 @@ class SkyWaterPackTest(unittest.TestCase):
         doc = json.loads(json.dumps(self.plans))
         row = next(e for e in doc["entries"] if e["quality"] == "approx")
         row["draw_enabled"] = 1
+        row["contract"] = ""
         errors = validate_pack(self.manifest, doc, self.refusals)
-        self.assertTrue(any("full contract" in e for e in errors), errors)
+        self.assertTrue(any("declared contract" in e for e in errors), errors)
 
     def test_negative_hash_in_both_tables(self):
         doc = json.loads(json.dumps(self.refusals))

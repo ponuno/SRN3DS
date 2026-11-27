@@ -14,9 +14,9 @@
   "ps": 82
  },
  "coverage": {
-  "translated": 14,
-  "draw-enabled": 0,
-  "refused": 31,
+  "translated": 0,
+  "draw-enabled": 45,
+  "refused": 0,
   "contract_only": 0
  },
  "refusal_classes": {
@@ -33,99 +33,316 @@
  ],
  "plans": [
   {
+   "id": "water.surface.fresnel.lite.00ae3cdf.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "00ae3cdfb5feab0cc4bf9c8cb5220512344968535e19a4407c1bb33b8b420c9c"
+  },
+  {
    "id": "sky.tex_vcolor_x1p5_lite.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "013ad862c987aa3ece6ec06e2fcc57b94cc5a8d60a1515a2cbc65212483e9577"
   },
   {
+   "id": "water.surface.normal.lite.05fbd326.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "05fbd3260138b293f87143a92753b5a6994cc693703653d89066160d2d719e15"
+  },
+  {
+   "id": "water.surface.fresnel.lite.060ac341.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "060ac34166f28a8e777d5f2c9ea3772aea15dc56bba9f92bdb06a6e62e299c7f"
+  },
+  {
    "id": "water.surface_cube_lite.b.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "0f008dd5638437da7f3dc2d2b3c5a8e9a56e27d35f750c8ac4fbaf6c1343d107"
   },
   {
+   "id": "water.surface_dither_lite.14afadfa.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "14afadfa852a92e78dcda1b3cd45efa853cf9129e581fe9948c81ab432efa1eb"
+  },
+  {
+   "id": "water.surface.fresnel.lite.19268b16.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "19268b16f2464154ef28830aba4211214dbefadbe48c494206ca965a38edea10"
+  },
+  {
    "id": "water.fog_lerp_lite.b.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "1a48a3c10481757d2e916df9a9029f3bd17b22b706c0e5b7319cc4f042239bff"
   },
   {
    "id": "sky.tex_vcolor_bias_alphascale.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "250481a5376a565d1a12d5bceb36d5329c7a51a3903bfe839ea4ea54abb35181"
   },
   {
+   "id": "water.surface.normal.lite.27997d6f.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "27997d6fd9e25511efadd812f8ad827efc831d4d4d22e982062f95eefb917e99"
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.280ccd17.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "280ccd175c33267e19ac53ebb23da5b1968f98aaff6eb8294964b6a1a20cbc52"
+  },
+  {
    "id": "water.surface_fresnel_lite.d.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "2895c53c23193ced6fc3471df138d3d6fe1dc8db9ce598c60604df49e2493ace"
   },
   {
+   "id": "water.surface.fresnel.lite.31d53fcb.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "31d53fcbc373db9355cdbfce95d27e2d452372b15698836c776ffc5dca53f32a"
+  },
+  {
    "id": "sky.two_tex_lerp.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "37902aa719a706ea5dd41c9036d4b8f41dcb8db17c80119d05edc03edde345cd"
   },
   {
+   "id": "water.surface.normal.lite.39f229e5.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "39f229e5ad5055c58368fc7b0618b835185cabb28a7e1244e699ede22e5e0916"
+  },
+  {
+   "id": "sky.star_dither_lite.3d3ad298.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "3d3ad2986bbd4dedb4ea3404231e816cf1eb7f2d924ddfc1e1564b0471c6ac5f"
+  },
+  {
    "id": "water.surface_cube_lite.a.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "3e6befd423bdaf9a1963b2175c85ee3f0670355eb359d24be208b67a81b8a13f"
   },
   {
+   "id": "water.surface.normal.lite.42a56842.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "42a56842527987c9291c30b6ff49251e894b220bb4c7a759415e52a92d55d2d3"
+  },
+  {
    "id": "water.surface_fresnel_lite.a.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "44248bf6b5fd49f7b3ea9cf419f6dd171ffe5fdd4d19135d225a775d43a4ae5e"
   },
   {
    "id": "water.surface_fresnel_lite.e.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "497a6e339edf926dd8d2b06eec46313d3ad844c60bbcf9c9b3ea3c46a3bfbd61"
   },
   {
+   "id": "water.surface.fresnel.lite.4ba57307.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "4ba573078f2de0af9c701efc734cb9293fcd70d77f7e6bc03d4f7fff1096828b"
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.4d2da681.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "4d2da681382c5a5312e9276ebabcfb1a0f99a31d62700c00ba1ebbd843101971"
+  },
+  {
+   "id": "water.surface.fresnel.lite.50226768.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "502267687d3e1504912e1975e1fe8000b58f6917c9d4b52d7b9f1cb85539bc96"
+  },
+  {
+   "id": "water.surface.normal.lite.5f9893cd.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "5f9893cd869e6d524b5bc5dde760728db17ccb9a8c07dab115ae0bbe1168b94b"
+  },
+  {
+   "id": "water.surface_dither_lite.5ff638e2.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "5ff638e272e76afde3699b121d2b1836591ecff7053564c6aea84dd425204ffe"
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.60d29412.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "60d294122d9f9a3a0a467e08465bfedce210406545f1c63e9c931815be934fba"
+  },
+  {
    "id": "water.fog_lerp_lite.a.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "71e129a012c57e22f0d3142b1f28457ed9e24f2aa715441b47af0adbcdfe7af7"
   },
   {
+   "id": "water.surface.normal.lite.86f79b70.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "86f79b709830605cb7eb4706e063e1515e5ffaa1222b5ea26683f045ff9626ef"
+  },
+  {
    "id": "sky.tex_vcolor_bias.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "91ab7cd78fdd5705cf8772f8909dc4b13240dbf356e5c5cb7bc0dbb27a2a1a92"
   },
   {
    "id": "water.surface_fresnel_lite.c.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "92fb44343251f1895d95dfadfd0f540aae180bc55cabae1a3957b0fab450b42e"
   },
   {
+   "id": "water.surface_dither_lite.93080391.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "93080391474d9e4f11d0884518371d0d63450d08f6f3806819014adfda0e8d43"
+  },
+  {
+   "id": "water.surface.fresnel.lite.96451fca.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "96451fcacdd852a3960c4b87d88ab732f70bf1790ef4c87fcb4ead92df028a55"
+  },
+  {
+   "id": "water.surface.fresnel.lite.977a5f7a.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "977a5f7a223f4660f9dc21a3e1560fa977f4600bb0911188e42101a341a6b7d3"
+  },
+  {
+   "id": "sky.cloud_dither_lite.999e1894.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "999e18949869daae10f716ae931c9cfbeed6b0e07db895215ac41a1695317dc9"
+  },
+  {
+   "id": "water.surface.fresnel.lite.9a87584a.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "9a87584aa74cf4b69bc44cbe59814b0061f2a24c9d505deeaa18e39648715932"
+  },
+  {
+   "id": "water.surface.normal.lite.9ade7b21.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "9ade7b21c3dca5ed794622c4f1353f526fec07c273d410ee315e4b269b1740c9"
+  },
+  {
+   "id": "water.surface.fresnel.lite.9dd7fd7d.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "9dd7fd7d7cf55f6cd2983aa7d04e72f4741a16de2f0d8f658fc61968f5fb69e7"
+  },
+  {
+   "id": "water.surface.fresnel.lite.a64b5c83.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "a64b5c83ac5b31325e4b844276955eb0a8fb28aff11d60e895a944af0041953e"
+  },
+  {
+   "id": "water.surface.normal.lite.b13fa04e.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "b13fa04e59b57130a6a2f6c64a20699972a82c975ffcad6defb5dcd95fd0e9f8"
+  },
+  {
+   "id": "water.surface.normal.lite.bf35da7f.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "bf35da7f481550729f6940c791427fde35102c2c985b7b08a6320ee2b967fad3"
+  },
+  {
+   "id": "water.surface.normal.lite.c1f0adcc.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "c1f0adcc58a3cb3321b9bf116a2f8905f55f43cf30adb211b74cf6fb6cf1639a"
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.c6814553.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "c68145536b09355d800d1de924953928a0eddd9c4eafc9c30c19d2b1b4c074f0"
+  },
+  {
    "id": "water.surface_fresnel_lite.b.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "e9e6f6a82e5e523851b7911f3e28e4498fd5943831b8632926b9f49552d91ad3"
   },
   {
+   "id": "water.surface.fresnel.lite.eff05109.ps",
+   "status": "draw-enabled",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "eff05109d0aa78e74c46868545633ab95f4531fdc1f2529cb4fc8743fda3c89b"
+  },
+  {
    "id": "sky.tex_vcolor_fade_lite.ps",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "tev",
    "family": "sky_water",
    "sha256": "fa8e64396fd257f7caa5ce0fe491e6f73a8dee18da56b70603e9e1019ba1241b"

@@ -2,7 +2,7 @@
  "schema": "d9-shader-plan-v1",
  "archive": "Skyrim - Shaders.bsa",
  "pack": "sky_water",
- "note": "sky_water port-lite catalog. draw_enabled is 0 for every row: the three 'exact' entries have a complete declared material contract but no runtime codegen binding, and every 'approx' row names what it drops. runtime is 0 by default.",
+ "note": "sky_water port-lite catalog: all 45 hashes have a plan. Three sky rows are exact; the remaining sky/water rows are explicit approximations with a written loss list. Def literals outside [0,1] are folded into selectors or dropped with their expression, never clamped.",
  "summary": {
   "recipes": [
    "sky_tex_vcolor_bias",
@@ -10,16 +10,23 @@
    "sky_tex_vcolor_fade_lite",
    "sky_tex_vcolor_x1p5_lite",
    "sky_two_tex_lerp",
-   "water_fog_lerp_lite",
+   "water_surface_fresnel_lite",
    "water_surface_cube_lite",
-   "water_surface_fresnel_lite"
+   "water_fog_lerp_lite",
+   "water_surface_normal_lite",
+   "water_surface_dither_lite",
+   "water_refraction_uv_flat_lite",
+   "sky_star_dither_lite",
+   "sky_cloud_dither_lite"
   ],
-  "hashes": 14,
-  "chunks": 24,
+  "hashes": 45,
+  "chunks": 82,
   "exact": 3,
-  "approx": 11,
-  "draw_enabled": 0,
-  "runtime": 0
+  "approx": 42,
+  "draw_enabled": 45,
+  "runtime": 0,
+  "refused": 0,
+  "runtime_candidates": 45
  },
  "entries": [
   {
@@ -32,7 +39,7 @@
    "sha1": "b0ff91ca8b0cfca875a58c6b18ff0e1443a52e0c",
    "version": "0xffff0300",
    "instructions": 3,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -61,7 +68,7 @@
      ],
      "scale_rgb": 0,
      "scale_a": 0,
-     "const_reg": 0,
+     "const_reg": 7,
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "multiply_add"
@@ -83,13 +90,14 @@
     }
    ],
    "constants": [
-    0
+    0,
+    7
    ],
    "uses_vertex_color": 1,
    "requires_alpha_fixup": 0,
    "ldr_clamped": 1,
    "preconditions": [
-    "material_constant_slot0_rgb_equals_c0_y",
+    "derived_c7_equals_c0_yyy",
     "texture0_2d",
     "vertex_color",
     "ldr_quality"
@@ -97,12 +105,32 @@
    "quality": "exact",
    "approximation": "",
    "contract": "full",
-   "note": "one-stage sky sprite: texture x vertex colour plus scalar bias; alpha = texture.a x vertex.a rgb bias c0.y is a material scalar replicated into the TEV constant colour; no clamp is inserted.",
+   "note": "one-stage sky sprite: texture x vertex colour plus scalar bias; alpha = texture.a x vertex.a rgb bias c0.y is a material scalar replicated into the TEV constant colour; no clamp is inserted. The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding.",
    "constant_bindings": {
-    "0": {
+    "7": {
      "rgb": "c0.y"
     }
-   }
+   },
+   "constant_ops": [
+    {
+     "dst_reg": 7,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "yyyy",
+       "negate": 0
+      }
+     ]
+    }
+   ],
+   "def_policy": {
+    "original_literals": [],
+    "outside_unit_range": [],
+    "treatment": "def literals outside [0,1] are folded into TEV selectors or discarded as identities; nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "sky.tex_vcolor_bias_alphascale.ps",
@@ -114,7 +142,7 @@
    "sha1": "9c48ce755fef0cecb51a3df89016bf02f8a0b99f",
    "version": "0xffff0300",
    "instructions": 4,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
    "stages": 2,
    "stage_data": [
@@ -143,7 +171,7 @@
      ],
      "scale_rgb": 0,
      "scale_a": 0,
-     "const_reg": 0,
+     "const_reg": 7,
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "multiply_add"
@@ -173,7 +201,7 @@
      ],
      "scale_rgb": 0,
      "scale_a": 0,
-     "const_reg": 1,
+     "const_reg": 6,
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "alpha_scale"
@@ -196,14 +224,15 @@
    ],
    "constants": [
     0,
-    1
+    6,
+    7
    ],
    "uses_vertex_color": 1,
    "requires_alpha_fixup": 0,
    "ldr_clamped": 1,
    "preconditions": [
-    "material_constant_slot0_rgb_equals_c0_y",
-    "material_constant_slot1_alpha_equals_c0_x",
+    "derived_c7_equals_c0_yyy",
+    "derived_c6_equals_c0_xxxx",
     "texture0_2d",
     "vertex_color",
     "ldr_quality"
@@ -211,15 +240,46 @@
    "quality": "exact",
    "approximation": "",
    "contract": "full",
-   "note": "sky sprite with scalar RGB bias and a separate alpha scale; two material constant slots the IR uses c0.x and c0.y from one register; the contract requires feeding two TEV constant slots, so no clamp or renormalisation is invented.",
+   "note": "sky sprite with scalar RGB bias and a separate alpha scale; two material constant slots the IR uses c0.x and c0.y from one register; the contract requires feeding two TEV constant slots, so no clamp or renormalisation is invented. The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding.",
    "constant_bindings": {
-    "0": {
+    "7": {
      "rgb": "c0.y"
     },
-    "1": {
+    "6": {
      "alpha": "c0.x"
     }
-   }
+   },
+   "constant_ops": [
+    {
+     "dst_reg": 7,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "yyyy",
+       "negate": 0
+      }
+     ]
+    },
+    {
+     "dst_reg": 6,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "xxxx",
+       "negate": 0
+      }
+     ]
+    }
+   ],
+   "def_policy": {
+    "original_literals": [],
+    "outside_unit_range": [],
+    "treatment": "def literals outside [0,1] are folded into TEV selectors or discarded as identities; nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "sky.tex_vcolor_fade_lite.ps",
@@ -231,7 +291,7 @@
    "sha1": "b73f274ebabd82a14cc5681330ea7a7f70cfe79b",
    "version": "0xffff0300",
    "instructions": 4,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -296,7 +356,14 @@
    "quality": "approx",
    "approximation": "second-UV alpha fade (dcl_texcoord2 v1.x) dropped: alpha becomes texture.a x vertex.a; RGB scalar bias c0.y is kept in constant slot 0",
    "contract": "lite",
-   "note": "community sky sprite: texture x vertex colour + bias; per-vertex UV fade approximated away one TEV stage cannot read the second UV component as a scalar, so the fade is external."
+   "note": "community sky sprite: texture x vertex colour + bias; per-vertex UV fade approximated away one TEV stage cannot read the second UV component as a scalar, so the fade is external.",
+   "def_policy": {
+    "original_literals": [],
+    "outside_unit_range": [],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "sky.tex_vcolor_x1p5_lite.ps",
@@ -308,7 +375,7 @@
    "sha1": "545983971f6362293c248044549c72f0843dcc2c",
    "version": "0xffff0300",
    "instructions": 5,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -373,7 +440,19 @@
    "quality": "approx",
    "approximation": "second-UV alpha fade (dcl_texcoord2 v1.x) dropped: alpha becomes texture.a x vertex.a; RGB scalar bias c0.y is kept in constant slot 0; RGB 1.5 gain (def c1.x) dropped to 1.0 because TEV scale is 1x/2x/4x/0.5x",
    "contract": "lite",
-   "note": "sky sprite with a 1.5 RGB gain and second-UV alpha fade; both approximated the gain is a named visual loss, not silently clamped to 2x."
+   "note": "sky sprite with a 1.5 RGB gain and second-UV alpha fade; both approximated the gain is a named visual loss, not silently clamped to 2x.",
+   "def_policy": {
+    "original_literals": [
+     1.5,
+     0.0
+    ],
+    "outside_unit_range": [
+     1.5
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "sky.two_tex_lerp.ps",
@@ -385,7 +464,7 @@
    "sha1": "479ca47a0ae5428be231de0b2e95ff1f940492d1",
    "version": "0xffff0300",
    "instructions": 6,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
    "stages": 2,
    "stage_data": [
@@ -414,7 +493,7 @@
      ],
      "scale_rgb": 0,
      "scale_a": 0,
-     "const_reg": 0,
+     "const_reg": 7,
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "interpolate"
@@ -444,7 +523,7 @@
      ],
      "scale_rgb": 0,
      "scale_a": 0,
-     "const_reg": 1,
+     "const_reg": 6,
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "multiply_add"
@@ -472,14 +551,15 @@
    ],
    "constants": [
     0,
-    1
+    6,
+    7
    ],
    "uses_vertex_color": 1,
    "requires_alpha_fixup": 0,
    "ldr_clamped": 1,
    "preconditions": [
-    "material_constant_slot0_alpha_equals_c0_x",
-    "material_constant_slot1_rgb_equals_c0_y",
+    "derived_c7_equals_c0_xxxx",
+    "derived_c6_equals_c0_yyyy",
     "texture0_2d",
     "texture1_2d",
     "vertex_color",
@@ -488,15 +568,46 @@
    "quality": "exact",
    "approximation": "",
    "contract": "full",
-   "note": "cloud/aurora two-texture lerp by c0.x, then vertex colour modulation and scalar bias TEV INTERPOLATE is (A-B)*C+B with C alpha, exactly D3D lrp; two constant slots hold c0.x (alpha) and c0.y (RGB).",
+   "note": "cloud/aurora two-texture lerp by c0.x, then vertex colour modulation and scalar bias TEV INTERPOLATE is (A-B)*C+B with C alpha, exactly D3D lrp; two constant slots hold c0.x (alpha) and c0.y (RGB). The c0.y/c0.x scalars are now built by constant_ops (c7/c6) instead of a split runtime binding.",
    "constant_bindings": {
-    "0": {
+    "7": {
      "alpha": "c0.x"
     },
-    "1": {
+    "6": {
      "rgb": "c0.y"
     }
-   }
+   },
+   "constant_ops": [
+    {
+     "dst_reg": 7,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "xxxx",
+       "negate": 0
+      }
+     ]
+    },
+    {
+     "dst_reg": 6,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "yyyy",
+       "negate": 0
+      }
+     ]
+    }
+   ],
+   "def_policy": {
+    "original_literals": [],
+    "outside_unit_range": [],
+    "treatment": "def literals outside [0,1] are folded into TEV selectors or discarded as identities; nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.surface_fresnel_lite.a.ps",
@@ -508,9 +619,9 @@
    "sha1": "c73a58544b98bbcabb661166fca212107842e04b",
    "version": "0xffff0300",
    "instructions": 65,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
-   "stages": 2,
+   "stages": 3,
    "stage_data": [
     {
      "func_rgb": 1,
@@ -571,6 +682,36 @@
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
     }
    ],
    "textures": [
@@ -605,7 +746,26 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 3 textures + 3-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+   "note": "water surface, 3 textures + 3-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.surface_fresnel_lite.b.ps",
@@ -617,9 +777,9 @@
    "sha1": "d9f83d2c2f5da8836ed9dc727a53046ce23e24aa",
    "version": "0xffff0300",
    "instructions": 63,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
-   "stages": 2,
+   "stages": 3,
    "stage_data": [
     {
      "func_rgb": 1,
@@ -680,6 +840,36 @@
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
     }
    ],
    "textures": [
@@ -714,7 +904,26 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 3 textures + 2-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+   "note": "water surface, 3 textures + 2-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.surface_fresnel_lite.c.ps",
@@ -726,9 +935,9 @@
    "sha1": "e2116924e1b6428f39033e076339e7cb0df45426",
    "version": "0xffff0300",
    "instructions": 76,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
-   "stages": 2,
+   "stages": 3,
    "stage_data": [
     {
      "func_rgb": 1,
@@ -789,6 +998,36 @@
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
     }
    ],
    "textures": [
@@ -823,7 +1062,31 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 4 textures and specular exponent in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+   "note": "water surface, 4 textures and specular exponent in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     -1.0,
+     1.0,
+     0.0,
+     -0.000624999,
+     -0.0001,
+     0.25,
+     2.0,
+     -2.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     -1.0,
+     -0.000624999,
+     -0.0001,
+     2.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.surface_fresnel_lite.d.ps",
@@ -835,9 +1098,9 @@
    "sha1": "7303ad2e757e543b220380f2f94d68b36a7b8578",
    "version": "0xffff0300",
    "instructions": 88,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
-   "stages": 2,
+   "stages": 3,
    "stage_data": [
     {
      "func_rgb": 1,
@@ -898,6 +1161,36 @@
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
     }
    ],
    "textures": [
@@ -932,7 +1225,29 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 6 texture declarations in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+   "note": "water surface, 6 texture declarations in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     -1.0,
+     1.0,
+     0.0,
+     0.04,
+     2.0,
+     -2.0,
+     -0.5
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     -1.0,
+     2.0,
+     -2.0,
+     -0.5
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.surface_fresnel_lite.e.ps",
@@ -944,9 +1259,9 @@
    "sha1": "069b88410060e15dfbb9972a9ee5379a615dcc20",
    "version": "0xffff0300",
    "instructions": 106,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
-   "stages": 2,
+   "stages": 3,
    "stage_data": [
     {
      "func_rgb": 1,
@@ -1007,6 +1322,36 @@
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
     }
    ],
    "textures": [
@@ -1041,7 +1386,32 @@
    "quality": "approx",
    "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
    "contract": "lite",
-   "note": "water surface, 5 textures in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+   "note": "water surface, 5 textures in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target.",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     -1.0,
+     1.0,
+     0.0,
+     2.0,
+     -2.0,
+     -0.5,
+     0.04,
+     -0.099,
+     0.990000011
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     -1.0,
+     2.0,
+     -2.0,
+     -0.5,
+     -0.099
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.surface_cube_lite.a.ps",
@@ -1053,9 +1423,9 @@
    "sha1": "9279dd08f86318ae35e7808a24328f6f9f566929",
    "version": "0xffff0300",
    "instructions": 63,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
-   "stages": 2,
+   "stages": 3,
    "stage_data": [
     {
      "func_rgb": 1,
@@ -1116,6 +1486,36 @@
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
     }
    ],
    "textures": [
@@ -1148,9 +1548,31 @@
     "ldr_quality"
    ],
    "quality": "approx",
-   "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; alpha is 1.",
+   "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; a final REPLACE stage forces alpha to 1.",
    "contract": "lite",
-   "note": "water surface with cube reflection (s0) and normal map (s1) reflection is one cube sample, not a second render target."
+   "note": "water surface with cube reflection (s0) and normal map (s1) reflection is one cube sample, not a second render target.",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.099,
+     0.990000011
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.099
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.surface_cube_lite.b.ps",
@@ -1162,9 +1584,9 @@
    "sha1": "5acefb8ab98d881e06ebaade1e91df0a1f208df8",
    "version": "0xffff0300",
    "instructions": 79,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
-   "stages": 2,
+   "stages": 3,
    "stage_data": [
     {
      "func_rgb": 1,
@@ -1225,6 +1647,36 @@
      "const_is_literal": 0,
      "const_rgba8": 0,
      "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
     }
    ],
    "textures": [
@@ -1257,9 +1709,28 @@
     "ldr_quality"
    ],
    "quality": "approx",
-   "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; alpha is 1.",
+   "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; a final REPLACE stage forces alpha to 1.",
    "contract": "lite",
-   "note": "water surface with 2D scene texture and cube reflection (s1) reflection is one cube sample, not a second render target."
+   "note": "water surface with 2D scene texture and cube reflection (s1) reflection is one cube sample, not a second render target.",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     -1.0,
+     1.0,
+     0.0,
+     2.0,
+     -2.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     -1.0,
+     2.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.fog_lerp_lite.a.ps",
@@ -1271,7 +1742,7 @@
    "sha1": "85c6885dcd6b469c49ed99af31df77571cec90ba",
    "version": "0xffff0300",
    "instructions": 14,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -1330,7 +1801,18 @@
    "quality": "approx",
    "approximation": "three-colour cmp-selected fog/gradient (c0..c5) replaced by one constant fog colour; the retail 0.9 texture/fog mix is kept exactly by TEV INTERPOLATE with constant alpha 0.9. texkill in the IR is left to an external alpha test.",
    "contract": "lite",
-   "note": "fog/gradient shader: cmp chain selects a 3-colour gradient from v1.x, then 90% texture over it one stage, one constant colour; no per-vertex gradient selection."
+   "note": "fog/gradient shader: cmp chain selects a 3-colour gradient from v1.x, then 90% texture over it one stage, one constant colour; no per-vertex gradient selection.",
+   "def_policy": {
+    "original_literals": [
+     0.0,
+     1.0,
+     0.900000023
+    ],
+    "outside_unit_range": [],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   },
   {
    "id": "water.fog_lerp_lite.b.ps",
@@ -1342,7 +1824,7 @@
    "sha1": "57bc18847393b0bd348e28c42459b7e35d22d4f6",
    "version": "0xffff0300",
    "instructions": 17,
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "runtime": 0,
    "stages": 1,
    "stage_data": [
@@ -1402,7 +1884,4508 @@
    "quality": "approx",
    "approximation": "three-colour cmp-selected fog/gradient (c0..c5) replaced by one constant fog colour; the retail 0.9 texture/fog mix is kept exactly by TEV INTERPOLATE with constant alpha 0.9. texkill in the IR is left to an external alpha test.",
    "contract": "lite",
-   "note": "fog/gradient shader with alpha-kill (texkill) plus the 3-colour cmp gradient one stage, one constant colour; no per-vertex gradient selection."
+   "note": "fog/gradient shader with alpha-kill (texkill) plus the 3-colour cmp gradient one stage, one constant colour; no per-vertex gradient selection.",
+   "def_policy": {
+    "original_literals": [
+     0.0,
+     1.0,
+     0.900000023
+    ],
+    "outside_unit_range": [],
+    "treatment": "sign-expansion/scalar def literals outside [0,1] are dropped with the original expression; the lite plan uses only material constants and in-range selectors, nothing is clamped",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.00ae3cdf.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "00ae3cdfb5feab0cc4bf9c8cb5220512344968535e19a4407c1bb33b8b420c9c",
+   "sha1": "0f7ad51905bcd9f526444a5a756e2ee8dc7d41ac",
+   "version": "0xffff0300",
+   "instructions": 103,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 4,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     -2.0,
+     0.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.05fbd326.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "05fbd3260138b293f87143a92753b5a6994cc693703653d89066160d2d719e15",
+   "sha1": "d766a68bf432da2efad9c379c11ac3678b638ba5",
+   "version": "0xffff0300",
+   "instructions": 97,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.5,
+     0.04,
+     -3.0,
+     -4.0,
+     -5.0,
+     -6.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.5,
+     -3.0,
+     -4.0,
+     -5.0,
+     -6.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.060ac341.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "060ac34166f28a8e777d5f2c9ea3772aea15dc56bba9f92bdb06a6e62e299c7f",
+   "sha1": "97127546e369ec65b0b72d72f7bfc4ff1036f9cd",
+   "version": "0xffff0300",
+   "instructions": 130,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 5,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     -0.5,
+     0.04,
+     -0.099,
+     0.990000011,
+     -2.0,
+     0.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -0.5,
+     -0.099,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface_dither_lite.14afadfa.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_dither_lite",
+   "stage": "ps_3_0",
+   "sha256": "14afadfa852a92e78dcda1b3cd45efa853cf9129e581fe9948c81ab432efa1eb",
+   "sha1": "c0e1b8424565d1dcd94339da2a48dfb3bc6cab70",
+   "version": "0xffff0300",
+   "instructions": 36,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "dither_dropped",
+    "external_alpha_test",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "ordered dither, texkill and the dependent 4-tap single-channel read are dropped. One base texture is modulated by a material fresnel constant and one additive sun highlight; reflection and normal perturbation are absent.",
+   "contract": "lite",
+   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     1.0,
+     0.0,
+     -1.0
+    ],
+    "outside_unit_range": [
+     -1.0
+    ],
+    "treatment": "sign-expansion def values (-8192/2/-1) and dither 255/0.5/1/255 are dropped with the original expression; the lite recipe uses only material constant c0 and stage selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.19268b16.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "19268b16f2464154ef28830aba4211214dbefadbe48c494206ca965a38edea10",
+   "sha1": "d58af9476bfa2f7c2d1416cf257962bb02b9d010",
+   "version": "0xffff0300",
+   "instructions": 112,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 4,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     -0.099,
+     0.990000011,
+     0.0,
+     -2.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -0.099,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.27997d6f.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "27997d6fd9e25511efadd812f8ad827efc831d4d4d22e982062f95eefb917e99",
+   "sha1": "22f1a9788dfcb3e247653cd2fdd1f89481fc437e",
+   "version": "0xffff0300",
+   "instructions": 80,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -3.0,
+     -4.0,
+     -5.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -3.0,
+     -4.0,
+     -5.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.280ccd17.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_refraction_uv_flat_lite",
+   "stage": "ps_3_0",
+   "sha256": "280ccd175c33267e19ac53ebb23da5b1968f98aaff6eb8294964b6a1a20cbc52",
+   "sha1": "9e5b8becd8ae1c14060901419e843878a29f185a",
+   "version": "0xffff0300",
+   "instructions": 14,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      14,
+      14,
+      14
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294934656,
+     "instruction": "flat_projected_uv"
+    }
+   ],
+   "textures": [],
+   "inputs": [],
+   "constants": [],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "flat_refraction_uv",
+    "distortion_dropped",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
+   "contract": "lite",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -0.5,
+     0.100000001,
+     -0.100000001,
+     0.900000023,
+     -0.090000003,
+     1.0,
+     0.0
+    ],
+    "outside_unit_range": [
+     -0.5,
+     -0.100000001,
+     -0.090000003
+    ],
+    "treatment": "all original def literals, including -0.5/1.8/0.1/0.9, are dropped with the rcp/min/cmp expression; the only value emitted is the in-range literal 0.5 for the flat centre UV.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.31d53fcb.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "31d53fcbc373db9355cdbfce95d27e2d452372b15698836c776ffc5dca53f32a",
+   "sha1": "0282abb118e204c845d6b834ee0cbd1fd09805d0",
+   "version": "0xffff0300",
+   "instructions": 121,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 4,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     -0.099,
+     0.990000011,
+     0.0,
+     -2.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -0.099,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.39f229e5.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "39f229e5ad5055c58368fc7b0618b835185cabb28a7e1244e699ede22e5e0916",
+   "sha1": "9c3f715febbe9e608d957404842e3c6f2d015f0b",
+   "version": "0xffff0300",
+   "instructions": 79,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.5,
+     0.04
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.5
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "sky.star_dither_lite.3d3ad298.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "sky_star_dither_lite",
+   "stage": "ps_3_0",
+   "sha256": "3d3ad2986bbd4dedb4ea3404231e816cf1eb7f2d924ddfc1e1564b0471c6ac5f",
+   "sha1": "de37fead7a9cbb8d6b771edf35135431dd8e8dc0",
+   "version": "0xffff0300",
+   "instructions": 8,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "texture_x_vertex_colour"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "star/tint vertex colour"
+    }
+   ],
+   "constants": [],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "texture0_2d",
+    "vertex_color",
+    "dither_dropped",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "ordered dither (mad x255+0.5, frc, cmp) is dropped; the star texture is multiplied by the vertex tint. The dither quantisation is not emulated.",
+   "contract": "lite",
+   "note": "sky star/detail sprite: texture x vertex tint, dither removed.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     255.0,
+     0.5,
+     0.003921568,
+     0.0
+    ],
+    "outside_unit_range": [
+     255.0
+    ],
+    "treatment": "c1 = 255/0.5/1/255/0 is folded into the dropped dither selectors; no clamp.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.42a56842.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "42a56842527987c9291c30b6ff49251e894b220bb4c7a759415e52a92d55d2d3",
+   "sha1": "da6481b76c8666b3754f043543fa2ae7e3b1686a",
+   "version": "0xffff0300",
+   "instructions": 94,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.5,
+     0.04,
+     -3.0,
+     -4.0,
+     -5.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.5,
+     -3.0,
+     -4.0,
+     -5.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.4ba57307.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "4ba573078f2de0af9c701efc734cb9293fcd70d77f7e6bc03d4f7fff1096828b",
+   "sha1": "c8829e5590d28ed5a343f473867d45ff182a7945",
+   "version": "0xffff0300",
+   "instructions": 54,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 2,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.099,
+     0.990000011
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.099
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.4d2da681.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_refraction_uv_flat_lite",
+   "stage": "ps_3_0",
+   "sha256": "4d2da681382c5a5312e9276ebabcfb1a0f99a31d62700c00ba1ebbd843101971",
+   "sha1": "ba94aee9fe2449716d4930aaa444425a405a918e",
+   "version": "0xffff0300",
+   "instructions": 9,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      14,
+      14,
+      14
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294934656,
+     "instruction": "flat_projected_uv"
+    }
+   ],
+   "textures": [],
+   "inputs": [],
+   "constants": [],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "flat_refraction_uv",
+    "distortion_dropped",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
+   "contract": "lite",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -0.5,
+     1.799999949,
+     0.5,
+     1.0
+    ],
+    "outside_unit_range": [
+     -0.5,
+     1.799999949
+    ],
+    "treatment": "all original def literals, including -0.5/1.8/0.1/0.9, are dropped with the rcp/min/cmp expression; the only value emitted is the in-range literal 0.5 for the flat centre UV.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.50226768.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "502267687d3e1504912e1975e1fe8000b58f6917c9d4b52d7b9f1cb85539bc96",
+   "sha1": "66422be7541bbf00abbc2560bcdf9092d7f09d07",
+   "version": "0xffff0300",
+   "instructions": 94,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 4,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     -2.0,
+     0.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.5f9893cd.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "5f9893cd869e6d524b5bc5dde760728db17ccb9a8c07dab115ae0bbe1168b94b",
+   "sha1": "bf155aa5a8bf966184158caab839691670e28e95",
+   "version": "0xffff0300",
+   "instructions": 77,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.5,
+     0.04
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.5
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface_dither_lite.5ff638e2.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_dither_lite",
+   "stage": "ps_3_0",
+   "sha256": "5ff638e272e76afde3699b121d2b1836591ecff7053564c6aea84dd425204ffe",
+   "sha1": "53cdf92609d3acd57b0f1c8c79da46c3b0255dc5",
+   "version": "0xffff0300",
+   "instructions": 40,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "dither_dropped",
+    "external_alpha_test",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "ordered dither, texkill and the dependent 4-tap single-channel read are dropped. One base texture is modulated by a material fresnel constant and one additive sun highlight; reflection and normal perturbation are absent.",
+   "contract": "lite",
+   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     1.0,
+     0.0,
+     -1.0
+    ],
+    "outside_unit_range": [
+     -1.0
+    ],
+    "treatment": "sign-expansion def values (-8192/2/-1) and dither 255/0.5/1/255 are dropped with the original expression; the lite recipe uses only material constant c0 and stage selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.60d29412.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_refraction_uv_flat_lite",
+   "stage": "ps_3_0",
+   "sha256": "60d294122d9f9a3a0a467e08465bfedce210406545f1c63e9c931815be934fba",
+   "sha1": "19e2da67085ac16458e3dc77cda75c4ea7011a67",
+   "version": "0xffff0300",
+   "instructions": 13,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      14,
+      14,
+      14
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294934656,
+     "instruction": "flat_projected_uv"
+    }
+   ],
+   "textures": [],
+   "inputs": [],
+   "constants": [],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "flat_refraction_uv",
+    "distortion_dropped",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
+   "contract": "lite",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -0.5,
+     1.799999949,
+     0.5,
+     1.0
+    ],
+    "outside_unit_range": [
+     -0.5,
+     1.799999949
+    ],
+    "treatment": "all original def literals, including -0.5/1.8/0.1/0.9, are dropped with the rcp/min/cmp expression; the only value emitted is the in-range literal 0.5 for the flat centre UV.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.86f79b70.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "86f79b709830605cb7eb4706e063e1515e5ffaa1222b5ea26683f045ff9626ef",
+   "sha1": "f32d5acba6d64af1e97bee69e69ed7c5a27d3020",
+   "version": "0xffff0300",
+   "instructions": 90,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     -3.0,
+     1.0,
+     -0.5,
+     0.04,
+     -4.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -3.0,
+     -0.5,
+     -4.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface_dither_lite.93080391.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_dither_lite",
+   "stage": "ps_3_0",
+   "sha256": "93080391474d9e4f11d0884518371d0d63450d08f6f3806819014adfda0e8d43",
+   "sha1": "b6d5e2f7615058f6ea85003b7d78b6c5519ea816",
+   "version": "0xffff0300",
+   "instructions": 40,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "dither_dropped",
+    "external_alpha_test",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "ordered dither, texkill and the dependent 4-tap single-channel read are dropped. One base texture is modulated by a material fresnel constant and one additive sun highlight; reflection and normal perturbation are absent.",
+   "contract": "lite",
+   "note": "water detail/dither variant: one base texture + constant fresnel + sun; dither/texkill/dependent taps removed.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     1.0,
+     0.0,
+     -1.0
+    ],
+    "outside_unit_range": [
+     -1.0
+    ],
+    "treatment": "sign-expansion def values (-8192/2/-1) and dither 255/0.5/1/255 are dropped with the original expression; the lite recipe uses only material constant c0 and stage selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.96451fca.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "96451fcacdd852a3960c4b87d88ab732f70bf1790ef4c87fcb4ead92df028a55",
+   "sha1": "0c74586107b21f050ce9aa674b44879bfcb944c2",
+   "version": "0xffff0300",
+   "instructions": 112,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 5,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     0.0,
+     -0.5,
+     0.04,
+     -2.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -0.5,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.977a5f7a.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "977a5f7a223f4660f9dc21a3e1560fa977f4600bb0911188e42101a341a6b7d3",
+   "sha1": "55dba206c7b4567bfa87b39cd31b554c3d8283e8",
+   "version": "0xffff0300",
+   "instructions": 51,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "sky.cloud_dither_lite.999e1894.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "sky_cloud_dither_lite",
+   "stage": "ps_3_0",
+   "sha256": "999e18949869daae10f716ae931c9cfbeed6b0e07db895215ac41a1695317dc9",
+   "sha1": "b42aeb2bfe42694277bb0d3e74831715062fe3c2",
+   "version": "0xffff0300",
+   "instructions": 9,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 4,
+     "func_a": 4,
+     "src_rgb": [
+      4,
+      3,
+      14
+     ],
+     "src_a": [
+      4,
+      3,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      2
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 2155905152,
+     "instruction": "cloud_half_lerp"
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "texture_x_vertex_colour"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "sampler_reg": 1,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "cloud/tint vertex colour"
+    }
+   ],
+   "constants": [],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color",
+    "dither_dropped",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "ordered dither (mad x255+0.5, frc, cmp) is dropped. The two sky textures keep a fixed half lerp and the vertex tint; the dither quantisation is not emulated.",
+   "contract": "lite",
+   "note": "sky cloud/star blend: two-texture half lerp + vertex tint; ordered dither removed.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     255.0,
+     0.5,
+     0.003921568,
+     0.0
+    ],
+    "outside_unit_range": [
+     255.0
+    ],
+    "treatment": "c1 = 255/0.5/1/255/0 is folded into the dropped dither selectors; no value is clamped. The plan uses only the in-range literal 0.5 blend factor.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.9a87584a.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "9a87584aa74cf4b69bc44cbe59814b0061f2a24c9d505deeaa18e39648715932",
+   "sha1": "dd0259dc368da9c79b7c74435d0362a4d876018b",
+   "version": "0xffff0300",
+   "instructions": 103,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 5,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     -0.5,
+     0.04,
+     0.0,
+     -2.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -0.5,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.9ade7b21.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "9ade7b21c3dca5ed794622c4f1353f526fec07c273d410ee315e4b269b1740c9",
+   "sha1": "a67e74a03676eb4d6f8f62a30ccfbf50874fb4bb",
+   "version": "0xffff0300",
+   "instructions": 83,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -3.0,
+     -4.0,
+     -5.0,
+     -6.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -3.0,
+     -4.0,
+     -5.0,
+     -6.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.9dd7fd7d.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "9dd7fd7d7cf55f6cd2983aa7d04e72f4741a16de2f0d8f658fc61968f5fb69e7",
+   "sha1": "298933da8b5a7c557b91c0b8214c48a47ed7e91b",
+   "version": "0xffff0300",
+   "instructions": 65,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.5,
+     0.04
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.5
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.a64b5c83.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "a64b5c83ac5b31325e4b844276955eb0a8fb28aff11d60e895a944af0041953e",
+   "sha1": "71b0208434d8a10f25127bbbaf6fc99c4a79649a",
+   "version": "0xffff0300",
+   "instructions": 121,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 5,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     1.0,
+     -0.5,
+     0.04,
+     -0.099,
+     0.990000011,
+     -2.0,
+     0.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -0.5,
+     -0.099,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.b13fa04e.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "b13fa04e59b57130a6a2f6c64a20699972a82c975ffcad6defb5dcd95fd0e9f8",
+   "sha1": "10b3b2a2b3d39f6d676cbf9216d5518b8bc862bb",
+   "version": "0xffff0300",
+   "instructions": 68,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     -3.0,
+     1.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -3.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.bf35da7f.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "bf35da7f481550729f6940c791427fde35102c2c985b7b08a6320ee2b967fad3",
+   "sha1": "79d574d3b3f713ce1b8e2fe204325b1bc7d88352",
+   "version": "0xffff0300",
+   "instructions": 82,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     1.0,
+     -0.5,
+     0.04,
+     -3.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -0.5,
+     -3.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.normal.lite.c1f0adcc.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_normal_lite",
+   "stage": "ps_3_0",
+   "sha256": "c1f0adcc58a3cb3321b9bf116a2f8905f55f43cf30adb211b74cf6fb6cf1639a",
+   "sha1": "0531951e6268263af27ab6e2f242f41c09390d7c",
+   "version": "0xffff0300",
+   "instructions": 76,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_material_constant",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "normal_blur_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "4-tap normal-map blur (rcp/frc/cmp/dp3 weighting) and its light loop are dropped. One base texture is used with a prebaked fresnel tint and one additive sun highlight; reflection and per-pixel normals are not reconstructed.",
+   "contract": "lite",
+   "note": "water normal-blur surface: one texture + prebaked fresnel; normal blur and reflection target dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     0.0,
+     -3.0,
+     1.0,
+     -4.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     2.0,
+     -1.0,
+     -2.0,
+     -3.0,
+     -4.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.refraction_uv_flat_lite.c6814553.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_refraction_uv_flat_lite",
+   "stage": "ps_3_0",
+   "sha256": "c68145536b09355d800d1de924953928a0eddd9c4eafc9c30c19d2b1b4c074f0",
+   "sha1": "d3f28b80107aa64e28f30c95bac1081a8674a8dd",
+   "version": "0xffff0300",
+   "instructions": 18,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      14,
+      14,
+      14
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294934656,
+     "instruction": "flat_projected_uv"
+    }
+   ],
+   "textures": [],
+   "inputs": [],
+   "constants": [],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "flat_refraction_uv",
+    "distortion_dropped",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "rcp-by-w, min/cmp distortion clamp and the vertex UV addend are dropped. The render-target UV pair is replaced by the flat no-distortion centre (0.5, 0.5); no def value is clamped and the original -0.5/1.8/0.1/0.9 literals are dropped with the expression, not rewritten.",
+   "contract": "lite",
+   "note": "water refraction/projection UV target: flat centre UV instead of the per-pixel rcp/min/cmp offset; texture colour channels are not a TEV output.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -0.5,
+     0.100000001,
+     -0.100000001,
+     0.900000023,
+     -0.090000003,
+     1.0,
+     0.0
+    ],
+    "outside_unit_range": [
+     -0.5,
+     -0.100000001,
+     -0.090000003
+    ],
+    "treatment": "all original def literals, including -0.5/1.8/0.1/0.9, are dropped with the rcp/min/cmp expression; the only value emitted is the in-range literal 0.5 for the flat centre UV.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
+  },
+  {
+   "id": "water.surface.fresnel.lite.eff05109.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "eff05109d0aa78e74c46868545633ab95f4531fdc1f2529cb4fc8743fda3c89b",
+   "sha1": "96b373f7fa73f43738bb4040a51c867cd4cca397",
+   "version": "0xffff0300",
+   "instructions": 97,
+   "draw_enabled": 1,
+   "runtime": 0,
+   "stages": 3,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 1,
+     "const_rgba8": 4294967295,
+     "instruction": "alpha_one"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 5,
+     "usage": 10,
+     "usage_index": 1,
+     "tev_source": 0,
+     "note": "prebaked fresnel/tint vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color",
+    "normal_map_dropped",
+    "reflection_target_dropped",
+    "light_loop_dropped",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (rcp/pow), the 2-3 light loop, specular and the reflection/refraction render-target pair are dropped. One scene/base texture is modulated by a prebaked fresnel tint and one constant sun highlight is added. A final REPLACE stage forces alpha to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "full water surface reduced to the lite one-texture recipe: scene/base sample x prebaked fresnel + constant sun highlight; reflection, normal map and light loop dropped.",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "def_policy": {
+    "original_literals": [
+     -8192.0,
+     -1.0,
+     1.0,
+     0.0,
+     -0.099,
+     0.990000011,
+     2.0,
+     -2.0
+    ],
+    "outside_unit_range": [
+     -8192.0,
+     -1.0,
+     -0.099,
+     2.0,
+     -2.0
+    ],
+    "treatment": "sign-expansion literals (-8192, 2, -1, -2) are folded into TEV selectors; out-of-range scalars such as -0.5/0.04/1.8 and the normal-blur constants are dropped with the original expression. Nothing is clamped: the lite plan consumes material constant c0 and uses only in-range selectors.",
+    "clamped": 0
+   },
+   "runtime_candidate": 1
   }
  ]
 }
