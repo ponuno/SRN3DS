@@ -25,7 +25,7 @@
 #define CODE   0x00510000u
 #define ENTRY_DEADLOCK 0x00520000u
 #define ENTRY_IR       0x00530000u
-
+#define CODE2          0x00510100u   /* pure-compute loop, no imports */
 static int failures;
 static int checks;
 static GuestMemory m;
@@ -350,8 +350,7 @@ static void test_deadlock_fault(void) {
  *   [param+16] = second side effect
  */
 static void install_ir_code(void) {
-    static const uint8_t code[] = {
-        0x55,                         /* push ebp */
+    static const uint8_t code[] = {        0x55,                         /* push ebp */
         0x89, 0xe5,                   /* mov ebp,esp */
         0x8b, 0x75, 0x08,             /* mov esi,[ebp+8] (callee-saved base) */
         0x83, 0x06, 0x01,             /* add dword [esi],1 */
@@ -367,10 +366,27 @@ static void install_ir_code(void) {
         0xc2, 0x04, 0x00,             /* ret 4 */
     };
     memcpy(guest_ptr(&m, CODE, sizeof code), code, sizeof code);
-    static IrFnEntry fn; /* the runtime keeps this table for the whole session */
-    fn.addr = CODE;
-    fn.end = CODE + sizeof code;
-    if (n3ds_ir_bind(&fn, 1)) { fprintf(stderr, "ir_bind failed\n"); exit(2); }
+    /* Pure-compute loop: no import call, no blocking point.  Count in [param+0],
+     * iteration budget in [param+4], completion marker in [param+8]. */
+    static const uint8_t loop_code[] = {
+        0x55,                         /* push ebp */
+        0x89, 0xe5,                   /* mov ebp,esp */
+        0x8b, 0x75, 0x08,             /* mov esi,[ebp+8] */
+        0x8b, 0x4e, 0x04,             /* mov ecx,[esi+4] */
+        0x83, 0x06, 0x01,             /* l: add dword [esi],1 */
+        0x49,                         /*    dec ecx */
+        0x75, 0xfa,                   /*    jnz l */
+        0xc7, 0x46, 0x08, 0x01, 0x00, 0x00, 0x00, /* mov dword [esi+8],1 */
+        0x5d,                         /* pop ebp */
+        0xc2, 0x04, 0x00,             /* ret 4 */
+    };
+    memcpy(guest_ptr(&m, CODE2, sizeof loop_code), loop_code, sizeof loop_code);
+    static IrFnEntry fn[2]; /* the runtime keeps this table for the whole session */
+    fn[0].addr = CODE;
+    fn[0].end = CODE + sizeof code;
+    fn[1].addr = CODE2;
+    fn[1].end = CODE2 + sizeof loop_code;
+    if (n3ds_ir_bind(fn, 2)) { fprintf(stderr, "ir_bind failed\n"); exit(2); }
 }
 static void test_ir_flags_and_continuation(void) {
     reset_state();
@@ -405,6 +421,31 @@ static void test_ir_flags_and_continuation(void) {
     CHECK(M32(rec + 0) == 2, "re-entry repeats the pre-wait side effect (restart, not resume)");
     printf("INFO restart control: counter=%u after second entry\n", M32(rec + 0));
     close_h(M32(rec + 4));
+}
+
+/* ---------------------------------------------------------------- 8 */
+/* Cooperative time slicing: a guest thread that runs a long loop with no
+ * import call must not own the CPU until it finishes.  Without the executor's
+ * yield hook, spawn() only returns after the worker's loop has completed, so
+ * the counter below equals the budget and every other guest thread (in TESV:
+ * the init thread and main) is starved for the whole loop. */
+static void test_ir_compute_loop_yields(void) {
+    reset_state();
+    uint32_t rec = DATA + 0x1c0;
+    const uint32_t budget = 200000u;
+    M32(rec + 0) = 0;
+    M32(rec + 4) = budget;
+    M32(rec + 8) = 0;
+    uint32_t t = spawn(CODE2, rec, 0);
+    CHECK(M32(rec + 0) > 0, "compute loop started before the spawner resumed");
+    CHECK(M32(rec + 0) < budget,
+          "compute loop yielded while running (spawner regained the CPU mid-loop)");
+    CHECK(wait1(t, 0xffffffffu) == 0, "compute loop thread completes");
+    CHECK(M32(rec + 0) == budget, "compute loop ran every iteration exactly once");
+    CHECK(M32(rec + 8) == 1, "compute loop reached its tail after the yields");
+    CHECK(exit_code(t) == 0, "compute loop thread exit code 0");
+    printf("PASS IR compute loop yields to other threads\n");
+    close_h(t);
 }
 
 /* ---------------------------------------------------------------- timeouts */
@@ -481,6 +522,7 @@ int main(void) {
     test_deadlock_fault();
     test_timeout_paths();
     test_ir_flags_and_continuation();
+    test_ir_compute_loop_yields();
     report_memory();
 
     printf("SUMMARY checks=%d failures=%d\n", checks, failures);

@@ -11,6 +11,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Installed by the host runtime (ir_core.c); NULL keeps the executor
+ * non-preemptible. */
+static unsigned slice_yield_count;
 #ifdef N3DS_WATCH_STORE_CHECKS
 #define IR_WATCH(s) guest_watch_check_active(s)
 #else
@@ -1415,6 +1419,10 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
         if (done) { n3ds_ir_cur_func_end = prev_end; return; }
         if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 0);
         ip = next;
+        if (n3ds_ir_yield_hook && ++slice_yield_count >= N3DS_IR_YIELD_INTERVAL) {
+            slice_yield_count = 0;
+            n3ds_ir_yield_hook();
+        }
     }
 }
 

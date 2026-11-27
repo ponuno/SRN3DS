@@ -85,6 +85,9 @@ struct N3dsIrc {
     N3dsIrcAotPredicate aot_pred;
     void *aot_user;
 
+    /* Cooperative time slicing between IR blocks: shared host hook. */
+    unsigned yield_count;
+
     N3dsIrcStats st;
 };
 
@@ -731,6 +734,7 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
     Flags f = {0};
     uint32_t ip = addr;
     IrcSlot *s = g_irc_frames[g_irc_frame_count - 1].slot;
+    N3dsIrc *irc = g_irc_frames[g_irc_frame_count - 1].irc;
     /* Records are sorted by block start. A cold block before the callable
      * entry is part of this frame, so direct branches may target it. */
     uint32_t frame_start = irc_rd32(s->data + N3DS_IRC_RECORD_HEADER);
@@ -759,6 +763,10 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
         if (done) return;
         if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 1);
         ip = next;
+        if (n3ds_ir_yield_hook && ++irc->yield_count >= N3DS_IR_YIELD_INTERVAL) {
+            irc->yield_count = 0;
+            n3ds_ir_yield_hook();
+        }
     }
 }
 

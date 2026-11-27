@@ -10,6 +10,9 @@
 #include <string.h>
 
 static const IrFnEntry *g_fns;
+/* Host-installed cooperative time-slice hook (see ir_core.h).  Defined here
+ * rather than in ir_exec.c because ir_container.c includes ir_exec.c. */
+void (*n3ds_ir_yield_hook)(void);
 static unsigned g_nfns;
 /* Direct-mapped memo for the immutable bound table. The table is rebound only
  * at boot (or by a test), and n3ds_ir_bind clears this. */

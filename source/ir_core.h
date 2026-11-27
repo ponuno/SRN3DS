@@ -169,6 +169,15 @@ int n3ds_ir_fetch_block(CPU *c, uint32_t start, uint32_t func_end, IrExecBlock *
 void n3ds_ir_call(CPU *c, uint32_t addr);
 void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end);
 
+/* Cooperative time slicing between guest IR blocks.  Both executors (slice IR
+ * and the all-functions container) run long guest loops that make no import
+ * call; without a tick such a thread owns the CPU forever and starves every
+ * other guest thread.  win32_thread_init() installs the scheduler's tick; a
+ * NULL hook disables slicing entirely, and the counter only costs one compare
+ * per block. */
+#define N3DS_IR_YIELD_INTERVAL 4096u
+extern void (*n3ds_ir_yield_hook)(void);
+
 /* Runtime dispatch (implemented in n3ds_lift_runtime.c): resolve AOT, IR or
  * import and invoke. Returns 0 when invoked, -1 when the address is neither
  * (the caller then raises the appropriate fault). */

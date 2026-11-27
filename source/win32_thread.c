@@ -12,6 +12,7 @@
 #include "win32_sync.h"
 #include "guest_process.h" /* GP_TEB/GP_PEB/GP_TLS layout constants */
 #include "n3ds_lift_runtime.h"
+#include "ir_core.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -167,6 +168,8 @@ static void dump_thread(const char *role, W32Thread *t) {
             (unsigned)t->cpu.r[0], (unsigned)t->cpu.r[3], (unsigned)t->cpu.r[1],
             (unsigned)t->cpu.r[2], (unsigned)t->cpu.r[6], (unsigned)t->cpu.r[7],
             (unsigned long)t->rt.irc_depth);
+    fprintf(stderr, " suspends=%u in_ready=%d seq=%llu", t->suspends, t->in_ready,
+            (unsigned long long)t->ready_seq);
     if (t->state == ST_BLOCKED) {
         fprintf(stderr, " wait_n=%u all=%d timed=%u status=%d wait=",
                 t->wait_n, t->wait_all, (unsigned)t->timed, t->wait_status);
@@ -563,6 +566,13 @@ static void activate(W32Thread *t) {
 }
 
 /* ---- lifecycle --------------------------------------------------------- */
+/* Executor time-slice tick (ir_core.h).  Only switches when the scheduler is
+ * up and a running guest thread exists, so an isolated test or a pre-init
+ * caller is unaffected. */
+static void guest_preempt_tick(void) {
+    if (scheduler_up && cur) win32_thread_yield();
+}
+
 int win32_thread_init(GuestMemory *m) {
     if (!m || mem) return -1;
     mem = m;
@@ -593,6 +603,12 @@ int win32_thread_init(GuestMemory *m) {
     reap_pending = NULL;
     win32_sync_set_current_thread(MAIN_THREAD_ID);
     win32_sync_set_waker(win32_thread_wake);
+    /* Time-slice guest IR execution.  The executors call this between blocks so
+     * a guest loop with no blocking call cannot own the CPU: TESV's stream/menu
+     * worker spins in a hash walk and otherwise starves the init thread and
+     * main's pump forever.  Installed here because only the scheduler knows
+     * when yielding is meaningful (and the containers also run without it). */
+    n3ds_ir_yield_hook = guest_preempt_tick;
     watchdog_start();
     return 0;
 }
