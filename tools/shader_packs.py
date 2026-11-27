@@ -348,6 +348,23 @@ def check() -> list:
                       % (total_hashes, census["distinct_hashes"]))
     if index.get("chunks") != total_chunks:
         errors.append("index chunks disagrees with the packs")
+    if os.path.isfile(SCHEDULER_PATH):
+        try:
+            from shaders import plan_verify
+            scheduler = _load_json(SCHEDULER_PATH)
+            seen_sha = set()
+            for entry in scheduler.get("entries", []):
+                plan_verify.validate_entry(entry, errors,
+                                           "scheduler %s" % entry.get("id"))
+                if entry.get("sha256") in seen_sha:
+                    errors.append("scheduler: duplicate hash %s"
+                                  % entry.get("sha256"))
+                seen_sha.add(entry.get("sha256"))
+                if entry.get("sha256") not in seen:
+                    errors.append("scheduler: hash %s is not in the census"
+                                  % entry.get("sha256"))
+        except Exception as exc:  # pragma: no cover - defensive import guard
+            errors.append("scheduler catalog unreadable: %s" % exc)
     return errors
 
 
