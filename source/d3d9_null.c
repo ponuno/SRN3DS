@@ -229,7 +229,8 @@ static int null_cube_texel_raw(const uint8_t *base,unsigned edge,size_t pitch,
         return 0;
     }
     unsigned block=format==D9_DXT1?8u:
-                   (format==D9_DXT3||format==D9_DXT5)?16u:0u;
+                   (format==D9_DXT3||format==D9_DXT5||
+                    format==D9_ATI2||format==D9_BC5U)?16u:0u;
     if(!block)return -1;
     const uint8_t *bp=base+(size_t)(y/4)*pitch+(size_t)(x/4)*block;
     uint8_t rgba[64];
@@ -257,7 +258,8 @@ static int null_draw_cube(void *ctx,const D9ColorVertex *v,size_t n,
         null_log("DrawPrimitive","cube view has no CPU pixels or an invalid edge");return -1;
     }
     if(cube->format!=D9_A8R8G8B8&&cube->format!=D9_X8R8G8B8&&
-       cube->format!=D9_DXT1&&cube->format!=D9_DXT3&&cube->format!=D9_DXT5){
+       cube->format!=D9_DXT1&&cube->format!=D9_DXT3&&cube->format!=D9_DXT5&&
+       cube->format!=D9_ATI2&&cube->format!=D9_BC5U){
         null_log("DrawPrimitive","null cube sampling supports A8/X8/DXT1/3/5 level 0");return -1;
     }
     uint32_t samples[3]={0};unsigned last_faces[3]={0};

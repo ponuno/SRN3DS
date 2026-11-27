@@ -169,6 +169,9 @@ is pushed right before `Pool`.
 | `D3DFMT_A4R4G4B4` | `0x1a` | `0xf82f01` | **refused** (latent fallback only) |
 | `D3DFMT_A8R8G8B8` | `0x15` | `0xf82f66` | **works** — power-of-two only |
 | `D3DFMT_DXT1/3/5` | `'DXT1/3/5'` | not on this path | accepted by layout, **decoded** by `d9_bc_to_pica` |
+| `ATI2` / `BC5U` | `'ATI2'`/`'BC5U'` | no retail/mod file measured | accepted, decoded to R,G / B=0,A=255; see `docs/TEXTURE_FORMATS.md` |
+| `ATI1` / `BC4U` | `'ATI1'`/`'BC4U'` | 7 UBE tint masks (mod) | accepted, decoded to R / G=B=0,A=255 |
+| `BC7` (DX10 DXGI 98/99) | DX10 header | 120 UBE 2.0 files | **refused by name**: no BC7 decoder; not converted |
 | `D24S8` (depth) | `0x4b` | `0xf82616` | format ok, **Lockable=1 now creates a CPU D24S8 shadow** (FIXED) |
 
 Important nuance: `0xf8205d`…`0xf83b28` is a **fallback chain**, not four
@@ -176,6 +179,16 @@ independent requests. The code caches the chosen format at `[obj+0x1c]` and,
 if creation failed, retries `0x1c -> 0x33 -> 0x1a` (and `0x15` in the
 render-target variant). So A8L8/A4R4G4B4 are only reached when **A8 creation
 failed**. A8 currently succeeds, so those two are latent, not immediate.
+
+### Float/HDR render targets
+
+PICA200 has no float colour attachment, so `R16F` (0x6f),
+`A16B16G16R16F` (0x71) and `R32F` (0x72) cannot be real render targets.
+`CheckDeviceFormat`/the adapter return `D3DERR_NOTAVAILABLE` with a named
+reason for all three; the `TESV_D3D9_HDR_LDR_FALLBACK=1` mapping is a
+measurement-only probe (same-size A8R8G8B8) and is never a shipping default.
+The evidence and VRAM budget are in `docs/FLOAT_RENDER_TARGETS.md`; the corpus
+format census is in `docs/TEXTURE_FORMATS.md`.
 
 Font atlases are created at half the target size with `Levels=1` and
 `Pool=DEFAULT`; the dimension comes from `[obj+0x36c/0x370]`, so they inherit
@@ -328,6 +341,9 @@ refusal with a non-`S_OK` HRESULT.
 | `CreateTexture` non-pow2 / <8 px | **PART** (FIXED for A8) | A8 8..1024 NPOT, one level; RGBA8/BC keep pow2; <8 still RGBA8-only | P1 | done |
 | `CreateTexture A8L8 / A4R4G4B4` | **REF** | layout table has A8/RGBA8/XRGB8/BC only | P2 | only reachable as fallback; map A8L8→A8+RGBA8 pair or expand to RGBA8 |
 | `CreateTexture DXT1/3/5` | **OK** (decode) | needs pow2 ≥8, ≤1024 | P2 | already decodes in `d9_bc_to_pica`; add a test for 2 mips |
+| `CreateTexture ATI2/BC5U (BC5)` | **OK** (decode) | needs pow2 ≥8, ≤1024; two BC4 channels, B=0/A=255 | P2 | corpus has no ATI2; synthetic block test only |
+| `CreateTexture ATI1/BC4U (BC4)` | **OK** (decode) | needs pow2 ≥8, ≤1024; single channel to R | P2 | 7 UBE tint masks |
+| `CreateTexture BC7 (DX10)` | **REF** | no BC7 decoder; `DX10` header rejected as `D3DXERR_INVALIDDATA` with the DXGI name | P3 | real decoder or mod-side re-export |
 | `CreateTexture A8` | **OK** | `GPU_A8`, 1 B/px | — | — |
 | `CreateVertexBuffer/IndexBuffer` (DYNAMIC, DEFAULT, FVF 0) | **OK** | — | — | — |
 | `SetIndices` + `SetStreamSource` (16-bit) | **OK** | — | — | — |

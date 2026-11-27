@@ -53,7 +53,9 @@ static const uint32_t L_RESOURCE_TEXTURE[] = { D9REQ_RESOURCE_TEXTURE };
 static const uint32_t L_RESOURCE_LDR[] = {
     D9REQ_RESOURCE_SURFACE, D9REQ_RESOURCE_TEXTURE
 };
-static const uint32_t L_FLOAT16[] = { D9REQ_FMT_A16B16G16R16F };
+static const uint32_t L_FLOAT16[] = {
+    D9REQ_FMT_R16F, D9REQ_FMT_A16B16G16R16F, D9REQ_FMT_R32F
+};
 static const uint32_t L_ATOC[] = { D9REQ_FMT_ATOC };
 static const uint32_t L_RESZ[] = { D9REQ_FMT_RESZ };
 static const uint32_t L_DEPTH[] = {
@@ -133,8 +135,8 @@ static const D9ReqRule RULES[] = {
         .format_count = COUNT(L_FLOAT16),
         .decision = D9REQ_UNSUPPORTED,
         .answer = D9REQ_ANSWER_NOTAVAILABLE,
-        .reason = "A16B16G16R16F is not a PICA200 texture or render-target format in this bridge",
-        .contract = "LDR X8R8G8B8/A8R8G8B8 or DXT/ETC1 only; this is a downgrade, not A16 support",
+        .reason = "R16F/A16B16G16R16F/R32F are not PICA200 texture or render-target formats; PICA has no float colour attachment",
+        .contract = "LDR X8R8G8B8/A8R8G8B8 or DXT/ETC1 only; this is a downgrade, not float support",
     },
     {
         .id = D9REQ_ID_FORMAT_SRGB_WRITE,
@@ -837,7 +839,9 @@ const char *d9_req_format_name(uint32_t format) {
     case D9REQ_FMT_D24FS8: return "D24FS8";
     case D9REQ_FMT_D32_LOCKABLE: return "D32_LOCKABLE";
     case D9REQ_FMT_S8_LOCKABLE: return "S8_LOCKABLE";
+    case D9REQ_FMT_R16F: return "R16F";
     case D9REQ_FMT_A16B16G16R16F: return "A16B16G16R16F";
+    case D9REQ_FMT_R32F: return "R32F";
     case D9REQ_FMT_DXT1: return "DXT1";
     case D9REQ_FMT_DXT3: return "DXT3";
     case D9REQ_FMT_DXT5: return "DXT5";

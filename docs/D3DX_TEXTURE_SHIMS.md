@@ -16,17 +16,21 @@ the 2D `ExA` loader, and the four file-path cube/volume loaders.
 | `D3DXCreateTextureFromFileInMemory` | Parses the same DDS and creates a real `IDirect3DTexture9` through `d9_com_host_create_texture()` + per-level upload. Uses the file's format, the file's mip chain, `D3DPOOL_MANAGED`, usage 0. |
 | `D3DXGetImageInfoFromFileA` | Maps the guest path below the `win32_init()` sandbox root, reads **only the 128-byte DDS header**, and fills the same seven fields. A valid header is reported even when the payload is larger than 64 MiB. |
 | `D3DXCreateTextureFromFileExA` | Reads the whole file (64 MiB cap), parses the same DDS, accepts the real TESV tuple (Width/Height from the file, `MipLevels=D3DX_FROM_FILE`, `D3DUSAGE_DYNAMIC`, `A8R8G8B8`, `D3DPOOL_SYSTEMMEM`), and creates/uploads a real texture. BC1/3/5 files requested as `A8R8G8B8` are decoded through `d3d9_bc.c`. |
-| `D3DXCreateCubeTextureFromFileInMemory` | Parses a six-face cube DDS (`CUBEMAP` plus all six face bits), validates square/pow2/<=1024 and the face-major mip chain, then creates a real `IDirect3DCubeTexture9` through the new core cube path and uploads every face/level. A8R8G8B8, X8R8G8B8, DXT1, DXT3 and DXT5 are accepted. |
-| `D3DXCreateVolumeTextureFromFileInMemory` | Parses a legacy volume DDS (`DDSCAPS2_VOLUME`, `DDSD_DEPTH`, depth > 1), validates pow2 width/height/depth up to 1024 and the level-major slice chain, then creates a real `IDirect3DVolumeTexture9` and uploads every depth slice/mip level. A8R8G8B8, X8R8G8B8, DXT1, DXT3 and DXT5 are accepted. |
+| `D3DXCreateCubeTextureFromFileInMemory` | Parses a six-face cube DDS (`CUBEMAP` plus all six face bits), validates square/pow2/<=1024 and the face-major mip chain, then creates a real `IDirect3DCubeTexture9` through the new core cube path and uploads every face/level. A8R8G8B8, X8R8G8B8, DXT1, DXT3, DXT5, ATI1/BC4 and ATI2/BC5 are accepted. |
+| `D3DXCreateVolumeTextureFromFileInMemory` | Parses a legacy volume DDS (`DDSCAPS2_VOLUME`, `DDSD_DEPTH`, depth > 1), validates pow2 width/height/depth up to 1024 and the level-major slice chain, then creates a real `IDirect3DVolumeTexture9` and uploads every depth slice/mip level. A8R8G8B8, X8R8G8B8, DXT1, DXT3, DXT5, ATI1/BC4 and ATI2/BC5 are accepted. |
 | `D3DXCreateCubeTextureFromFileA` | Reads a sandboxed file (64 MiB cap) and feeds the same cube DDS parser/creator; three arguments, `ret 0x0c`. |
 | `D3DXCreateCubeTextureFromFileExA` | Same file-derived cube path with the strict tuple below; 13 arguments, `ret 0x34`. |
 | `D3DXCreateVolumeTextureFromFileA` | Reads a sandboxed file and feeds the same volume DDS parser/creator; three arguments, `ret 0x0c`. |
 | `D3DXCreateVolumeTextureFromFileExA` | Same file-derived volume path with the strict tuple below; 15 arguments, `ret 0x3c`. |
 
-Supported DDS payloads: `A8R8G8B8`, `X8R8G8B8`, `DXT1`, `DXT3`, `DXT5`;
-power-of-two dimensions up to 1024. Legacy DDS headers only; a `DX10` header is
-rejected explicitly. Compressed files keep the bridge's 8x8 floor when the
-texture format stays compressed; decoding to A8R8G8B8 allows smaller levels.
+Supported DDS payloads: `A8R8G8B8`, `X8R8G8B8`, `DXT1`, `DXT3`, `DXT5`,
+`ATI1`/`BC4U` (8-byte BC4 blocks) and `ATI2`/`BC5U` (16-byte, two BC4
+channels); power-of-two dimensions up to 1024. Legacy DDS headers only; a
+`DX10` header is rejected explicitly and named, including `BC7_UNORM`
+(DXGI 98/99) with the reason that no BC7 decoder exists (see
+`docs/TEXTURE_FORMATS.md`). Compressed files keep the bridge's 8x8 floor when
+the texture format stays compressed; decoding to A8R8G8B8 allows smaller
+levels. Uncompressed 24-bit `R8G8B8` and `A8B8G8R8` are named but not created.
 
 ### `D3DXCreateTextureFromFileExA` accepted parameter set
 
@@ -96,8 +100,9 @@ Files shorter than 128 bytes are reported as such.
 
 ## Error naming
 
-* `D3DXERR_INVALIDDATA` for not-DDS, DX10, unsupported pixel formats, truncated
-  payloads, and unreadable/missing files.
+* `D3DXERR_INVALIDDATA` for not-DDS, DX10 (including the named BC7/BC6H
+  refusal), unsupported pixel formats, truncated payloads, and
+  unreadable/missing files.
 * `D3DERR_INVALIDCALL` for bad guest pointers/rectangles and sandbox-path
   rejection.
 * `D3DERR_NOTAVAILABLE` for unsupported conversions, resize/filter, usage,

@@ -227,6 +227,16 @@ def parse_dds(data: bytes, *, require_payload: bool = True) -> DdsInfo:
         if array_size > 1:
             raise DdsError("DX10 texture arrays (%d slices) are not supported" % array_size)
         if dxgi_format not in DXGI_FORMATS:
+            if dxgi_format in (98, 99):
+                raise DdsError(
+                    "BC7 (DXGI format %d) is not supported by this pipeline: "
+                    "there is no BC7 decoder or BC7-to-ETC1 conversion" % dxgi_format
+                )
+            if dxgi_format in (95, 96):
+                raise DdsError(
+                    "BC6H (DXGI format %d) is not supported by this pipeline: "
+                    "there is no BC6H decoder or BC6H-to-ETC1 conversion" % dxgi_format
+                )
             raise DdsError("unsupported DXGI format %d" % dxgi_format)
         format_name, kind = DXGI_FORMATS[dxgi_format]
         data_offset += 20

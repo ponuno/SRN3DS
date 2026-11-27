@@ -15,8 +15,10 @@ enum { USAGE_RT=0x00000001u, USAGE_DS=0x00000002u, USAGE_DYNAMIC=0x00000200u,
        USAGE_POSTPIXEL=0x00080000u };
 enum { FMT_A8R8G8B8=21u, FMT_X8R8G8B8=22u, FMT_A8=28u,
        FMT_DXT1=0x31545844u, FMT_DXT3=0x33545844u, FMT_DXT5=0x35545844u,
+       FMT_ATI1=0x31495441u, FMT_BC4U=0x55344342u,
+       FMT_ATI2=0x32495441u, FMT_BC5U=0x55354342u,
        FMT_D24S8=75u, FMT_D24X8=77u, FMT_D16=80u,
-       FMT_F16=0x71u, FMT_F32=0x72u };
+       FMT_R16F=0x6fu, FMT_F16=0x71u, FMT_F32=0x72u };
 
 static unsigned cases, failures;
 
@@ -149,7 +151,8 @@ int main(void) {
                   FMT_X8R8G8B8, D9_ADAPTER_UNAVAILABLE, "DEPTHSTENCIL");
 
     /* 2D textures: sampler formats and usages. */
-    const unsigned tex2d[] = {FMT_A8R8G8B8,FMT_X8R8G8B8,FMT_A8,FMT_DXT1,FMT_DXT3,FMT_DXT5};
+    const unsigned tex2d[] = {FMT_A8R8G8B8,FMT_X8R8G8B8,FMT_A8,FMT_DXT1,FMT_DXT3,FMT_DXT5,
+                              FMT_ATI1,FMT_BC4U,FMT_ATI2,FMT_BC5U};
     for (unsigned i=0;i<sizeof tex2d/sizeof *tex2d;++i)
         expect_format("texture 2D plain", 0, 1, FMT_X8R8G8B8, 0, RT_TEXTURE,
                       tex2d[i], D9_ADAPTER_OK, "2D texture");
@@ -159,12 +162,16 @@ int main(void) {
                   FMT_F16, D9_ADAPTER_UNAVAILABLE, "HDR_LDR_FALLBACK");
     expect_format("texture 0x72 no-hdr", 0, 1, FMT_X8R8G8B8, 0, RT_TEXTURE,
                   FMT_F32, D9_ADAPTER_UNAVAILABLE, "HDR_LDR_FALLBACK");
+    expect_format("texture R16F no-hdr", 0, 1, FMT_X8R8G8B8, 0, RT_TEXTURE,
+                  FMT_R16F, D9_ADAPTER_UNAVAILABLE, "HDR_LDR_FALLBACK");
     expect_format("texture X8 RT", 0, 1, FMT_X8R8G8B8, USAGE_RT, RT_TEXTURE,
                   FMT_X8R8G8B8, D9_ADAPTER_OK, "render-target texture");
     expect_format("texture A8 RT", 0, 1, FMT_X8R8G8B8, USAGE_RT, RT_TEXTURE,
                   FMT_A8R8G8B8, D9_ADAPTER_OK, "render-target texture");
     expect_format("texture 0x71 RT no-hdr", 0, 1, FMT_X8R8G8B8, USAGE_RT,
                   RT_TEXTURE, FMT_F16, D9_ADAPTER_UNAVAILABLE, "HDR_LDR_FALLBACK");
+    expect_format("texture R16F RT no-hdr", 0, 1, FMT_X8R8G8B8, USAGE_RT,
+                  RT_TEXTURE, FMT_R16F, D9_ADAPTER_UNAVAILABLE, "HDR_LDR_FALLBACK");
     expect_format("texture DXT1 RT", 0, 1, FMT_X8R8G8B8, USAGE_RT, RT_TEXTURE,
                   FMT_DXT1, D9_ADAPTER_UNAVAILABLE, "render-target textures");
     expect_format("texture A8 RT", 0, 1, FMT_X8R8G8B8, USAGE_RT, RT_TEXTURE,
@@ -187,7 +194,8 @@ int main(void) {
                   D9_ADAPTER_UNAVAILABLE, "usage");
 
     /* Cubes: non-RT formats, RT formats, dynamic/query, A8 refusal. */
-    const unsigned cube_nonrt[] = {FMT_A8R8G8B8,FMT_X8R8G8B8,FMT_DXT1,FMT_DXT3,FMT_DXT5};
+    const unsigned cube_nonrt[] = {FMT_A8R8G8B8,FMT_X8R8G8B8,FMT_DXT1,FMT_DXT3,FMT_DXT5,
+                                   FMT_ATI2,FMT_BC5U};
     for (unsigned i=0;i<sizeof cube_nonrt/sizeof *cube_nonrt;++i)
         expect_format("cube plain", 0, 1, FMT_X8R8G8B8, 0, RT_CUBE,
                       cube_nonrt[i], D9_ADAPTER_OK, "cube");
@@ -207,7 +215,8 @@ int main(void) {
                   RT_CUBE, FMT_X8R8G8B8, D9_ADAPTER_OK, "cube");
 
     /* Volumes: non-RT only. */
-    const unsigned vol_formats[] = {FMT_A8R8G8B8,FMT_X8R8G8B8,FMT_DXT1,FMT_DXT3,FMT_DXT5};
+    const unsigned vol_formats[] = {FMT_A8R8G8B8,FMT_X8R8G8B8,FMT_DXT1,FMT_DXT3,FMT_DXT5,
+                                    FMT_ATI2,FMT_BC5U};
     for (unsigned i=0;i<sizeof vol_formats/sizeof *vol_formats;++i)
         expect_format("volume plain", 0, 1, FMT_X8R8G8B8, 0, RT_VOLUME,
                       vol_formats[i], D9_ADAPTER_OK, "volume");
@@ -238,6 +247,10 @@ int main(void) {
                   FMT_F16, D9_ADAPTER_OK, "LDR fallback");
     expect_format("cube 0x72 RT hdr", 0, 1, FMT_X8R8G8B8, USAGE_RT, RT_CUBE,
                   FMT_F32, D9_ADAPTER_OK, "LDR fallback");
+    expect_format("texture R16F RT hdr", 0, 1, FMT_X8R8G8B8, USAGE_RT,
+                  RT_TEXTURE, FMT_R16F, D9_ADAPTER_OK, "LDR fallback");
+    expect_format("cube BC5U plain", 0, 1, FMT_X8R8G8B8, 0, RT_CUBE,
+                  FMT_BC5U, D9_ADAPTER_OK, "cube");
 
     /* Depth-stencil match. */
     expect_depth("depth match X8/X8/D24S8", FMT_X8R8G8B8, FMT_X8R8G8B8,

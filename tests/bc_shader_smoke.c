@@ -29,6 +29,23 @@ static void decoder(void){uint8_t rgba[64],b[16]={0};
     size_t pitch,bytes;assert(!d9_texture_layout(64,64,D9_DXT1,&pitch,&bytes)&&pitch==128&&bytes==2048);
     assert(!d9_texture_layout(64,64,D9_DXT3,&pitch,&bytes)&&pitch==256&&bytes==4096);
     assert(!d9_texture_layout(64,64,D9_DXT5,&pitch,&bytes)&&pitch==256&&bytes==4096);
+    /* BC5/ATI2: two independent BC4 channels, B=0, A=255 (normal-map X/Y). */
+    uint8_t bc5[16];bc5[0]=0;bc5[1]=255;alpha_indices(bc5);
+    bc5[8]=255;bc5[9]=0;alpha_indices(bc5+8);
+    assert(!d9_bc_decode_block(D9_ATI2,bc5,16,rgba));
+    assert(rgba[0]==0&&rgba[1]==255&&rgba[2]==0&&rgba[3]==255);
+    assert(rgba[4]==255&&rgba[5]==0&&rgba[6]==0);
+    assert(rgba[8]==51&&rgba[9]==218);
+    assert(rgba[12]==102&&rgba[13]==182);
+    assert(rgba[28]==255&&rgba[29]==36);
+    assert(d9_bc_decode_block(D9_BC5U,bc5,8,rgba)==D9_INVALID);
+    /* BC4/ATI1: one channel in R; the same block decodes (R,0,0,1). */
+    assert(!d9_bc_decode_block(D9_ATI1,bc5,8,rgba));
+    assert(rgba[0]==0&&rgba[1]==0&&rgba[2]==0&&rgba[3]==255);
+    assert(rgba[4]==255&&rgba[5]==0);
+    assert(d9_bc_decode_block(D9_BC4U,bc5,7,rgba)==D9_INVALID);
+    assert(!d9_texture_layout(64,64,D9_ATI2,&pitch,&bytes)&&pitch==256&&bytes==4096);
+    assert(!d9_texture_layout(64,64,D9_ATI1,&pitch,&bytes)&&pitch==128&&bytes==2048);
 }
 
 static void show(const char *text){puts(text);}

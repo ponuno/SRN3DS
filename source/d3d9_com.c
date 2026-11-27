@@ -1391,7 +1391,7 @@ static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||!ptr(out,
     if(A(4)==1u){
         unsigned w=A(1),height=A(2),levels=A(3),format=A(5),pool=A(6);
         unsigned storage=format;
-        int hdr=format==0x71u||format==0x72u; /* A16B16G16R16F / A32B32G32R32F */
+        int hdr=format==0x6fu||format==0x71u||format==0x72u; /* R16F / A16B16G16R16F / R32F */
         if(hdr&&g.hdr_ldr_fallback)storage=D9_A8R8G8B8;
         const char *why=pool!=0?"render-target textures require D3DPOOL_DEFAULT":
             levels!=1?"render-target textures are implemented with exactly one level":
@@ -1450,7 +1450,7 @@ static uint32_t cube_create_obj(uint32_t device,unsigned edge,unsigned levels,un
             d3d_fail("CreateCubeTexture","render-target cubes require D3DPOOL_DEFAULT",UNAVAILABLE);
             return UNAVAILABLE;
         }
-        if(format==0x71u||format==0x72u){ /* A16B16G16R16F / A32B32G32R32F */
+        if(format==0x6fu||format==0x71u||format==0x72u){ /* R16F / A16B16G16R16F / R32F */
             if(!g.hdr_ldr_fallback){
                 d3d_fail("CreateCubeTexture","float/HDR cube render targets are not implemented; "
                          "set TESV_D3D9_HDR_LDR_FALLBACK=1 for the measurement-only A8R8G8B8 fallback",UNAVAILABLE);

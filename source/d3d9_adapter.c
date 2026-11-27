@@ -73,7 +73,9 @@ static int fmt_rgba(unsigned format){
     return format==D9_A8R8G8B8||format==D9_X8R8G8B8;
 }
 static int fmt_block(unsigned format){
-    return format==D9_DXT1||format==D9_DXT3||format==D9_DXT5;
+    return format==D9_DXT1||format==D9_DXT3||format==D9_DXT5||
+           format==D9_ATI1||format==D9_BC4U||
+           format==D9_ATI2||format==D9_BC5U;
 }
 static int fmt_texture2d(unsigned format){
     /* A8 is a real 2D texture layout (d9_texture_layout/lock_texture use 1 bpp). */
@@ -88,7 +90,7 @@ static int fmt_volume_nonrt(unsigned format){
     return fmt_rgba(format)||fmt_block(format);
 }
 static int fmt_depth(unsigned format){return format==D9_D24S8||format==D9_D24X8;}
-static int fmt_hdr(unsigned format){return format==0x71u||format==0x72u;}
+static int fmt_hdr(unsigned format){return format==0x6fu||format==0x71u||format==0x72u;}
 static D9AdapterAnswer ok_answer(const char *reason){
     D9AdapterAnswer a={D9_ADAPTER_OK,reason};return a;
 }
@@ -108,7 +110,7 @@ static int hdr_format_probe_enabled(void){
     if(on&&!hdr_format_probe_logged){
         hdr_format_probe_logged=1;
         fprintf(stderr,"[d3d9] MEASUREMENT ONLY: CheckDeviceFormat accepts "
-            "0x71/0x72 RENDERTARGET SURFACE/TEXTURE/CUBETEXTURE and usage-0 "
+            "0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) RENDERTARGET SURFACE/TEXTURE/CUBETEXTURE and usage-0 "
             "SURFACE/TEXTURE/CUBETEXTURE descriptors as LDR fallback; "
             "not shippable\n");
     }
@@ -222,8 +224,8 @@ D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device
                 return ok_answer("D24S8/D24X8 depth-stencil surface descriptor");
             if(fmt_hdr(format))
                 return hdr_format_probe_enabled()
-                    ? ok_answer("0x71/0x72 render-target descriptor (LDR fallback enabled)")
-                    : no_answer("0x71/0x72 descriptors require TESV_D3D9_HDR_LDR_FALLBACK=1");
+                    ? ok_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) render-target descriptor (LDR fallback enabled)")
+                    : no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) descriptors require TESV_D3D9_HDR_LDR_FALLBACK=1");
             return no_answer("surface format is not X8R8G8B8/A8R8G8B8 or a D24S8/D24X8 depth-stencil descriptor");
         }
         if(usage==USAGE_RENDERTARGET){
@@ -231,11 +233,11 @@ D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device
                 return ok_answer("single LDR X8R8G8B8/A8R8G8B8 render-target surface");
             if(fmt_hdr(format))
                 return hdr_format_probe_enabled()
-                    ? ok_answer("measurement-only 0x71/0x72 LDR fallback render target")
-                    : no_answer("0x71/0x72 render targets require TESV_D3D9_HDR_LDR_FALLBACK=1");
+                    ? ok_answer("measurement-only 0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) LDR fallback render target")
+                    : no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) render targets require TESV_D3D9_HDR_LDR_FALLBACK=1");
             if(fmt_depth(format))
                 return no_answer("depth-stencil surfaces have no RENDERTARGET usage");
-            return no_answer("render-target surfaces require X8R8G8B8/A8R8G8B8 or the 0x71/0x72 LDR fallback");
+            return no_answer("render-target surfaces require X8R8G8B8/A8R8G8B8 or the 0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) LDR fallback");
         }
         if(usage==USAGE_DEPTHSTENCIL){
             if(fmt_depth(format))
@@ -251,17 +253,17 @@ D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device
                 return ok_answer("single-level LDR X8R8G8B8/A8R8G8B8 render-target texture");
             if(fmt_hdr(format))
                 return hdr_format_probe_enabled()
-                    ? ok_answer("measurement-only 0x71/0x72 LDR fallback render-target texture")
-                    : no_answer("0x71/0x72 render-target textures require TESV_D3D9_HDR_LDR_FALLBACK=1");
-            return no_answer("render-target textures require X8R8G8B8/A8R8G8B8 or the 0x71/0x72 LDR fallback");
+                    ? ok_answer("measurement-only 0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) LDR fallback render-target texture")
+                    : no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) render-target textures require TESV_D3D9_HDR_LDR_FALLBACK=1");
+            return no_answer("render-target textures require X8R8G8B8/A8R8G8B8 or the 0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) LDR fallback");
         }
         if(usage==0){
             if(fmt_texture2d(format))
                 return ok_answer("2D texture sampler format (A8R8G8B8/X8R8G8B8/A8/DXT1/3/5)");
             if(fmt_hdr(format))
                 return hdr_format_probe_enabled()
-                    ? ok_answer("0x71/0x72 render-target capability descriptor")
-                    : no_answer("0x71/0x72 descriptors require TESV_D3D9_HDR_LDR_FALLBACK=1");
+                    ? ok_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) render-target capability descriptor")
+                    : no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) descriptors require TESV_D3D9_HDR_LDR_FALLBACK=1");
             return no_answer("2D texture format is not A8R8G8B8/X8R8G8B8/A8/DXT1/DXT3/DXT5");
         }
         if(usage&~USAGE_TEXTURE_MASK)
@@ -269,7 +271,7 @@ D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device
         if(fmt_texture2d(format))
             return ok_answer("2D texture with DYNAMIC/QUERY_FILTER/QUERY_WRAPANDMIP usage");
         if(fmt_hdr(format))
-            return no_answer("0x71/0x72 are render-target only; no sampled float texture");
+            return no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) are render-target only; no sampled float texture");
         return no_answer("2D texture format is not A8R8G8B8/X8R8G8B8/A8/DXT1/DXT3/DXT5");
     }
 
@@ -279,17 +281,17 @@ D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device
                 return ok_answer("LDR X8R8G8B8/A8R8G8B8 cube render-target format");
             if(fmt_hdr(format))
                 return hdr_format_probe_enabled()
-                    ? ok_answer("measurement-only 0x71/0x72 LDR fallback cube render target")
-                    : no_answer("0x71/0x72 cube render targets require TESV_D3D9_HDR_LDR_FALLBACK=1");
-            return no_answer("cube render targets require X8R8G8B8/A8R8G8B8 or the 0x71/0x72 LDR fallback");
+                    ? ok_answer("measurement-only 0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) LDR fallback cube render target")
+                    : no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) cube render targets require TESV_D3D9_HDR_LDR_FALLBACK=1");
+            return no_answer("cube render targets require X8R8G8B8/A8R8G8B8 or the 0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) LDR fallback");
         }
         if(usage==0){
             if(fmt_cube_nonrt(format))
                 return ok_answer("cube sampler format (X8R8G8B8/A8R8G8B8/DXT1/3/5)");
             if(fmt_hdr(format))
                 return hdr_format_probe_enabled()
-                    ? ok_answer("0x71/0x72 cube render-target capability descriptor")
-                    : no_answer("0x71/0x72 cubic descriptors require TESV_D3D9_HDR_LDR_FALLBACK=1");
+                    ? ok_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) cube render-target capability descriptor")
+                    : no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) cubic descriptors require TESV_D3D9_HDR_LDR_FALLBACK=1");
             return no_answer("cube format is not X8R8G8B8/A8R8G8B8/DXT1/DXT3/DXT5; A8 cube storage is not implemented");
         }
         if(usage&~USAGE_TEXTURE_MASK)
@@ -297,7 +299,7 @@ D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device
         if(fmt_cube_nonrt(format))
             return ok_answer("cube with DYNAMIC/QUERY_FILTER/QUERY_WRAPANDMIP usage");
         if(fmt_hdr(format))
-            return no_answer("0x71/0x72 cubes are render-target only");
+            return no_answer("0x6f/0x71/0x72 (R16F/A16B16G16R16F/R32F) cubes are render-target only");
         return no_answer("cube format is not X8R8G8B8/A8R8G8B8/DXT1/DXT3/DXT5; A8 cube storage is not implemented");
     }
 

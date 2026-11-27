@@ -162,6 +162,15 @@ int main(void) {
     uint32_t tex32 = read32(&demo, OUT);
     assert(tex32 && m.targets_created == 2);
 
+    /* R16F (0x6f) is the format the engine actually requested before the
+     * substitution to R32F; it takes the same measurement-only LDR path. */
+    assert(create_rt(&demo, 256, 256, 0x6fu) == 0);
+    uint32_t tex16 = read32(&demo, OUT);
+    assert(tex16 && m.targets_created == 3);
+    assert(call(&demo, tex16, 17, desc, 2) == 0);
+    assert(!guest_read(&demo.memory, OUT, got, sizeof got));
+    assert(got[0] == 0x6fu && got[6] == 256 && got[7] == 256);
+
     /* Refcounted release frees exactly one target per texture. */
     uint32_t back[] = {0, 0};
     assert(device_call(&demo, 37, back, 2) == 0);
@@ -170,7 +179,8 @@ int main(void) {
     assert(call(&demo, surface, 2, NULL, 0) == 0);
     assert(call(&demo, tex, 2, NULL, 0) == 0);
     assert(call(&demo, tex32, 2, NULL, 0) == 0);
-    assert(m.targets_deleted == 2);
+    assert(call(&demo, tex16, 2, NULL, 0) == 0);
+    assert(m.targets_deleted == 3);
 
     d9_com_demo_destroy(&demo);
     assert(!d9_destroy_device_ex(d));

@@ -57,6 +57,8 @@
 
 #define FMT_A8R8G8B8 21u
 #define FMT_DXT1 0x31545844u
+#define FMT_ATI2 0x32495441u
+#define FMT_DX10 0x30315844u
 
 static void wr32(uint8_t *p,uint32_t v){
     p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);p[2]=(uint8_t)(v>>16);p[3]=(uint8_t)(v>>24);
@@ -123,6 +125,12 @@ static size_t make_a8r8g8b8_dds(uint8_t *b,unsigned w,unsigned h,unsigned mips,u
 static size_t make_dxt1_dds(uint8_t *b,unsigned w,unsigned h,unsigned seed){
     size_t off=dds_header(b,w,h,1,0x4u,FMT_DXT1,0,0,0,0,0,0,1);
     size_t bytes=(size_t)((w+3u)/4u)*((h+3u)/4u)*8u;
+    for(size_t k=0;k<bytes;++k)b[off+k]=(uint8_t)(seed+k);
+    return off+bytes;
+}
+static size_t make_bc5_dds(uint8_t *b,unsigned w,unsigned h,unsigned seed){
+    size_t off=dds_header(b,w,h,1,0x4u,FMT_ATI2,0,0,0,0,0,0,1);
+    size_t bytes=(size_t)((w+3u)/4u)*((h+3u)/4u)*16u;
     for(size_t k=0;k<bytes;++k)b[off+k]=(uint8_t)(seed+k);
     return off+bytes;
 }
@@ -339,6 +347,32 @@ int main(void){
     level=0;assert(call(&h,tex,20,&level,1)==HR_OK);
     assert(call(&h,tex,2,NULL,0)==0);
 
+    /* 4a. BC5/ATI2 DDS: recognised, created, 16-byte blocks preserved. */
+    dds_a8=make_bc5_dds(ddsbuf,16,16,0x30);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,dds_a8));
+    src=guest_ptr(&h.memory,DATA,dds_a8);assert(src);
+    uint32_t bi[]={DATA,(uint32_t)dds_a8,INFO};
+    assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",bi,3)==HR_OK);
+    assert(rd(&h,INFO+12)==1&&rd(&h,INFO+16)==FMT_ATI2);
+    uint32_t bct[]={h.device,DATA,(uint32_t)dds_a8,OUT};
+    assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",bct,4)==HR_OK);
+    tex=rd(&h,OUT);assert(tex);
+    uint32_t bdl[]={0,OUT2,0,0};assert(call(&h,tex,19,bdl,4)==HR_OK);
+    assert(rd(&h,OUT2)==64&&guest_ptr(&h.memory,rd(&h,OUT2+4),256));
+    assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),256),src+128,256));
+    level=0;assert(call(&h,tex,20,&level,1)==HR_OK);
+    assert(call(&h,tex,2,NULL,0)==0);
+
+    /* 4a2. DX10 BC7 is refused by name, not guessed. */
+    {size_t n=dds_header(ddsbuf,8,8,1,0x4u,FMT_DX10,0,0,0,0,0,0,1);
+     wr32(ddsbuf+128,98);wr32(ddsbuf+132,3);wr32(ddsbuf+136,0);
+     wr32(ddsbuf+140,1);wr32(ddsbuf+144,0);n+=20;
+     assert(!guest_write(&h.memory,DATA,ddsbuf,n));
+     uint32_t b7[]={DATA,(uint32_t)n,INFO};
+     assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",b7,3)==HR_INVALIDDATA);
+     assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"BC7"));
+     assert(strstr(d3dx_texture_shims_last_error(),"no decoder"));}
     /* 4b. A 4x4 DXT1 is valid metadata but below the bridge's 8x8 compressed
      * floor: creation is a named NOTAVAILABLE before any resource exists. */
     dds_a8=make_dxt1_dds(ddsbuf,4,4,0x50);

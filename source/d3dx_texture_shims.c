@@ -40,6 +40,10 @@
 #define D3DFMT_DXT3 0x33545844u
 #define D3DFMT_DXT4 0x34545844u
 #define D3DFMT_DXT5 0x35545844u
+#define D3DFMT_ATI1 0x31495441u
+#define D3DFMT_BC4U 0x55344342u
+#define D3DFMT_ATI2 0x32495441u
+#define D3DFMT_BC5U 0x55354342u
 
 /* DDS_HEADER flags/caps (the subset this parser gives meaning to). */
 #define DDSD_MIPMAPCOUNT 0x00020000u
@@ -67,6 +71,7 @@ typedef struct {
 static struct {
     GuestMemory *memory;
     char last_error[256];
+    char dds_note[160];
 } g;
 
 static uint32_t rd32(const uint8_t *p){
@@ -105,6 +110,10 @@ static unsigned dds_format(uint32_t pf_flags,uint32_t fourcc,uint32_t bits,
         case D3DFMT_DXT3:return D3DFMT_DXT3;
         case D3DFMT_DXT4:return D3DFMT_DXT4;
         case D3DFMT_DXT5:return D3DFMT_DXT5;
+        case D3DFMT_ATI1:return D3DFMT_ATI1;
+        case D3DFMT_BC4U:return D3DFMT_BC4U;
+        case D3DFMT_ATI2:return D3DFMT_ATI2;
+        case D3DFMT_BC5U:return D3DFMT_BC5U;
         default:return 0;
         }
     }
@@ -135,10 +144,26 @@ static unsigned dds_format(uint32_t pf_flags,uint32_t fourcc,uint32_t bits,
     return 0;
 }
 
+static const char *dxgi_name(uint32_t f){
+    switch(f){
+    case 28:return "R8G8B8A8_UNORM";case 29:return "R8G8B8A8_UNORM_SRGB";
+    case 49:return "R8G8_UNORM";case 61:return "R8_UNORM";case 65:return "A8_UNORM";
+    case 71:return "BC1_UNORM";case 72:return "BC1_UNORM_SRGB";
+    case 74:return "BC2_UNORM";case 75:return "BC2_UNORM_SRGB";
+    case 77:return "BC3_UNORM";case 78:return "BC3_UNORM_SRGB";
+    case 80:return "BC4_UNORM";case 81:return "BC4_SNORM";
+    case 83:return "BC5_UNORM";case 84:return "BC5_SNORM";
+    case 98:return "BC7_UNORM";case 99:return "BC7_UNORM_SRGB";
+    case 95:return "BC6H_UF16";case 96:return "BC6H_SF16";
+    default:return "unknown";
+    }
+}
+
 /* Returns 0 for a structurally valid legacy (128-byte header) DDS.  DX10
- * headers and unknown pixel formats are rejected explicitly: silently guessing
- * a D3D9 format would be worse than the named failure. */
+ * headers and unknown pixel formats are rejected explicitly and named: silently
+ * guessing a D3D9 format would be worse than the named failure. */
 static int parse_dds(const uint8_t *p,size_t n,DdsImage *out){
+    g.dds_note[0]=0;
     if(!p||!out||n<128)return -1;
     if(memcmp(p,"DDS ",4)!=0)return -1;
     if(rd32(p+4)!=124u)return -1;          /* DDS_HEADER.dwSize */
@@ -148,10 +173,28 @@ static int parse_dds(const uint8_t *p,size_t n,DdsImage *out){
     if(rd32(p+76)!=32u)return -1;          /* DDS_PIXELFORMAT.dwSize */
     uint32_t pf_flags=rd32(p+80);
     uint32_t fourcc=rd32(p+84);
-    if((pf_flags&DDPF_FOURCC)&&fourcc==0x30315844u)return -2; /* "DX10" */
+    if((pf_flags&DDPF_FOURCC)&&fourcc==0x30315844u){ /* "DX10" */
+        if(n<148){
+            snprintf(g.dds_note,sizeof g.dds_note,"truncated DX10 header");
+        }else{
+            uint32_t dxgi=rd32(p+128);
+            snprintf(g.dds_note,sizeof g.dds_note,
+                "DX10 DXGI format %u (%s) has no decoder in this bridge "
+                "(BC7 is not converted to ETC1/BC5)",
+                dxgi,dxgi_name(dxgi));
+        }
+        return -2;
+    }
     unsigned format=dds_format(pf_flags,fourcc,rd32(p+88),rd32(p+92),
                                rd32(p+96),rd32(p+100),rd32(p+104));
-    if(!format)return -2;
+    if(!format){
+        snprintf(g.dds_note,sizeof g.dds_note,
+                 (pf_flags&DDPF_FOURCC)?"unsupported FourCC 0x%08x":
+                 "unrecognised DDS pixel format (bits=%u masks=%08x/%08x/%08x/%08x)",
+                 (pf_flags&DDPF_FOURCC)?fourcc:rd32(p+88),
+                 rd32(p+92),rd32(p+96),rd32(p+100),rd32(p+104));
+        return -2;
+    }
     unsigned mips=1;
     if(flags&DDSD_MIPMAPCOUNT){unsigned m=rd32(p+28);if(m)mips=m;}
     if(mips>16u)return -1;
@@ -170,7 +213,9 @@ static int parse_dds(const uint8_t *p,size_t n,DdsImage *out){
 
 static unsigned bc_bytes(unsigned format){
     if(format==D3DFMT_DXT1)return 8u;
-    if(format==D3DFMT_DXT3||format==D3DFMT_DXT5)return 16u;
+    if(format==D3DFMT_ATI1||format==D3DFMT_BC4U)return 8u;
+    if(format==D3DFMT_DXT3||format==D3DFMT_DXT5||
+       format==D3DFMT_ATI2||format==D3DFMT_BC5U)return 16u;
     return 0;
 }
 static int texture_format_supported(unsigned format){
@@ -187,6 +232,10 @@ static const char *format_name(unsigned f){
     case D3DFMT_DXT3:return "DXT3";
     case D3DFMT_DXT4:return "DXT4";
     case D3DFMT_DXT5:return "DXT5";
+    case D3DFMT_ATI1:return "ATI1/BC4";
+    case D3DFMT_BC4U:return "BC4U";
+    case D3DFMT_ATI2:return "ATI2/BC5";
+    case D3DFMT_BC5U:return "BC5U";
     case D3DFMT_R8G8B8:return "R8G8B8";
     case D3DFMT_R5G6B5:return "R5G6B5";
     case D3DFMT_A1R5G5B5:return "A1R5G5B5";
@@ -210,7 +259,9 @@ static int level_layout(unsigned format,unsigned w,unsigned h,size_t *pitch,size
 static int parse_checked(const char *who,const uint8_t *p,size_t n,DdsImage *d){
     int rc=parse_dds(p,n,d);
     if(rc)
-        reject("%s: %s (host shim supports legacy DDS only)",who,
+        reject("%s: %s (host shim supports legacy DXT1/3/5, ATI1/BC4, "
+               "ATI2/BC5 and A8R8G8B8/X8R8G8B8 DDS)",who,
+               rc==-2&&g.dds_note[0]?g.dds_note:
                rc==-2?"unsupported DDS pixel format/header":"not a DDS file");
     return rc;
 }
