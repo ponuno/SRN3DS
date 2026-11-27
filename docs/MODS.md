@@ -325,8 +325,9 @@ C:\devkitPro\devkitARM\bin\arm-none-eabi-gcc.exe -std=c11 -D_GNU_SOURCE `
   `menu_bsa_runtime.c`. The next code step is a C mount list emitted from the
   manifest (or a small C loader that reads plugins.txt) so the same precedence
   is used on device.
-* **Texture repack path**: ETC1/BC1 outputs exist, but the asset staging route
-  into the 3DS build is not automated yet.
+* **Texture repack path**: `tools/deploy_device.py` now produces a device tree
+  and converts textures the port cannot load (see `docs/DEPLOY.md`); the C
+  mount list still has to be emitted for the staged tree.
 * **Mesh decimation**: analysis only. Implementing a vertex/index rewrite needs
   a validated NIF writer and a visual/collision check; do not fake it.
 * **Per-mod index cap**: lower the C defaults (24/64/96 MiB) to the device
