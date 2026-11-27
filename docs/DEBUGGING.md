@@ -80,6 +80,25 @@ CPU limit.
 | Host tests | `build_host/logs/<stamp>_<test>.log` |
 | ARM builds | `dist/<target>/build.log`, `build_manifest.json` |
 
+### Quick slice-log summary
+
+`tools/summarize_run.ps1` prints the first `Guest fault`/`unmapped` line with
+two lines of context, `DrawPrimitive*`/`DrawIndexed*`/`Present` line counts,
+the last unique `[menu] enter` addresses, the last `mem tag=fault|exit`
+snapshot, and the effective line/byte count. It automatically picks up a
+paired `<log>.err` (guest logs often go to stderr) but skips it when the runner
+already teed those lines into the `.log`, so nothing is counted twice. No
+dependencies beyond PowerShell.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\summarize_run.ps1 `
+  -Log E:\menu_capture\last_run.log -Tail 12
+```
+
+`-Log` accepts several paths; `-Tail` sets how many recent unique menu
+addresses to show. Counts are literal token matches (a header such as
+"Present scales to 400x240" counts as one `Present`), not decoded D3D9 calls.
+
 ### Luma3DS crash dumps
 
 Hardware crashes are saved as `sdmc:/luma/dumps/arm11/crash_dump_*.dmp`.
