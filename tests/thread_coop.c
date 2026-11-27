@@ -288,6 +288,70 @@ static void test_auto_reset_one_waiter(void) {
     close_h(w0); close_h(w1); close_h(M32(st + S_EVENT));
 }
 
+/* ---------------------------------------------------------------- 3 */
+/* One signal, one waiter.  The cooperative scheduler releases a waiter from the
+ * signaller's context; the waiter's own wait loop must then consume the object
+ * (semaphore count down / auto-reset event cleared).  These pin that contract
+ * end to end: TESV's renderer handshake (ReleaseSemaphore -> palette worker ->
+ * SetEvent -> video worker) relies on one release satisfying exactly one wait,
+ * otherwise the count never drops and a later Wait succeeds with no new
+ * signal. */
+static void test_one_token_per_signal(void) {
+    reset_state();
+    uint32_t st = DATA;
+    uint32_t a[4] = {0, 0, 1, 0};                    /* initial 0, maximum 1 */
+    CPU tmp = *cpu;
+    uint32_t sem = call_shim(&tmp, resolve("CreateSemaphoreA"), a, 4);
+    *cpu = tmp;
+    M32(st + S_EVENT) = sem;
+    uint32_t w0 = spawn(0x00500020u, st, 0);         /* body_waiter blocks */
+    uint32_t w1 = spawn(0x00500020u, st, 0);
+    CHECK(!win32_thread_signaled(w0) && !win32_thread_signaled(w1), "both waiters blocked");
+    tmp = *cpu; W3(&tmp, "ReleaseSemaphore", sem, 1, 0); *cpu = tmp;
+    CHECK(wait1(w0, 0xffffffffu) == 0, "one release wakes the oldest waiter");
+    CHECK(win32_thread_signaled(w0) == 1, "first waiter ran");
+    CHECK(win32_thread_signaled(w1) == 0, "second waiter did not run from one token");
+    CHECK(wait1(sem, 0) == 258, "released token was consumed (count is 0)");
+    tmp = *cpu; W3(&tmp, "ReleaseSemaphore", sem, 1, 0); *cpu = tmp;
+    CHECK(wait1(w1, 0xffffffffu) == 0, "second release wakes the second waiter");
+    CHECK(wait1(sem, 0) == 258, "no leftover token after both waits");
+    printf("PASS one token per signal (semaphore)\n");
+    close_h(w0); close_h(w1); close_h(sem);
+}
+
+/* Auto-reset event: the waiter that woke must have cleared the signal, so an
+ * immediate 0-timeout wait reports WAIT_TIMEOUT instead of taking the same
+ * signal a second time. */
+static void test_auto_reset_consumed_on_wake(void) {
+    reset_state();
+    uint32_t st = DATA;
+    M32(st + S_EVENT) = new_event(0, 0);
+    uint32_t w = spawn(0x00500020u, st, 0);
+    CHECK(win32_thread_signaled(w) == 0, "waiter blocked on the event");
+    CPU tmp = *cpu;
+    W1(&tmp, "SetEvent", M32(st + S_EVENT)); *cpu = tmp;
+    CHECK(wait1(w, 0xffffffffu) == 0 && win32_thread_signaled(w) == 1, "waiter ran");
+    CHECK(wait1(M32(st + S_EVENT), 0) == 258,
+          "the woken waiter consumed the auto-reset signal");
+    /* set-before-wait: a signal with no waiter is kept, not lost */
+    tmp = *cpu; W1(&tmp, "SetEvent", M32(st + S_EVENT)); *cpu = tmp;
+    uint32_t w2 = spawn(0x00500020u, st, 0);
+    CHECK(win32_thread_signaled(w2) == 1, "a signal set before the wait is kept");
+    CHECK(wait1(M32(st + S_EVENT), 0) == 258, "and consumed by exactly one wait");
+    /* manual-reset: every waiter and a later wait all see it until reset */
+    uint32_t manual = new_event(1, 0);
+    M32(st + S_EVENT) = manual;
+    uint32_t m0 = spawn(0x00500020u, st, 0), m1 = spawn(0x00500020u, st, 0);
+    tmp = *cpu; W1(&tmp, "SetEvent", manual); *cpu = tmp;
+    CHECK(wait1(m0, 0xffffffffu) == 0 && wait1(m1, 0xffffffffu) == 0,
+          "a manual-reset event wakes every waiter");
+    CHECK(wait1(manual, 0) == 0, "manual-reset stays signaled after a wait");
+    tmp = *cpu; W1(&tmp, "ResetEvent", manual); *cpu = tmp;
+    CHECK(wait1(manual, 0) == 258, "ResetEvent clears it");
+    printf("PASS auto/manual reset consumption and set-before-wait\n");
+    close_h(w); close_h(w2); close_h(m0); close_h(m1); close_h(manual);
+}
+
 /* ---------------------------------------------------------------- 4 */
 static void test_tls_teb_isolation(void) {
     reset_state();
@@ -570,6 +634,8 @@ int main(void) {
     test_launcher_and_order("repeat-2");
     test_launcher_and_order("repeat-3");
     test_auto_reset_one_waiter();
+    test_one_token_per_signal();
+    test_auto_reset_consumed_on_wake();
     test_tls_teb_isolation();
     test_exit_paths();
     test_deadlock_fault();

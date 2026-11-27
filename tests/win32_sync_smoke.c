@@ -63,8 +63,17 @@ static GuestFn fn_of(const char *name) {
     }
     return e->fn;
 }
-/* push return address + args on the guest stack and call the shim directly */
-static uint32_t call(GuestFn fn, const uint32_t *args, unsigned n) {
+/* Blocker stub for the hand-off test: report "a handle may be ready" a fixed
+ * number of times, then time out.  This models the scheduler releasing a waiter
+ * that must still re-check (and consume) the object itself. */
+static int fake_wakes_left;
+static int fake_block(const uint32_t *handles, unsigned count, int all, uint32_t ms) {
+    (void)handles; (void)count; (void)all; (void)ms;
+    if (fake_wakes_left) { --fake_wakes_left; return 0; }
+    return 1;
+}
+
+/* push return address + args on the guest stack and call the shim directly */static uint32_t call(GuestFn fn, const uint32_t *args, unsigned n) {
     uint32_t frame = STACK_TOP - 4 - 4 * n;
     cpu.r[4] = frame;
     M32(frame) = 0;
@@ -297,6 +306,35 @@ int main(void) {
     args[0] = 9; args[1] = list; args[2] = 0; args[3] = 0;
     CHECK_EQ(call(wait_many, args, 4), 0xffffffffu);
     CHECK_EQ(last_error(), 87);
+
+    /* --- hand-off: a woke thread re-checks and consumes one token -------- */
+    /* Windows satisfies a wait by consuming the object.  The cooperative
+     * scheduler only makes the waiter runnable; the wait loop re-tests the
+     * object, so a release ("woken" but nothing signaled) must go back to sleep
+     * instead of reporting WAIT_OBJECT_0, and a real token must be consumed
+     * exactly once -- not satisfy the waiter twice. */
+    args[0] = 0; args[1] = 0; args[2] = 1; args[3] = 0;
+    uint32_t hand = call(create_sem, args, 4);        /* empty semaphore */
+    win32_sync_set_blocker(fake_block, NULL);
+    fake_wakes_left = 1;                              /* one spurious wake */
+    args[0] = hand; args[1] = 0xffffffffu;
+    CHECK_EQ(call(wait_one, args, 2), 258);           /* re-checks, no fake success */
+    args[0] = hand; args[1] = 1; args[2] = 0;
+    CHECK_EQ(call(release_sem, args, 3), 1);
+    args[0] = hand; args[1] = 0; CHECK_EQ(call(wait_one, args, 2), 0);
+    args[0] = hand; args[1] = 0; CHECK_EQ(call(wait_one, args, 2), 258); /* consumed once */
+    win32_sync_set_blocker(NULL, NULL);
+    args[0] = auto_ev; CHECK_EQ(call(reset_event, args, 1), 1);
+    args[0] = auto_ev; CHECK_EQ(call(set_event, args, 1), 1);
+    args[0] = auto_ev; args[1] = 0; CHECK_EQ(call(wait_one, args, 2), 0);
+    args[0] = auto_ev; args[1] = 0; CHECK_EQ(call(wait_one, args, 2), 258);
+    /* manual-reset stays signaled for every wait until ResetEvent */
+    args[0] = manual; CHECK_EQ(call(set_event, args, 1), 1);
+    args[0] = manual; args[1] = 0; CHECK_EQ(call(wait_one, args, 2), 0);
+    args[0] = manual; args[1] = 0; CHECK_EQ(call(wait_one, args, 2), 0);
+    args[0] = manual; CHECK_EQ(call(reset_event, args, 1), 1);
+    args[0] = manual; args[1] = 0; CHECK_EQ(call(wait_one, args, 2), 258);
+    CHECK_EQ(win32_sync_close(hand), 1);
 
     /* --- invalid handles and close --- */
     args[0] = 0x1234; args[1] = 0;

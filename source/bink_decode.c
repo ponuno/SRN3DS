@@ -194,11 +194,19 @@ uint64_t bink_copy_span(uint32_t dst_pitch, uint32_t dst_height,
     default: return 0;
     }
     if (!src_w || !src_h || !dst_pitch) return 0;
-    /* Same bounds as bink_decode_copy_rect(): the copy is rejected, so no
-     * destination byte needs to be mapped. */
-    if (dst_x + src_w > dst_pitch / bpp || dst_y + src_h > dst_height) return 0;
-    return (uint64_t)(dst_y + src_h - 1u) * dst_pitch +
-           (uint64_t)(dst_x + src_w) * bpp;
+    /* The destination rectangle is clipped exactly like the copy: the video
+     * uploader tiles a 1024-pitch, 720-row surface into 256x256 tiles, so the
+     * last tile (dst_y = 512) runs past the bottom and only its visible rows
+     * belong to the locked surface.  Refusing that tile drops the bottom third
+     * of every frame; real Bink clips the copy to the destination. */
+    uint32_t cols = src_w, rows = src_h;
+    uint32_t pitch_px = dst_pitch / bpp;
+    if (dst_x >= pitch_px || dst_y >= dst_height) return 0;
+    if (dst_x + cols > pitch_px) cols = pitch_px - dst_x;
+    if (dst_y + rows > dst_height) rows = dst_height - dst_y;
+    if (!cols || !rows) return 0;
+    return (uint64_t)(dst_y + rows - 1u) * dst_pitch +
+           (uint64_t)(dst_x + cols) * bpp;
 }
 
 int bink_decode_copy_rect(BinkDecoded *d, uint32_t frame,
@@ -212,9 +220,15 @@ int bink_decode_copy_rect(BinkDecoded *d, uint32_t frame,
     int flip = (flags & BINK_COPY_FLIP) != 0;
     if (!d || !d->raw_path[0] || !dst || src_w == 0 || src_h == 0) return BINK_DECODE_BAD_ARG;
     if (frame >= d->frames) return BINK_DECODE_BAD_RECT;
-    if (src_x + src_w > (uint32_t)d->width || src_y + src_h > (uint32_t)d->height)
-        return BINK_DECODE_BAD_RECT;
     if (src_w > 8192) return BINK_DECODE_BAD_RECT;
+    /* Clip the source rectangle to the decoded frame.  The video uploader asks
+     * for full 256x256 tiles even at the bottom edge of a 720-row frame
+     * (src_y 512 + 256 = 768), exactly as it does for the destination; Bink
+     * clips to the frame, so only the rows that exist are copied. */
+    uint32_t cols = src_w, rows = src_h;
+    if (src_x >= (uint32_t)d->width || src_y >= (uint32_t)d->height) return BINK_DECODE_OK;
+    if (src_x + cols > (uint32_t)d->width) cols = (uint32_t)d->width - src_x;
+    if (src_y + rows > (uint32_t)d->height) rows = (uint32_t)d->height - src_y;
     switch (flags & 7u) {
     case BINK_COPY_BGRA: case BINK_COPY_RGBA:
     case BINK_COPY_ABGR: case BINK_COPY_ARGB: bpp = 4; break;
@@ -222,20 +236,26 @@ int bink_decode_copy_rect(BinkDecoded *d, uint32_t frame,
     case BINK_COPY_565: bpp = 2; break;
     default: return BINK_DECODE_BAD_RECT;
     }
-    if (dst_x + src_w > dst_pitch / bpp || dst_y + src_h > dst_height)
-        return BINK_DECODE_BAD_RECT;
+    /* Clip the rectangle to the destination buffer the way Bink does instead
+     * of refusing it.  A whole rect outside the buffer writes nothing and is
+     * still a successful call. */
+    uint32_t pitch_px = dst_pitch / bpp;
+    if (dst_x >= pitch_px || dst_y >= dst_height) return BINK_DECODE_OK;
+    if (dst_x + cols > pitch_px) cols = pitch_px - dst_x;
+    if (dst_y + rows > dst_height) rows = dst_height - dst_y;
+    if (!cols || !rows) return BINK_DECODE_OK;
     if (!d->fp) d->fp = fopen(d->raw_path, "rb");
     if (!d->fp) return BINK_DECODE_FAILED;
-    for (r = 0; r < src_h; ++r) {
+    for (r = 0; r < rows; ++r) {
         size_t off = (((size_t)frame * (size_t)d->height) + src_y + r) *
                      (size_t)d->width * 4u + (size_t)src_x * 4u;
-        uint32_t dr = flip ? (src_h - 1u - r) : r;
+        uint32_t dr = flip ? (rows - 1u - r) : r;
         unsigned char *drow = (unsigned char *)dst +
             (size_t)(dst_y + dr) * dst_pitch + (size_t)dst_x * bpp;
         uint32_t x;
         if (fseek(d->fp, (long)off, SEEK_SET) != 0) return BINK_DECODE_FAILED;
-        if (fread(row, 4, src_w, d->fp) != src_w) return BINK_DECODE_FAILED;
-        for (x = 0; x < src_w; ++x)
+        if (fread(row, 4, cols, d->fp) != cols) return BINK_DECODE_FAILED;
+        for (x = 0; x < cols; ++x)
             put_pixel(drow + (size_t)x * bpp, row + (size_t)x * 4u, flags);
     }
     return BINK_DECODE_OK;

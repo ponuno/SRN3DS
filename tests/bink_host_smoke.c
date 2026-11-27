@@ -72,11 +72,16 @@ int main(int argc, char **argv) {
      * tiled copy as unmapped (the TESV BGS_LOGO thread died there). */
     assert(bink_copy_span(1024, 720, 0, 0, 256, 256, BINK_COPY_ARGB) == 256u * 1024u);
     assert(bink_copy_span(1024, 720, 0, 464, 256, 256, BINK_COPY_ARGB) == 720u * 1024u);
+    /* The bottom tile (dst_y 512, 256 rows) runs 48 rows past a 720-row
+     * surface.  Real Bink clips to the destination; refusing it dropped the
+     * bottom third of every frame (rc=-5 in the TESV video uploader). */
+    assert(bink_copy_span(1024, 720, 0, 512, 256, 256, BINK_COPY_ARGB) == 719u * 1024u + 256u * 4u);
     assert(bink_copy_span(5120, 720, 0, 0, 1280, 720, BINK_COPY_BGRA) == 720u * 5120u);
     assert(bink_copy_span(5120, 720, 3, 0, 1280, 1, BINK_COPY_RGB) == 3849u);
     assert(bink_copy_span(100, 8, 0, 0, 25, 8, BINK_COPY_565) == 750u);
-    assert(bink_copy_span(1024, 720, 0, 0, 257, 256, BINK_COPY_ARGB) == 0); /* > pitch/4 */
-    assert(bink_copy_span(1024, 720, 0, 465, 256, 256, BINK_COPY_ARGB) == 0); /* > height */
+    assert(bink_copy_span(1024, 720, 0, 0, 257, 256, BINK_COPY_ARGB) == 256u * 1024u); /* clipped to pitch/4 */
+    assert(bink_copy_span(1024, 720, 0, 465, 256, 256, BINK_COPY_ARGB) == 719u * 1024u + 256u * 4u);
+    assert(bink_copy_span(1024, 720, 0, 720, 256, 256, BINK_COPY_ARGB) == 0);   /* fully below */
     assert(bink_copy_span(1024, 720, 0, 0, 256, 256, 7) == 0);                /* bad format */
     assert(bink_copy_span(1024, 720, 0, 0, 0, 256, BINK_COPY_ARGB) == 0);
     printf("BINK_HOST span contract OK\n");
@@ -170,6 +175,28 @@ int main(int argc, char **argv) {
     assert(rect[(size_t)8 * ((size_t)w * 4u + 64u) + 15u * 4u + 3u] == 0);
     assert(rect[(size_t)(8 + 32) * ((size_t)w * 4u + 64u) + 16u * 4u] == 0);
     assert(rect[(size_t)8 * ((size_t)w * 4u + 64u) + (size_t)(16 + 64) * 4u] == 0);
+
+    /* Bottom-edge tile: the engine asks for a full 256x256 tile at src_y=512
+     * of a 720-row frame (48 rows past the bottom) into a 1024-pitch surface.
+     * Real Bink clips the rectangle; refusing it returned BINK_DECODE_BAD_RECT
+     * (-5) and dropped the bottom third of every video frame. */
+    {
+        unsigned char *tile = (unsigned char *)calloc((size_t)1024 * 720u, 1);
+        assert(tile);
+        assert(bink_copy_span(1024, 720, 0, 512, 256, 256, BINK_COPY_BGRA)
+               == 719u * 1024u + 256u * 4u);
+        assert(bink_decode_copy_rect(&d, F0, tile, 1024, 720,
+                                     0, 512, 0, 512, 256, 256, BINK_COPY_BGRA) == 0);
+        for (y = 0; y < 208; ++y) for (x = 0; x < 256; ++x) {
+            const unsigned char *got = tile + (size_t)(512 + y) * 1024u + (size_t)x * 4u;
+            const unsigned char *want = f0 + (size_t)(512 + y) * ((size_t)w * 4u) + (size_t)x * 4u;
+            assert(memcmp(got, want, 4) == 0);
+        }
+        /* the byte comparison above proves real decoded pixels; the bottom of
+         * the logo frame can legitimately be black, so no lit-pixel check. */
+        free(tile);
+        printf("BINK_HOST bottom-edge tile clipped to 208 rows OK\n");
+    }
 
     /* RGBA conversion swaps red and blue, alpha stays opaque. */
     {
