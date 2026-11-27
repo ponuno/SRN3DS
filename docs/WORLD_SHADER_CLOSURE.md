@@ -250,6 +250,37 @@ the one complete TEV draw.
 A real slice was not run in this timebox; the resolution table plus the C
 formatter test are the committed evidence.
 
+## 2g. This round: `def` fold and COLOR1 feasibility
+
+Two requested promotions were investigated end-to-end and **not** promoted;
+the blockers are structural, not counters:
+
+* **`def` fold does not unblock the 10-chunk block by itself.** The nine
+  refused 10-chunk lighting hashes fail the planner *before* the literal:
+  `nrm` (53fe44bb, 6b95db62, d8a0ed61, f43b6dc2), `rcp` (997083d1, a47654d2,
+  c2b26bfe) and `lrp` (c157fddc). `compile.plan_ps(ignore_def_range=True)`
+  returns no plan for them, so a plan row would still be a fake path.
+* **The five 10-chunk `lighting.approx.*` plans cannot be promoted as the
+  rendered descriptor.** Their `stage_data` is a reduced base-lit recipe
+  (`constants [3,4,5,9]`, no literal), while the device renders the translated
+  *original* PS. PICA's documented policy is “derive, do not clamp”
+  (`bsa_ps.py`; `tests/tev_translate_smoke.c` asserts an out-of-[0,1] `def` is
+  refused), so clamping the lane is not acceptable. A truthful promotion needs
+  the translated stages serialized back into the plan plus literal
+  `constant_ops` (M), not a table row.
+* **COLOR1 has no PICA TEV carrier.** PICA exposes one primary colour and
+  `d3d9_pica_citro3d.map_source` has no `FRAG_PRIMARY` mapping; all six
+  candidate PS read both COLOR0 and COLOR1 and their plans keep the COLOR1
+  term. Packing color1 into color0's alpha only works if the PS ignores COLOR0
+  alpha, which it does not. The honest options are (a) rewrite the paired PS
+  plan to drop the COLOR1 term and promote the pair as `quality: approx` with
+  a measured error, or (b) keep the VS off. No pair has a COLOR0-only PS plan
+  today, so **0 promoted**.
+
+Order of work that actually unblocks these: opcode lowering (`nrm/rcp/lrp`)
+for the 10-chunk queue → translated-stage-to-plan serializer + literal
+`constant_ops` → PS-plan COLOR1-drop with measured error.
+
 ## 3. Top-30 world plans by frequency
 
 By census chunk count (`manifest.json` `hashes[3]`); status is the committed
