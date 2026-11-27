@@ -17,6 +17,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 static int checks;
@@ -919,6 +923,291 @@ static void test_runtime(void) {
     remove("bsa_test_corrupt.bsa");
 }
 
+/* INI-driven mount list: synthetic [Archive] files plus tiny archives. */
+static int write_text_file(const char *path, const char *text) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return 0;
+    size_t n = strlen(text);
+    int ok = fwrite(text, 1, n, f) == n;
+    fclose(f);
+    return ok;
+}
+
+static void test_ini_sources(void) {
+    uint8_t a_swf[512], b_swf[512];
+    size_t a_len = make_cws(a_swf, sizeof a_swf, 0x11, 48);
+    size_t b_len = make_cws(b_swf, sizeof b_swf, 0x77, 96);
+    TestFile a_files[] = {{"interface\\startmenu.swf", a_swf, a_len}};
+    TestFile b_files[] = {{"interface\\startmenu.swf", b_swf, b_len}};
+    uint8_t a_blob[4096], b_blob[4096];
+    BuiltBsa a_built, b_built;
+    check(a_len > 0 && b_len > 0, "INI fixture SWFs build");
+    check(build_bsa(a_blob, sizeof a_blob, a_files, 1, 104, 0, 0, 1,
+                    &a_built) != 0, "INI archive A builds");
+    check(build_bsa(b_blob, sizeof b_blob, b_files, 1, 104, 0, 0, 1,
+                    &b_built) != 0, "INI archive B builds");
+    check(write_file("bsa_ini_a.bsa", a_blob, a_built.len),
+          "write INI archive A");
+    check(write_file("bsa_ini_b.bsa", b_blob, b_built.len),
+          "write INI archive B");
+    check(write_file("bsa_ini_bad.bsa", (const uint8_t *)"NOPE", 4),
+          "write INI corrupt archive");
+
+    char reason[BSA_REASON_MAX];
+    MenuBsaSources set;
+
+    check(write_text_file("bsa_ini_order.ini",
+                          "[Archive]\n"
+                          "sResourceArchiveList=bsa_ini_a.bsa, bsa_ini_b.bsa\n"
+                          "sResourceArchiveList2=,,  ,\n"),
+          "write INI order fixture");
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_order.ini",
+                                    reason, sizeof reason) == 1 &&
+              set.count == 2 && set.skip_unusable == 1 &&
+              strstr(set.source[0].path, "bsa_ini_a.bsa") != NULL &&
+              strstr(set.source[1].path, "bsa_ini_b.bsa") != NULL,
+          "INI list order and empty List2 elements");
+
+    GuestMemory mem;
+    GuestHeap heap;
+    guest_init(&mem, 2u * 1024u * 1024u);
+    check(heap_create(&heap, &mem, 0x20000000u, 1024u * 1024u) == 0,
+          "INI guest heap created");
+    MenuBsaResult r;
+    MenuBsaStatus st = menu_bsa_resolve_startmenu_sources(&heap, &set,
+                                                          256u * 1024u, &r);
+    check(st == MENU_BSA_OK && r.archive_index == 1 && r.size == b_len,
+          "later INI archive overrides earlier archive");
+    if (st == MENU_BSA_OK) heap_free(&heap, r.guest_address);
+
+    check(write_text_file("bsa_ini_reverse.ini",
+                          "[Archive]\n"
+                          "sResourceArchiveList=bsa_ini_b.bsa, bsa_ini_a.bsa\n"),
+          "write reverse INI fixture");
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_reverse.ini",
+                                    reason, sizeof reason) == 1 &&
+              set.count == 2,
+          "reverse INI parses");
+    st = menu_bsa_resolve_startmenu_sources(&heap, &set, 256u * 1024u, &r);
+    check(st == MENU_BSA_OK && r.archive_index == 1 && r.size == a_len,
+          "reverse INI order changes the winner");
+    if (st == MENU_BSA_OK) heap_free(&heap, r.guest_address);
+
+    check(write_text_file("bsa_ini_skip.ini",
+                          "[Archive]\n"
+                          "sResourceArchiveList=bsa_ini_bad.bsa, "
+                          "bsa_ini_missing.bsa, bsa_ini_a.bsa\n"
+                          "sResourceArchiveList2=bsa_ini_b.bsa\n"),
+          "write INI skip fixture");
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_skip.ini",
+                                    reason, sizeof reason) == 1 &&
+              set.count == 4,
+          "INI keeps absent and corrupt entries for the mount log");
+    st = menu_bsa_resolve_startmenu_sources(&heap, &set, 256u * 1024u, &r);
+    check(st == MENU_BSA_OK && r.archive_index == 3 && r.size == b_len,
+          "corrupt/absent INI archives are logged and skipped");
+    if (st == MENU_BSA_OK) heap_free(&heap, r.guest_address);
+
+    check(write_text_file("bsa_ini_upper.ini",
+                          "[Archive]\n"
+                          "sResourceArchiveList=bsa_ini_a.BSA\n"),
+          "write uppercase extension fixture");
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_upper.ini",
+                                    reason, sizeof reason) == 1 &&
+              set.count == 1,
+          "case-insensitive .bsa extension");
+
+    char many[4096];
+    size_t at = (size_t)snprintf(many, sizeof many, "[Archive]\n"
+                                                   "sResourceArchiveList=");
+    for (unsigned i = 0; i < MENU_BSA_MAX_SOURCES + 1u; ++i) {
+        at += (size_t)snprintf(many + at, sizeof many - at, "%sbsa_ini_a.bsa",
+                               i ? "," : "");
+    }
+    snprintf(many + at, sizeof many - at, "\n");
+    check(write_text_file("bsa_ini_many.ini", many),
+          "write over-limit INI fixture");
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_many.ini",
+                                    reason, sizeof reason) == 0 &&
+              strstr(reason, "32") != NULL,
+          "over-limit INI list is a named refusal");
+
+    check(write_text_file("bsa_ini_empty.ini",
+                          "[Archive]\n"
+                          "sResourceArchiveList=,\n"
+                          "sResourceArchiveList2=\n"),
+          "write empty INI fixture");
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_empty.ini",
+                                    reason, sizeof reason) == 1 &&
+              set.count == 2 && set.skip_unusable == 0 &&
+              strstr(set.source[0].path, "Skyrim - Interface.bsa") != NULL &&
+              strstr(set.source[1].path, "Update.bsa") != NULL,
+          "empty list falls back to Interface/Update");
+
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_no_such.ini",
+                                    reason, sizeof reason) == 1 &&
+              set.count == 2 &&
+              strstr(set.source[0].path, "Skyrim - Interface.bsa") != NULL,
+          "missing INI falls back to Interface/Update");
+
+    check(menu_bsa_sources_from_ini(&set, ".", "bsa_ini_order.ini",
+                                    reason, sizeof reason) == 1,
+          "order INI reloads for budget check");
+    set.total_index_budget = 1;
+    st = menu_bsa_resolve_startmenu_sources(&heap, &set, 256u * 1024u, &r);
+    check(st == MENU_BSA_BUDGET && strstr(r.reason, "index") != NULL,
+          "summed archive index budget is a named refusal");
+
+    heap_destroy(&heap);
+    guest_destroy(&mem);
+    remove("bsa_ini_a.bsa");
+    remove("bsa_ini_b.bsa");
+    remove("bsa_ini_bad.bsa");
+    remove("bsa_ini_order.ini");
+    remove("bsa_ini_reverse.ini");
+    remove("bsa_ini_skip.ini");
+    remove("bsa_ini_upper.ini");
+    remove("bsa_ini_many.ini");
+    remove("bsa_ini_empty.ini");
+}
+
+static int make_dir(const char *path) {
+#ifdef _WIN32
+    return _mkdir(path) == 0;
+#else
+    return mkdir(path, 0777) == 0;
+#endif
+}
+
+static int remove_dir(const char *path) {
+#ifdef _WIN32
+    return _rmdir(path) == 0;
+#else
+    return rmdir(path) == 0;
+#endif
+}
+
+static int read_text_file(const char *path, char *out, size_t cap) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = fread(out, 1, cap - 1, f);
+    fclose(f);
+    out[n] = 0;
+    return 1;
+}
+
+/* Boot-path entry: a synthetic sdmc-like root, two cooked archives and the
+ * exact startup log line the device writes. */
+static void test_boot_mount(void) {
+    const char *root = "bsa_boot_root";
+    const char *data = "bsa_boot_root/Data";
+    const char *ini = "bsa_boot_root/Skyrim.ini";
+    const char *name_a = "Skyrim - Cooked A.bsa";
+    const char *name_b = "Skyrim - Cooked B.bsa";
+    char path_a[256], path_b[256], data_ini[256];
+    snprintf(path_a, sizeof path_a, "%s/%s", data, name_a);
+    snprintf(path_b, sizeof path_b, "%s/%s", data, name_b);
+    snprintf(data_ini, sizeof data_ini, "%s/Skyrim.ini", data);
+    remove(ini);
+    remove(data_ini);
+    remove(path_a);
+    remove(path_b);
+    (void)make_dir(root);
+    (void)make_dir(data);
+
+    uint8_t a_swf[512], b_swf[512];
+    size_t a_len = make_cws(a_swf, sizeof a_swf, 0x21, 72);
+    size_t b_len = make_cws(b_swf, sizeof b_swf, 0x91, 120);
+    TestFile a_files[] = {{"interface\\startmenu.swf", a_swf, a_len}};
+    TestFile b_files[] = {{"interface\\startmenu.swf", b_swf, b_len}};
+    uint8_t a_blob[4096], b_blob[4096];
+    BuiltBsa a_built, b_built;
+    check(a_len > 0 && b_len > 0, "boot fixture SWFs build");
+    check(build_bsa(a_blob, sizeof a_blob, a_files, 1, 104, 0, 0, 1,
+                    &a_built) != 0 &&
+              build_bsa(b_blob, sizeof b_blob, b_files, 1, 104, 0, 0, 1,
+                        &b_built) != 0,
+          "boot cooked archives build");
+    check(write_file(path_a, a_blob, a_built.len) &&
+              write_file(path_b, b_blob, b_built.len),
+          "boot cooked archives write under the synthetic root");
+    check(write_text_file(ini,
+                          "[Archive]\n"
+                          "sResourceArchiveList=Skyrim - Cooked A.bsa, "
+                          "Skyrim - Cooked B.bsa\n"),
+          "boot Skyrim.ini writes");
+
+    char reason[BSA_REASON_MAX];
+    MenuBsaSources set;
+    check(menu_bsa_sources_from_boot(&set, root, reason, sizeof reason) == 1 &&
+              set.count == 2 && set.skip_unusable == 1,
+          "boot reads Skyrim.ini list from the game root");
+    check(strstr(set.source[0].path, "Skyrim - Cooked A.bsa") != NULL &&
+              strstr(set.source[1].path, "Skyrim - Cooked B.bsa") != NULL,
+          "boot keeps cooked names with spaces in listed order");
+
+    char log_text[1024];
+    FILE *log = fopen("bsa_boot_log.txt", "wb");
+    check(log != NULL, "boot log fixture opens");
+    if (log) {
+        menu_bsa_sources_log(&set, log);
+        fclose(log);
+    }
+    check(read_text_file("bsa_boot_log.txt", log_text, sizeof log_text) &&
+              strstr(log_text,
+                     "[menu-bsa] 2 archive(s) from Skyrim.ini: "
+                     "Skyrim - Cooked A.bsa, Skyrim - Cooked B.bsa") != NULL,
+          "boot log names the INI list");
+
+    GuestMemory mem;
+    GuestHeap heap;
+    guest_init(&mem, 2u * 1024u * 1024u);
+    check(heap_create(&heap, &mem, 0x20000000u, 1024u * 1024u) == 0,
+          "boot guest heap created");
+    MenuBsaResult r;
+    MenuBsaStatus st = menu_bsa_resolve_startmenu_sources(&heap, &set,
+                                                          256u * 1024u, &r);
+    check(st == MENU_BSA_OK && r.archive_index == 1 && r.size == b_len &&
+              r.crc32 == bsa_crc32(b_swf, b_len),
+          "boot resolves the later cooked archive");
+    if (st == MENU_BSA_OK) heap_free(&heap, r.guest_address);
+    heap_destroy(&heap);
+    guest_destroy(&mem);
+
+    /* `deploy_device --pack cooked` rewrites Data/Skyrim.ini; the boot helper
+     * must pick it up when the game-root INI is absent. */
+    remove(ini);
+    check(write_text_file(data_ini,
+                          "[Archive]\n"
+                          "sResourceArchiveList=Skyrim - Cooked A.bsa, "
+                          "Skyrim - Cooked B.bsa\n"),
+          "cooked Data/Skyrim.ini writes");
+    check(menu_bsa_sources_from_boot(&set, root, reason, sizeof reason) == 1 &&
+              set.count == 2 && set.skip_unusable == 1 &&
+              strstr(set.source[0].path, "Skyrim - Cooked A.bsa") != NULL,
+          "boot falls through to Data/Skyrim.ini");
+    remove(data_ini);
+
+    check(menu_bsa_sources_from_boot(&set, root, reason, sizeof reason) == 1 &&
+              set.count == 2 && set.skip_unusable == 0,
+          "boot missing INI takes the fallback");    log = fopen("bsa_boot_log.txt", "wb");
+    if (log) {
+        menu_bsa_sources_log(&set, log);
+        fclose(log);
+    }
+    check(read_text_file("bsa_boot_log.txt", log_text, sizeof log_text) &&
+              strstr(log_text, "[menu-bsa] fallback: Interface+Update") != NULL,
+          "fallback log is explicit");
+
+    remove("bsa_boot_log.txt");
+    remove(path_a);
+    remove(path_b);
+    remove(data_ini);
+    remove(ini);
+    (void)remove_dir(data);
+    (void)remove_dir(root);
+}
+
 /* Optional read-only check against the installed game data. */
 static void test_real(const char *data_dir) {
     MenuBsaSources src;
@@ -1016,6 +1305,8 @@ int main(int argc, char **argv) {
     test_bsa_embedded_and_errors();
     test_swf_header();
     test_runtime();
+    test_ini_sources();
+    test_boot_mount();
 
     const char *real = argc > 1 ? argv[1] : getenv("SKYRIM_N3DS_REAL_DATA");
     if (real && real[0]) {

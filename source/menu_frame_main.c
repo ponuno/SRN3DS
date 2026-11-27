@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "bsa_reader.h"
+#include "menu_bsa_runtime.h"
 #include "d3d9_citro3d.h"
 #include "d3d9_com_demo.h"
 #include "d3d9_core.h"
@@ -268,41 +269,52 @@ static int append_shape(const MenuSwfDisplayListRecord *record,
 
 static uint8_t *load_startmenu(size_t *out_size, uint32_t *out_crc,
                                char *reason, size_t reason_cap) {
-    const char *path = "sdmc:/Skyrim/Data/Update.bsa";
-    BsaArchive *archive = NULL;
-    BsaStatus status = bsa_open_path(path, NULL, &archive, reason, reason_cap);
-    if (status != BSA_OK) return NULL;
-    BsaMatch match;
-    status = bsa_find(archive, "interface/startmenu.swf", &match);
-    if (status != BSA_OK) {
-        snprintf(reason, reason_cap, "%s: %s", path, bsa_status_name(status));
-        bsa_close(archive);
+    MenuBsaSources sources;
+    if (!menu_bsa_sources_from_boot(&sources, "sdmc:/Skyrim",
+                                    reason, reason_cap))
+        return NULL;
+    menu_bsa_sources_log(&sources, stderr);
+
+    GuestMemory mem;
+    GuestHeap heap;
+    guest_init(&mem, 4u * 1024u * 1024u);
+    if (heap_create(&heap, &mem, 0x20000000u, 2u * 1024u * 1024u) != 0) {
+        guest_destroy(&mem);
+        snprintf(reason, reason_cap, "guest heap creation failed");
         return NULL;
     }
-    uint32_t size = 0;
-    status = bsa_unpacked_size(archive, &match.entry, &size, reason, reason_cap);
-    if (status != BSA_OK || !size || size > MENU_SWF_MAX_DECLARED) {
-        if (status == BSA_OK)
-            snprintf(reason, reason_cap, "StartMenu size %lu is outside the SWF bound",
-                     (unsigned long)size);
-        bsa_close(archive);
-        return NULL;
+
+    MenuBsaResult result;
+    MenuBsaStatus status = menu_bsa_resolve_startmenu_sources(
+        &heap, &sources, 2u * 1024u * 1024u, &result);
+    uint8_t *bytes = NULL;
+    if (status != MENU_BSA_OK) {
+        size_t n = strlen(result.reason);
+        if (n >= reason_cap) n = reason_cap ? reason_cap - 1 : 0;
+        if (reason_cap) {
+            memcpy(reason, result.reason, n);
+            reason[n] = 0;
+        }
+    } else if (!result.size || result.size > MENU_SWF_MAX_DECLARED) {
+        snprintf(reason, reason_cap,
+                 "StartMenu size %lu is outside the SWF bound",
+                 (unsigned long)result.size);
+    } else {
+        bytes = malloc(result.size);
+        if (!bytes) {
+            snprintf(reason, reason_cap, "StartMenu allocation failed");
+        } else if (guest_read(&mem, result.guest_address, bytes, result.size)) {
+            free(bytes);
+            bytes = NULL;
+            snprintf(reason, reason_cap, "StartMenu guest read failed");
+        } else {
+            *out_size = result.size;
+            *out_crc = result.crc32;
+        }
+        heap_free(&heap, result.guest_address);
     }
-    uint8_t *bytes = malloc(size);
-    size_t got = 0;
-    if (!bytes) {
-        snprintf(reason, reason_cap, "StartMenu allocation failed");
-        bsa_close(archive);
-        return NULL;
-    }
-    status = bsa_read(archive, &match.entry, bytes, size, &got, reason, reason_cap);
-    bsa_close(archive);
-    if (status != BSA_OK || got != size) {
-        free(bytes);
-        return NULL;
-    }
-    *out_size = size;
-    *out_crc = bsa_crc32(bytes, size);
+    heap_destroy(&heap);
+    guest_destroy(&mem);
     return bytes;
 }
 
@@ -618,7 +630,7 @@ int main(void) {
      * fflush() would otherwise leave an empty log. */
     setvbuf(stderr, NULL, _IONBF, 0);
     fprintf(stderr, "StartMenu PICA frame runner: build-only until Azahar pixels are archived\n");
-    fprintf(stderr, "input=sdmc:/Skyrim/Data/Update.bsa!interface/startmenu.swf\n");
+    fprintf(stderr, "input=Interface\\StartMenu.swf via Skyrim.ini mount list\n");
     if (!stderr_log) fprintf(stderr, "stderr redirect unavailable\n");
     stage("start");
 
@@ -627,7 +639,7 @@ int main(void) {
     uint32_t swf_crc = 0;
     stage("load_startmenu");
     uint8_t *swf = load_startmenu(&swf_size, &swf_crc, reason, sizeof reason);
-    CHECK(swf != NULL, "real Update.bsa StartMenu loads");
+    CHECK(swf != NULL, "real StartMenu resolves through the INI mount list");
     stage("load_startmenu_done");
     if (!swf) fprintf(stderr, "MENU_INPUT_FAIL: %s\n", reason);
     if (swf)

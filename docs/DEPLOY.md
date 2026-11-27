@@ -61,6 +61,26 @@ Winners come from the same resolver the runtime uses
 * a path that loses is counted under `resolve.overridden_entries` — it is the
   size a future cooked pack could drop.
 
+<<<<<<< HEAD
+=======
+### Runtime mount list
+
+The C runtime reads the archive names from `Skyrim.ini` **at boot**.  The menu
+loader (`source/menu_frame_main.c`) calls `menu_bsa_sources_from_boot(
+"sdmc:/Skyrim")`, which tries `sdmc:/Skyrim/Skyrim.ini` first and then
+`sdmc:/Skyrim/Data/Skyrim.ini` (the cooked tree's rewritten INI), reads
+`[Archive]`, and mounts `sResourceArchiveList` first, then
+`sResourceArchiveList2`, in file order.  A cooked tree that names only its
+cooked archives therefore mounts exactly those.
+
+The list is capped at 32 archives and a 96 MiB summed index; an over-limit list
+is a named refusal.  A missing or corrupt archive is logged and skipped, and an
+absent/empty list falls back to `Skyrim - Interface.bsa` then `Update.bsa`.
+Startup writes `[menu-bsa] N archive(s) from Skyrim.ini: ...` or
+`[menu-bsa] fallback: Interface+Update` to the device stderr log.  See
+`docs/MENU_BSA_RUNTIME.md`.
+
+>>>>>>> 2abd304 (menu_frame_main: mount StartMenu archives from Skyrim.ini at boot)
 ## 3. Texture policy
 
 | source | action |
@@ -128,8 +148,9 @@ Trade-offs:
 * changing the load order or a mod requires a **re-cook** on the PC;
 * a per-file patch can still be dropped as a loose overlay — the runtime
   overlay lets loose files win;
-* the C mount list must read the archive names from the INI (or a manifest);
-  until it does, the cooked tree is a file-layer artifact only.
+* the C mount list reads the archive names from the INI at boot (game-root
+  `Skyrim.ini`, then the cooked `Data/Skyrim.ini`); no separate manifest is
+  needed.
 
 ## 6. Limits / next steps
 

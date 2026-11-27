@@ -46,6 +46,9 @@ int menu_bsa_sources_init(MenuBsaSources *out, const char *data_dir,
         set_reason(reason, reason_cap, "data directory is empty");
         return 0;
     }
+    out->count = MENU_BSA_ARCHIVE_COUNT;
+    out->total_index_budget = MENU_BSA_DEFAULT_TOTAL_INDEX_BYTES;
+    out->skip_unusable = 0;
     size_t len = strlen(data_dir);
     while (len > 1 && (data_dir[len - 1] == '/' || data_dir[len - 1] == '\\')) --len;
     for (unsigned i = 0; i < MENU_BSA_ARCHIVE_COUNT; ++i) {
@@ -59,6 +62,246 @@ int menu_bsa_sources_init(MenuBsaSources *out, const char *data_dir,
         out->source[i].name = menu_bsa_archive_names[i];
     }
     return 1;
+}
+
+/* ---- Skyrim.ini [Archive] list ------------------------------------------- */
+
+#define MENU_BSA_INI_MAX_BYTES (1024u * 1024u)
+
+static int ascii_ci_eq_n(const char *a, const char *b, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        char ca = a[i], cb = b[i];
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return 0;
+    }
+    return 1;
+}
+
+static int ascii_ci_eq(const char *a, const char *b) {
+    size_t na = strlen(a), nb = strlen(b);
+    return na == nb && ascii_ci_eq_n(a, b, na);
+}
+
+static char *span_trim(char *s, size_t *len) {
+    while (*len && (*s == ' ' || *s == '\t' || *s == '\r')) { ++s; --*len; }
+    while (*len && (s[*len - 1] == ' ' || s[*len - 1] == '\t' ||
+                    s[*len - 1] == '\r')) --*len;
+    s[*len] = 0;
+    return s;
+}
+
+static int ini_archive_section(const char *line) {
+    if (line[0] != '[') return 0;
+    const char *end = strchr(line + 1, ']');
+    if (!end) return 0;
+    size_t n = (size_t)(end - (line + 1));
+    return n == 7 && ascii_ci_eq_n(line + 1, "Archive", n);
+}
+
+static int ini_append_name(MenuBsaSources *out, const char *data_dir,
+                           size_t dir_len, char *token,
+                           char *reason, size_t reason_cap) {
+    size_t len = strlen(token);
+    token = span_trim(token, &len);
+    if (len >= 2 && token[0] == '"' && token[len - 1] == '"') {
+        ++token;
+        len -= 2;
+        token = span_trim(token, &len);
+    }
+    if (!len) return 1;
+    if (len < 4 || !ascii_ci_eq_n(token + len - 4, ".bsa", 4)) {
+        fprintf(stderr, "[menu-bsa] ignoring non-.bsa entry '%s' in Skyrim.ini\n",
+                token);
+        return 1;
+    }
+    if (out->count >= MENU_BSA_MAX_SOURCES) {
+        set_reason(reason, reason_cap,
+                   "Skyrim.ini lists more than %u archives (at '%s'); refusing "
+                   "instead of truncating the mount list",
+                   MENU_BSA_MAX_SOURCES, token);
+        return 0;
+    }
+    char *storage = out->storage[out->count];
+    int n = snprintf(storage, MENU_BSA_DATA_PATH_MAX, "%.*s/%.*s",
+                     (int)dir_len, data_dir, (int)len, token);
+    if (n < 0 || (size_t)n >= MENU_BSA_DATA_PATH_MAX) {
+        set_reason(reason, reason_cap,
+                   "archive path for '%s' exceeds %u bytes",
+                   token, MENU_BSA_DATA_PATH_MAX);
+        return 0;
+    }
+    out->source[out->count].path = storage;
+    out->source[out->count].name = storage + dir_len + 1;
+    ++out->count;
+    return 1;
+}
+
+/* Scan one key across the whole file, preserving file order within that key. */
+static int ini_collect_list(MenuBsaSources *out, const char *data_dir,
+                            size_t dir_len, char *buf, const char *wanted,
+                            char *reason, size_t reason_cap) {
+    int in_archive = 0;
+    char *p = buf;
+    while (*p) {
+        char *nl = strchr(p, '\n');
+        if (nl) *nl = 0;
+        size_t line_len = strlen(p);
+        char *line = span_trim(p, &line_len);
+        if (*line == ';' || *line == '#' || !*line) {
+            /* comment or blank */
+        } else if (*line == '[') {
+            in_archive = ini_archive_section(line);
+        } else if (in_archive && strchr(line, '=')) {
+            char *eq = strchr(line, '=');
+            *eq = 0;
+            size_t key_len = strlen(line);
+            char *key = span_trim(line, &key_len);
+            if (ascii_ci_eq(key, wanted)) {
+                char *value = eq + 1;
+                size_t value_len = strlen(value);
+                value = span_trim(value, &value_len);
+                if (value_len >= 2 && value[0] == '"' &&
+                    value[value_len - 1] == '"') {
+                    ++value;
+                    value_len -= 2;
+                    value = span_trim(value, &value_len);
+                }
+                char *seg = value;
+                for (;;) {
+                    char *comma = strchr(seg, ',');
+                    if (comma) *comma = 0;
+                    if (!ini_append_name(out, data_dir, dir_len, seg,
+                                         reason, reason_cap))
+                        return 0;
+                    if (!comma) break;
+                    seg = comma + 1;
+                }
+            }
+        }
+        if (!nl) break;
+        p = nl + 1;
+    }
+    return 1;
+}
+
+int menu_bsa_sources_from_ini(MenuBsaSources *out, const char *data_dir,
+                              const char *ini_path,
+                              char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!out || !data_dir || !data_dir[0]) {
+        set_reason(reason, reason_cap, "data directory is empty");
+        return 0;
+    }
+    out->count = 0;
+    out->total_index_budget = MENU_BSA_DEFAULT_TOTAL_INDEX_BYTES;
+    out->skip_unusable = 1;
+
+    char *buf = NULL;
+    FILE *f = ini_path && ini_path[0] ? fopen(ini_path, "rb") : NULL;
+    if (f) {
+        buf = malloc(MENU_BSA_INI_MAX_BYTES);
+        if (buf) {
+            size_t n = fread(buf, 1, MENU_BSA_INI_MAX_BYTES - 1, f);
+            buf[n] = 0;
+            /* Skip a UTF-8 BOM if the file was edited on a desktop. */
+            if (n >= 3 && (unsigned char)buf[0] == 0xef &&
+                (unsigned char)buf[1] == 0xbb && (unsigned char)buf[2] == 0xbf)
+                memmove(buf, buf + 3, n - 2);
+        }
+        fclose(f);
+    }
+
+    size_t dir_len = strlen(data_dir);
+    while (dir_len > 1 && (data_dir[dir_len - 1] == '/' ||
+                           data_dir[dir_len - 1] == '\\'))
+        --dir_len;
+
+    int ok = 1;
+    if (buf) {
+        size_t buf_len = strlen(buf);
+        char *work = malloc(buf_len + 1);
+        if (!work) {
+            free(buf);
+            set_reason(reason, reason_cap, "out of memory while reading the INI");
+            return 0;
+        }
+        /* Each pass mutates its own copy: List is collected fully before List2
+         * even if the two keys appear in the opposite order in the file. */
+        memcpy(work, buf, buf_len + 1);
+        ok = ini_collect_list(out, data_dir, dir_len, work,
+                              "sResourceArchiveList", reason, reason_cap);
+        if (ok) {
+            memcpy(work, buf, buf_len + 1);
+            ok = ini_collect_list(out, data_dir, dir_len, work,
+                                  "sResourceArchiveList2", reason, reason_cap);
+        }
+        free(work);
+        free(buf);
+    }
+    if (!ok) return 0;
+
+    if (!out->count) {
+        /* No INI, no readable list or only empty elements: keep the measured
+         * Interface/Update default so existing boots do not regress. */
+        return menu_bsa_sources_init(out, data_dir, reason, reason_cap);
+    }
+    return 1;
+}
+
+int menu_bsa_sources_from_boot(MenuBsaSources *out, const char *root,
+                               char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!out || !root || !root[0]) {
+        set_reason(reason, reason_cap, "game root is empty");
+        return 0;
+    }
+    size_t root_len = strlen(root);
+    while (root_len > 1 && (root[root_len - 1] == '/' ||
+                            root[root_len - 1] == '\\'))
+        --root_len;
+
+    char data_dir[MENU_BSA_DATA_PATH_MAX];
+    int n = snprintf(data_dir, sizeof data_dir, "%.*s/Data",
+                     (int)root_len, root);
+    if (n < 0 || (size_t)n >= sizeof data_dir) {
+        set_reason(reason, reason_cap, "game root path is too long");
+        return 0;
+    }
+
+    const char *suffixes[] = {"/Skyrim.ini", "/Data/Skyrim.ini"};
+    for (unsigned i = 0; i < sizeof suffixes / sizeof suffixes[0]; ++i) {
+        char ini_path[MENU_BSA_DATA_PATH_MAX];
+        n = snprintf(ini_path, sizeof ini_path, "%.*s%s", (int)root_len, root,
+                     suffixes[i]);
+        if (n < 0 || (size_t)n >= sizeof ini_path) continue;
+        FILE *probe = fopen(ini_path, "rb");
+        if (!probe) continue;
+        fclose(probe);
+        if (!menu_bsa_sources_from_ini(out, data_dir, ini_path,
+                                       reason, reason_cap))
+            return 0;
+        if (out->skip_unusable) return 1; /* non-empty configured list */
+        /* The file exists but has no archive names; prefer the cooked INI in
+         * Data over silently falling back. */
+    }
+    return menu_bsa_sources_init(out, data_dir, reason, reason_cap);
+}
+
+void menu_bsa_sources_log(const MenuBsaSources *set, FILE *log) {    if (!set || !log) return;
+    if (!set->skip_unusable) {
+        fprintf(log, "[menu-bsa] fallback: Interface+Update\n");
+        return;
+    }
+    fprintf(log, "[menu-bsa] %u archive(s) from Skyrim.ini: ",
+            (unsigned)set->count);
+    for (size_t i = 0; i < set->count; ++i) {
+        const char *name = set->source[i].name && set->source[i].name[0]
+                               ? set->source[i].name
+                               : set->source[i].path;
+        fprintf(log, "%s%s", i ? ", " : "", name ? name : "<unnamed>");
+    }
+    fputc('\n', log);
 }
 
 static void result_fail(MenuBsaResult *out, MenuBsaStatus status,
@@ -80,10 +323,14 @@ static void result_fail(MenuBsaResult *out, MenuBsaStatus status,
     out->reason[sizeof out->reason - 1] = 0;
 }
 
-MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
-                               const MenuBsaSource *sources, size_t source_count,
-                               const char *virtual_path, uint32_t budget_bytes,
-                               const BsaOptions *options, MenuBsaResult *out) {
+MenuBsaStatus menu_bsa_resolve_ex(GuestHeap *heap,
+                                  const MenuBsaSource *sources,
+                                  size_t source_count,
+                                  const char *virtual_path,
+                                  uint32_t budget_bytes,
+                                  const BsaOptions *options,
+                                  uint64_t total_index_budget,
+                                  int skip_unusable, MenuBsaResult *out) {
     if (!out) return MENU_BSA_BAD_ARGUMENT;
     memset(out, 0, sizeof *out);
     out->status = MENU_BSA_BAD_ARGUMENT;
@@ -100,6 +347,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
         return out->status;
     }
     snprintf(out->virtual_path, sizeof out->virtual_path, "%s", virtual_path);
+    if (!total_index_budget) total_index_budget = MENU_BSA_DEFAULT_TOTAL_INDEX_BYTES;
 
     BsaOptions opt;
     bsa_options_default(&opt);
@@ -117,6 +365,7 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
 
     BsaArchive *archives[MENU_BSA_MAX_SOURCES];
     memset(archives, 0, sizeof archives);
+    uint64_t index_total = 0;
     int winner = -1;
     BsaMatch match;
     memset(&match, 0, sizeof match);
@@ -132,12 +381,31 @@ MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
         BsaStatus st = bsa_open_path(src->path, &opt, &archives[i],
                                      archive_reason, sizeof archive_reason);
         if (st == BSA_ERR_NOT_FOUND) {
+            fprintf(stderr, "[menu-bsa] skip missing archive '%s' (%s)\n",
+                    name ? name : "<unnamed>", src->path);
             continue; /* absent optional archive, e.g. Update.bsa */
         }
         if (st != BSA_OK) {
+            if (skip_unusable) {
+                fprintf(stderr,
+                        "[menu-bsa] skip unusable archive '%s' (%s): %s: %s\n",
+                        name ? name : "<unnamed>", src->path,
+                        bsa_status_name(st), archive_reason);
+                continue;
+            }
             result_fail(out, map_archive_status(st, MENU_BSA_CORRUPT),
                         "archive '%s' (%s): %s: %s", name, src->path,
                         bsa_status_name(st), archive_reason);
+            goto done;
+        }
+        index_total += bsa_index_bytes(archives[i]);
+        if (index_total > total_index_budget) {
+            result_fail(out, MENU_BSA_BUDGET,
+                        "archive index budget exceeded: '%s' brings the mounted "
+                        "total to %llu bytes, limit is %llu",
+                        name ? name : src->path,
+                        (unsigned long long)index_total,
+                        (unsigned long long)total_index_budget);
             goto done;
         }
         st = bsa_find(archives[i], virtual_path, &match);
@@ -257,6 +525,28 @@ done:
     return out->status;
 }
 
+MenuBsaStatus menu_bsa_resolve(GuestHeap *heap,
+                               const MenuBsaSource *sources, size_t source_count,
+                               const char *virtual_path, uint32_t budget_bytes,
+                               const BsaOptions *options, MenuBsaResult *out) {
+    return menu_bsa_resolve_ex(heap, sources, source_count, virtual_path,
+                               budget_bytes, options,
+                               MENU_BSA_DEFAULT_TOTAL_INDEX_BYTES, 0, out);
+}
+
+MenuBsaStatus menu_bsa_resolve_sources(GuestHeap *heap,
+                                       const MenuBsaSources *set,
+                                       const char *virtual_path,
+                                       uint32_t budget_bytes,
+                                       const BsaOptions *options,
+                                       MenuBsaResult *out) {
+    if (!set) return menu_bsa_resolve_ex(heap, NULL, 0, virtual_path,
+                                         budget_bytes, options, 0, 0, out);
+    return menu_bsa_resolve_ex(heap, set->source, set->count, virtual_path,
+                               budget_bytes, options, set->total_index_budget,
+                               set->skip_unusable, out);
+}
+
 MenuBsaStatus menu_bsa_resolve_startmenu(GuestHeap *heap,
                                          const MenuBsaSource *sources,
                                          size_t source_count,
@@ -264,4 +554,12 @@ MenuBsaStatus menu_bsa_resolve_startmenu(GuestHeap *heap,
                                          MenuBsaResult *out) {
     return menu_bsa_resolve(heap, sources, source_count,
                             "Interface\\StartMenu.swf", budget_bytes, NULL, out);
+}
+
+MenuBsaStatus menu_bsa_resolve_startmenu_sources(GuestHeap *heap,
+                                                 const MenuBsaSources *set,
+                                                 uint32_t budget_bytes,
+                                                 MenuBsaResult *out) {
+    return menu_bsa_resolve_sources(heap, set, "Interface\\StartMenu.swf",
+                                    budget_bytes, NULL, out);
 }

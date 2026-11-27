@@ -76,6 +76,26 @@ Interpretation, stated with its evidence tier:
 The runtime source order is therefore fixed as:
 
 ```
+<<<<<<< HEAD
+=======
+
+`menu_bsa_sources_from_boot(root, ...)` (called with `"sdmc:/Skyrim"`) tries
+`<root>/Skyrim.ini` first and then `<root>/Data/Skyrim.ini`, the cooked deploy
+target.  `menu_bsa_sources_from_ini(data_dir, ini_path, ...)` is the underlying
+parser: it mounts `sResourceArchiveList` entries first, then
+`sResourceArchiveList2`, preserving the file's order (a later archive still
+overrides an earlier one).  Names with spaces survive, commas separate, empty
+elements are skipped and `.bsa` is case-insensitive.  The list is capped at 32
+archives and 96 MiB of summed parsed index; exceeding either is a named refusal,
+never a silent truncation.  An absent or corrupt archive is logged by name and
+skipped.  Startup writes `[menu-bsa] N archive(s) from Skyrim.ini: ...` or
+`[menu-bsa] fallback: Interface+Update`.
+
+When the INI is absent, unreadable, or both lists are empty, the previous
+measured fallback is kept:
+
+```text
+>>>>>>> 2abd304 (menu_frame_main: mount StartMenu archives from Skyrim.ini at boot)
 0: Skyrim - Interface.bsa   (base)
 1: Update.bsa               (last, override)
 ```
