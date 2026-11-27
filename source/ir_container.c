@@ -20,6 +20,9 @@ void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
                          int is_irc);
 void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
                            uint32_t next, int is_irc);
+/* Cooperative guest thread id (win32_thread.c); used only by the optional
+ * per-thread block ring. */
+unsigned win32_thread_current_id(void);
 
 #if defined(__3DS__)
 #include <3ds.h>
@@ -740,11 +743,13 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
     uint32_t frame_start = irc_rd32(s->data + N3DS_IRC_RECORD_HEADER);
     if (g_a43f_trace_on < 0) n3ds_a43f_trace_prime();
     int trace = g_a43f_trace_on;
+    guest_pc_ring_note(addr, win32_thread_current_id(), c->r[4], c->r[1], c->r[0]);
     for (;;) {
         IrExecBlock b;
         n3ds_irc_last_function = addr;
         n3ds_irc_last_block = ip;
         n3ds_irc_current_cpu = c;
+        guest_pc_ring_note(ip, win32_thread_current_id(), c->r[4], c->r[1], c->r[0]);
         HP_START(hp_fetch);
         if (irc_fetch_block(c, ip, func_end, &b)) {
             HP_ADD(HP_FETCH, hp_fetch);

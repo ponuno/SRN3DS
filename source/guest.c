@@ -22,6 +22,7 @@ static struct {
     uint8_t *host_address;
     GuestWatchRecord ring[128];
 } guest_watch;
+void guest_pc_ring_dump_thread(FILE *f, unsigned thread);
 
 static void guest_watch_locate(GuestMemory *m, uint32_t addr,
                                uint32_t *base, uint32_t *size, int *slab) {
@@ -89,6 +90,9 @@ static void guest_watch_record(GuestMemory *m, const char *source) {
         guest_watch.target_seen = 1;
         fprintf(stderr, "[watch] FIRST target %08x at field %08x\n", value, guest_watch.address);
         guest_watch_print_record(r);
+        /* The writer's own block path is what places the store; the global ring
+         * is interleaved, the per-thread ring is not. */
+        guest_pc_ring_dump_thread(stderr, guest_watch.last_thread);
     } else if (guest_watch.sequence <= 16u) {
         guest_watch_print_record(r);
     }
@@ -115,6 +119,54 @@ void guest_pc_ring_dump(FILE *f) {
     for (unsigned i = 0; i < cnt; ++i)
         fprintf(f, " %08x", (unsigned)g_pc_ring[(g_pc_n - cnt + i) % 96u]);
     fputc('\n', f);
+}
+
+/* Per-thread block ring with the registers visible at block entry.  The
+ * process-wide ring above is interleaved by the cooperative scheduler, so its
+ * tail is not necessarily the faulting thread; this one is indexed by
+ * win32_thread_current_id() and is what the fault dump reads.  N3DS_PC_RING=1
+ * arms it (the branch is one cached byte when off). */
+#define GUEST_PC_RING_SLOTS 16u
+#define GUEST_PC_RING_DEPTH 96u
+typedef struct {
+    uint32_t pc, esp, ecx, eax;
+} GuestPcRecord;
+typedef struct {
+    GuestPcRecord r[GUEST_PC_RING_DEPTH];
+    unsigned n;
+} GuestPcThread;
+static GuestPcThread g_pc_threads[GUEST_PC_RING_SLOTS];
+static int g_pc_thread_on = -1;
+static int guest_pc_ring_enabled(void) {
+    if (g_pc_thread_on < 0)
+        g_pc_thread_on = getenv("N3DS_PC_RING") && *getenv("N3DS_PC_RING") ? 1 : 0;
+    return g_pc_thread_on;
+}
+void guest_pc_ring_note(uint32_t pc, unsigned thread, uint32_t esp,
+                        uint32_t ecx, uint32_t eax) {
+    guest_watch.last_pc = pc;
+    guest_watch.last_thread = thread;
+    if (!guest_pc_ring_enabled()) return;
+    unsigned slot = thread < GUEST_PC_RING_SLOTS ? thread
+                                                 : GUEST_PC_RING_SLOTS - 1u;
+    GuestPcThread *t = &g_pc_threads[slot];
+    GuestPcRecord *r = &t->r[t->n++ % GUEST_PC_RING_DEPTH];
+    r->pc = pc; r->esp = esp; r->ecx = ecx; r->eax = eax;
+}
+void guest_pc_ring_dump_thread(FILE *f, unsigned thread) {
+    if (!f) return;
+    unsigned slot = thread < GUEST_PC_RING_SLOTS ? thread
+                                                 : GUEST_PC_RING_SLOTS - 1u;
+    GuestPcThread *t = &g_pc_threads[slot];
+    unsigned cnt = t->n < GUEST_PC_RING_DEPTH ? t->n : GUEST_PC_RING_DEPTH;
+    fprintf(f, "[guest] thread %u block ring (%u, oldest first):\n", thread, cnt);
+    for (unsigned i = 0; i < cnt; ++i) {
+        const GuestPcRecord *r =
+            &t->r[(t->n - cnt + i) % GUEST_PC_RING_DEPTH];
+        fprintf(f, "[guest]   pc=%08x esp=%08x ecx=%08x eax=%08x\n",
+                (unsigned)r->pc, (unsigned)r->esp, (unsigned)r->ecx,
+                (unsigned)r->eax);
+    }
 }
 uint32_t guest_watch_last_pc(void) { return guest_watch.last_pc; }
 

@@ -31,6 +31,9 @@ static GuestMemory *memory;
 static const FnModule *modules;
 static unsigned module_count;
 static int ever_bound;
+/* Cooperative guest thread id (win32_thread.c); used only by the optional
+ * per-thread block ring. */
+unsigned win32_thread_current_id(void);
 #if defined(__ELF__) || defined(__3DS__) || defined(_WIN32)
 /* The hybrid build links a generated table of interpreter function ranges. It
  * is optional: a pure-AOT build simply leaves both symbols undefined. */
@@ -719,6 +722,66 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
                             (unsigned)c->r[5],(unsigned)esp,(unsigned)g_last_call);
                     fprintf(stderr,"[guest] last_block_pc=%08x\n",(unsigned)guest_watch_last_pc());
                     guest_pc_ring_dump(stderr);
+                    {
+                        unsigned tid = win32_thread_current_id();
+                        fprintf(stderr,"[guest] fault thread=%u\n", tid);
+                        guest_pc_ring_dump_thread(stderr, tid);
+                    }
+                    if (memory) {
+                        uint32_t w[8] = {0};
+                        fprintf(stderr, "[guest] stack@%08x:", esp);
+                        for (unsigned k = 0; k < 8; ++k) {
+                            (void)guest_read32(memory, esp + 4u * k, &w[k]);
+                            fprintf(stderr, " %08x", w[k]);
+                        }
+                        fputc('\n', stderr);
+                        uint32_t ebp = c->r[5], f[7] = {0};
+                        static const uint32_t offs[7] = {0, 4, 0x18, 0x28,
+                                                         0x50, 0x54, 0x68};
+                        fprintf(stderr, "[guest] ebp=%08x:", ebp);
+                        for (unsigned k = 0; k < 7; ++k) {
+                            (void)guest_read32(memory, ebp + offs[k], &f[k]);
+                            fprintf(stderr, " [+%02x]=%08x", offs[k], f[k]);
+                        }
+                        fputc('\n', stderr);
+                        /* 0x5fc640 saves `this` at its [esp+0x48]; the call to
+                         * 0x60aa70 pushed one return address, so the caller's
+                         * frame is at esp+4.  Print what the frame points at
+                         * rather than trusting a possibly spilled ebp. */
+                        uint32_t sv[6] = {0};
+                        static const uint32_t soff[6] = {0x4c, 0x50, 0x64,
+                                                         0x78, 0x80, 0x84};
+                        fprintf(stderr, "[guest] frame@%08x:", esp);
+                        for (unsigned k = 0; k < 6; ++k) {
+                            (void)guest_read32(memory, esp + soff[k], &sv[k]);
+                            fprintf(stderr, " [+%02x]=%08x", soff[k], sv[k]);
+                        }
+                        fputc('\n', stderr);
+                        uint32_t saved_this = sv[0];
+                        if (saved_this) {
+                            uint32_t g[8] = {0};
+                            static const uint32_t goff[8] =
+                                {0x00, 0x04, 0x08, 0x54, 0x58, 0x60, 0x68, 0x94};
+                            fprintf(stderr, "[guest] saved this=%08x:",
+                                    saved_this);
+                            for (unsigned k = 0; k < 8; ++k) {
+                                (void)guest_read32(memory, saved_this + goff[k],
+                                                   &g[k]);
+                                fprintf(stderr, " [+%02x]=%08x", goff[k], g[k]);
+                            }
+                            fputc('\n', stderr);
+                            uint32_t data = g[6], e[4] = {0};
+                            if (data) {
+                                fprintf(stderr, "[guest] array=%08x:", data);
+                                for (unsigned k = 0; k < 4; ++k) {
+                                    (void)guest_read32(memory, data + 4u * k,
+                                                       &e[k]);
+                                    fprintf(stderr, " %08x", e[k]);
+                                }
+                                fputc('\n', stderr);
+                            }
+                        }
+                    }
                     if(memory){
                         const uint8_t *p40=guest_ptr(memory,ecx+0x40,4);
                         const uint8_t *p8=guest_ptr(memory,ecx+8,4);
@@ -922,6 +985,8 @@ int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
         }
     }
     g_last_call=addr; g_last_cpu=c;
+    guest_pc_ring_note(addr, win32_thread_current_id(), c?c->r[4]:0,
+                      c?c->r[1]:0, c?c->r[0]:0);
     /* The recent-call ring (including its guest stack read) is consumed only by
      * the hang watchdog dump. Reading the return address on every dispatch costs
      * a checked guest read; skip both when no watchdog/dump env is armed. */
@@ -991,6 +1056,8 @@ void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return;
     menu_trace(c, addr);
     g_last_call=addr; g_last_cpu=c;
+    guest_pc_ring_note(addr, win32_thread_current_id(), c?c->r[4]:0,
+                      c?c->r[1]:0, c?c->r[0]:0);
     const FnEntry *e=lookup(addr);
     if(e){*cache=e;e->fn(c);return;}
     int slice = n3ds_ir_has(addr) != 0;
