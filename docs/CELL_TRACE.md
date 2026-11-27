@@ -2,6 +2,8 @@
 
 Status: **static disassembly only, no run claimed.** Worktree `cell-trace`,
 base `cbe2f9b`. Scope: `docs/` + `tools/`, no C changes.
+Addendum 5.4 (schema 2 exterior rows) belongs to the `world-index` branch and
+is implemented in `source/asset_stream.{h,c}` + `tools/stream_index_build.py`.
 
 Image: `E:\census_ir2\ir_container\_work\ir_container_input.bin`
 (SHA-256 `13B8D2779F1F93FFDB9A83C0DFC71CDDD1CB484E8994223EF957A87F616A052E`);
@@ -238,11 +240,13 @@ Categories that a cell transition pulls (all through the same `ReadFile` path):
 | LOD | `meshes\terrain\<world>\...btr` (near), `...bto` (far), `_lod.nif` | exterior only, step 0x434550/0x1ba7724 region |
 | worldspace grid | `0x4f5330` creates empty cells for grids with no data | no file read for empty cells |
 
-The cooked pipeline already reserves a per-cell table: `STREAM_INDEX_CELL_ENTRY_SIZE`
-= 64 bytes (`key[24] | neighbour_count u32 | flags u32 | 8 x u32 resource id`),
-`cell_count = 0` in schema 1 (`source/asset_stream.h`, `docs/STREAMING_IMPL.md`).
-That is the natural place to put "cell -> P0 resource ids", and it is currently
-unused - so cell prefetch is a data problem (fill cell rows), not a new ABI.
+The cooked pipeline reserves a per-cell table: `STREAM_INDEX_CELL_ENTRY_SIZE`
+= 64 bytes (`key[24] | resource_count u32 | flags u32 | 8 x u32 resource id`).
+Schema 1 left `cell_count = 0`; schema 2 (`tools/stream_index_build.py`) fills
+it for interiors (`kind=0`, `form_id`) and exterior windows (`kind=1`,
+`(worldspace_form_id, grid_x, grid_y)`), so cell prefetch is a data problem
+that is now solved for both branches (`source/asset_stream.{h,c}`,
+`docs/STREAMING.md`).
 
 ---
 
@@ -308,6 +312,41 @@ Order of work per transition:
 Success criterion: after a transition, the centre cell's meshes/textures are
 already `STREAM_REQ_READY` before the guest asks for them, and no increase in
 peak staged bytes beyond one cell window.
+
+### 5.4 Schema 2: filling exterior rows
+
+`tools/stream_index_build.py` reads the WRLD records and remembers which world
+owns each CELL while walking the GRUPs:
+
+| WRLD subrecord | meaning |
+|---|---|
+| `EDID` | worldspace name (`Tamriel`, `WhiterunWorld`, ...) |
+| `DATA` | one-byte flags (not bounds; for example Tamriel has 0) |
+| `NAM0`, `NAM9` | min/max bounds, two floats each (`x,y`) |
+
+Exterior CELLs are only counted when they sit under GRUP type 4
+(`Exterior Cell Block`) or 5 (`Exterior Cell Sub-Block`). The world's
+persistent CELL (Tamriel `0x00000d74`) is a direct child of the World Children
+group and carries a placeholder `XCLC 0,0`; treating it as grid `(0,0)` would
+collide with the real cell `BleakwindBasinExterior01` (`0x000099a2`), so it is
+excluded.
+
+Build a bounded window (no whole-world index):
+
+```
+python tools/stream_index_build.py `
+  --data "E:/SteamLibrary/steamapps/common/Skyrim/Data" `
+  --world Tamriel --grid 5,-11 --radius 1 `
+  --out build/stream_index_riverwood_world.bin `
+  --report build/stream_index_riverwood_world.json
+```
+
+The row key is `(kind=1, form_id=0, gx, gy, worldspace_form_id)`; the trigger
+reads exactly `gx = [holder+0x5c]`, `gy = [holder+0x60]`,
+`world = [[holder+0xbc]+0x0c]`. Resources are the same `REFR -> NAME ->
+MODL -> NIF -> DDS` chain as interiors. Not emitted, and recorded in the
+report: `.btr`/`.bto`/`_lod.nif` (their names need the terrain LOD grid),
+`LAND`/`LTEX` terrain geometry/textures, and leveled lists.
 
 ---
 

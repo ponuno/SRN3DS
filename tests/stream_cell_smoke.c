@@ -1,11 +1,12 @@
 /* Host test: cell trigger on synthetic guest memory and index.
  *
- * Two interior cells (form 0x133C6 with two files, 0x200 with one file),
- * three archive resources.  The fake GuestMemory holds the CELL_TRACE tuple
- * (holder [0x1b2e864], cell +0x6c, grid +0x5c/+0x60, worldspace +0xbc,
- * latch 0x12e3560).  Checks: tuple change -> P0 requests; latch -> P0;
- * interior -> one centre row; shrink -> trim; demand read served from READY
- * without a second prefetch; unknown exterior grid -> no requests.
+ * Two interior cells (form 0x133C6 with two files, 0x200 with one file) and
+ * two exterior Tamriel rows (grid 0,0 and 1,0), three archive resources.  The
+ * fake GuestMemory holds the CELL_TRACE tuple (holder [0x1b2e864], cell +0x6c,
+ * grid +0x5c/+0x60, worldspace +0xbc, latch 0x12e3560).  Checks: tuple change
+ * -> P0 requests; latch -> P0; interior -> one centre row; exterior key lookup
+ * and prefetch; shrink -> trim; demand read served from READY without a second
+ * prefetch; unknown exterior grid -> no requests; schema 1 still parses.
  */
 
 #include "asset_stream.h"
@@ -61,6 +62,7 @@ static TestFile g_files[FILE_COUNT];
 static uint32_t g_offsets[FILE_COUNT];
 static uint8_t g_archive[512u * 1024u];
 static uint8_t g_index[64u * 1024u];
+static uint8_t g_legacy[64u * 1024u];
 static uint8_t g_big[BIG_BYTES];
 static uint8_t g_med[MED_BYTES];
 static uint8_t g_small[SMALL_BYTES];
@@ -153,7 +155,7 @@ static size_t build_index(size_t archive_len) {
     size_t pool_off = resource_off +
                       (size_t)FILE_COUNT * STREAM_INDEX_RESOURCE_ENTRY_SIZE;
     size_t cell_off = (pool_off + pool_len + 7u) & ~(size_t)7u;
-    size_t total = cell_off + 2u * STREAM_INDEX_CELL_ENTRY_SIZE + 4u;
+    size_t total = cell_off + 4u * STREAM_INDEX_CELL_ENTRY_SIZE + 4u;
     if (total > sizeof g_index) return 0;
     memset(g_index, 0, total);
     memcpy(g_index, "SRNX", 4);
@@ -165,7 +167,7 @@ static size_t build_index(size_t archive_len) {
     put_u16(g_index + 14, 0x0001);
     put_u32(g_index + 16, 1);
     put_u32(g_index + 20, FILE_COUNT);
-    put_u32(g_index + 24, 2);
+    put_u32(g_index + 24, 4);
     put_u64(g_index + 32, 0x5152535455565758ull);
     put_u64(g_index + 40, archive_off);
     put_u64(g_index + 48, resource_off);
@@ -209,6 +211,24 @@ static size_t build_index(size_t archive_len) {
     put_u32(cell + 24, 2);
     put_u32(cell + 32, 0);
     put_u32(cell + 36, 1);
+    /* Exterior Tamriel (0x3c) grid 0,0: id 0. */
+    cell += STREAM_INDEX_CELL_ENTRY_SIZE;
+    put_u32(cell + 0, 1);
+    put_u32(cell + 4, 0);
+    put_u32(cell + 8, 0);
+    put_u32(cell + 12, 0);
+    put_u32(cell + 16, 0x3cu);
+    put_u32(cell + 24, 1);
+    put_u32(cell + 32, 0);
+    /* Exterior Tamriel grid 1,0: id 1 (sorted by grid_x). */
+    cell += STREAM_INDEX_CELL_ENTRY_SIZE;
+    put_u32(cell + 0, 1);
+    put_u32(cell + 4, 0);
+    put_u32(cell + 8, 1);
+    put_u32(cell + 12, 0);
+    put_u32(cell + 16, 0x3cu);
+    put_u32(cell + 24, 1);
+    put_u32(cell + 32, 1);
     put_u32(g_index + total - 4, bsa_crc32(g_index, total - 4));
     return total;
 }
@@ -318,6 +338,19 @@ int main(void) {
     check(stream_index_find_cell(stream_cell_index(state), &key, &row, reason,
                                  sizeof reason) == STREAM_ERR_NOT_FOUND,
           "an unknown cell is a miss");
+    memset(&key, 0, sizeof key);
+    key.kind = 1;
+    key.grid_x = 1;
+    key.grid_y = 0;
+    key.worldspace_form_id = 0x3cu;
+    check(stream_index_find_cell(stream_cell_index(state), &key, &row, reason,
+                                 sizeof reason) == STREAM_OK &&
+              row.resource_count == 1 && row.resource_id[0] == 1,
+          "exterior key (world, gx, gy) finds its row");
+    key.grid_y = 3;
+    check(stream_index_find_cell(stream_cell_index(state), &key, &row, reason,
+                                 sizeof reason) == STREAM_ERR_NOT_FOUND,
+          "an unknown exterior grid is a miss");
 
     /* 1. Tuple change -> two P0 requests, centre visible. */
     st = stream_cell_tick(state, &g_mem, reason, sizeof reason);
@@ -387,13 +420,44 @@ int main(void) {
     check(m->prefetch_requests == quiet_prefetch,
           "an unchanged tuple does not enqueue");
 
-    /* 6. Exterior grid with no index rows -> no requests, honest miss. */
+    /* 6. Exterior grid present in the index -> centre + east rows queued. */
+    uint64_t exterior_prefetch = m->prefetch_requests;
+    uint64_t exterior_found = m->rows_found;
+    set_tuple(CELL_A, 0, 0, WS_OBJ);
+    st = stream_cell_tick(state, &g_mem, reason, sizeof reason);
+    check(st == STREAM_OK && m->exterior_ticks == 1,
+          "worldspace selects the exterior path");
+    check(m->rows_found >= exterior_found + 2,
+          "exterior tick finds both indexed grid rows");
+    check(m->prefetch_requests >= exterior_prefetch + 2,
+          "exterior rows are queued");
+    check(m->last_resource_count == 1 && stream_cell_handle_count(state) == 1,
+          "the centre exterior row is visible");
+
+    /* 7. A grid with no index rows stays an honest miss. */
     uint64_t missing_before = m->rows_missing;
-    set_tuple(CELL_A, 4, -2, WS_OBJ);
+    set_tuple(CELL_A, 10, -10, WS_OBJ);
     stream_cell_tick(state, &g_mem, reason, sizeof reason);
-    check(m->exterior_ticks == 1, "worldspace selects the exterior path");
     check(m->rows_missing >= missing_before + 1,
           "missing exterior rows are counted, not invented");
+
+    /* 8. Schema 1 uses the same row layout; the reader still accepts it. */
+    memcpy(g_legacy, g_index, index_len);
+    put_u16(g_legacy + 4, 1);
+    put_u32(g_legacy + index_len - 4, bsa_crc32(g_legacy, index_len - 4));
+    StreamIndex *legacy = NULL;
+    check(stream_index_parse(g_legacy, index_len, &legacy, reason,
+                             sizeof reason) == STREAM_OK && legacy != NULL,
+          "schema 1 index still parses");
+    if (legacy) {
+        StreamCellKey old;
+        memset(&old, 0, sizeof old);
+        old.form_id = 0x133C6u;
+        check(stream_index_find_cell(legacy, &old, &row, reason,
+                                     sizeof reason) == STREAM_OK,
+              "schema 1 lookup keeps working");
+        stream_index_free(legacy);
+    }
 
     stream_cell_close(state);
     guest_destroy(&g_mem);

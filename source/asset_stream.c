@@ -311,7 +311,7 @@ static StreamStatus index_validate(StreamIndex *index, char *reason,
     uint32_t resource_count = le32(b + 20);
     uint32_t cell_count = le32(b + 24);
     uint64_t total = le64(b + 72);
-    if (schema != STREAM_INDEX_SCHEMA) {
+    if (schema < STREAM_INDEX_SCHEMA_MIN || schema > STREAM_INDEX_SCHEMA) {
         set_reason(reason, cap, "unsupported index schema %u", schema);
         return STREAM_ERR_SCHEMA;
     }
@@ -319,7 +319,7 @@ static StreamStatus index_validate(StreamIndex *index, char *reason,
         archive_size != STREAM_INDEX_ARCHIVE_ENTRY_SIZE ||
         resource_size != STREAM_INDEX_RESOURCE_ENTRY_SIZE ||
         cell_size != STREAM_INDEX_CELL_ENTRY_SIZE) {
-        set_reason(reason, cap, "index entry sizes do not match schema 1");
+        set_reason(reason, cap, "index entry sizes do not match schema 1/2");
         return STREAM_ERR_SCHEMA;
     }
     if (flags != 0x0001u) {

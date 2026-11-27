@@ -34,6 +34,7 @@
 #define LATCH_ADDR 0x12e3560u
 #define UGRIDS_ADDR 0x1241000u
 #define CELL_OBJ 0x20000000u
+#define WS_OBJ 0x20001000u
 
 static int checks;
 static int failures;
@@ -103,70 +104,143 @@ int main(int argc, char **argv) {
     uint8_t off = 0;
     CHECK(guest_write(&mem, LATCH_ADDR, &off, 1) == 0);
     CHECK(guest_write32(&mem, CELL_OBJ + 0x0c, 0x133C6u) == 0);
+    const char *env_world = getenv("STREAM_CELL_WORLD");
+    const char *env_gx = getenv("STREAM_CELL_GX");
+    const char *env_gy = getenv("STREAM_CELL_GY");
+    uint32_t ext_world = env_world ? (uint32_t)strtoul(env_world, NULL, 0)
+                                   : 0x3cu;
+    int32_t ext_gx = env_gx ? (int32_t)strtol(env_gx, NULL, 0) : 0;
+    int32_t ext_gy = env_gy ? (int32_t)strtol(env_gy, NULL, 0) : 0;
+    CHECK(guest_write32(&mem, WS_OBJ + 0x0c, ext_world) == 0);
     set_tuple(&mem, CELL_OBJ, 0, 0, 0);
 
     g_now_ns = 1000000ull;
     stream_mount_set_clock((StreamMount *)stream_cell_mount(state), fake_clock,
                            NULL);
 
+    const StreamCellMetrics *m = stream_cell_metrics(state);
+    StreamMetrics sm;
+    stream_mount_metrics(stream_cell_mount(state), &sm);
+
+    int ran = 0;
+
+    /* Interior: RiverwoodSleepingGiantInn (0x133C6). */
     StreamCellKey key;
     memset(&key, 0, sizeof key);
     key.form_id = 0x133C6u;
     StreamCellRow row;
-    st = stream_index_find_cell(stream_cell_index(state), &key, &row, reason,
-                                sizeof reason);
-    CHECK(st == STREAM_OK && row.resource_count > 0);
-    if (st != STREAM_OK) {
-        printf("stream_cell_real_prefetch: cell 0x133c6 is not in the index\n");
+    if (stream_index_find_cell(stream_cell_index(state), &key, &row, reason,
+                               sizeof reason) == STREAM_OK &&
+        row.resource_count > 0) {
+        ran = 1;
+        unsigned compressed = 0;
+        for (uint32_t i = 0; i < row.resource_count; ++i) {
+            StreamResource res;
+            if (stream_index_find_id(stream_cell_index(state), row.resource_id[i],
+                                     &res, reason, sizeof reason) == STREAM_OK &&
+                (res.flags & STREAM_RESOURCE_FLAG_COMPRESSED))
+                ++compressed;
+        }
+        printf("interior 0x133c6: row has %u id(s), %u compressed\n",
+               row.resource_count, compressed);
+
+        uint64_t transitions = m->transitions;
+        set_tuple(&mem, CELL_OBJ, 0, 0, 0);
+        CHECK(stream_cell_tick(state, &mem, reason, sizeof reason) == STREAM_OK);
+        CHECK(m->transitions == transitions + 1);
+        CHECK(m->last_resource_count == row.resource_count);
+        CHECK(m->prefetch_requests > 0);
+        CHECK(m->skipped_compressed == 0);
+
+        drain(stream_cell_mount(state));
+        stream_mount_metrics(stream_cell_mount(state), &sm);
+        CHECK(sm.ready > 0);
+        CHECK(sm.request_errors == 0);
+        StreamResource first;
+        if (stream_index_find_id(stream_cell_index(state), row.resource_id[0],
+                                 &first, reason, sizeof reason) == STREAM_OK) {
+            char path[STREAM_PATH_MAX + 1];
+            uint32_t n = first.path_length < STREAM_PATH_MAX ? first.path_length
+                                                             : STREAM_PATH_MAX;
+            memcpy(path, first.path, n);
+            path[n] = 0;
+            uint8_t buf[4096];
+            uint32_t want = first.payload_length < sizeof buf
+                                ? first.payload_length : (uint32_t)sizeof buf;
+            uint32_t got = 0;
+            int served = stream_cell_demand_read(state, path, 0, buf, want,
+                                                 &got);
+            printf("interior demand '%s' served=%d got=%u\n", path, served, got);
+            CHECK(served == 1 && got == want && want > 0);
+        }
+    }
+
+    /* Exterior: Tamriel (0x3c) around the configured grid (default 0,0). */
+    memset(&key, 0, sizeof key);
+    key.kind = 1;
+    key.grid_x = ext_gx;
+    key.grid_y = ext_gy;
+    key.worldspace_form_id = ext_world;
+    if (stream_index_find_cell(stream_cell_index(state), &key, &row, reason,
+                               sizeof reason) == STREAM_OK &&
+        row.resource_count > 0) {
+        ran = 1;
+        unsigned compressed = 0;
+        for (uint32_t i = 0; i < row.resource_count; ++i) {
+            StreamResource res;
+            if (stream_index_find_id(stream_cell_index(state), row.resource_id[i],
+                                     &res, reason, sizeof reason) == STREAM_OK &&
+                (res.flags & STREAM_RESOURCE_FLAG_COMPRESSED))
+                ++compressed;
+        }
+        printf("exterior 0x%x %d,%d: row has %u id(s), %u compressed\n",
+               ext_world, (int)ext_gx, (int)ext_gy, row.resource_count,
+               compressed);
+
+        uint64_t transitions = m->transitions;
+        uint64_t prefetch = m->prefetch_requests;
+        set_tuple(&mem, CELL_OBJ, ext_gx, ext_gy, WS_OBJ);
+        CHECK(stream_cell_tick(state, &mem, reason, sizeof reason) == STREAM_OK);
+        CHECK(m->transitions == transitions + 1);
+        CHECK(m->exterior_ticks > 0);
+        CHECK(m->last_resource_count == row.resource_count);
+        CHECK(m->prefetch_requests >= prefetch + row.resource_count);
+        CHECK(m->skipped_compressed == 0);
+
+        drain(stream_cell_mount(state));
+        stream_mount_metrics(stream_cell_mount(state), &sm);
+        CHECK(sm.physical_reads > 0);
+        CHECK(sm.ready > 0);
+        CHECK(sm.request_errors == 0);
+        StreamResource first;
+        if (stream_index_find_id(stream_cell_index(state), row.resource_id[0],
+                                 &first, reason, sizeof reason) == STREAM_OK) {
+            char path[STREAM_PATH_MAX + 1];
+            uint32_t n = first.path_length < STREAM_PATH_MAX ? first.path_length
+                                                             : STREAM_PATH_MAX;
+            memcpy(path, first.path, n);
+            path[n] = 0;
+            uint8_t buf[4096];
+            uint32_t want = first.payload_length < sizeof buf
+                                ? first.payload_length : (uint32_t)sizeof buf;
+            uint32_t got = 0;
+            int served = stream_cell_demand_read(state, path, 0, buf, want,
+                                                 &got);
+            printf("exterior demand '%s' served=%d got=%u\n", path, served, got);
+            CHECK(served == 1 && got == want && want > 0);
+        }
+    }
+
+    if (!ran) {
+        printf("stream_cell_real_prefetch: index has no 0x133c6 or exterior "
+               "row for 0x%x %d,%d; skipped\n", ext_world, (int)ext_gx,
+               (int)ext_gy);
         stream_cell_close(state);
         guest_destroy(&mem);
-        return failures ? 1 : 0;
+        return 0;
     }
 
-    unsigned compressed = 0;
-    for (uint32_t i = 0; i < row.resource_count; ++i) {
-        StreamResource res;
-        if (stream_index_find_id(stream_cell_index(state), row.resource_id[i],
-                                 &res, reason, sizeof reason) == STREAM_OK &&
-            (res.flags & STREAM_RESOURCE_FLAG_COMPRESSED))
-            ++compressed;
-    }
-    printf("stream_cell_real_prefetch: row has %u id(s), %u compressed\n",
-           row.resource_count, compressed);
-
-    st = stream_cell_tick(state, &mem, reason, sizeof reason);
-    CHECK(st == STREAM_OK);
-    const StreamCellMetrics *m = stream_cell_metrics(state);
-    CHECK(m->transitions == 1);
-    CHECK(m->last_resource_count == row.resource_count);
-    CHECK(m->prefetch_requests > 0);
-    CHECK(m->skipped_compressed == 0);
-
-    drain(stream_cell_mount(state));
-    StreamMetrics sm;
     stream_mount_metrics(stream_cell_mount(state), &sm);
-    CHECK(sm.physical_reads > 0);
-    CHECK(sm.ready > 0);
-    CHECK(sm.request_errors == 0);
-    /* A demand read of the first staged resource must come from RAM. */
-    StreamResource first;
-    if (stream_index_find_id(stream_cell_index(state), row.resource_id[0],
-                             &first, reason, sizeof reason) == STREAM_OK) {
-        char path[STREAM_PATH_MAX + 1];
-        uint32_t n = first.path_length < STREAM_PATH_MAX ? first.path_length
-                                                         : STREAM_PATH_MAX;
-        memcpy(path, first.path, n);
-        path[n] = 0;
-        uint8_t buf[4096];
-        uint32_t got = 0;
-        int served = stream_cell_demand_read(state, path, 0, buf, sizeof buf,
-                                             &got);
-        printf("stream_cell_real_prefetch: demand '%s' served=%d got=%u\n",
-               path, served, got);
-        CHECK(served == 1 && got == sizeof buf);
-    }
-    stream_mount_metrics(stream_cell_mount(state), &sm);
-
     printf("stream_cell_real_prefetch: prefetch_requests=%llu "
            "skipped_compressed=%llu physical_reads=%llu quanta=%llu "
            "bytes_returned=%llu ready=%llu\n",

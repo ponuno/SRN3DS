@@ -3,9 +3,10 @@
 This is not a game-data implementation: it extracts just enough to answer
 "which meshes does one cell instance, and therefore which textures does it
 pull in".  It understands the TES4 record/GRUP framing, compressed records
-(zlib, 4-byte unpacked size prefix), CELL ``EDID``/``XCLC``/``DATA`` and REFR
-``NAME``/``DATA`` subrecords, and ``MODL`` on the common placeable base
-objects.
+(zlib, 4-byte unpacked size prefix), WRLD ``EDID``/``DATA``/``NAM0``/``NAM9``,
+CELL ``EDID``/``XCLC``/``DATA`` and REFR ``NAME``/``DATA`` subrecords, and
+``MODL`` on the common placeable base objects.  Exterior CELLs inherit the
+owning WRLD form id from the GRUP nesting (Exterior Cell Block/Sub-Block).
 
 Not implemented: VMAD scripts, navmesh, landscape (``LAND``) geometry,
 encounter zones, leveled lists (a REFR pointing at a LVLI is reported without
@@ -44,6 +45,7 @@ class CellSummary:
     grid: Optional[Tuple[int, int]] = None
     interior: bool = False
     ref_count: int = 0
+    world_form_id: int = 0
 
     @property
     def exterior(self) -> bool:
@@ -55,7 +57,31 @@ class CellSummary:
             "editor_id": self.editor_id,
             "grid": list(self.grid) if self.grid else None,
             "interior": self.interior,
+            "world_form_id": "0x%08x" % self.world_form_id,
             "refs": self.ref_count,
+        }
+
+
+@dataclass
+class WorldSummary:
+    """A WRLD record and the grid bounds it declares.
+
+    Skyrim stores the bounds in ``NAM0`` (min x/y) and ``NAM9`` (max x/y) as
+    two floats each; ``DATA`` is a one-byte flag word, not the bounds.  Both
+    are recorded so a caller can choose a window without guessing.
+    """
+
+    form_id: int
+    editor_id: str = ""
+    flags: int = 0
+    bounds: Optional[Tuple[float, float, float, float]] = None
+
+    def as_dict(self) -> dict:
+        return {
+            "form_id": "0x%08x" % self.form_id,
+            "editor_id": self.editor_id,
+            "flags": self.flags,
+            "bounds": list(self.bounds) if self.bounds else None,
         }
 
 
@@ -93,6 +119,25 @@ class PluginScan:
     record_counts: Dict[str, int]
     file_size: int
     base_textures: Dict[int, str] = field(default_factory=dict)
+    worlds: List[WorldSummary] = field(default_factory=list)
+
+    def find_worlds(self, selector: str) -> List[WorldSummary]:
+        """Match a WRLD by ``0x``/decimal form id or editor id."""
+        form_id = None
+        text = selector
+        try:
+            form_id = int(selector, 16) if selector.lower().startswith("0x") \
+                else int(selector, 10)
+            text = None
+        except ValueError:
+            pass
+        out = []
+        for world in self.worlds:
+            if form_id is not None and world.form_id == form_id:
+                out.append(world)
+            elif text and world.editor_id.lower() == text.lower():
+                out.append(world)
+        return out
 
     def find_cells(
         self,
@@ -178,6 +223,45 @@ def _decode_tx00(payload: bytes) -> Optional[str]:
     return None
 
 
+def _decode_world(payload: bytes):
+    """Return ``(editor_id, flags, bounds)`` from a WRLD record payload.
+
+    A few test worldspaces (e.g. ``CWTestHold`` 0x1b44a in Skyrim.esm) carry
+    trailing padding that does not form valid subrecords, so this scan stops
+    at the first malformed one instead of rejecting the whole plugin.  The
+    fields this tool needs appear before that padding.
+    """
+    editor_id = ""
+    flags = 0
+    nam0 = None
+    nam9 = None
+    pos = 0
+    end = len(payload)
+    while pos + 6 <= end:
+        kind = payload[pos:pos + 4]
+        size, = struct.unpack_from("<H", payload, pos + 4)
+        start = pos + 6
+        stop = start + size
+        if stop > end:
+            break
+        sub = payload[start:stop]
+        if kind == b"EDID":
+            editor_id = sub.split(b"\x00", 1)[0].decode("cp1252", "replace")
+        elif kind == b"DATA" and sub:
+            flags = sub[0]
+        elif kind == b"NAM0" and len(sub) >= 8:
+            nam0 = struct.unpack_from("<ff", sub, 0)
+        elif kind == b"NAM9" and len(sub) >= 8:
+            nam9 = struct.unpack_from("<ff", sub, 0)
+        pos = stop
+    bounds = None
+    if nam0 is not None or nam9 is not None:
+        low = nam0 or (0.0, 0.0)
+        high = nam9 or (0.0, 0.0)
+        bounds = (low[0], low[1], high[0], high[1])
+    return editor_id, flags, bounds
+
+
 def _archive_mesh_path(modl: str) -> str:
     if modl.lower().startswith("meshes\\"):
         return modl
@@ -192,17 +276,22 @@ def _walk(
     parent_cell: Optional[CellSummary],
     state: "_ScanState",
     depth: int = 0,
+    parent_world: int = 0,
+    exterior_group: bool = False,
 ) -> None:
     if depth > 32:
         raise EsmError("GRUP nesting deeper than 32")
     pos = start
     current_cell = parent_cell
+    current_world = parent_world
+    in_exterior = exterior_group
     while pos + 24 <= end:
         kind = data[pos : pos + 4]
         if kind == b"GRUP":
             size, = struct.unpack_from("<I", data, pos + 4)
             if size < 24 or pos + size > end:
                 raise EsmError("invalid GRUP size %d at %d" % (size, pos))
+            group_type, = struct.unpack_from("<i", data, pos + 12)
             _walk(
                 data,
                 pos + 24,
@@ -210,6 +299,12 @@ def _walk(
                 parent_cell=current_cell,
                 state=state,
                 depth=depth + 1,
+                parent_world=current_world,
+                # TES5 exterior cells live under "Exterior Cell Block" (4)
+                # and "Exterior Cell Sub-Block" (5).  The world's persistent
+                # CELL sits directly under World Children (1) and carries a
+                # placeholder XCLC 0,0; it must not claim that grid.
+                exterior_group=in_exterior or group_type in (4, 5),
             )
             pos += size
             continue
@@ -226,7 +321,15 @@ def _walk(
             raise EsmError("record count exceeds the safety limit")
 
         raw = data[pos + 24 : rec_end]
-        if kind == b"CELL":
+        if kind == b"WRLD":
+            payload = _payload(data, flags, raw)
+            editor_id, world_flags, bounds = _decode_world(payload)
+            state.worlds.append(WorldSummary(
+                form_id=form_id, editor_id=editor_id, flags=world_flags,
+                bounds=bounds))
+            # Exterior CELL records live in descendant GRUPs of this WRLD.
+            current_world = form_id
+        elif kind == b"CELL":
             payload = _payload(data, flags, raw)
             editor_id = ""
             grid = None
@@ -239,7 +342,10 @@ def _walk(
                 elif sub_kind == b"DATA" and sub:
                     interior = bool(sub[0] & 0x01)
             current_cell = CellSummary(
-                form_id=form_id, editor_id=editor_id, grid=grid, interior=interior
+                form_id=form_id, editor_id=editor_id, grid=grid,
+                interior=interior,
+                world_form_id=0 if (interior or not in_exterior)
+                                else current_world,
             )
             state.cells.append(current_cell)
             if state.watch_form_id == form_id:
@@ -283,6 +389,7 @@ class _ScanState:
     cells: List[CellSummary] = field(default_factory=list)
     base_meshes: Dict[int, str] = field(default_factory=dict)
     base_textures: Dict[int, str] = field(default_factory=dict)
+    worlds: List[WorldSummary] = field(default_factory=list)
     record_counts: Dict[str, int] = field(default_factory=dict)
     refs: List[RefEntry] = field(default_factory=list)
     records: int = 0
@@ -312,6 +419,7 @@ def scan_plugin(path: str) -> PluginScan:
             record_counts=state.record_counts,
             file_size=len(mm),
             base_textures=state.base_textures,
+            worlds=state.worlds,
         )
     finally:
         mm.close()

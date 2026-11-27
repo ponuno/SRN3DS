@@ -1,8 +1,8 @@
 """Build a cell-aware ``stream_index.bin`` for a Skyrim Data tree.
 
 The device format is the one already parsed by ``source/asset_stream.c``
-(schema 1, 64-byte cell rows).  This tool fills the reserved cell table for
-interior cells only:
+(schema 2, 64-byte cell rows).  This tool fills the cell table for interior
+cells and exterior windows:
 
   * CELL -> REFR -> base record ``MODL`` gives the cell's NIF paths;
   * each NIF is read from Data (loose or the first matching BSA) and its
@@ -12,21 +12,31 @@ interior cells only:
   * every resource is resolved to a real archive directory entry, and the
     physical range is computed from the stored prefix, never estimated.
 
+Exterior cells are keyed by ``(worldspace_form_id, grid_x, grid_y)``.  The
+WRLD pass records every worldspace (form id, editor id, ``DATA`` flags,
+``NAM0``/``NAM9`` bounds) and the CELL walker remembers which WRLD owns each
+exterior cell.  ``--world Tamriel --grid 0,0 --radius 1`` selects a bounded
+window; the whole ESM is never indexed.  LOD keys (``.btr``/``.bto``/
+``_lod.nif``) are *not* emitted: deriving their names needs the terrain LOD
+grid, not just the cell grid, and inventing them would make every lookup a
+miss.  See ``docs/STREAMING.md``.
+
 The 64-byte row reserves exactly 8 resource ids, so a cell with more assets is
 truncated to the 8 largest stored payloads.  That truncation is reported.
-Exterior cells are not emitted: this pass does not track the owning WRLD form
-id, and inventing one would make every exterior lookup miss.  ``cell_count``
-therefore counts interior cells only.
+Schema 1 remains readable: it uses the same 64-byte rows, only the header
+schema number differs.
 
 Usage::
 
     python tools/stream_index_build.py --data "E:/.../Skyrim/Data" \
         --cell RiverwoodSleepingGiantInn --out build/stream_index.bin
 
+    python tools/stream_index_build.py --world Tamriel --grid 0,0 --radius 1
+
     python tools/stream_index_build.py --cell 0x133C6 --cell WhiterunBanneredMare
 
 The output is deterministic for the same inputs (row order is fixed by path,
-cells by form id, archives by the order the first resource needs them).
+cells by key, archives by the order the first resource needs them).
 """
 
 from __future__ import annotations
@@ -46,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from skyrim import bsa, esm, nif  # noqa: E402
 
 MAGIC = b"SRNX"
-SCHEMA = 1
+SCHEMA = 2
 HEADER_SIZE = 80
 ARCHIVE_ENTRY_SIZE = 56
 RESOURCE_ENTRY_SIZE = 104
@@ -203,6 +213,54 @@ def _select_cells(scan: esm.PluginScan, selectors: Sequence[str]) -> List[esm.Ce
     return chosen
 
 
+def _select_worlds(scan: esm.PluginScan,
+                   selectors: Sequence[str]) -> List[esm.WorldSummary]:
+    chosen: List[esm.WorldSummary] = []
+    seen = set()
+    for selector in selectors:
+        matches = scan.find_worlds(selector)
+        if not matches:
+            raise BuildError("no worldspace matching %r" % selector)
+        if len(matches) > 1:
+            raise BuildError("ambiguous worldspace selector %r: %s" % (
+                selector, ", ".join("%s (0x%08x)" % (w.editor_id, w.form_id)
+                                    for w in matches[:8])))
+        world = matches[0]
+        if world.form_id in seen:
+            continue
+        seen.add(world.form_id)
+        chosen.append(world)
+    return chosen
+
+
+def _select_exterior_window(scan: esm.PluginScan, world: esm.WorldSummary,
+                            grid: Tuple[int, int],
+                            radius: int) -> List[esm.CellSummary]:
+    if radius < 0:
+        raise BuildError("--radius must be >= 0")
+    cells = []
+    for cell in scan.cells:
+        if not cell.exterior or cell.world_form_id != world.form_id:
+            continue
+        gx, gy = cell.grid
+        if abs(gx - grid[0]) > radius or abs(gy - grid[1]) > radius:
+            continue
+        cells.append(cell)
+    if not cells:
+        raise BuildError(
+            "worldspace %s (0x%08x) has no exterior cells within %d of %d,%d"
+            % (world.editor_id, world.form_id, radius, grid[0], grid[1]))
+    cells.sort(key=lambda c: (c.grid[0], c.grid[1]))
+    return cells
+
+
+def _cell_key(cell: esm.CellSummary) -> Tuple[int, int, int, int, int]:
+    """Mirror the C comparator: (kind, form_id, gx, gy, world)."""
+    if cell.interior:
+        return (0, cell.form_id, 0, 0, 0)
+    return (1, 0, cell.grid[0], cell.grid[1], cell.world_form_id)
+
+
 def _cell_assets(esm_path: str, scan: esm.PluginScan,
                  cell: esm.CellSummary, resolver: Resolver) -> Tuple[List[Resource], dict]:
     files = esm.extract_cell(esm_path, form_id=cell.form_id, scan=scan)
@@ -263,25 +321,53 @@ def _read_stored(resolver: Resolver, res: Resource) -> bytes:
 
 
 def build(data_dir: str, esm_path: str, selectors: Sequence[str],
-          archive_names: Sequence[str], hash_archives: bool) -> Tuple[bytes, dict]:
+          archive_names: Sequence[str], hash_archives: bool,
+          *, worlds: Sequence[str] = (),
+          grid: Tuple[int, int] = (0, 0),
+          radius: int = 0) -> Tuple[bytes, dict]:
     if not os.path.isfile(esm_path):
         raise BuildError("ESM not found: %s" % esm_path)
     scan = esm.scan_plugin(esm_path)
     cells = _select_cells(scan, selectors)
+    selected_worlds = _select_worlds(scan, worlds)
     resolver = Resolver(data_dir, archive_names)
     report = {"cells": [], "resource_archives": {}, "warnings": []}
 
+    wanted: List[esm.CellSummary] = []
+    seen_cells = set()
+
+    def add_cell(cell: esm.CellSummary, why: str) -> None:
+        if cell.form_id in seen_cells:
+            return
+        if not cell.interior and not cell.world_form_id:
+            report["warnings"].append(
+                "cell 0x%08x is exterior without an owning WRLD; skipped (%s)"
+                % (cell.form_id, why))
+            return
+        if not cell.interior and cell.grid is None:
+            report["warnings"].append(
+                "cell 0x%08x is neither interior nor gridded; skipped (%s)"
+                % (cell.form_id, why))
+            return
+        seen_cells.add(cell.form_id)
+        wanted.append(cell)
+
+    for cell in cells:
+        add_cell(cell, "--cell")
+    for world in selected_worlds:
+        for cell in _select_exterior_window(scan, world, grid, radius):
+            add_cell(cell, "world window")
+
     chosen: List[Tuple[esm.CellSummary, List[Resource]]] = []
     try:
-        for cell in cells:
-            if not cell.interior:
-                report["warnings"].append(
-                    "cell 0x%08x is exterior; skipped" % cell.form_id)
-                continue
+        for cell in wanted:
             assets, stats = _cell_assets(esm_path, scan, cell, resolver)
             # Deterministic order: largest stored payload first, then path.
             assets.sort(key=lambda r: (-r.source.entry.size, r.path))
             picked = assets[:CELL_IDS]
+            stats["kind"] = "interior" if cell.interior else "exterior"
+            stats["grid"] = list(cell.grid) if cell.grid else None
+            stats["world_form_id"] = "0x%08x" % cell.world_form_id
             stats["indexed"] = len(picked)
             stats["truncated"] = max(0, len(assets) - CELL_IDS)
             stats["indexed_bytes"] = sum(a.source.unpacked for a in picked)
@@ -366,18 +452,32 @@ def build(data_dir: str, esm_path: str, selectors: Sequence[str],
                 resource.source.entry.size, resource.source.entry.offset,
                 flags, resource.stored_sha, resource.stored_sha)
 
+        seen_keys = {}
+        for cell, _assets in chosen:
+            key = _cell_key(cell)
+            if key in seen_keys:
+                raise BuildError(
+                    "cell key %r collides: 0x%08x and 0x%08x"
+                    % (key, seen_keys[key], cell.form_id))
+            seen_keys[key] = cell.form_id
+
         requested = {cell.form_id: [r.path for r in assets]
                      for cell, assets in chosen}
         cell_table = bytearray()
         cells_written = []
-        for cell, assets in sorted(chosen, key=lambda item: item[0].form_id):
+        for cell, assets in sorted(chosen, key=lambda item: _cell_key(item[0])):
             ids = [id_of[asset.path] for asset in assets]
             ids += [0] * (CELL_IDS - len(ids))
+            kind, form_id, gx, gy, ws = _cell_key(cell)
             cell_table += struct.pack(
-                "<IIiiIIII8I", 0, cell.form_id, 0, 0, 0, 0, len(assets), 0,
+                "<IIiiIIII8I", kind, form_id, gx, gy, ws, 0, len(assets), 0,
                 *ids)
             cells_written.append({
                 "form_id": "0x%08x" % cell.form_id,
+                "kind": "interior" if cell.interior else "exterior",
+                "grid": list(cell.grid) if cell.grid else None,
+                "world_form_id": "0x%08x" % cell.world_form_id,
+                "key": [kind, form_id, gx, gy, ws],
                 "editor_id": cell.editor_id,
                 "ids": len(assets),
                 "paths": requested[cell.form_id],
@@ -400,24 +500,46 @@ def build(data_dir: str, esm_path: str, selectors: Sequence[str],
             bytes(pool) + bytes(cell_table)
         blob += struct.pack("<I", zlib.crc32(blob) & 0xFFFFFFFF)
 
+        interior_count = sum(1 for cell, _ in chosen if cell.interior)
+        exterior_count = len(chosen) - interior_count
         report.update({
             "data_dir": data_dir,
             "esm": esm_path,
+            "schema": SCHEMA,
             "cell_count": len(cells_written),
+            "interior_count": interior_count,
+            "exterior_count": exterior_count,
             "resource_count": len(ordered),
             "archive_count": len(archive_rows),
             "archives": [row["name"] for row in archive_rows],
             "resolver": resolver.stats,
-            # Loose winners have no archive range, so the schema-1 mount cannot
+            # Loose winners have no archive range, so a schema-1/2 mount cannot
             # stage them.  They are counted here instead of silently indexed.
             "loose_skipped": resolver.stats["loose"],
             "cells_written": cells_written,
-            "exterior": "not emitted: no WRLD form id in this ESM pass",
+            "worlds": [world.as_dict() for world in selected_worlds],
+            "window": {"grid": list(grid), "radius": radius} if selected_worlds
+                      else None,
+            "exterior": ("emitted with the owning WRLD form id"
+                         if exterior_count else
+                         "not emitted: no exterior cell selected"),
+            "lod": ("not emitted: .btr/.bto/_lod.nif need the terrain LOD "
+                    "grid, which this pass does not derive"),
             "cell_slot_limit": CELL_IDS,
         })
         return blob, report
     finally:
         resolver.close()
+
+
+def _parse_grid(text: str) -> Tuple[int, int]:
+    parts = text.replace(";", ",").split(",")
+    if len(parts) != 2:
+        raise BuildError("--grid needs two comma-separated ints, got %r" % text)
+    try:
+        return (int(parts[0], 0), int(parts[1], 0))
+    except ValueError as exc:
+        raise BuildError("--grid is not two ints: %r" % text) from exc
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -427,6 +549,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out", default="stream_index.bin")
     parser.add_argument("--cell", action="append", default=[],
                         help="cell editor id, decimal or 0x-prefixed form id")
+    parser.add_argument("--world", action="append", default=[],
+                        help="worldspace editor id or form id (exterior window)")
+    parser.add_argument("--grid", default="0,0",
+                        help="exterior window centre gx,gy (default 0,0)")
+    parser.add_argument("--radius", type=int, default=0,
+                        help="window half-size in cells (default 0: one cell)")
     parser.add_argument("--archives", default=",".join(DEFAULT_ARCHIVES))
     parser.add_argument("--no-archive-sha", action="store_true",
                         help="leave archive SHA-256 zero (size is still real)")
@@ -434,12 +562,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="write the JSON report to this path too")
     args = parser.parse_args(argv)
 
-    selectors = args.cell or ["RiverwoodSleepingGiantInn"]
+    selectors = args.cell or ([] if args.world else ["RiverwoodSleepingGiantInn"])
     esm_path = args.esm or os.path.join(args.data, "Skyrim.esm")
     archives = [name for name in args.archives.split(",") if name]
     try:
         blob, report = build(args.data, esm_path, selectors, archives,
-                             not args.no_archive_sha)
+                             not args.no_archive_sha, worlds=args.world,
+                             grid=_parse_grid(args.grid), radius=args.radius)
     except (BuildError, esm.EsmError, bsa.BsaError, OSError) as exc:
         print("stream_index_build: %s" % exc, file=sys.stderr)
         return 1

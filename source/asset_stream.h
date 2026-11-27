@@ -24,7 +24,11 @@
 
 #include "bsa_reader.h"
 
-#define STREAM_INDEX_SCHEMA 1u
+#define STREAM_INDEX_SCHEMA 2u
+/* Schema 2 adds exterior rows (kind=1, keyed by worldspace + grid).  The row
+ * layout is unchanged, so schema 1 files keep parsing: the reader accepts
+ * schema 1 and 2 and the only difference is which keys the writer filled. */
+#define STREAM_INDEX_SCHEMA_MIN 1u
 #define STREAM_INDEX_HEADER_SIZE 80u
 #define STREAM_INDEX_ARCHIVE_ENTRY_SIZE 56u
 #define STREAM_INDEX_RESOURCE_ENTRY_SIZE 104u
@@ -107,7 +111,8 @@ typedef struct {
 /* Cell table row, 64 bytes on disk:
  *   key[24] | resource_count u32 | flags u32 | resource_id[8] u32
  * `resource_count` is 0..8; only the first `resource_count` ids are valid.
- * Schema 1 has no room for more than 8 ids per cell. */
+ * Both schema 1 and 2 reserve at most 8 ids per cell; schema 2 is the first
+ * writer to fill exterior keys. */
 typedef struct {
     StreamCellKey key;
     uint32_t resource_count;

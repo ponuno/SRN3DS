@@ -257,7 +257,7 @@ def main():
         tamper(res0 + 24, "<I", 0xFFFFFFFF, "outside")
         tamper(head + 52, "<I", 7, "declares")
         tamper(res0 + 8, "<I", 64, "canonical")
-        tamper(4, "<H", 2, "schema")
+        tamper(4, "<H", 3, "schema")
         tamper(8, "<H", 64, "entry sizes")
         raw = bytearray(blob)
         raw[head + 20] ^= 0xFF          # archive SHA-256 field only

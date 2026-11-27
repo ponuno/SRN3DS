@@ -7,8 +7,8 @@ device, and no address derived from an archive name, directory order or a
 converter estimate.  Every resource row is built by reopening the archive
 written by ``write_bsa_stream()`` and reading the real ``BsaFileEntry``.
 
-Layout (schema 1)
------------------
+Layout (schema 1/2; this writer emits 1)
+---------------------------------------
 
 Header, 80 bytes, little-endian::
 
@@ -80,6 +80,11 @@ from skyrim import bsa
 
 MAGIC = b"SRNX"
 SCHEMA_VERSION = 1
+# The cooked-manifest writer still emits schema 1 (no cell rows).  The device
+# reader accepts schema 1 and schema 2; schema 2 only means the builder filled
+# exterior keys in the same 64-byte row layout.
+SCHEMA_MIN = 1
+SCHEMA_MAX = 2
 HEADER_SIZE = 80
 ARCHIVE_ENTRY_SIZE = 56
 RESOURCE_ENTRY_SIZE = 104
@@ -247,12 +252,12 @@ class StreamIndex:
          total) = _HEADER.unpack_from(blob, 0)
         if magic != MAGIC:
             raise StreamIndexError("bad index magic %r" % magic)
-        if schema != SCHEMA_VERSION:
+        if schema < SCHEMA_MIN or schema > SCHEMA_MAX:
             raise StreamIndexError("unsupported index schema %d" % schema)
         if (header_size, archive_size, resource_size, cell_size) != (
                 HEADER_SIZE, ARCHIVE_ENTRY_SIZE, RESOURCE_ENTRY_SIZE,
                 CELL_ENTRY_SIZE):
-            raise StreamIndexError("index entry sizes do not match schema 1")
+            raise StreamIndexError("index entry sizes do not match schema 1/2")
         if flags != FLAG_LITTLE_ENDIAN:
             raise StreamIndexError("unsupported index flags 0x%04x" % flags)
         if reserved != 0:
