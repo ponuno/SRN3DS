@@ -15,8 +15,8 @@
   "vs": 60
  },
  "coverage": {
-  "translated": 68,
-  "draw-enabled": 1,
+  "translated": 62,
+  "draw-enabled": 7,
   "refused": 0,
   "contract_only": 0
  },
@@ -165,7 +165,7 @@
   },
   {
    "id": "blit.vs.31d368ce",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "31d368cecad5b4d215c4c1fe1580d9ab0606e09af4ee3d2fa4ce8c4fcae9359f"
@@ -228,7 +228,7 @@
   },
   {
    "id": "blit.vs.57e51db9",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "57e51db9dfcc5ad7014b12d9d9b819a0ec1a98c064ed657b0a8f829631396dfb"
@@ -410,7 +410,7 @@
   },
   {
    "id": "blit.vs.c7ef0cd4",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "c7ef0cd44146251737cf27b21bf2909f74c54d7fbf297ca681d53dc02458485f"
@@ -424,7 +424,7 @@
   },
   {
    "id": "blit.vs.ce758c79",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "ce758c790d9684dc42916fbdb343d7661a600210ff5c299697742f5b373b8e33"
@@ -438,7 +438,7 @@
   },
   {
    "id": "blit.vs.d48c8642",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "d48c8642ffa0bc04ec33de070c52b2dfa3f36db3ec6b050e0881627e0f306920"
@@ -459,7 +459,7 @@
   },
   {
    "id": "blit.vs.d6896494",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "d68964943e9560d499b369bd47969ca7e621cb09da8470fc56739b412974132c"

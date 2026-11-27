@@ -20,8 +20,8 @@
    "owner": "sm3-agent-blit-post",
    "chunks": 131,
    "unique_hashes": 69,
-   "translated": 68,
-   "draw_enabled": 1,
+   "translated": 62,
+   "draw_enabled": 7,
    "refused": 0,
    "contract_only": 0,
    "refused_classes": {},
@@ -95,8 +95,8 @@
   }
  },
  "total": {
-  "translated": 6550,
-  "draw-enabled": 87,
+  "translated": 6544,
+  "draw-enabled": 93,
   "refused": 22,
   "chunks": 10475,
   "unique_hashes": 6659

@@ -2,8 +2,69 @@
  "archive": "Skyrim - Shaders.bsa",
  "entries": [
   {
-   "codegen": "pending",
-   "draw_enabled": 0,
+   "codegen": "emitted-verified",
+   "constants": [
+    0
+   ],
+   "draw_enabled": 1,
+   "dropped_output_regs": [],
+   "emitted_asm": "generated/blit.vs.31d368ce.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 10,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.31d368ce.shbin",
+    "shbin_bytes": 248,
+    "shbin_sha256": "73432d9f121839a21e795faf1ebd8f606d79bd45a62678075e877aeba8a83239",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 1,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.31d368ce",
    "inputs": [
@@ -22,9 +83,13 @@
    ],
    "instructions": 9,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled: fullscreen quad, position + texcoord0, identity uniform bank",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -32,6 +97,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -40,22 +109,114 @@
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "emitted_code_upload_path"
    ],
-   "quality": "contract",
-   "runtime": 0,
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "f9b5de94593fe16e852eae7fb73e9ebd46d8e382",
    "sha256": "31d368cecad5b4d215c4c1fe1580d9ab0606e09af4ee3d2fa4ce8c4fcae9359f",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
-   "uniform_registers": 2,
+   "uniform_map": "identity",
+   "uniform_registers": 1,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
+   "codegen": "emitted-verified",
+   "constants": [
+    0
+   ],
    "draw_enabled": 0,
+   "dropped_output_regs": [],
+   "emitted_asm": "generated/blit.vs.4d155cd6.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 12,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.4d155cd6.shbin",
+    "shbin_bytes": 272,
+    "shbin_sha256": "eb3102aa72516a3284f502049e6bc3a38ebaa1c308fe081bce3e805cbca8fb03",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 1,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 2
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.4d155cd6",
    "inputs": [
@@ -74,9 +235,13 @@
    ],
    "instructions": 12,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 2 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: writes texcoord1; d9_pica_vs_declare binds texcoord0 only",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -84,6 +249,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -91,6 +260,10 @@
      "usage_name": "texcoord"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 1,
+     "map_mode": "natural",
+     "pica_name": "outtc1",
      "reg_index": 2,
      "type": 6,
      "usage": 5,
@@ -99,22 +272,126 @@
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "wider_varying_loader"
    ],
-   "quality": "contract",
+   "quality": "exact",
    "runtime": 0,
    "sha1": "b4ce32787d50f2cb6f484f8c80d6542306f2d768",
    "sha256": "4d155cd6fee59dd665d46cddd1af8d1e917d4678e2f02fe4188c141751401d58",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
-   "uniform_registers": 2,
+   "uniform_map": "identity",
+   "uniform_registers": 1,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 1,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc1",
+     "pica_semantic": "texcoord1",
+     "reg_index": 2
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
-   "draw_enabled": 0,
+   "codegen": "emitted-verified",
+   "constants": [
+    3
+   ],
+   "draw_enabled": 1,
+   "dropped_output_regs": [],
+   "emitted_asm": "generated/blit.vs.57e51db9.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 10,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.57e51db9.shbin",
+    "shbin_bytes": 248,
+    "shbin_sha256": "69f5212e685f9d57c1e55c8808e12bffa42f784796cf7fd835f3a2bb2ec6a69f",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 4,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.57e51db9",
    "inputs": [
@@ -133,9 +410,13 @@
    ],
    "instructions": 9,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled: fullscreen quad, position + texcoord0, identity uniform bank",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -143,6 +424,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -151,22 +436,162 @@
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "emitted_code_upload_path"
    ],
-   "quality": "contract",
-   "runtime": 0,
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "be6e171262f3edaf83529fdc8bc461e2ba4cb8f9",
    "sha256": "57e51db9dfcc5ad7014b12d9d9b819a0ec1a98c064ed657b0a8f829631396dfb",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
+   "uniform_map": "identity",
    "uniform_registers": 4,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
+   "codegen": "emitted-verified",
+   "constants": [
+    0
+   ],
    "draw_enabled": 0,
+   "dropped_output_regs": [
+    [
+     6,
+     4
+    ],
+    [
+     6,
+     5
+    ]
+   ],
+   "dropped_outputs": [
+    {
+     "usage": 5,
+     "usage_index": 3,
+     "usage_name": "texcoord"
+    },
+    {
+     "usage": 5,
+     "usage_index": 4,
+     "usage_name": "texcoord"
+    }
+   ],
+   "emitted_asm": "generated/blit.vs.c43418bb.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 14,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.c43418bb.shbin",
+    "shbin_bytes": 320,
+    "shbin_sha256": "ea1981e7fb4c7a95ef5ca306755107781b87a08ea04612366c4fc40552ea36f8",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 1,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 1,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc1",
+      "pica_semantic": "texcoord1",
+      "reg_index": 2
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 2,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc2",
+      "pica_semantic": "texcoord2",
+      "reg_index": 3
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 3,
+      "d3d_usage_name": "texcoord",
+      "mode": "dropped",
+      "pica_name": null,
+      "pica_semantic": null,
+      "reg_index": 4
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 4,
+      "d3d_usage_name": "texcoord",
+      "mode": "dropped",
+      "pica_name": null,
+      "pica_semantic": null,
+      "reg_index": 5
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.c43418bb",
    "inputs": [
@@ -185,9 +610,13 @@
    ],
    "instructions": 17,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 5 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: writes texcoord1,2; d9_pica_vs_declare binds texcoord0 only",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -195,6 +624,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -202,6 +635,10 @@
      "usage_name": "texcoord"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 1,
+     "map_mode": "natural",
+     "pica_name": "outtc1",
      "reg_index": 2,
      "type": 6,
      "usage": 5,
@@ -209,44 +646,153 @@
      "usage_name": "texcoord"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 2,
+     "map_mode": "natural",
+     "pica_name": "outtc2",
      "reg_index": 3,
      "type": 6,
      "usage": 5,
      "usage_index": 2,
      "usage_name": "texcoord"
-    },
-    {
-     "reg_index": 4,
-     "type": 6,
-     "usage": 5,
-     "usage_index": 3,
-     "usage_name": "texcoord"
-    },
-    {
-     "reg_index": 5,
-     "type": 6,
-     "usage": 5,
-     "usage_index": 4,
-     "usage_name": "texcoord"
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "wider_varying_loader"
    ],
-   "quality": "contract",
+   "quality": "approx",
    "runtime": 0,
    "sha1": "a0d07bf57217e25032b07a0965e54bd78e2dcac0",
    "sha256": "c43418bb396c19888f0537f7ff8a3b3fc110ee09b6fbfdbcc9d9374342036c67",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
-   "uniform_registers": 2,
+   "uniform_map": "identity",
+   "uniform_registers": 1,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 1,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc1",
+     "pica_semantic": "texcoord1",
+     "reg_index": 2
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 2,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc2",
+     "pica_semantic": "texcoord2",
+     "reg_index": 3
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 3,
+     "d3d_usage_name": "texcoord",
+     "mode": "dropped",
+     "pica_name": null,
+     "pica_semantic": null,
+     "reg_index": 4
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 4,
+     "d3d_usage_name": "texcoord",
+     "mode": "dropped",
+     "pica_name": null,
+     "pica_semantic": null,
+     "reg_index": 5
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
-   "draw_enabled": 0,
+   "codegen": "emitted-verified",
+   "constants": [
+    0
+   ],
+   "draw_enabled": 1,
+   "dropped_output_regs": [],
+   "emitted_asm": "generated/blit.vs.c7ef0cd4.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 10,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.c7ef0cd4.shbin",
+    "shbin_bytes": 248,
+    "shbin_sha256": "73432d9f121839a21e795faf1ebd8f606d79bd45a62678075e877aeba8a83239",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 1,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.c7ef0cd4",
    "inputs": [
@@ -265,9 +811,13 @@
    ],
    "instructions": 9,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled: fullscreen quad, position + texcoord0, identity uniform bank",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -275,6 +825,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -283,22 +837,115 @@
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "emitted_code_upload_path"
    ],
-   "quality": "contract",
-   "runtime": 0,
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "9439c81e2c7de3b98ecc9537bf2ce792724257a7",
    "sha256": "c7ef0cd44146251737cf27b21bf2909f74c54d7fbf297ca681d53dc02458485f",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
-   "uniform_registers": 2,
+   "uniform_map": "identity",
+   "uniform_registers": 1,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
-   "draw_enabled": 0,
+   "codegen": "emitted-verified",
+   "constants": [
+    0,
+    1,
+    2
+   ],
+   "draw_enabled": 1,
+   "dropped_output_regs": [],
+   "emitted_asm": "generated/blit.vs.ce758c79.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 13,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.ce758c79.shbin",
+    "shbin_bytes": 284,
+    "shbin_sha256": "7767e7e3ceee5720a55d59a80897fa00be208a9b191b1708932d93f2956d07ec",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 3,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.ce758c79",
    "inputs": [
@@ -317,9 +964,13 @@
    ],
    "instructions": 12,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled: fullscreen quad, position + texcoord0, identity uniform bank",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -327,6 +978,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -335,22 +990,125 @@
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "emitted_code_upload_path"
    ],
-   "quality": "contract",
-   "runtime": 0,
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "4b59dd10cb266d14a9b469c02b3609a9c70cb7d0",
    "sha256": "ce758c790d9684dc42916fbdb343d7661a600210ff5c299697742f5b373b8e33",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
-   "uniform_registers": 4,
+   "uniform_map": "identity",
+   "uniform_registers": 3,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
-   "draw_enabled": 0,
+   "codegen": "emitted-verified",
+   "constants": [
+    5
+   ],
+   "draw_enabled": 1,
+   "dropped_output_regs": [],
+   "emitted_asm": "generated/blit.vs.d48c8642.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 10,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.d48c8642.shbin",
+    "shbin_bytes": 248,
+    "shbin_sha256": "3976efb6c48ce275947a5ea44f38515098b03a8747da4091db8f5df6480db2aa",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 6,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     },
+     {
+      "d3d": 4,
+      "row": 4
+     },
+     {
+      "d3d": 5,
+      "row": 5
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.d48c8642",
    "inputs": [
@@ -369,9 +1127,13 @@
    ],
    "instructions": 9,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled: fullscreen quad, position + texcoord0, identity uniform bank",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -379,6 +1141,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -387,22 +1153,110 @@
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "emitted_code_upload_path"
    ],
-   "quality": "contract",
-   "runtime": 0,
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "ffc3f0976a37ed543995f9bf1752fec1c58e680f",
    "sha256": "d48c8642ffa0bc04ec33de070c52b2dfa3f36db3ec6b050e0881627e0f306920",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
+   "uniform_map": "identity",
    "uniform_registers": 6,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
-   "draw_enabled": 0,
+   "codegen": "emitted-verified",
+   "constants": [
+    0,
+    1
+   ],
+   "draw_enabled": 1,
+   "dropped_output_regs": [],
+   "emitted_asm": "generated/blit.vs.d6896494.v.pica",
+   "emitter": {
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     }
+    ],
+    "instructions": 13,
+    "magnitude_limit": 1000000.0,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "max_rel_varying": 0.0,
+    "picasso": "pass",
+    "rel_tolerance": 1e-06,
+    "samples": 256,
+    "shbin": "generated/blit.vs.d6896494.shbin",
+    "shbin_bytes": 292,
+    "shbin_sha256": "5a9b287a19f8168dc1464a73e8664b326dfee9e43a3a2f34c2c062a658db8d3b",
+    "skipped_ill_conditioned": 0,
+    "tolerance": 0.0001,
+    "uniform_map": "identity",
+    "uniform_rows": 2,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     }
+    ],
+    "varying_map": [
+     {
+      "d3d_usage": 0,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "position",
+      "mode": "natural",
+      "pica_name": "outpos",
+      "pica_semantic": "position",
+      "reg_index": 0
+     },
+     {
+      "d3d_usage": 5,
+      "d3d_usage_index": 0,
+      "d3d_usage_name": "texcoord",
+      "mode": "natural",
+      "pica_name": "outtc0",
+      "pica_semantic": "texcoord0",
+      "reg_index": 1
+     }
+    ]
+   },
    "family": "blit_post",
    "id": "blit.vs.d6896494",
    "inputs": [
@@ -421,9 +1275,13 @@
    ],
    "instructions": 12,
    "kind": "pica_vs",
-   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); runtime-enabled: fullscreen quad, position + texcoord0, identity uniform bank",
    "outputs": [
     {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outpos",
      "reg_index": 0,
      "type": 6,
      "usage": 0,
@@ -431,6 +1289,10 @@
      "usage_name": "position"
     },
     {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "map_mode": "natural",
+     "pica_name": "outtc0",
      "reg_index": 1,
      "type": 6,
      "usage": 5,
@@ -439,17 +1301,39 @@
     }
    ],
    "preconditions": [
-    "pica_vs_codegen",
     "exact_hash_descriptor_match",
-    "fullscreen_quad_semantics"
+    "fullscreen_quad_semantics",
+    "emitted_code_upload_path"
    ],
-   "quality": "contract",
-   "runtime": 0,
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "a6fde11149b4ca864abb5bd4ae34f431ffa717aa",
    "sha256": "d68964943e9560d499b369bd47969ca7e621cb09da8470fc56739b412974132c",
+   "source_key": "0x00000000",
    "source_package": "shadersfx\\imagespace002.fxp",
    "stage": "vs_3_0",
-   "uniform_registers": 3,
+   "uniform_map": "identity",
+   "uniform_registers": 2,
+   "varying_map": [
+    {
+     "d3d_usage": 0,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "position",
+     "mode": "natural",
+     "pica_name": "outpos",
+     "pica_semantic": "position",
+     "reg_index": 0
+    },
+    {
+     "d3d_usage": 5,
+     "d3d_usage_index": 0,
+     "d3d_usage_name": "texcoord",
+     "mode": "natural",
+     "pica_name": "outtc0",
+     "pica_semantic": "texcoord0",
+     "reg_index": 1
+    }
+   ],
    "version": "0xfffe0300"
   },
   {
@@ -6002,6 +6886,6 @@
   }
  ],
  "generated_for": "blit_post (copy/blit, post-process/imagespace)",
- "note": "pack catalog; every entry has runtime=0. draw_enabled=1 only for an exact one-stage TEV contract. Approximations carry quality=approx and an approximation field.",
+ "note": "pack catalog; draw_enabled=1 only for exact runtime descriptors (the one-stage TEV copy plus the six fullscreen-quad PICA VS the generic loader binds). Approximations carry quality=approx and an approximation field.",
  "schema": "d9-shader-plan-v1"
 }

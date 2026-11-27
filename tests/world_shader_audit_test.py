@@ -32,7 +32,7 @@ EXPECTED_DRAW = {
     "lighting": 6,
     "skinning": 3,
     "sky_water": 0,
-    "blit_post": 1,
+    "blit_post": 7,
 }
 
 

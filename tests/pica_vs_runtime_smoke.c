@@ -59,8 +59,9 @@ static void skin_decl(D9Decl *decl, unsigned index_type) {
 }
 
 int main(void) {
-    CHECK(d9_pica_vs_count() == 30,
-          "three skin + five GFx menu + sixteen BSA UI + six contract programs");
+    CHECK(d9_pica_vs_count() == 36,
+          "three skin + five GFx menu + sixteen BSA UI + six contract + "
+          "six blit programs");
 
     for (unsigned i = 0; i < d9_pica_vs_count(); ++i) {
         const D9PicaVsProgram *p = d9_pica_vs_at(i);
@@ -106,6 +107,16 @@ int main(void) {
     CHECK(p && p->uniform_rows == 16u, "f8ffaecd uses c0..c15");
     CHECK(p && p->attr_count == 3u, "f8ffaecd declares position/weight/index");
     CHECK(d9_pica_vs_lookup(SKIN_60DBD11A_SHA) != NULL, "60dbd11a is present");
+    /* Fullscreen-quad blit/post program: exact lookup and identity bank. */
+    {
+        const D9PicaVsProgram *b = d9_pica_vs_lookup(
+            "c7ef0cd44146251737cf27b21bf2909f74c54d7fbf297ca681d53dc02458485f");
+        CHECK(b != NULL, "c7ef0cd4 is in the blit runtime catalog");
+        CHECK(b && b->bone_rows == 0u, "c7ef0cd4 uses the identity bank");
+        CHECK(b && b->attr_count == 2u,
+              "c7ef0cd4 declares position/texcoord0");
+        CHECK(b && b->uniform_rows == 1u, "c7ef0cd4 reads c0 only");
+    }
     CHECK(d9_pica_vs_lookup(
               "0000000000000000000000000000000000000000000000000000000000000000")
           == NULL, "foreign hash is a miss, not a fallback");

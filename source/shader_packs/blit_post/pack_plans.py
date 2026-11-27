@@ -529,6 +529,31 @@ def _ps_plans():
     return plans
 
 
+def _preserve_runtime(entries):
+    """Keep committed runtime-promoted rows (tools/blit_vs_emit.py) intact.
+
+    The corpus-derived catalog can rebuild the *contract* of every VS, but it
+    cannot rebuild the emitter proof or the promoted draw state.  Replacing
+    such a row here would silently undo ``draw_enabled: 1`` and the pinned
+    ``.shbin``; keep the committed row instead, exactly like the skinning
+    pack keeps its runtime-certified representatives.
+    """
+    path = os.path.join(HERE, "plans.json")
+    if not os.path.isfile(path):
+        return entries
+    with open(path, encoding="utf-8") as handle:
+        previous = {e["sha256"]: e for e in json.load(handle).get("entries", [])}
+    out = []
+    for entry in entries:
+        old = previous.get(entry["sha256"])
+        if (old is not None and old.get("codegen") == "emitted-verified"
+                and old.get("emitter", {}).get("picasso") == "pass"):
+            out.append(old)
+        else:
+            out.append(entry)
+    return out
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", default=DEFAULT_CORPUS)
@@ -597,6 +622,7 @@ def main(argv=None) -> int:
             entry["instructions"] = _ir_instruction_count(args.corpus,
                                                           entry["sha256"], row)
     entries.sort(key=lambda e: (e["kind"], e["sha256"]))
+    entries = _preserve_runtime(entries)
 
     planned = {e["sha256"] for e in entries}
     refusals = []
@@ -615,9 +641,11 @@ def main(argv=None) -> int:
         "schema": "d9-shader-plan-v1",
         "archive": manifest.get("archive", ARCHIVE),
         "generated_for": "blit_post (copy/blit, post-process/imagespace)",
-        "note": "pack catalog; every entry has runtime=0. draw_enabled=1 only "
-                "for an exact one-stage TEV contract. Approximations carry "
-                "quality=approx and an approximation field.",
+        "note": "pack catalog; draw_enabled=1 only for exact runtime "
+                "descriptors (the one-stage TEV copy plus the six "
+                "fullscreen-quad PICA VS the generic loader binds). "
+                "Approximations carry quality=approx and an approximation "
+                "field.",
         "entries": entries,
     }
     refusals_doc = {

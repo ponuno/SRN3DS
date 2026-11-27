@@ -6,7 +6,7 @@ copy/blit and image-space post effects (bloom, adaptation, colour grading)
 
 * census families: `blit/copy`, `post-process/imagespace`
 * chunks: **131** / unique hashes: **69**
-* coverage: 68 translated, 1 draw-enabled, 0 refused
+* coverage: 62 translated, 7 draw-enabled, 0 refused
 * first step: certify one-stage copy plans, then full-screen passes
 
 `manifest.json` lists every bytecode SHA-256 in this pack together with its

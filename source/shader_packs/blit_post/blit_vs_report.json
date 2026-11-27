@@ -1,0 +1,106 @@
+{
+ "entries": [
+  {
+   "draw_enabled": 1,
+   "id": "blit.vs.31d368ce",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "",
+   "sha256": "31d368cecad5b4d215c4c1fe1580d9ab0606e09af4ee3d2fa4ce8c4fcae9359f",
+   "shbin_bytes": 248,
+   "shbin_sha256": "73432d9f121839a21e795faf1ebd8f606d79bd45a62678075e877aeba8a83239",
+   "status": "pass"
+  },
+  {
+   "draw_enabled": 0,
+   "id": "blit.vs.4d155cd6",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "writes texcoord1; d9_pica_vs_declare binds texcoord0 only",
+   "sha256": "4d155cd6fee59dd665d46cddd1af8d1e917d4678e2f02fe4188c141751401d58",
+   "shbin_bytes": 272,
+   "shbin_sha256": "eb3102aa72516a3284f502049e6bc3a38ebaa1c308fe081bce3e805cbca8fb03",
+   "status": "pass"
+  },
+  {
+   "draw_enabled": 1,
+   "id": "blit.vs.57e51db9",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "",
+   "sha256": "57e51db9dfcc5ad7014b12d9d9b819a0ec1a98c064ed657b0a8f829631396dfb",
+   "shbin_bytes": 248,
+   "shbin_sha256": "69f5212e685f9d57c1e55c8808e12bffa42f784796cf7fd835f3a2bb2ec6a69f",
+   "status": "pass"
+  },
+  {
+   "draw_enabled": 0,
+   "id": "blit.vs.c43418bb",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "writes texcoord1,2; d9_pica_vs_declare binds texcoord0 only",
+   "sha256": "c43418bb396c19888f0537f7ff8a3b3fc110ee09b6fbfdbcc9d9374342036c67",
+   "shbin_bytes": 320,
+   "shbin_sha256": "ea1981e7fb4c7a95ef5ca306755107781b87a08ea04612366c4fc40552ea36f8",
+   "status": "pass"
+  },
+  {
+   "draw_enabled": 1,
+   "id": "blit.vs.c7ef0cd4",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "",
+   "sha256": "c7ef0cd44146251737cf27b21bf2909f74c54d7fbf297ca681d53dc02458485f",
+   "shbin_bytes": 248,
+   "shbin_sha256": "73432d9f121839a21e795faf1ebd8f606d79bd45a62678075e877aeba8a83239",
+   "status": "pass"
+  },
+  {
+   "draw_enabled": 1,
+   "id": "blit.vs.ce758c79",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "",
+   "sha256": "ce758c790d9684dc42916fbdb343d7661a600210ff5c299697742f5b373b8e33",
+   "shbin_bytes": 284,
+   "shbin_sha256": "7767e7e3ceee5720a55d59a80897fa00be208a9b191b1708932d93f2956d07ec",
+   "status": "pass"
+  },
+  {
+   "draw_enabled": 1,
+   "id": "blit.vs.d48c8642",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "",
+   "sha256": "d48c8642ffa0bc04ec33de070c52b2dfa3f36db3ec6b050e0881627e0f306920",
+   "shbin_bytes": 248,
+   "shbin_sha256": "3976efb6c48ce275947a5ea44f38515098b03a8747da4091db8f5df6480db2aa",
+   "status": "pass"
+  },
+  {
+   "draw_enabled": 1,
+   "id": "blit.vs.d6896494",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "reason": "",
+   "sha256": "d68964943e9560d499b369bd47969ca7e621cb09da8470fc56739b412974132c",
+   "shbin_bytes": 292,
+   "shbin_sha256": "5a9b287a19f8168dc1464a73e8664b326dfee9e43a3a2f34c2c062a658db8d3b",
+   "status": "pass"
+  }
+ ],
+ "pack": "blit_post",
+ "plans": 8,
+ "promoted": 6,
+ "samples": 256,
+ "schema": "blit-vs-runtime/1",
+ "tolerance": 0.0001
+}

@@ -1,8 +1,8 @@
 {
  "counts": {
-  "approx_translated": 53,
+  "approx_translated": 54,
   "contract_only_vs": 8,
-  "exact_draw_enabled": 0,
+  "exact_draw_enabled": 6,
   "planned": 67,
   "refused": 0
  },

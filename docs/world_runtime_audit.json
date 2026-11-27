@@ -87,8 +87,8 @@
         }
       ],
       "census_hashes": 69,
-      "draw_enabled": 1,
-      "runtime_paths": 1,
+      "draw_enabled": 7,
+      "runtime_paths": 7,
       "catalog_only": 0,
       "unmatched": [],
       "by_kind": {
@@ -99,8 +99,8 @@
   ],
   "totals": {
     "plans": 691,
-    "draw_enabled": 10,
-    "runtime_paths": 10,
+    "draw_enabled": 16,
+    "runtime_paths": 16,
     "catalog_only": 0,
     "unmatched": 0,
     "invalid": 0,
@@ -113,7 +113,7 @@
       "kind": "vs",
       "chunks": 38,
       "class": "pica_vs",
-      "status": "catalog-only",
+      "status": "runtime",
       "plan": "blit.vs.c7ef0cd4"
     },
     {
@@ -158,7 +158,7 @@
       "kind": "vs",
       "chunks": 10,
       "class": "pica_vs",
-      "status": "catalog-only",
+      "status": "runtime",
       "plan": "blit.vs.31d368ce"
     },
     {
