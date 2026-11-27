@@ -294,6 +294,8 @@ function Add-Test($name, $flags, $sources, $testArgs) {
 }
 
 Add-Test "host" $common @("source/probe.c", "source/guest.c", "source/pe_image.c", "source/guest_heap.c", "source/guest_call.c", "tests/host.c") @()
+# Device cfg parser/loader under the production __3DS__ guard (no libctru calls).
+Add-Test "device_cfg" ($common + @("-D__3DS__")) @("source/n3ds_env_cfg.c", "tests/device_cfg_smoke.c") @()
 Add-Test "mem_stats" $common @("source/mem_stats.c", "tests/mem_stats_test.c") @()
 # Measured BSA resident/index/page/range bytes over E:\harness_skyrim\Data plus
 # a real compressed record driven through the stream snapshot; skips without it.

@@ -1,6 +1,7 @@
 /* Diagnostic runner: map the real TESV PE, bind imports (unknown ones become
  * traps that name themselves), and execute a bounded lifted slice. This is not
  * a claim that the game boots; it reports the first exact failure. */
+#include "n3ds_env_cfg.h"
 #include "n3ds_boot.h"
 #include "n3ds_pilot.h"
 #include "pilot_guard.h"
@@ -374,7 +375,14 @@ out:
 }
 
 #ifdef __3DS__
-int main(void) {
+int main(int argc, char **argv) {
+    /* Open the SD trace before cfg so every applied key is visible there. */
+    (void)freopen("sdmc:/Skyrim_N3DS_stderr.log", "w", stderr);
+    const char *cfg_path = (argc > 1 && argv[1] && *argv[1]) ? argv[1] : NULL;
+    if (!cfg_path) cfg_path = getenv("TESV_CFG");
+    if (!cfg_path || !*cfg_path) cfg_path = "sdmc:/Skyrim_N3DS.cfg";
+    if (n3ds_env_cfg_load(cfg_path, stderr) != 0)
+        fprintf(stderr, "[cfg] load failed: %s\n", cfg_path);
     gfxInitDefault();
     mem_stats_init();
     mem_stats_configure(TESV_HEAP_MIB, TESV_LINEAR_MIB, TESV_RESERVE_MIB);
@@ -393,9 +401,6 @@ int main(void) {
     D9Citro *gpu=d9_citro_open();
     mem_stats_snapshot("arenas", NULL);
     consoleInit(GFX_TOP, NULL); osSetSpeedupEnable(true);
-    /* Keep the complete stderr trace on SD so emulator runs can be read
-     * from the host after the console scrolls or the engine exits. */
-    (void)freopen("sdmc:/Skyrim_N3DS_stderr.log", "w", stderr);
     printf("Skyrim N3DS - TESV startup slice\nNot a playable build.\n\n");
     printf("D3D9 backend: %s\n",gpu?"PICA200":"null fallback (PICA init failed)");
     printf("Hold X at start: memory probe (measurement only)\n\n");
@@ -403,7 +408,9 @@ int main(void) {
 #ifdef TESV_FORCE_MEMPROBE
     int probe = 1; /* isolated diagnostic build only; never shippable */
 #else
-    int probe = (hidKeysHeld() & KEY_X) != 0;
+    const char *memprobe = getenv("TESV_MEMPROBE");
+    int probe = (hidKeysHeld() & KEY_X) != 0 ||
+                (memprobe && *memprobe && strcmp(memprobe, "0"));
 #endif
     if (probe) {
 #ifdef TESV_FORCE_MEMPROBE

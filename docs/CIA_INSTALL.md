@@ -104,7 +104,9 @@ menu's render targets/textures can hit `linear_fail_n > 0`. That is visible in
 `Skyrim_N3DS_mem.log` (`linear_fail_n`, `linear_fail_bytes`, `alloc_failures`).
 If it binds, the next candidates are `132x12` (12 MiB linear, 128 MiB guest) and
 `128x16` (16 MiB linear, 124 MiB guest), both of which need the guest peak
-reduced first.
+reduced first. The SD config described in section 5 can lower texture-cache
+pressure without a rebuild, but it cannot enlarge the compiled 8 MiB linear
+heap.
 
 `guest_budget` is only a cap on guest pages: the host-side structures live in
 the *same* newlib heap. At menu time the measured residents are roughly 4 MiB
@@ -133,6 +135,7 @@ reinstall it (a `.3dsx` cannot reach 178).
 Root: `sdmc:/Skyrim/`.
 
 ```
+sdmc:/Skyrim_N3DS.cfg                      optional (runtime env-style settings, section 5)
 sdmc:/Skyrim/TESV.exe                       17,462,064 B   (required)
 sdmc:/Skyrim/Skyrim.ini                          < 200 B   (required, see below)
 sdmc:/Skyrim/ir/tesv.irc                 65,688,624 B      (required, MMX container)
@@ -183,27 +186,94 @@ the card and this line to test whether menu art is the only texture consumer.
 writes settings, `Documents/My Games/Skyrim/` and `LocalAppData/Skyrim/` are
 optional.
 
-## 5. Runtime switches
+## 5. Runtime config (`sdmc:/Skyrim_N3DS.cfg`)
 
-The slice reads the same variables on device and on host:
+A CIA has no shell, so the device launcher reads an allowlisted `KEY=VALUE`
+file before graphics, memory setup, `n3ds_boot_prepare()` or `guest_init()`.
+The default path is `sdmc:/Skyrim_N3DS.cfg`. An env-aware launcher may override
+it with its first `main` argument, or with `TESV_CFG`; argument takes precedence.
+`TESV_CFG` itself must be set by the launcher, not by this file.
 
-| variable | default | recommendation here |
+Minimal/recommended file:
+
+```cfg
+# Skyrim N3DS device runtime settings
+N3DS_TEX_GPU_LIMIT=6M
+N3DS_TEX_GUEST_LIMIT=16M
+N3DS_STREAM=0
+
+# Optional overrides (uncomment to use):
+# N3DS_IRC_PATH=sdmc:/Skyrim/ir/tesv.irc
+# N3DS_IRC_CACHE_BYTES=4194304
+# N3DS_MEM_EVERY=300
+# TESV_MEMPROBE=1
+```
+
+Format rules: blank lines and lines starting with `#` or `;` are comments;
+inline `#`/`;` comments after whitespace are accepted. Spaces around keys and
+values are trimmed. Values may be bare, single-quoted or double-quoted. For a
+duplicate supported key the last line wins. Unknown keys and malformed lines
+are ignored (a count is logged). A missing file is not an error.
+
+Values are applied with `setenv(KEY, VALUE, 0)`: a variable already supplied by
+a launcher is never overwritten. If a key is absent from both the environment
+and the file, the launcher supplies these defaults:
+
+* `N3DS_TEX_GPU_LIMIT=6M`: the texture cache's GPU allocation budget stays
+  within the PICA200's 6 MiB VRAM instead of competing without a cap with render
+  targets and depth buffers.
+* `N3DS_TEX_GUEST_LIMIT=16M`: a conservative guest-side texture-cache cap for
+  the measured ~29 MiB host texture working set. It reduces unbounded guest/
+  host growth under the 136x8 profile's tight heaps; it is a starting value,
+  not a claim of a measured optimum.
+* `N3DS_STREAM=0`: the menu route does not need the cooked cell stream. Keeping
+  it off avoids opening `stream_index.bin` and allocating its staging/cache
+  structures. Set it to `1` only with a valid index and data directory.
+
+Every applied config/default key is written as `[cfg] KEY=VALUE` to stderr and
+`sdmc:/Skyrim_N3DS_stderr.log`. Check those lines after launch to confirm the
+file was read.
+
+### Supported keys
+
+| key | built-in/default | meaning |
 |---|---|---|
-| `N3DS_IRC_PATH` | `sdmc:/Skyrim/ir/tesv.irc` | leave unset (default is correct) |
-| `N3DS_TEX_GPU_LIMIT` | 0 (unlimited) | `6M` — never exceed the 6 MiB PICA VRAM |
-| `N3DS_TEX_GUEST_LIMIT` | 0 (unlimited) | `16M` for the 136x8 profile |
-| stream cache | on, 2 MiB staged / 7 MB/s | compiled-in defaults; there is no `N3DS_STREAM` on/off switch in this tree. The menu load is CPU-bound, not SD-bound, so leave it |
-| `TESV_MEMPROBE` | off | **off**: not a shipping flag; the 512 MiB report is fiction |
-| `N3DS_MEM_EVERY` | 300 frames | leave default; snapshots also fire on alloc failure |
+| `N3DS_TEX_GPU_LIMIT` | `6M` | texture-cache GPU bytes; plain bytes or `K`/`M`/`G` suffix |
+| `N3DS_TEX_GUEST_LIMIT` | `16M` | texture-cache guest bytes; same suffix format |
+| `N3DS_STREAM` | `0` | `1` enables cooked cell streaming; `0` disables it |
+| `N3DS_STREAM_INDEX` | `sdmc:/Skyrim/stream_index.bin` | stream index path when enabled |
+| `N3DS_STREAM_DATA` | `sdmc:/Skyrim/Data` | archive data directory when enabled |
+| `N3DS_IRC_PATH` | `sdmc:/Skyrim/ir/tesv.irc` | IR container path |
+| `N3DS_IRC_ENABLE` | `1` | enable the IR container tier |
+| `N3DS_IRC_REQUIRED` | `0` | `1` makes a missing/bad container a named guest fault |
+| `N3DS_IRC_CACHE_BYTES` | `4194304` | decoded-record cache byte budget |
+| `N3DS_IRC_CACHE_RECORDS` | `256` | decoded-record cache entry limit |
+| `N3DS_MEM_EVERY` | `300` | periodic memory-snapshot interval in frames; `0` disables the periodic line |
+| `TESV_MEMPROBE` | unset/off | **measurement only**: reports a fictional 512 MiB commit limit; never enable for a normal run |
 
-A CIA has no shell on the 3DS, so most environment variables are not settable
-there. The delivered CIAs therefore run with the compiled defaults: the IRC path
-is correct, while both texture limits are **unlimited**. The `6M`/`16M` values in
-the table are the recommended caps for a `.3dsx` or an env-aware launcher, not
-something the CIA applies by itself. On hardware, watch `linear_fail_n` /
-`linear_fail_bytes` in `Skyrim_N3DS_mem.log`; if the 8 MiB linear heap binds, the
-options are a rebuild with a larger linear profile (and a smaller guest budget)
-or an SD/env config mechanism, which does not exist in this tree yet.
+The allowlist deliberately excludes `TESV_D3D9_CAPS_PROBE`,
+`TESV_D3D9_SM3_GATE_PROBE`, `TESV_D3D9_SHADER_SKIP_PROBE`, and all other
+probe/capability flags. This config cannot change `DevCaps`; it stays
+`0x00082000` without the separate probe flag files below.
+
+### Changing limits without rebuilding
+
+Edit `sdmc:/Skyrim_N3DS.cfg` in a text editor and relaunch the CIA. The file is
+read once at startup, so no CIA rebuild is needed. For example, if the memory
+log shows texture-cache pressure, try guest limits `12M` or `8M` while keeping
+the GPU limit at or below `6M`:
+
+```cfg
+N3DS_TEX_GPU_LIMIT=6M
+N3DS_TEX_GUEST_LIMIT=12M
+N3DS_STREAM=0
+```
+
+Lower texture limits can reduce cache growth, but they do not add linear heap.
+If `linear_fail_n` keeps rising, non-evictable render targets or the compiled
+8 MiB linear heap are still the limit; a different memory profile requires a
+rebuild. Do not “fix” OOM by enabling `TESV_MEMPROBE`: its 512 MiB value is
+intentionally false and only useful for a controlled measurement.
 
 Probe/flag files (measurement only, never ship):
 
@@ -221,10 +291,14 @@ them; do not create them for a real StartMenu run.
    must show as using the New 3DS / 178 MiB mode; a title installed without the
    RSF memory mode will report `App region: 96 MiB` or fail to allocate heaps.
 2. Copy `sdmc:/Skyrim` as in section 4. FAT32, no junction points.
-3. Launch from the home menu. The top screen shows the diagnostic console.
-4. Wait. The host needs ~228 s to the menu load stall; on hardware, allow
-   **15–25 minutes** before calling it stuck. Watch `sdmc:/Skyrim_N3DS_mem.log`
-   (append, flushed every line) rather than the scrolling console.
+3. Create `sdmc:/Skyrim_N3DS.cfg` using the example in section 5. It is
+   optional; without it the launcher still applies the `6M`/`16M`/stream-off
+   defaults.
+4. Launch from the home menu. The top screen shows the diagnostic console.
+5. Confirm `[cfg] ...` lines in `sdmc:/Skyrim_N3DS_stderr.log`, then wait. The
+   host needs ~228 s to the menu load stall; on hardware, allow **15–25
+   minutes** before calling it stuck. Watch `sdmc:/Skyrim_N3DS_mem.log` (append,
+   flushed every line) rather than the scrolling console.
 
 ## 7. Checkpoints and diagnosis
 
@@ -254,8 +328,9 @@ Distinguishing failure modes:
 |---|---|---|
 | `[mem] FATAL: guest budget arithmetic failed` | profile macros inconsistent | rebuild; do not flash |
 | `App region: 96 MiB` | CIA without 178 MB extheader | reinstall with the RSF |
-| `alloc_failures` / `guest_backing_failures` / `guest ... failed` | guest pages exhausted (129.4 MiB peak > 132 budget) | stop; reduce guest peak or move to 132x12/128x16 after trimming |
-| `linear_fail_n>0` / `linear_fail_bytes=…` | 8 MiB linear heap bound first | lower texture/mip policy, or rebuild 132x12 and trim guest |
+| `alloc_failures` / `guest_backing_failures` / `guest ... failed` | guest pages or host residents exhausted (129.4 MiB peak > 132 budget) | stop; lower `N3DS_TEX_GUEST_LIMIT`/IRC cache in the SD config, reduce guest peak, or move to 132x12/128x16 after trimming |
+| `linear_fail_n>0` / `linear_fail_bytes=…` | 8 MiB linear heap bound first | lower texture limits in the SD config; if non-evictable targets still bind, rebuild 132x12 and trim guest |
+| no `[cfg] KEY=VALUE` lines | config missing or key already present in launcher env | check `sdmc:/Skyrim_N3DS.cfg`, path override and stderr log |
 | `pilot basic-block budget exceeded` | 2e9 blocks consumed | expected ceiling; not OOM |
 | `Guest fault at <addr>` in the log | real guest bug at that VA | report address + `irc_fn` + last call |
 
