@@ -142,15 +142,17 @@ class BsaPlanCatalog(unittest.TestCase):
         self.assertEqual(sum(r.startswith("verify_failed") for r in reasons),
                          2)
 
-    def test_arm_table_covers_every_emitted_program(self):
-        path = os.path.join(HERE, "generated", "ui_vs_table.inc")
+    def test_runtime_table_covers_every_emitted_program(self):
+        path = os.path.join(REPO, "source", "d3d9_pica_vs_ui_table.inc")
         self.assertTrue(os.path.exists(path))
         with open(path, encoding="ascii") as handle:
             text = handle.read()
-        self.assertIn("#define D9_UI_VS_PROGRAM_COUNT", text)
-        self.assertEqual(text.count('{"ui.vs.'), 16)
-        self.assertTrue(os.path.exists(os.path.join(
-            HERE, "generated", "ui_vs_table_check.c")))
+        self.assertIn("#define D9_PICA_VS_UI_ENTRY_COUNT", text)
+        self.assertEqual(text.count('.v.pica"'), 16)
+        sizes = os.path.join(REPO, "tests", "ui_vs_shbin_sizes.inc")
+        self.assertTrue(os.path.exists(sizes))
+        with open(sizes, encoding="ascii") as handle:
+            self.assertEqual(handle.read().count('{"'), 16)
 
     def test_manifest_coverage_matches_catalog(self):
         coverage = self.manifest["coverage"]

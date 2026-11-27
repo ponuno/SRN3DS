@@ -8,11 +8,14 @@
 
 #include "d3d9_pica_vs_shbin.inc"
 #include "d3d9_pica_vs_menu_shbin.inc"
+#include "d3d9_pica_vs_ui_shbin.inc"
 
 /* Verified emitted programs (exact vs_3_0 SHA-256 keys). */
 #include "d3d9_pica_vs_table.inc"
 /* GFx menu VS: same emitter contract, no bone palette (mode == MENU). */
 #include "d3d9_pica_vs_menu_table.inc"
+/* BSA ui/interface VS: menu transform/texgen/tint, identity uniform bank. */
+#include "d3d9_pica_vs_ui_table.inc"
 
 /* ------------------------------------------------------------------------- */
 /* SHA-256 (FIPS 180-4), used to pin the embedded .shbin bytes. */
@@ -107,14 +110,18 @@ int d9_pica_vs_sha256_equal(const char *a, const char *b) {
 }
 
 unsigned d9_pica_vs_count(void) {
-    return (unsigned)(D9_PICA_VS_ENTRY_COUNT + D9_PICA_VS_MENU_ENTRY_COUNT);
+    return (unsigned)(D9_PICA_VS_ENTRY_COUNT + D9_PICA_VS_MENU_ENTRY_COUNT +
+                      D9_PICA_VS_UI_ENTRY_COUNT);
 }
 
 const D9PicaVsProgram *d9_pica_vs_at(unsigned index) {
     if (index < D9_PICA_VS_ENTRY_COUNT) return &d9_pica_vs_entries[index];
     index -= D9_PICA_VS_ENTRY_COUNT;
-    if (index >= D9_PICA_VS_MENU_ENTRY_COUNT) return NULL;
-    return &d9_pica_vs_menu_entries[index];
+    if (index < D9_PICA_VS_MENU_ENTRY_COUNT)
+        return &d9_pica_vs_menu_entries[index];
+    index -= D9_PICA_VS_MENU_ENTRY_COUNT;
+    if (index >= D9_PICA_VS_UI_ENTRY_COUNT) return NULL;
+    return &d9_pica_vs_ui_entries[index];
 }
 
 const D9PicaVsProgram *d9_pica_vs_lookup(const char *sha256_hex) {
@@ -125,6 +132,9 @@ const D9PicaVsProgram *d9_pica_vs_lookup(const char *sha256_hex) {
     for (unsigned i = 0; i < D9_PICA_VS_MENU_ENTRY_COUNT; ++i)
         if (d9_pica_vs_sha256_equal(d9_pica_vs_menu_entries[i].sha256, sha256_hex))
             return &d9_pica_vs_menu_entries[i];
+    for (unsigned i = 0; i < D9_PICA_VS_UI_ENTRY_COUNT; ++i)
+        if (d9_pica_vs_sha256_equal(d9_pica_vs_ui_entries[i].sha256, sha256_hex))
+            return &d9_pica_vs_ui_entries[i];
     return NULL;
 }
 

@@ -99,10 +99,14 @@ picasso rejects `texcoord3` as an output type (`invalid output type`), and
 The emitted-program table is compiled for ARM11 (compile-only, no link):
 
 ```powershell
-python source\shader_packs\ui\emit_arm_table.py
+python source\shader_packs\ui\emit_runtime_tables.py
 arm-none-eabi-gcc -c -O2 -std=gnu11 -march=armv6k -mfloat-abi=hard `
-    source\shader_packs\ui\generated\ui_vs_table_check.c -o ui_vs_table.o
+    -Isource source\d3d9_pica_vs.c -o ui_pica_vs.o
 ```
+
+`source/d3d9_pica_vs.c` includes `d3d9_pica_vs_ui_table.inc` /
+`d3d9_pica_vs_ui_shbin.inc` next to the skin and GFx menu rows, so
+`d9_pica_vs_lookup()` resolves the 16 UI hashes at runtime.
 
 ## StartMenu / GFx priority set (phase 2)
 

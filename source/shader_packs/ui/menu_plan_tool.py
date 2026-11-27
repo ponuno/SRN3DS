@@ -582,6 +582,16 @@ def check(plans_path=PLANS_PATH, ir_path=IR_PATH, catalog_path=CATALOG_PATH,
         ir_doc = json.load(handle)
     with open(catalog_path, encoding="utf-8") as handle:
         catalog = json.load(handle)
+    # This verifier owns the GFx StartMenu measurement only.  The BSA
+    # ui/interface rows in the same catalog are checked by test_bsa_plans.py.
+    catalog = dict(catalog)
+    catalog["entries"] = [e for e in catalog.get("entries", [])
+                          if e.get("id", "").startswith("menu.gfx.")]
+    catalog["refusals"] = [r for r in catalog.get("refusals", [])
+                           if not str(r.get("id", "")).startswith("ui.")]
+    catalog["coverage"] = dict(catalog.get("coverage", {}),
+                               translated=len(catalog["entries"]),
+                               refused=len(catalog["refusals"]))
     if any(entry.get("runtime") == 1 and entry.get("draw_enabled") != 1
            for entry in catalog.get("entries", [])):
         problems.append("catalog: a runtime entry is not draw-enabled")

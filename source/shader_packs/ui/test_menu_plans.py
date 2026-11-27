@@ -35,8 +35,11 @@ def main(argv=None):
     with open(T.CATALOG_PATH, encoding="utf-8") as handle:
         catalog = json.load(handle)
 
-    entries = catalog.get("entries", [])
-    refusals = catalog.get("refusals", [])
+    entries = [e for e in catalog.get("entries", [])
+               if e.get("id", "").startswith("menu.gfx.")]
+    refusals = [r for r in catalog.get("refusals", [])
+                if str(r.get("id", r.get("prefix_sha256", ""))).startswith("menu.gfx.")
+                or not str(r.get("id", "")).startswith("ui.")]
     ps = [e for e in entries if e["stage"] == "ps_3_0"]
     vs = [e for e in entries if e["stage"] == "vs_3_0"]
     runtime = [e for e in entries if e.get("runtime") == 1]
