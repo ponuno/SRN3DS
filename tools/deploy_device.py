@@ -277,16 +277,22 @@ def plan_report(overlay, args) -> dict:
     cooked = None
     if args.pack == "cooked":
         refusals: List[dict] = []
-        entries = cook_entries(winners, archives, max_dim, refusals)
+        entries = cook_entries(winners, archives, max_dim, refusals,
+                               _csv(args.exclude_groups),
+                               _csv(args.exclude_ext))
         by_group = Counter(entry["group"] for entry in entries)
         by_group_bytes = Counter()
         for entry in entries:
             by_group_bytes[entry["group"]] += entry["estimate"]
         cap = args.max_archive_mb * 1024 * 1024
+        grouped: Dict[str, List[dict]] = {}
+        for entry in entries:
+            grouped.setdefault(entry["group"], []).append(entry)
         cooked = {
             "cap_bytes": cap,
             "archives_estimate": sum(
-                1 for _ in _batches(entries, cap)),
+                sum(1 for _ in _batches(items, cap))
+                for items in grouped.values()),
             "files": len(entries),
             "bytes_estimate": sum(entry["estimate"] for entry in entries),
             "groups": {name: {"files": by_group[name],
@@ -428,6 +434,10 @@ def convert_texture(asset, row, archives, out_root: str, max_dim: int) -> dict:
 # Cooked archives
 
 
+def _csv(value: str) -> List[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
 def _group_of(virtual_path: str) -> str:
     parts = virtual_path.replace("/", "\\").split("\\")
     if len(parts) < 2:
@@ -437,13 +447,19 @@ def _group_of(virtual_path: str) -> str:
 
 
 def cook_entries(winners, archives, max_dim: int,
-                 refusals: List[dict]) -> List[dict]:
+                 refusals: List[dict], exclude_groups=(), exclude_ext=()) -> List[dict]:
     """Everything a cooked archive would contain, with an estimated size."""
     entries = []
+    groups = {name.strip().lower() for name in exclude_groups if name.strip()}
+    exts = {name.strip().lower() if name.strip().startswith(".") else
+            "." + name.strip().lower() for name in exclude_ext if name.strip()}
     for key in sorted(winners):
         asset = winners[key]
         ext = os.path.splitext(key)[1]
+        group = _group_of(asset.virtual_path)
         if ext in COOK_SKIP_EXT or key.startswith("video\\"):
+            continue
+        if group in groups or ext in exts:
             continue
         if key.endswith(".dds"):
             prefix = _read_prefix(asset, archives, DDS_HEADER_BYTES)
@@ -462,7 +478,7 @@ def cook_entries(winners, archives, max_dim: int,
             row = {"action": "copy", "reason": "non-texture"}
             estimate = _asset_size(asset, archives)
         entries.append({"asset": asset, "row": row, "estimate": estimate,
-                        "group": _group_of(asset.virtual_path)})
+                        "group": group})
     return entries
 
 
@@ -529,50 +545,52 @@ def stage_cooked(overlay, args) -> dict:
                        "sha256": hashlib.sha256(open(dest, "rb").read()).hexdigest(),
                        "class": "core"})
     refusals: List[dict] = []
-    entries = cook_entries(winners, archives, max_dim, refusals)
+    entries = cook_entries(winners, archives, max_dim, refusals,
+                           _csv(args.exclude_groups),
+                           _csv(args.exclude_ext))
     cap = args.max_archive_mb * 1024 * 1024
     archive_rows = []
     file_rows = []
     data_dir = os.path.join(args.out, "Data")
     os.makedirs(data_dir, exist_ok=True)
-    parts: Dict[str, int] = {}
-    for batch in _batches(entries, cap):
-        group = batch[0]["group"]
-        parts[group] = parts.get(group, 0) + 1
-        part = parts[group]
-        name = "Skyrim - Cooked %s%s.bsa" % (
-            group, "" if part == 1 else " %d" % part)
-        rows: List[dict] = []
+    groups: Dict[str, List[dict]] = {}
+    for entry in entries:
+        groups.setdefault(entry["group"], []).append(entry)
+    for group in sorted(groups):
+        for part, batch in enumerate(_batches(groups[group], cap), 1):
+            name = "Skyrim - Cooked %s%s.bsa" % (
+                group, "" if part == 1 else " %d" % part)
+            rows: List[dict] = []
 
-        def payloads(batch=batch, rows=rows):
-            for entry in batch:
-                asset, row = entry["asset"], entry["row"]
-                try:
-                    if row["action"] == "copy":
-                        payload, container = _read_all(asset, archives), "copied"
-                    else:
-                        payload, container = texture_payload(
-                            asset, row, archives, max_dim)
-                except (OSError, bsa.BsaError, dds.DdsError, DeployError) as exc:
-                    refusals.append({"path": asset.virtual_path,
-                                     "reason": "conversion failed: %s" % exc,
-                                     "plugin": asset.plugin})
-                    continue
-                rows.append({"path": asset.virtual_path, "bytes": len(payload),
-                             "sha256": hashlib.sha256(payload).hexdigest(),
-                             "container": container,
-                             "source": {"kind": asset.kind,
-                                        "plugin": asset.plugin,
-                                        "archive": asset.archive}})
-                yield asset.virtual_path, payload
+            def payloads(batch=batch, rows=rows):
+                for entry in batch:
+                    asset, row = entry["asset"], entry["row"]
+                    try:
+                        if row["action"] == "copy":
+                            payload, container = _read_all(asset, archives), "copied"
+                        else:
+                            payload, container = texture_payload(
+                                asset, row, archives, max_dim)
+                    except (OSError, bsa.BsaError, dds.DdsError, DeployError) as exc:
+                        refusals.append({"path": asset.virtual_path,
+                                         "reason": "conversion failed: %s" % exc,
+                                         "plugin": asset.plugin})
+                        continue
+                    rows.append({"path": asset.virtual_path, "bytes": len(payload),
+                                 "sha256": hashlib.sha256(payload).hexdigest(),
+                                 "container": container,
+                                 "source": {"kind": asset.kind,
+                                            "plugin": asset.plugin,
+                                            "archive": asset.archive}})
+                    yield asset.virtual_path, payload
 
-        result = bsa_write.write_bsa_stream(
-            os.path.join(data_dir, name), payloads(), compressed=False)
-        archive_rows.append({"name": name, "files": len(rows),
-                             "bytes": result["bytes"],
-                             "sha256": hashlib.sha256(
-                                 open(result["path"], "rb").read()).hexdigest()})
-        file_rows.extend(rows)
+            result = bsa_write.write_bsa_stream(
+                os.path.join(data_dir, name), payloads(), compressed=False)
+            archive_rows.append({"name": name, "files": len(rows),
+                                 "bytes": result["bytes"],
+                                 "sha256": hashlib.sha256(
+                                     open(result["path"], "rb").read()).hexdigest()})
+            file_rows.extend(rows)
     if not archive_rows:
         raise DeployError("cooked stage produced no archives")
     ini_source = ""
@@ -701,6 +719,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        help="cooked writes only winning assets into new archives")
         p.add_argument("--max-archive-mb", type=int, default=1800,
                        help="split cooked archives at this size")
+        p.add_argument("--exclude-groups", default="",
+                       help="comma list of top-level groups, e.g. grass,sound")
+        p.add_argument("--exclude-ext", default="",
+                       help="comma list of extensions, e.g. .bto,.btr,.hkx")
     args = parser.parse_args(argv)
     try:
         with data_overlay.DataOverlay(args.data or None,
