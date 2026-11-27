@@ -84,16 +84,23 @@ static void make_dir(CPU *c, const char *guest) {
 
 int main(void) {
     GuestMemory m;
-    guest_init(&m, 1u << 20);
-    if (guest_map(&m, DATA, DATA_SIZE) || guest_map(&m, STACK, STACK_SIZE))
+    guest_init(&m, 16u << 20);
+    if (guest_map(&m, DATA, DATA_SIZE) || guest_map(&m, STACK, STACK_SIZE)) {
+        puts("setup failed: guest_map");
+        ++failures;
         goto done;
+    }
     g_mem = &m;
 #ifdef _WIN32
     _mkdir("save_paths_root");
 #else
     mkdir("save_paths_root", 0777);
 #endif
-    if (win32_init(&m, 0x100000u, "save_paths_root") != 0) goto done;
+    if (win32_init(&m, 0x100000u, "save_paths_root") != 0) {
+        puts("setup failed: win32_init");
+        ++failures;
+        goto done;
+    }
 
     /* --- mapping ------------------------------------------------------- */
     expect_map("LocalAppData\\Skyrim\\.\\Plugins.txt",
