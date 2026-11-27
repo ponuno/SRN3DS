@@ -1,0 +1,1408 @@
+{
+ "schema": "d9-shader-plan-v1",
+ "archive": "Skyrim - Shaders.bsa",
+ "pack": "sky_water",
+ "note": "sky_water port-lite catalog. draw_enabled is 0 for every row: the three 'exact' entries have a complete declared material contract but no runtime codegen binding, and every 'approx' row names what it drops. runtime is 0 by default.",
+ "summary": {
+  "recipes": [
+   "sky_tex_vcolor_bias",
+   "sky_tex_vcolor_bias_alphascale",
+   "sky_tex_vcolor_fade_lite",
+   "sky_tex_vcolor_x1p5_lite",
+   "sky_two_tex_lerp",
+   "water_fog_lerp_lite",
+   "water_surface_cube_lite",
+   "water_surface_fresnel_lite"
+  ],
+  "hashes": 14,
+  "chunks": 24,
+  "exact": 3,
+  "approx": 11,
+  "draw_enabled": 0,
+  "runtime": 0
+ },
+ "entries": [
+  {
+   "id": "sky.tex_vcolor_bias.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "sky_tex_vcolor_bias",
+   "stage": "ps_3_0",
+   "sha256": "91ab7cd78fdd5705cf8772f8909dc4b13240dbf356e5c5cb7bc0dbb27a2a1a92",
+   "sha1": "b0ff91ca8b0cfca875a58c6b18ff0e1443a52e0c",
+   "version": "0xffff0300",
+   "instructions": 3,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 8,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      0,
+      14
+     ],
+     "src_a": [
+      3,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "multiply_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "material_constant_slot0_rgb_equals_c0_y",
+    "texture0_2d",
+    "vertex_color",
+    "ldr_quality"
+   ],
+   "quality": "exact",
+   "approximation": "",
+   "contract": "full",
+   "note": "one-stage sky sprite: texture x vertex colour plus scalar bias; alpha = texture.a x vertex.a rgb bias c0.y is a material scalar replicated into the TEV constant colour; no clamp is inserted.",
+   "constant_bindings": {
+    "0": {
+     "rgb": "c0.y"
+    }
+   }
+  },
+  {
+   "id": "sky.tex_vcolor_bias_alphascale.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "sky_tex_vcolor_bias_alphascale",
+   "stage": "ps_3_0",
+   "sha256": "250481a5376a565d1a12d5bceb36d5329c7a51a3903bfe839ea4ea54abb35181",
+   "sha1": "9c48ce755fef0cecb51a3df89016bf02f8a0b99f",
+   "version": "0xffff0300",
+   "instructions": 4,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 8,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      0,
+      14
+     ],
+     "src_a": [
+      3,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "multiply_add"
+    },
+    {
+     "func_rgb": 0,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 1,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "alpha_scale"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0
+    }
+   ],
+   "constants": [
+    0,
+    1
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "material_constant_slot0_rgb_equals_c0_y",
+    "material_constant_slot1_alpha_equals_c0_x",
+    "texture0_2d",
+    "vertex_color",
+    "ldr_quality"
+   ],
+   "quality": "exact",
+   "approximation": "",
+   "contract": "full",
+   "note": "sky sprite with scalar RGB bias and a separate alpha scale; two material constant slots the IR uses c0.x and c0.y from one register; the contract requires feeding two TEV constant slots, so no clamp or renormalisation is invented.",
+   "constant_bindings": {
+    "0": {
+     "rgb": "c0.y"
+    },
+    "1": {
+     "alpha": "c0.x"
+    }
+   }
+  },
+  {
+   "id": "sky.tex_vcolor_fade_lite.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "sky_tex_vcolor_fade_lite",
+   "stage": "ps_3_0",
+   "sha256": "fa8e64396fd257f7caa5ce0fe491e6f73a8dee18da56b70603e9e1019ba1241b",
+   "sha1": "b73f274ebabd82a14cc5681330ea7a7f70cfe79b",
+   "version": "0xffff0300",
+   "instructions": 4,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 8,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      0,
+      14
+     ],
+     "src_a": [
+      3,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "multiply_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 2,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "material_constant_slot0_rgb_equals_c0_y",
+    "texture0_2d",
+    "vertex_color",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "second-UV alpha fade (dcl_texcoord2 v1.x) dropped: alpha becomes texture.a x vertex.a; RGB scalar bias c0.y is kept in constant slot 0",
+   "contract": "lite",
+   "note": "community sky sprite: texture x vertex colour + bias; per-vertex UV fade approximated away one TEV stage cannot read the second UV component as a scalar, so the fade is external."
+  },
+  {
+   "id": "sky.tex_vcolor_x1p5_lite.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "sky_tex_vcolor_x1p5_lite",
+   "stage": "ps_3_0",
+   "sha256": "013ad862c987aa3ece6ec06e2fcc57b94cc5a8d60a1515a2cbc65212483e9577",
+   "sha1": "545983971f6362293c248044549c72f0843dcc2c",
+   "version": "0xffff0300",
+   "instructions": 5,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 8,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      0,
+      14
+     ],
+     "src_a": [
+      3,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "multiply_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 2,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "material_constant_slot0_rgb_equals_c0_y",
+    "texture0_2d",
+    "vertex_color",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "second-UV alpha fade (dcl_texcoord2 v1.x) dropped: alpha becomes texture.a x vertex.a; RGB scalar bias c0.y is kept in constant slot 0; RGB 1.5 gain (def c1.x) dropped to 1.0 because TEV scale is 1x/2x/4x/0.5x",
+   "contract": "lite",
+   "note": "sky sprite with a 1.5 RGB gain and second-UV alpha fade; both approximated the gain is a named visual loss, not silently clamped to 2x."
+  },
+  {
+   "id": "sky.two_tex_lerp.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "sky_two_tex_lerp",
+   "stage": "ps_3_0",
+   "sha256": "37902aa719a706ea5dd41c9036d4b8f41dcb8db17c80119d05edc03edde345cd",
+   "sha1": "479ca47a0ae5428be231de0b2e95ff1f940492d1",
+   "version": "0xffff0300",
+   "instructions": 6,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 4,
+     "func_a": 4,
+     "src_rgb": [
+      4,
+      3,
+      14
+     ],
+     "src_a": [
+      4,
+      3,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "interpolate"
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      14
+     ],
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 1,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "multiply_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "sampler_reg": 1,
+     "texcoord_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 2,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0
+    }
+   ],
+   "constants": [
+    0,
+    1
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "material_constant_slot0_alpha_equals_c0_x",
+    "material_constant_slot1_rgb_equals_c0_y",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color",
+    "ldr_quality"
+   ],
+   "quality": "exact",
+   "approximation": "",
+   "contract": "full",
+   "note": "cloud/aurora two-texture lerp by c0.x, then vertex colour modulation and scalar bias TEV INTERPOLATE is (A-B)*C+B with C alpha, exactly D3D lrp; two constant slots hold c0.x (alpha) and c0.y (RGB).",
+   "constant_bindings": {
+    "0": {
+     "alpha": "c0.x"
+    },
+    "1": {
+     "rgb": "c0.y"
+    }
+   }
+  },
+  {
+   "id": "water.surface_fresnel_lite.a.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "44248bf6b5fd49f7b3ea9cf419f6dd171ffe5fdd4d19135d225a775d43a4ae5e",
+   "sha1": "c73a58544b98bbcabb661166fca212107842e04b",
+   "version": "0xffff0300",
+   "instructions": 65,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "fresnel/tint prebaked in vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color_or_white",
+    "normal_map_dropped",
+    "sun_highlight_constant",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "water surface, 3 textures + 3-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+  },
+  {
+   "id": "water.surface_fresnel_lite.b.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "e9e6f6a82e5e523851b7911f3e28e4498fd5943831b8632926b9f49552d91ad3",
+   "sha1": "d9f83d2c2f5da8836ed9dc727a53046ce23e24aa",
+   "version": "0xffff0300",
+   "instructions": 63,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "fresnel/tint prebaked in vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color_or_white",
+    "normal_map_dropped",
+    "sun_highlight_constant",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "water surface, 3 textures + 2-light loop in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+  },
+  {
+   "id": "water.surface_fresnel_lite.c.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "92fb44343251f1895d95dfadfd0f540aae180bc55cabae1a3957b0fab450b42e",
+   "sha1": "e2116924e1b6428f39033e076339e7cb0df45426",
+   "version": "0xffff0300",
+   "instructions": 76,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "fresnel/tint prebaked in vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color_or_white",
+    "normal_map_dropped",
+    "sun_highlight_constant",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "water surface, 4 textures and specular exponent in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+  },
+  {
+   "id": "water.surface_fresnel_lite.d.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "2895c53c23193ced6fc3471df138d3d6fe1dc8db9ce598c60604df49e2493ace",
+   "sha1": "7303ad2e757e543b220380f2f94d68b36a7b8578",
+   "version": "0xffff0300",
+   "instructions": 88,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "fresnel/tint prebaked in vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color_or_white",
+    "normal_map_dropped",
+    "sun_highlight_constant",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "water surface, 6 texture declarations in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+  },
+  {
+   "id": "water.surface_fresnel_lite.e.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_fresnel_lite",
+   "stage": "ps_3_0",
+   "sha256": "497a6e339edf926dd8d2b06eec46313d3ad844c60bbcf9c9b3ea3c46a3bfbd61",
+   "sha1": "069b88410060e15dfbb9972a9ee5379a615dcc20",
+   "version": "0xffff0300",
+   "instructions": 106,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "fresnel/tint prebaked in vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color_or_white",
+    "normal_map_dropped",
+    "sun_highlight_constant",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "per-pixel normal map, fresnel (dp3/rcp/pow), sun loop and specular are dropped. Base texture is modulated by a vertex-prebaked fresnel/tint (PRIMARY) and one constant colour is added as the sun highlight. Water alpha is forced to 1 as in the retail epilogue.",
+   "contract": "lite",
+   "note": "water surface, 5 textures in the IR; reduced to the lite surface recipe one scene texture + fresnel approximation + one additive highlight; no reflection render target."
+  },
+  {
+   "id": "water.surface_cube_lite.a.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_cube_lite",
+   "stage": "ps_3_0",
+   "sha256": "3e6befd423bdaf9a1963b2175c85ee3f0670355eb359d24be208b67a81b8a13f",
+   "sha1": "9279dd08f86318ae35e7808a24328f6f9f566929",
+   "version": "0xffff0300",
+   "instructions": 63,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 3
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "fresnel/tint prebaked in vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color_or_white",
+    "cube_reflection_texcoord",
+    "normal_map_dropped",
+    "sun_highlight_constant",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; alpha is 1.",
+   "contract": "lite",
+   "note": "water surface with cube reflection (s0) and normal map (s1) reflection is one cube sample, not a second render target."
+  },
+  {
+   "id": "water.surface_cube_lite.b.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_surface_cube_lite",
+   "stage": "ps_3_0",
+   "sha256": "0f008dd5638437da7f3dc2d2b3c5a8e9a56e27d35f750c8ac4fbaf6c1343d107",
+   "sha1": "5acefb8ab98d881e06ebaade1e91df0a1f208df8",
+   "version": "0xffff0300",
+   "instructions": 79,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 2,
+   "stage_data": [
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      0,
+      15
+     ],
+     "src_a": [
+      14,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "base_fresnel"
+    },
+    {
+     "func_rgb": 2,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "sun_add"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 1,
+     "texcoord_reg": 4,
+     "sampler_type": 3
+    }
+   ],
+   "inputs": [
+    {
+     "reg_index": 1,
+     "usage": 10,
+     "usage_index": 0,
+     "tev_source": 0,
+     "note": "fresnel/tint prebaked in vertex colour"
+    }
+   ],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "fresnel_prebaked_vertex_color_or_white",
+    "cube_reflection_texcoord",
+    "normal_map_dropped",
+    "sun_highlight_constant",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "cube reflection direction is computed per-pixel in the IR; the plan samples the cube along the declared texcoord. Per-pixel normal map, fresnel and specular are dropped. Base cube sample is modulated by a vertex-prebaked fresnel/tint and one constant highlight is added; alpha is 1.",
+   "contract": "lite",
+   "note": "water surface with 2D scene texture and cube reflection (s1) reflection is one cube sample, not a second render target."
+  },
+  {
+   "id": "water.fog_lerp_lite.a.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_fog_lerp_lite",
+   "stage": "ps_3_0",
+   "sha256": "71e129a012c57e22f0d3142b1f28457ed9e24f2aa715441b47af0adbcdfe7af7",
+   "sha1": "85c6885dcd6b469c49ed99af31df77571cec90ba",
+   "version": "0xffff0300",
+   "instructions": 14,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      14
+     ],
+     "src_a": [
+      3,
+      3,
+      3
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "fog_lerp"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "constant_slot0_rgb_equals_fog_colour",
+    "constant_slot0_alpha_equals_0_9",
+    "alpha_test_external",
+    "texture0_2d",
+    "ldr_quality"
+   ],
+   "quality": "approx",
+   "approximation": "three-colour cmp-selected fog/gradient (c0..c5) replaced by one constant fog colour; the retail 0.9 texture/fog mix is kept exactly by TEV INTERPOLATE with constant alpha 0.9. texkill in the IR is left to an external alpha test.",
+   "contract": "lite",
+   "note": "fog/gradient shader: cmp chain selects a 3-colour gradient from v1.x, then 90% texture over it one stage, one constant colour; no per-vertex gradient selection."
+  },
+  {
+   "id": "water.fog_lerp_lite.b.ps",
+   "kind": "tev",
+   "family": "sky_water",
+   "recipe": "water_fog_lerp_lite",
+   "stage": "ps_3_0",
+   "sha256": "1a48a3c10481757d2e916df9a9029f3bd17b22b706c0e5b7319cc4f042239bff",
+   "sha1": "57bc18847393b0bd348e28c42459b7e35d22d4f6",
+   "version": "0xffff0300",
+   "instructions": 17,
+   "draw_enabled": 0,
+   "runtime": 0,
+   "stages": 1,
+   "stage_data": [
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      3,
+      14,
+      14
+     ],
+     "src_a": [
+      3,
+      3,
+      3
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 0,
+     "const_is_literal": 0,
+     "const_rgba8": 0,
+     "instruction": "fog_lerp"
+    }
+   ],
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "texcoord_reg": 0,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [],
+   "constants": [
+    0
+   ],
+   "uses_vertex_color": 0,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "constant_slot0_rgb_equals_fog_colour",
+    "constant_slot0_alpha_equals_0_9",
+    "alpha_test_external",
+    "texture0_2d",
+    "ldr_quality",
+    "texkill_dropped"
+   ],
+   "quality": "approx",
+   "approximation": "three-colour cmp-selected fog/gradient (c0..c5) replaced by one constant fog colour; the retail 0.9 texture/fog mix is kept exactly by TEV INTERPOLATE with constant alpha 0.9. texkill in the IR is left to an external alpha test.",
+   "contract": "lite",
+   "note": "fog/gradient shader with alpha-kill (texkill) plus the 3-colour cmp gradient one stage, one constant colour; no per-vertex gradient selection."
+  }
+ ]
+}

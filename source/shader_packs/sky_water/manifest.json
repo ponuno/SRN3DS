@@ -14,9 +14,9 @@
   "ps": 82
  },
  "coverage": {
-  "translated": 0,
+  "translated": 14,
   "draw-enabled": 0,
-  "refused": 45,
+  "refused": 31,
   "contract_only": 0
  },
  "refusal_classes": {
@@ -31,7 +31,106 @@
   "class",
   "chunks"
  ],
- "plans": [],
+ "plans": [
+  {
+   "id": "sky.tex_vcolor_x1p5_lite.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "013ad862c987aa3ece6ec06e2fcc57b94cc5a8d60a1515a2cbc65212483e9577"
+  },
+  {
+   "id": "water.surface_cube_lite.b.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "0f008dd5638437da7f3dc2d2b3c5a8e9a56e27d35f750c8ac4fbaf6c1343d107"
+  },
+  {
+   "id": "water.fog_lerp_lite.b.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "1a48a3c10481757d2e916df9a9029f3bd17b22b706c0e5b7319cc4f042239bff"
+  },
+  {
+   "id": "sky.tex_vcolor_bias_alphascale.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "250481a5376a565d1a12d5bceb36d5329c7a51a3903bfe839ea4ea54abb35181"
+  },
+  {
+   "id": "water.surface_fresnel_lite.d.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "2895c53c23193ced6fc3471df138d3d6fe1dc8db9ce598c60604df49e2493ace"
+  },
+  {
+   "id": "sky.two_tex_lerp.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "37902aa719a706ea5dd41c9036d4b8f41dcb8db17c80119d05edc03edde345cd"
+  },
+  {
+   "id": "water.surface_cube_lite.a.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "3e6befd423bdaf9a1963b2175c85ee3f0670355eb359d24be208b67a81b8a13f"
+  },
+  {
+   "id": "water.surface_fresnel_lite.a.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "44248bf6b5fd49f7b3ea9cf419f6dd171ffe5fdd4d19135d225a775d43a4ae5e"
+  },
+  {
+   "id": "water.surface_fresnel_lite.e.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "497a6e339edf926dd8d2b06eec46313d3ad844c60bbcf9c9b3ea3c46a3bfbd61"
+  },
+  {
+   "id": "water.fog_lerp_lite.a.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "71e129a012c57e22f0d3142b1f28457ed9e24f2aa715441b47af0adbcdfe7af7"
+  },
+  {
+   "id": "sky.tex_vcolor_bias.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "91ab7cd78fdd5705cf8772f8909dc4b13240dbf356e5c5cb7bc0dbb27a2a1a92"
+  },
+  {
+   "id": "water.surface_fresnel_lite.c.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "92fb44343251f1895d95dfadfd0f540aae180bc55cabae1a3957b0fab450b42e"
+  },
+  {
+   "id": "water.surface_fresnel_lite.b.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "e9e6f6a82e5e523851b7911f3e28e4498fd5943831b8632926b9f49552d91ad3"
+  },
+  {
+   "id": "sky.tex_vcolor_fade_lite.ps",
+   "status": "translated",
+   "kind": "tev",
+   "family": "sky_water",
+   "sha256": "fa8e64396fd257f7caa5ce0fe491e6f73a8dee18da56b70603e9e1019ba1241b"
+  }
+ ],
  "hashes": [
   [
    "00ae3cdfb5feab0cc4bf9c8cb5220512344968535e19a4407c1bb33b8b420c9c",
