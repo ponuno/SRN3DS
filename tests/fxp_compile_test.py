@@ -319,7 +319,16 @@ class RealArchiveTests(unittest.TestCase):
 
     def test_committed_table_matches_generator(self):
         manifest = fxp_compile.build_manifest(self.data)
-        self.assertEqual(len(manifest["entries"]), 4)
+        # The canonical generator path merges every pack catalog and keeps
+        # only rows explicitly marked runtime=1 (menu GFx plans, draw-enabled
+        # copy).  That is what docs/shader_plans.json and the .inc commit.
+        extras = []
+        for path in fxp_compile.pack_plan_paths():
+            with open(path, encoding="utf-8") as handle:
+                extras.append((path, json.load(handle)))
+        manifest = fxp_compile.merge_extra_entries(manifest, extras,
+                                                   runtime_only=True)
+        self.assertEqual(len(manifest["entries"]), 39)
         entries = manifest["entries"]
         self.assertEqual(entries[0]["id"], "menu.logo.ps")
         self.assertEqual(entries[1]["id"], "menu.composite.ps")
@@ -331,7 +340,7 @@ class RealArchiveTests(unittest.TestCase):
                          "f5239354171a6bc8166e1bfc59a0f46b90a3f0bc37b936f0b33ff6b91e9cc9ce")
         self.assertEqual(entries[3]["sha256"],
                          "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7")
-        self.assertEqual([e["draw_enabled"] for e in entries], [0, 1, 0, 0])
+        self.assertEqual([e["draw_enabled"] for e in entries[:4]], [0, 1, 0, 0])
         generated = C.emit_c_table(entries)
         path = os.path.join(REPO, "source", "d3d9_shader_plan_table.inc")
         with open(path, "r", encoding="utf-8") as handle:
