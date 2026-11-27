@@ -43,5 +43,33 @@ static const D9PicaVsProgram d9_pica_vs_menu_entries[] = {
         {D9_PICA_VS_ATTR_COLOR, D9_DECL_UBYTE4N, 4, D9_PICA_VS_FMT_UBYTE_NORM, 1u},
         },
     },
+    {
+        "menu.gfx.vs.73904d3f",
+        "73904d3f32bd5eec48ec5b758e1cd100d7e3f750a1cce98cbdb5c69679f3b610",
+        "menu.gfx.vs.73904d3f.v.pica",
+        "menu.gfx.vs.73904d3f.shbin",
+        "bc75996772da99c75b26724660147903e25115a4d19331fdb091e923fb8f0fe1",
+        d9_pica_vs_menu_shbin_73904d3f, 256,
+        13u, 6u, 0u, 0u, 6u,
+        2u,
+        {
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
+        {D9_PICA_VS_ATTR_COLOR, D9_DECL_UBYTE4N, 4, D9_PICA_VS_FMT_UBYTE_NORM, 2u},
+        },
+    },
+    {
+        "menu.gfx.vs.0975cc50",
+        "0975cc503f63d9b1a1a36f8886a34043742e9a13f4a351e203d5dbd33b3f95ce",
+        "menu.gfx.vs.0975cc50.v.pica",
+        "menu.gfx.vs.0975cc50.shbin",
+        "a6bf4360e9d5d5606c52803193e3785c636044a798faf6b7c507fee012658805",
+        d9_pica_vs_menu_shbin_0975cc50, 272,
+        15u, 8u, 0u, 0u, 8u,
+        2u,
+        {
+        {D9_PICA_VS_ATTR_POSITION, D9_DECL_FLOAT3, 3, D9_PICA_VS_FMT_FLOAT, 0u},
+        {D9_PICA_VS_ATTR_COLOR, D9_DECL_UBYTE4N, 4, D9_PICA_VS_FMT_UBYTE_NORM, 2u},
+        },
+    },
 };
 #define D9_PICA_VS_MENU_ENTRY_COUNT (sizeof(d9_pica_vs_menu_entries)/sizeof(d9_pica_vs_menu_entries[0]))

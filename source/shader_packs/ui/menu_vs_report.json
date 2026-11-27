@@ -23,13 +23,17 @@
   },
   {
    "id": "menu.gfx.vs.73904d3f",
-   "reason": "color1_output_unmapped (PICA has one primary colour output)",
-   "status": "refused"
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "status": "pass"
   },
   {
    "id": "menu.gfx.vs.0975cc50",
-   "reason": "color1_output_unmapped (PICA has one primary colour output)",
-   "status": "refused"
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "status": "pass"
   }
  ],
  "samples": 256,

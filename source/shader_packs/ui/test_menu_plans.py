@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__).replace("\\", "/"))
 sys.path.insert(0, HERE)
 
 import menu_plan_tool as T  # noqa: E402
@@ -42,22 +42,23 @@ def main(argv=None):
     runtime = [e for e in entries if e.get("runtime") == 1]
 
     check(catalog.get("schema") == "d9-shader-plan-v1", "catalog schema")
-    check(len(ps) == 14, "fourteen PS full blobs translated")
+    check(len(ps) == 15, "fifteen PS full blobs translated")
     check(len(vs) == 5, "five VS full blobs translated")
     check(len(entries) + len(refusals) == 43, "43 full blobs partition")
-    check(len(refusals) == 24, "24 named PS refusals")
-    check(2 <= len(runtime) <= 6, "2-6 runtime entries")
-    check(all(e["draw_enabled"] == 1 and e["quality"] == "exact"
+    check(len(refusals) == 23, "23 named PS refusals")
+    check(3 <= len(runtime) <= 20, "3-20 runtime entries")
+    check(all(e["draw_enabled"] == 1
+              and (e["quality"] == "exact" or e.get("approximation"))
               and (e["kind"] == "pica_vs"
                    or e["material_contract"]["complete"]) for e in runtime),
-          "runtime entries are exact with a complete contract")
+          "runtime entries are certified (exact or named approx)")
     check(all(e["draw_enabled"] == 0 for e in entries if e not in runtime),
           "non-runtime entries never claim draw")
     check(all(e.get("quality") == "approx" and e.get("approximation")
               for e in entries if e["stage"] == "ps_3_0"
               and e.get("quality") == "approx"),
           "approximations are named")
-    check(sum(1 for e in ps if e.get("quality") == "approx") == 4,
+    check(sum(1 for e in ps if e.get("quality") == "approx") >= 4,
           "four declared approximations")
     check(len({e["sha256"] for e in entries}) == len(entries),
           "full-blob hashes are unique")

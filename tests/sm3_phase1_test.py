@@ -123,9 +123,13 @@ class PlanSchemaTest(unittest.TestCase):
         self.assertGreaterEqual(status["draw-enabled"], 1)
         for entry in self.doc["entries"]:
             if entry.get("draw_enabled") == 1:
-                self.assertEqual(entry["kind"], "tev", entry["id"])
+                self.assertIn(entry["kind"], ("tev", "pica_vs"), entry["id"])
                 if entry.get("quality") is not None:
-                    self.assertEqual(entry["quality"], "exact", entry["id"])
+                    self.assertTrue(
+                        entry["quality"] == "exact"
+                        or (entry["quality"] == "approx"
+                            and entry.get("approximation")),
+                        entry["id"])
 
     def test_status_is_derived_not_trusted(self):
         doc = copy.deepcopy(self.doc)
@@ -213,9 +217,13 @@ class PackPartitionTest(unittest.TestCase):
         runtime = json.load(open(plan_verify.PLANS_PATH, encoding="utf-8"))
         for entry in runtime["entries"]:
             if entry.get("draw_enabled") == 1:
-                self.assertEqual(entry["kind"], "tev", entry["id"])
+                self.assertIn(entry["kind"], ("tev", "pica_vs"), entry["id"])
                 if entry.get("quality") is not None:
-                    self.assertEqual(entry["quality"], "exact", entry["id"])
+                    self.assertTrue(
+                        entry["quality"] == "exact"
+                        or (entry["quality"] == "approx"
+                            and entry.get("approximation")),
+                        entry["id"])
 
 
 class MeasuredDifferentialTest(unittest.TestCase):

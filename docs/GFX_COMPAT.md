@@ -224,14 +224,13 @@ compiles each with picasso. The three verified programs are appended to
 | `6186c545` | `menu.gfx.vs.6186c545` | 3 |
 | `4999d543` | `menu.gfx.vs.4999d543` | 1 |
 
-Two programs are a *hardware* refusal, not a codegen gap: `0975cc50` and
-`73904d3f` write `color0` **and** `color1`, and picasso accepts exactly one
-`color` output (`error: invalid output type: color1`); PICA TEV also has a
-single primary raster colour. They stay exact plan descriptors (so
-`CreateVertexShader` returns `S_OK` and selects the plan) with
-`draw_enabled=0` and a named note. `SetVertexShader` no longer needs the
-fixed position+texcoord0 program for the colour-carrying family: the plan
-program is selected by exact hash and carries its declared inputs.
+Two programs (`0975cc50`, `73904d3f`) write `color0` **and** `color1`; picasso
+accepts exactly one `color` output and PICA TEV has a single primary raster
+colour. They are now emitted as **declared approximations**: `color0`,
+position and texcoord are emitted and numerically verified against the
+simplified spec (`max |dpos| = 0`), `color1` is dropped and the plan carries
+`quality: "approx"` plus an `approximation` string. So all five VS are
+draw-enabled (`runtime=1`), three exact and two approx.
 
 The menu runtime contract reuses `d3d9_pica_vs` with `bone_rows == 0` meaning
 "menu": the uniform bank is the identity `c0..cN` (no bone/WVP remap) and the
@@ -303,9 +302,14 @@ change takes (a): `CreatePixelShader` returns `S_OK` with a real
 `has_tev=1` object for every translated plan, but `runtime`/`draw_enabled`
 stay 0 unless the whole stage contract can be produced.
 
-Measured result after this change: **15 of 38 PS and 3 of 5 VS have real
-native descriptors at create time; 3 PS (and 3 VS) are draw-enabled.** None of
-the 24 named PS refusals changed.
+Measured result after this change: **15 of 38 PS have native TEV descriptors and
+14 are draw-enabled/runtime** (11 of those are declared approximations with an
+`approximation` string: `color1`→`color0`, non-uniform swizzle→`xyzw`, `def`
+clamp, or two-constant collapse). 23 PS remain named refusals (8 need a
+per-channel swizzle TEV cannot express, 6 exceed six stages, 4 need two
+constants in one non-mad stage, 3 have a dataflow shape the planner cannot
+serialise, 2 are structural plan mismatches). Nothing is labelled exact unless
+the unchanged IR is reproduced.
 
 ## 6. Status matrix
 

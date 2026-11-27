@@ -109,11 +109,13 @@ def value_graph(ir):
                     vec[ch] = ("op", "mul", srcs[0][ch], srcs[1][ch], None)
                 elif ins.opcode == 0x08:
                     vec[ch] = ("dot3", srcs[0], srcs[1])
-        elif ins.opcode == 0x12:  # lrp dst, a, b, c == a*c + b*(1-c)
+        elif ins.opcode == 0x12:  # lrp dst, a, b, c == a*b + (1-a)*c
             a, b, c = (_src_vec(s, temps, ir) for s in ins.srcs[:3])
             for ch in range(4):
                 if dst.mask & (1 << ch):
-                    vec[ch] = ("op", "func4", a[ch], b[ch], c[ch])
+                    # TEV INTERPOLATE is o1*o2 + o3*(1-o2); emit operands in
+                    # (b, a, c) order so the result is D3D's a*b + (1-a)*c.
+                    vec[ch] = ("op", "func4", b[ch], a[ch], c[ch])
         elif ins.opcode == 0x09:  # dp4 -> approximate one DOT3 row
             srcs = [_src_vec(s, temps, ir) for s in ins.srcs[:2]]
             approx.append("dp4 row collapsed to DOT3 (no 4-component dot in TEV)")
@@ -136,6 +138,52 @@ def value_graph(ir):
 
 class RelaxedPlanner(C.TevPlanner):
     """One PREV register, but a temp read may fall back to an earlier leaf."""
+
+    def emit(self, ins, dst_vec):
+        # TEV has one K register per stage.  A mad with two distinct constant
+        # sources is split into MODULATE(PREV, cA) + ADD(PREV, cB).
+        if ins.opcode == 0x04 and len(ins.srcs) == 3:
+            a, b, c = (self.operand(s) for s in ins.srcs)
+            regs, lits = self._const_values([a, b, c])
+            if len(regs) == 2 and not lits:
+                def _reg_of(op):
+                    return next((e[1] for e in op.vec if e[0] == "const"), None)
+                ra, rb = _reg_of(b), _reg_of(c)
+                if ra is None or rb is None:
+                    return super().emit(ins, dst_vec)
+                mul_stage = {
+                    "func_rgb": C.FUNC_MODULATE, "func_a": C.FUNC_MODULATE,
+                    "src_rgb": [a.source, C.SRC_CONST, C.SRC_PREV],
+                    "src_a": [a.source, C.SRC_CONST, C.SRC_PREV],
+                    "op_rgb": [a.op_rgb, C.RGB_COLOR, C.RGB_COLOR],
+                    "op_a": [a.op_a, C.A_ALPHA, C.A_ALPHA],
+                    "scale_rgb": 0, "scale_a": 0, "const_reg": ra,
+                    "const_is_literal": 0, "const_rgba8": 0,
+                    "instruction": "mad_mul", "word": ins.offset,
+                }
+                self.stages.append(mul_stage)
+                if ra not in self.constants:
+                    self.constants.append(ra)
+                result = self._stage_result(mul_stage, [a, b])
+                self.prev = result
+                self.prev_reg = (ins.dst.index if ins.dst.reg_type == asm.REG_TEMP
+                                 else None)
+                self.temps[ins.dst.index] = result
+                add_stage = {
+                    "func_rgb": C.FUNC_ADD, "func_a": C.FUNC_ADD,
+                    "src_rgb": [C.SRC_PREV, C.SRC_CONST, C.SRC_PREV],
+                    "src_a": [C.SRC_PREV, C.SRC_CONST, C.SRC_PREV],
+                    "op_rgb": [C.RGB_COLOR, C.RGB_COLOR, C.RGB_COLOR],
+                    "op_a": [C.A_ALPHA, C.A_ALPHA, C.A_ALPHA],
+                    "scale_rgb": 0, "scale_a": 0, "const_reg": rb,
+                    "const_is_literal": 0, "const_rgba8": 0,
+                    "instruction": "mad_add", "word": ins.offset,
+                }
+                self.stages.append(add_stage)
+                if rb not in self.constants:
+                    self.constants.append(rb)
+                return add_stage, self._stage_result(add_stage, [c])
+        return super().emit(ins, dst_vec)
 
     def __init__(self, ir, temps):
         super().__init__(ir, temps)
@@ -224,14 +272,15 @@ def _emit_lrp(planner, ins, temps):
     literal = next(iter(lits)) if lits else None
     if const_reg != 255 and const_reg not in planner.constants:
         planner.constants.append(const_reg)
-    # D3D order (a, b, c) -> TEV order (a, c, b) for o1*o2 + o3*(1-o2).
-    operands = [a, c, b]
+    # TEV INTERPOLATE = o1*o2 + o3*(1-o2).  D3D lrp(a,b,c) = a*b + c*(1-a),
+    # so the descriptor order is (b, a, c).
+    operands = [b, a, c]
     stage = {
         "func_rgb": C.FUNC_INTERPOLATE, "func_a": C.FUNC_INTERPOLATE,
-        "src_rgb": [a.source, c.source, b.source],
-        "src_a": [a.source, c.source, b.source],
-        "op_rgb": [a.op_rgb, c.op_rgb, b.op_rgb],
-        "op_a": [a.op_a, c.op_a, b.op_a],
+        "src_rgb": [o.source for o in operands],
+        "src_a": [o.source for o in operands],
+        "op_rgb": [o.op_rgb for o in operands],
+        "op_a": [o.op_a for o in operands],
         "scale_rgb": 0, "scale_a": 0, "const_reg": const_reg,
         "const_is_literal": 0 if literal is None else 1,
         "const_rgba8": 0 if literal is None else literal,
@@ -239,6 +288,18 @@ def _emit_lrp(planner, ins, temps):
     }
     planner.stages.append(stage)
     return stage, planner._stage_result(stage, operands)
+
+
+def _canon(expr):
+    """Flatten the mul+add split back to mad for the structural comparison."""
+    if isinstance(expr, tuple) and len(expr) == 5 and expr[0] == "op":
+        op, a, b, c = expr[1], expr[2], expr[3], expr[4]
+        a, b, c = _canon(a), _canon(b), _canon(c)
+        if op == "add" and isinstance(a, tuple) and len(a) == 5 \
+                and a[0] == "op" and a[1] == "mul":
+            return ("op", "mad", _canon(a[2]), _canon(a[3]), b)
+        return ("op", op, a, b, c)
+    return expr
 
 
 def plan_relaxed(ir):
@@ -272,6 +333,13 @@ def plan_relaxed(ir):
                     planner.snapshot(dst.index)
                 if ins.opcode == 0x12:
                     stage, result = _emit_lrp(planner, ins, temps)
+                elif (ins.opcode == 0x01 and ins.dst.reg_type == asm.REG_TEMP
+                      and ins.srcs[0].reg_type == asm.REG_CONST
+                      and ins.srcs[0].index not in defs):
+                    # Pure constant alias: no TEV stage; keep PREV intact so a
+                    # later stage can read both the temp and the constant.
+                    planner.temps[ins.dst.index] = planner.operand(ins.srcs[0]).vec
+                    continue
                 else:
                     stage, result = planner.emit(ins, dst_vec)
                 planner.prev = result
@@ -284,7 +352,8 @@ def plan_relaxed(ir):
             return None, [], str(exc)
 
         for ch in range(4):
-            if final[ch] != UNDEF and C._norm(planner.prev[ch]) != C._norm(final[ch]):
+            if final[ch] != UNDEF and (_canon(planner.prev[ch]) !=
+                                       _canon(final[ch])):
                 return None, [], "plan_mismatch: channel %d" % ch
 
         const_values = {str(reg): list(vals) for reg, vals in defs.items()}

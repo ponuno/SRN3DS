@@ -35,7 +35,7 @@ from skyrim.shaders import parse_package  # noqa: E402
 
 DEFAULT_DATA = [r"E:\SteamLibrary\steamapps\common\Skyrim\Data"]
 ARCHIVE = "Skyrim - Shaders.bsa"
-RUNTIME_MAX_ENTRIES = 16  # keep in sync with source/d3d9_shader_plan.h
+RUNTIME_MAX_ENTRIES = 32  # keep in sync with source/d3d9_shader_plan.h
 LOGO_HASH = "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"
 COPY_HASH = "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de"
 
@@ -267,9 +267,14 @@ def _check_extra_entry(entry: dict, origin: str) -> None:
 
 
 def runtime_entries(doc: dict) -> List[dict]:
-    """Entries a pack explicitly marks for the runtime table."""
+    """Entries a pack explicitly marks for the runtime TEV plan table.
+
+    ``pica_vs`` programs are draw-enabled through `d3d9_pica_vs_table.inc`,
+    not this table: putting them here would shadow the executable PICA VS
+    lookup with a descriptor-only plan.
+    """
     return [entry for entry in doc.get("entries", [])
-            if entry.get("runtime") == 1]
+            if entry.get("runtime") == 1 and entry.get("kind") == "tev"]
 
 
 def merge_extra_entries(manifest: dict, extra_docs: Sequence,

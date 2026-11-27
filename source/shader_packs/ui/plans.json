@@ -1,22 +1,22 @@
 {
  "archive": "TESV.exe (GFx renderer tables 0x012dfca8 / 0x012dfcd8)",
  "coverage": {
-  "draw_enabled": 6,
+  "draw_enabled": 19,
   "full_blobs": {
    "ps": 38,
    "vs": 5
   },
   "ps": {
-   "draw": 3,
-   "refused": 24,
-   "translated": 14
+   "draw": 14,
+   "refused": 23,
+   "translated": 15
   },
-  "refused": 24,
-  "translated": 19,
+  "refused": 23,
+  "translated": 20,
   "vs": {
-   "draw": 3,
-   "emitted": 3,
-   "refused": 2,
+   "draw": 5,
+   "emitted": 5,
+   "refused": 0,
    "translated": 5
   }
  },
@@ -365,7 +365,8 @@
    "version": "0xfffe0300"
   },
   {
-   "codegen": "refused",
+   "approximation": "PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied",
+   "codegen": "emitted-verified",
    "constants": [
     0,
     1,
@@ -374,7 +375,65 @@
     4,
     5
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
+   "emitted_asm": "generated/menu.gfx.vs.73904d3f.v.pica",
+   "emitter": {
+    "asm": "generated/menu.gfx.vs.73904d3f.v.pica",
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 10,
+      "usage_name": "color"
+     },
+     {
+      "reg_index": 2,
+      "usage": 10,
+      "usage_name": "color"
+     }
+    ],
+    "instructions": 13,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "shbin": "generated/menu.gfx.vs.73904d3f.shbin",
+    "shbin_bytes": 256,
+    "shbin_sha256": "bc75996772da99c75b26724660147903e25115a4d19331fdb091e923fb8f0fe1",
+    "tolerance": 0.0001,
+    "uniform_rows": 6,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     },
+     {
+      "d3d": 4,
+      "row": 4
+     },
+     {
+      "d3d": 5,
+      "row": 5
+     }
+    ]
+   },
    "expandable": [],
    "family": "ui",
    "id": "menu.gfx.vs.73904d3f",
@@ -400,7 +459,7 @@
    ],
    "instructions": 8,
    "kind": "pica_vs",
-   "note": "PICA VS refusal: color1_output_unmapped (PICA has one primary colour output); CreateVertexShader keeps the plan-selected object and the draw gate refuses by name",
+   "note": "GFx menu VS emitted and verified against the declared simplified spec (PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied): 256 samples, max |dpos| 0.0e+00, picasso pass",
    "objects": 1,
    "outputs": [
     {
@@ -433,8 +492,8 @@
     }
    ],
    "prefix_sha256": "77bc67a86e38ea6565c82f95313185a48420430c4f4c7afa6144d144ce075376",
-   "quality": "exact",
-   "runtime": 0,
+   "quality": "approx",
+   "runtime": 1,
    "sha1": "d3a78ef432aeccc02bab262f86a917870351a316",
    "sha256": "73904d3f32bd5eec48ec5b758e1cd100d7e3f750a1cce98cbdb5c69679f3b610",
    "skinning": false,
@@ -445,7 +504,8 @@
    "version": "0xfffe0300"
   },
   {
-   "codegen": "refused",
+   "approximation": "PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied",
+   "codegen": "emitted-verified",
    "constants": [
     0,
     1,
@@ -456,7 +516,73 @@
     6,
     7
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
+   "emitted_asm": "generated/menu.gfx.vs.0975cc50.v.pica",
+   "emitter": {
+    "asm": "generated/menu.gfx.vs.0975cc50.v.pica",
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 10,
+      "usage_name": "color"
+     },
+     {
+      "reg_index": 2,
+      "usage": 10,
+      "usage_name": "color"
+     }
+    ],
+    "instructions": 15,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "shbin": "generated/menu.gfx.vs.0975cc50.shbin",
+    "shbin_bytes": 272,
+    "shbin_sha256": "a6bf4360e9d5d5606c52803193e3785c636044a798faf6b7c507fee012658805",
+    "tolerance": 0.0001,
+    "uniform_rows": 8,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     },
+     {
+      "d3d": 4,
+      "row": 4
+     },
+     {
+      "d3d": 5,
+      "row": 5
+     },
+     {
+      "d3d": 6,
+      "row": 6
+     },
+     {
+      "d3d": 7,
+      "row": 7
+     }
+    ]
+   },
    "expandable": [],
    "family": "ui",
    "id": "menu.gfx.vs.0975cc50",
@@ -482,7 +608,7 @@
    ],
    "instructions": 10,
    "kind": "pica_vs",
-   "note": "PICA VS refusal: color1_output_unmapped (PICA has one primary colour output); CreateVertexShader keeps the plan-selected object and the draw gate refuses by name",
+   "note": "GFx menu VS emitted and verified against the declared simplified spec (PICA single primary colour: dropped vertex color1 output(s); colour0 is kept, color1/alpha tint is not applied): 256 samples, max |dpos| 0.0e+00, picasso pass",
    "objects": 1,
    "outputs": [
     {
@@ -522,8 +648,8 @@
     }
    ],
    "prefix_sha256": "ad97e55f922355acfd8f40e8d37f53ab122c8d3f7dbc5e2af1cc5e4adbe1f924",
-   "quality": "exact",
-   "runtime": 0,
+   "quality": "approx",
+   "runtime": 1,
    "sha1": "ef20631c6c684a230fb5ada056115d91dbedcf16",
    "sha256": "0975cc503f63d9b1a1a36f8886a34043742e9a13f4a351e203d5dbd33b3f95ce",
    "skinning": false,
@@ -748,12 +874,13 @@
    "version": "0xffff0300"
   },
   {
+   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.991af62a",
    "inputs": [
@@ -768,12 +895,13 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
      3
     ],
+    "simplified": true,
     "textures": [
      {
       "sampler_reg": 0,
@@ -790,12 +918,13 @@
      }
     ]
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
-   "quality": "exact",
+   "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "995d5e6041ce2946948e38fa878a9c15c89879ac",
    "sha256": "991af62a7a3c2fff28ce84c607fb1e54aa4152433683dffa6f24c7eb6a330a6a",
    "source_slot": 5,
@@ -837,9 +966,9 @@
      "const_is_literal": 0,
      "const_reg": 2,
      "const_rgba8": 0,
-     "func_a": 0,
-     "func_rgb": 0,
-     "instruction": "mov",
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
      "op_a": [
       0,
       0,
@@ -853,24 +982,24 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
+      0,
       14,
-      15,
       15
      ],
      "src_rgb": [
+      0,
       14,
-      15,
       15
      ],
-     "word": 260
+     "word": 272
     },
     {
      "const_is_literal": 0,
      "const_reg": 3,
      "const_rgba8": 0,
-     "func_a": 8,
-     "func_rgb": 8,
-     "instruction": "mad",
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
      "op_a": [
       0,
       0,
@@ -884,14 +1013,14 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "src_rgb": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "word": 272
     },
@@ -970,12 +1099,13 @@
    "version": "0xffff0300"
   },
   {
+   "approximation": "color1->color0",
    "constant_values": {},
    "constants": [
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.0cce461b",
    "inputs": [
@@ -984,24 +1114,19 @@
      "tev_source": 0,
      "usage": 10,
      "usage_index": 0
-    },
-    {
-     "reg_index": 1,
-     "tev_source": 1,
-     "usage": 10,
-     "usage_index": 1
     }
    ],
    "instructions": 4,
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
      3
     ],
+    "simplified": true,
     "textures": [],
     "varyings": [
      {
@@ -1009,21 +1134,16 @@
       "tev_source": 0,
       "usage": 10,
       "usage_index": 0
-     },
-     {
-      "reg_index": 1,
-      "tev_source": 1,
-      "usage": 10,
-      "usage_index": 1
      }
     ]
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (color1->color0); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
-   "quality": "exact",
+   "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "f4c23673c5bf455b66f815b5af51999eb08355a7",
    "sha256": "0cce461b63669edd2c6a0966c4457d6ec915a9e1648adbbc4d214a2c478edd0b",
    "source_slot": 12,
@@ -1034,9 +1154,9 @@
      "const_is_literal": 0,
      "const_reg": 2,
      "const_rgba8": 0,
-     "func_a": 0,
-     "func_rgb": 0,
-     "instruction": "mov",
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
      "op_a": [
       0,
       0,
@@ -1050,24 +1170,24 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
+      0,
       14,
-      15,
       15
      ],
      "src_rgb": [
+      0,
       14,
-      15,
       15
      ],
-     "word": 192
+     "word": 204
     },
     {
      "const_is_literal": 0,
      "const_reg": 3,
      "const_rgba8": 0,
-     "func_a": 8,
-     "func_rgb": 8,
-     "instruction": "mad",
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
      "op_a": [
       0,
       0,
@@ -1081,14 +1201,14 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "src_rgb": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "word": 204
     },
@@ -1113,12 +1233,12 @@
      "scale_rgb": 0,
      "src_a": [
       15,
-      1,
+      0,
       15
      ],
      "src_rgb": [
       15,
-      1,
+      0,
       15
      ],
      "word": 224
@@ -1161,12 +1281,13 @@
    "version": "0xffff0300"
   },
   {
+   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.57bd167d",
    "inputs": [
@@ -1181,12 +1302,13 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
      3
     ],
+    "simplified": true,
     "textures": [],
     "varyings": [
      {
@@ -1197,12 +1319,13 @@
      }
     ]
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
-   "quality": "exact",
+   "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "8f441cb3b48c4249733c7222b96331c1527eb1dd",
    "sha256": "57bd167db75f01aa253fc8751a0b5088b6f07d43f7365d4e1abe705eea1298f7",
    "source_slot": 13,
@@ -1213,9 +1336,9 @@
      "const_is_literal": 0,
      "const_reg": 2,
      "const_rgba8": 0,
-     "func_a": 0,
-     "func_rgb": 0,
-     "instruction": "mov",
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
      "op_a": [
       0,
       0,
@@ -1229,24 +1352,24 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
+      0,
       14,
-      15,
       15
      ],
      "src_rgb": [
+      0,
       14,
-      15,
       15
      ],
-     "word": 180
+     "word": 192
     },
     {
      "const_is_literal": 0,
      "const_reg": 3,
      "const_rgba8": 0,
-     "func_a": 8,
-     "func_rgb": 8,
-     "instruction": "mad",
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
      "op_a": [
       0,
       0,
@@ -1260,14 +1383,14 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "src_rgb": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "word": 192
     }
@@ -1278,12 +1401,12 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "dp4 4x4 basis collapsed to one DOT3 row; other rows and the c4 alpha/offset term dropped",
+   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     0
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.ee79ab27",
    "inputs": [],
@@ -1291,11 +1414,12 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      0
     ],
+    "simplified": true,
     "textures": [
      {
       "sampler_reg": 0,
@@ -1305,12 +1429,13 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
    "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "a9699e71257ac455b04813379c77dc99677ab582",
    "sha256": "ee79ab273f78b5ffff36dd949c51957e922135399a3aa152a25d361b23786efd",
    "source_slot": 20,
@@ -1361,12 +1486,12 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "dp4 4x4 basis collapsed to one DOT3 row; other rows and the c4 alpha/offset term dropped",
+   "approximation": "def c5 clamped to [0,1]",
    "constant_values": {},
    "constants": [
     0
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.95d3d096",
    "inputs": [],
@@ -1374,11 +1499,12 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      0
     ],
+    "simplified": true,
     "textures": [
      {
       "sampler_reg": 0,
@@ -1388,12 +1514,13 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (def c5 clamped to [0,1]); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
    "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "e2fb3e017c66fc1d026a69e512da2db5521557bb",
    "sha256": "95d3d09656ca7551cf8563e747391abfb3a7d874f1b1eb4f802ce004727ff4c3",
    "source_slot": 21,
@@ -1545,12 +1672,13 @@
    "version": "0xffff0300"
   },
   {
+   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.d6d05e55",
    "inputs": [],
@@ -1558,12 +1686,13 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
      3
     ],
+    "simplified": true,
     "textures": [
      {
       "sampler_reg": 0,
@@ -1573,12 +1702,13 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
-   "quality": "exact",
+   "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "bc1ae85fafbadfa8e46051ca788466397fb79905",
    "sha256": "d6d05e5531084b92f543543436db7be1b4487dea6a594947bdc101b0f900c4e2",
    "source_slot": 24,
@@ -1620,9 +1750,9 @@
      "const_is_literal": 0,
      "const_reg": 2,
      "const_rgba8": 0,
-     "func_a": 0,
-     "func_rgb": 0,
-     "instruction": "mov",
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
      "op_a": [
       0,
       0,
@@ -1636,24 +1766,24 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
-      14,
       15,
+      14,
       15
      ],
      "src_rgb": [
-      14,
       15,
+      14,
       15
      ],
-     "word": 248
+     "word": 260
     },
     {
      "const_is_literal": 0,
      "const_reg": 3,
      "const_rgba8": 0,
-     "func_a": 8,
-     "func_rgb": 8,
-     "instruction": "mad",
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
      "op_a": [
       0,
       0,
@@ -1667,14 +1797,14 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
-      3,
       15,
-      14
+      14,
+      15
      ],
      "src_rgb": [
-      3,
       15,
-      14
+      14,
+      15
      ],
      "word": 260
     },
@@ -1961,12 +2091,13 @@
    "version": "0xffff0300"
   },
   {
+   "approximation": "color1->color0",
    "constant_values": {},
    "constants": [
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.288c3696",
    "inputs": [
@@ -1975,24 +2106,19 @@
      "tev_source": 0,
      "usage": 10,
      "usage_index": 0
-    },
-    {
-     "reg_index": 1,
-     "tev_source": 1,
-     "usage": 10,
-     "usage_index": 1
     }
    ],
    "instructions": 5,
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
      3
     ],
+    "simplified": true,
     "textures": [],
     "varyings": [
      {
@@ -2000,21 +2126,16 @@
       "tev_source": 0,
       "usage": 10,
       "usage_index": 0
-     },
-     {
-      "reg_index": 1,
-      "tev_source": 1,
-      "usage": 10,
-      "usage_index": 1
      }
     ]
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (color1->color0); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
-   "quality": "exact",
+   "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "3af7a0fd2e42fff3694674ea916874f44bac0c16",
    "sha256": "288c36960a767c602a163c49c24dd93f28431960d90d4534c2d458f49e69c1a8",
    "source_slot": 35,
@@ -2025,9 +2146,9 @@
      "const_is_literal": 0,
      "const_reg": 2,
      "const_rgba8": 0,
-     "func_a": 0,
-     "func_rgb": 0,
-     "instruction": "mov",
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
      "op_a": [
       0,
       0,
@@ -2041,24 +2162,24 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
+      0,
       14,
-      15,
       15
      ],
      "src_rgb": [
+      0,
       14,
-      15,
       15
      ],
-     "word": 192
+     "word": 204
     },
     {
      "const_is_literal": 0,
      "const_reg": 3,
      "const_rgba8": 0,
-     "func_a": 8,
-     "func_rgb": 8,
-     "instruction": "mad",
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
      "op_a": [
       0,
       0,
@@ -2072,14 +2193,14 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "src_rgb": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "word": 204
     },
@@ -2104,12 +2225,12 @@
      "scale_rgb": 0,
      "src_a": [
       15,
-      1,
+      0,
       15
      ],
      "src_rgb": [
       15,
-      1,
+      0,
       15
      ],
      "word": 224
@@ -2183,12 +2304,13 @@
    "version": "0xffff0300"
   },
   {
+   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.8240aa9b",
    "inputs": [
@@ -2203,12 +2325,13 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
      3
     ],
+    "simplified": true,
     "textures": [],
     "varyings": [
      {
@@ -2219,12 +2342,13 @@
      }
     ]
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
-   "quality": "exact",
+   "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "2f58090b5e8290b652dc6766eeeedebf64642625",
    "sha256": "8240aa9bf52e12bd08c685bf6520a1ce70ce64e244add98726c4e8352f322982",
    "source_slot": 36,
@@ -2235,9 +2359,9 @@
      "const_is_literal": 0,
      "const_reg": 2,
      "const_rgba8": 0,
-     "func_a": 0,
-     "func_rgb": 0,
-     "instruction": "mov",
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
      "op_a": [
       0,
       0,
@@ -2251,24 +2375,24 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
+      0,
       14,
-      15,
       15
      ],
      "src_rgb": [
+      0,
       14,
-      15,
       15
      ],
-     "word": 180
+     "word": 192
     },
     {
      "const_is_literal": 0,
      "const_reg": 3,
      "const_rgba8": 0,
-     "func_a": 8,
-     "func_rgb": 8,
-     "instruction": "mad",
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
      "op_a": [
       0,
       0,
@@ -2282,14 +2406,14 @@
      "scale_a": 0,
      "scale_rgb": 0,
      "src_a": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "src_rgb": [
-      0,
       15,
-      14
+      14,
+      15
      ],
      "word": 192
     },
@@ -2362,12 +2486,12 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "dp4 4x4 basis collapsed to one DOT3 row; other rows and the c4 alpha/offset term dropped",
+   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     0
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.71d4da27",
    "inputs": [],
@@ -2375,11 +2499,12 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      0
     ],
+    "simplified": true,
     "textures": [
      {
       "sampler_reg": 0,
@@ -2389,12 +2514,13 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
    "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "d5462d9db06e6cd95a4d9882f7adcf9ef3da8dfb",
    "sha256": "71d4da271c4de5c6787ace01d1e7a82c2468eb32d7a4f269a4e415f1b8375039",
    "source_slot": 43,
@@ -2445,12 +2571,12 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "dp4 4x4 basis collapsed to one DOT3 row; other rows and the c4 alpha/offset term dropped",
+   "approximation": "def c5 clamped to [0,1]",
    "constant_values": {},
    "constants": [
     0
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.ed5e7b5d",
    "inputs": [],
@@ -2458,11 +2584,12 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      0
     ],
+    "simplified": true,
     "textures": [
      {
       "sampler_reg": 0,
@@ -2472,12 +2599,13 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS approximated for PICA (def c5 clamped to [0,1]); draw-certified for the declared simplified spec, not exact",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
    "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "c5d059dbefd3988a4ff58b91f7e8d757bbcad370",
    "sha256": "ed5e7b5d5110fa06106889a918fe433f55f2f8bfb0aa825045e57f71faff98b2",
    "source_slot": 44,
@@ -2526,6 +2654,241 @@
    ],
    "uses_vertex_color": 0,
    "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0",
+   "constant_values": {},
+   "constants": [
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.5b990161",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 5,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {},
+    "constants": [
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     },
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 1
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS approximated for PICA (color1->color0); draw-certified for the declared simplified spec, not exact",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "58b2824f4e03c6d287d1152d77984d989d6567b2",
+   "sha256": "5b9901615aa94246b480e0a589ed3e70a99da6c3259bd5da76db5d6a10fdca87",
+   "source_slot": 15,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 312
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 328
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 4,
+     "func_rgb": 4,
+     "instruction": "lrp",
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "op_rgb": [
+      0,
+      12,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      3
+     ],
+     "src_rgb": [
+      15,
+      0,
+      3
+     ],
+     "word": 344
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 376
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 376
+    }
+   ],
+   "stages": 5,
+   "textures": [
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    },
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 1
+    }
+   ],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
   }
  ],
  "note": "Pack-owned StartMenu/GFx plans, one entry per distinct full-blob SHA-256. Only exact descriptors with a complete declared material contract set runtime=1; approximations stay translated with quality=approx.",
@@ -2564,12 +2927,6 @@
    "class": "unsupported",
    "reason": "too_many_stages (>6)",
    "sha256": "d1465becee1e4690cf6efc5b19dc5d555b51ad0ed1814ff07ca1a1ce737af77d",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "temp_not_previous: r2 is not the previous stage result",
-   "sha256": "5b9901615aa94246b480e0a589ed3e70a99da6c3259bd5da76db5d6a10fdca87",
    "stage": "ps"
   },
   {
