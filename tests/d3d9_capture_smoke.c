@@ -13,11 +13,46 @@
 
 /* Section ids from source/d3d9_capture.c; the smoke test validates the
  * version 2 additions explicitly. */
-enum { TEST_SECTION_TARGET = 16, TEST_SECTION_PRESENT = 17 };
+enum { TEST_SECTION_TARGET = 16, TEST_SECTION_PRESENT = 17,
+       TEST_SECTION_VERTICES = 11, TEST_SECTION_INDICES = 12 };
+
+static void set_full_capture_env(const char *value) {
+#ifdef _WIN32
+    _putenv_s("TESV_D3D9_CAPTURE_FULL", value ? value : "");
+#else
+    if (value) setenv("TESV_D3D9_CAPTURE_FULL", value, 1);
+    else unsetenv("TESV_D3D9_CAPTURE_FULL");
+#endif
+}
 
 static GuestMemory g_memory;
 static D9Vertex g_vertices[300];
 static uint8_t g_texture[64];
+static uint8_t g_compact_vertices[3 * sizeof(D9Vertex)];
+
+/* Full-mode compact reconstruction hooks for the standalone capture smoke. */
+D9Device *d9_com_device(void) { return (D9Device *)(uintptr_t)1u; }
+int d9_get_stream_info(const D9Device *d, unsigned stream, D9Handle *buffer,
+                       size_t *offset, size_t *stride) {
+    (void)d;
+    if (stream != 0 || !buffer || !offset || !stride) return D9_INVALID;
+    *buffer = 1; *offset = 0; *stride = sizeof(D9Vertex);
+    return D9_OK;
+}
+int d9_get_buffer_data(const D9Device *d, D9Handle handle,
+                       const void **data, size_t *bytes) {
+    (void)d;
+    if (handle != 1 || !data || !bytes) return D9_INVALID;
+    *data = g_compact_vertices; *bytes = sizeof g_compact_vertices;
+    return D9_OK;
+}
+int d9_decl_decode(unsigned type, const void *data, size_t bytes, float out[4]) {
+    unsigned count = type == D9_DECL_FLOAT3 ? 3 : (type == D9_DECL_FLOAT2 ? 2 : 0);
+    if (!count || !data || !out || bytes < count * sizeof(float)) return -1;
+    out[0] = out[1] = out[2] = 0.0f; out[3] = 1.0f;
+    memcpy(out, data, count * sizeof(float));
+    return 0;
+}
 
 static void identity(D9Matrix *m) {
     memset(m, 0, sizeof *m);
@@ -399,8 +434,100 @@ static void test_truncation(void) {
     d9_capture_shutdown();
 }
 
+static void test_full_limits(void) {
+    enum { FULL_VERTICES = 3012, FULL_INDICES = 10038 };
+    begin_capture("d9cap_full", 1, D9_CAPTURE_OPT_UNIQUE_ONLY);
+    D9CaptureSnapshot s;
+    make_base(&s);
+    D9Vertex *vertices = (D9Vertex *)malloc(FULL_VERTICES * sizeof *vertices);
+    uint16_t *indices = (uint16_t *)malloc(FULL_INDICES * sizeof *indices);
+    assert(vertices && indices);
+    for (unsigned i = 0; i < FULL_VERTICES; ++i)
+        vertices[i] = (D9Vertex){(float)i, (float)(i & 255), 0.5f, 0.0f, 0.0f};
+    for (unsigned i = 0; i < FULL_INDICES; ++i) indices[i] = (uint16_t)(i % FULL_VERTICES);
+    s.draw.primitives = FULL_INDICES / 3;
+    s.draw.vertex_count = FULL_VERTICES;
+    s.draw.vertices.data.host = vertices;
+    s.draw.vertices.data.bytes = FULL_VERTICES * sizeof *vertices;
+    s.draw.vertices.count = FULL_VERTICES;
+    s.draw.indices.data.host = indices;
+    s.draw.indices.data.guest = 0;
+    s.draw.indices.data.bytes = FULL_INDICES * sizeof *indices;
+    s.draw.indices.count = FULL_INDICES;
+
+    set_full_capture_env("1");
+    assert(d9_capture_offer(&s, &g_memory) == D9_CAPTURE_OK);
+    D9CaptureRecordInfo info;
+    assert(d9_capture_record(0, &info) == D9_CAPTURE_OK);
+    assert(info.truncation == 0);
+    assert(info.vertex_count == FULL_VERTICES && info.vertex_captured == FULL_VERTICES);
+    assert(info.index_count == FULL_INDICES && info.index_captured == FULL_INDICES);
+    assert(info.vertex_bytes == FULL_VERTICES * sizeof *vertices);
+    assert(info.index_bytes == FULL_INDICES * sizeof *indices);
+    assert(file_contains(info.text_path, "capture.full=1"));
+    assert(file_contains(info.text_path, "vertices.captured=3012"));
+    assert(file_contains(info.text_path, "indices.captured=10038"));
+    assert(file_contains(info.text_path, "truncation.names=none"));
+
+    size_t binary_size;
+    unsigned char *binary = read_file(info.binary_path, &binary_size);
+    uint32_t payload = 0;
+    const unsigned char *section = find_section(binary, binary_size,
+                                                 TEST_SECTION_VERTICES, &payload);
+    assert(section && rd32(section + 4) == FULL_VERTICES);
+    assert(rd32(section + 8) == FULL_VERTICES);
+    assert(rd32(section + 12) == FULL_VERTICES * (uint32_t)sizeof *vertices);
+    section = find_section(binary, binary_size, TEST_SECTION_INDICES, &payload);
+    assert(section && rd32(section + 4) == FULL_INDICES);
+    assert(rd32(section + 8) == FULL_INDICES);
+    assert(rd32(section + 12) == FULL_INDICES * (uint32_t)sizeof *indices);
+    free(binary);
+    free(vertices);
+    free(indices);
+    d9_capture_shutdown();
+    set_full_capture_env(NULL);
+}
+
+static void test_full_compact_reconstruction(void) {
+    begin_capture("d9cap_compact", 1, D9_CAPTURE_OPT_UNIQUE_ONLY);
+    D9CaptureSnapshot s;
+    make_base(&s);
+    for (unsigned i = 0; i < 3; ++i)
+        memcpy(g_compact_vertices + i * sizeof(D9Vertex), &g_vertices[i], sizeof(D9Vertex));
+    s.draw.vertex_count = 3;
+    s.draw.vertices.count = 1;  /* stale scratch, as on the compact menu path */
+    s.draw.vertices.data.bytes = sizeof(D9Vertex);
+    s.streams[0].stride = sizeof(D9Vertex);
+    s.streams[0].offset = 0;
+    s.streams[0].bytes = sizeof g_compact_vertices;
+
+    set_full_capture_env("1");
+    assert(d9_capture_offer(&s, &g_memory) == D9_CAPTURE_OK);
+    D9CaptureRecordInfo info;
+    assert(d9_capture_record(0, &info) == D9_CAPTURE_OK);
+    assert(info.truncation == 0);
+    assert(info.vertex_count == 3 && info.vertex_captured == 3);
+    assert(info.vertex_bytes == 3 * sizeof(D9ColorVertex));
+    assert(file_contains(info.text_path, "vertices.stride=40"));
+    assert(file_contains(info.text_path, "vertices.source=decoded_compact"));
+
+    size_t binary_size;
+    unsigned char *binary = read_file(info.binary_path, &binary_size);
+    uint32_t payload = 0;
+    const unsigned char *section = find_section(binary, binary_size,
+                                                 TEST_SECTION_VERTICES, &payload);
+    assert(section && rd32(section) == 40 && rd32(section + 4) == 3);
+    assert(rd32(section + 8) == 3 && rd32(section + 12) == 3 * sizeof(D9ColorVertex));
+    free(binary);
+    d9_capture_shutdown();
+    set_full_capture_env(NULL);
+}
+
 static void test_bad_pointer(void) {
     begin_capture("d9cap_bad", 1, D9_CAPTURE_OPT_UNIQUE_ONLY);
+    int null_error = D9_CAPTURE_OK;
+    assert(d9_capture_signature(NULL, &g_memory, &null_error) == 0);
+    assert(null_error == D9_CAPTURE_INVALID);
     D9CaptureSnapshot s;
     make_base(&s);
 
@@ -726,6 +853,8 @@ int main(void) {
     test_fnv();
     test_first_draw();
     test_truncation();
+    test_full_limits();
+    test_full_compact_reconstruction();
     test_bad_pointer();
     test_no_overwrite();
     test_unique_signatures();
@@ -738,6 +867,8 @@ int main(void) {
 
     cleanup("d9cap_basic", 3);
     cleanup("d9cap_trunc", 3);
+    cleanup("d9cap_full", 3);
+    cleanup("d9cap_compact", 3);
     cleanup("d9cap_bad", 3);
     cleanup("d9cap_existing", 8);
     cleanup("d9cap_unique", 4);

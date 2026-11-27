@@ -39,6 +39,7 @@ function Find-Slice {
 if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
 
 $slice = Find-Slice
+$previousSlice = $slice
 if ($Reslice -or -not $slice) {
     Write-Host "[fast] building tesv_slice ..."
     $env:HOST_CLANG_JOBS = if ($env:HOST_CLANG_JOBS) { $env:HOST_CLANG_JOBS } else { '8' }
@@ -47,6 +48,9 @@ if ($Reslice -or -not $slice) {
         -OutDir $OutDir -Only tesv_slice -SkipPython -TestTimeoutSec 900 |
         Select-String -Pattern 'BUILD|Summary|Diagnostic|HOST' | ForEach-Object { $_.Line }
     $slice = Find-Slice
+    if ($previousSlice -and $slice -eq $previousSlice) {
+        throw "reslice failed; refusing to run stale $slice"
+    }
 }
 if (-not $slice) { throw "no tesv_slice.exe under $OutDir" }
 
@@ -55,7 +59,10 @@ if (-not $slice) { throw "no tesv_slice.exe under $OutDir" }
 # cannot dispatch them, so the first guest matrix call faults at a bare body
 # address such as 0802fa80 (D3DXMatrixMultiply).  Warn before the run instead
 # of reporting that as a new guest fault.
-$pilotTable = Join-Path $repo 'pilot_out_mult\D3DXMatrixMultiply\gen\pilot_table.c'
+$pilotGen = if ($env:N3DS_PILOT_GEN) { $env:N3DS_PILOT_GEN } else {
+    Join-Path $repo 'pilot_out_mult\D3DXMatrixMultiply\gen'
+}
+$pilotTable = Join-Path $pilotGen 'pilot_table.c'
 if (-not (Test-Path -LiteralPath $pilotTable)) {
     Write-Host "[fast] WARNING: $pilotTable is absent; the slice has no D3DX body table"
     Write-Host "[fast]          and a guest d3dx9_42.dll call (e.g. 0802fa80 D3DXMatrixMultiply) will fault"

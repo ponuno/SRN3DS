@@ -16,7 +16,7 @@ param(
     [string[]]$Only = @(),
     [switch]$Sanitize,
     [string]$Python = "",
-    [string]$PilotGen = "",
+    [string]$PilotGen = $env:N3DS_PILOT_GEN,
     [string]$PilotDll = "C:\Windows\SysWOW64\D3DX9_42.dll",
     [string]$OutDir = "",
     [switch]$CleanOutDir,
@@ -32,6 +32,18 @@ $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 if (-not $TesvIrc) { $TesvIrc = $env:N3DS_IRC_PATH }
+# Worktrees intentionally do not carry git-ignored staged inputs.  An external
+# read-only directory can supply them without creating/modifying staged/* here.
+$stagedRoot = if ($env:N3DS_STAGED_DIR) {
+    $stagedCandidate = if ([System.IO.Path]::IsPathRooted($env:N3DS_STAGED_DIR)) {
+        $env:N3DS_STAGED_DIR
+    } else { Join-Path (Get-Location).Path $env:N3DS_STAGED_DIR }
+    [System.IO.Path]::GetFullPath([string]$stagedCandidate)
+} else { Join-Path $root "staged" }
+if (-not (Test-Path -LiteralPath (Join-Path $stagedRoot "fpu.c"))) {
+    Write-Host "[host] staged/fpu.c is absent; set N3DS_STAGED_DIR for slice/legacy tests"
+}
+$stagedFpu = Join-Path $stagedRoot "fpu.c"
 
 $vsRoot = "C:\Program Files\Microsoft Visual Studio\18\Community"
 $vsVars = Join-Path $vsRoot "VC\Auxiliary\Build\vcvars64.bat"
@@ -72,13 +84,15 @@ $script:clangId = "{0}|{1}|{2}" -f $clang, (Get-Item $clang).Length, (Get-Item $
 # Source content alone is not enough: a header change must invalidate every
 # cached object that includes it.  Hash the shared header set once (the cache
 # then stays warm until a header actually changes).
+$headerDirs = @((Join-Path $root "source"), (Join-Path $root "tests"))
+if (Test-Path -LiteralPath $stagedRoot) { $headerDirs += $stagedRoot }
 $headerParts = @()
-foreach ($dir in @("source", "staged", "tests")) {
-    $hdrDir = Join-Path $root $dir
-    if (-not (Test-Path -LiteralPath $hdrDir)) { continue }
+foreach ($hdrDir in $headerDirs) {
     foreach ($hdr in Get-ChildItem -LiteralPath $hdrDir -Filter *.h -File -Recurse |
                        Sort-Object FullName) {
-        $rel = $hdr.FullName.Substring($root.Length).Replace('\', '/')
+        $rel = if ($hdr.FullName.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $hdr.FullName.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
+        } else { $hdr.FullName.Replace('\', '/') }
         $headerParts += "$rel=$((Get-FileHash -LiteralPath $hdr.FullName -Algorithm SHA256).Hash)"
     }
 }
@@ -268,11 +282,11 @@ if ($Sanitize) {
     $common += @("-fsanitize=address", "-fno-omit-frame-pointer")
 }
 
-$liftCommon = @("-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-fwrapv", "-fno-strict-aliasing", "-Wno-deprecated-declarations", "-Wno-format", "-Wl,/STACK:67108864")
+$liftCommon = @("-std=gnu11", "-O1", "-g", "-I`"$stagedRoot`"", "-Isource", "-fwrapv", "-fno-strict-aliasing", "-Wno-deprecated-declarations", "-Wno-format", "-Wl,/STACK:67108864")
 if ($env:N3DS_WATCH_STORE_CHECKS -eq '1') { $liftCommon += '-DN3DS_WATCH_STORE_CHECKS' }
-if ($Sanitize) { $liftCommon = $common + @("-Istaged", "-fwrapv", "-fno-strict-aliasing") }
+if ($Sanitize) { $liftCommon = $common + @("-I`"$stagedRoot`"", "-fwrapv", "-fno-strict-aliasing") }
 
-$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/bink_decode.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", "staged/fpu.c", "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/asset_stream.c", "source/stream_cell.c", "source/rep_movs.c", "source/mem_stats.c")
+$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/bink_decode.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", $stagedFpu, "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/asset_stream.c", "source/stream_cell.c", "source/rep_movs.c", "source/mem_stats.c")
 $comSources = $legacySources + @("source/guest_process.c", "source/n3ds_boot.c")
 $d3dSources = @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c")
 $d3dFull = $d3dSources + @("source/d3d9_shader.c", "source/d3d9_tev.c")
@@ -521,7 +535,7 @@ Add-Test "stream_cell_real_prefetch" $common @("source/bsa_reader.c", "source/as
 # Optional real-index Riverwood check; skips at run time unless STREAM_INDEX_REAL
 # is set.  It links the generated stage headers like win32_bsa_overlay, so a
 # source-only worktree simply does not register it.
-if (Test-Path (Join-Path $root "staged/rt_table.h")) {
+if (Test-Path (Join-Path $stagedRoot "rt_table.h")) {
     Add-Test "stream_cell_real" $liftCommon ($legacySources + @("tests/stream_cell_real_smoke.c")) @()
 } else {
     Write-Log "stream_cell_real: staged/rt_table.h is absent; real-index overlay test not registered"
@@ -773,7 +787,7 @@ foreach ($name in $tests.Keys) {
 }
 
 Write-Log "PYTHON tests"
-$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/menu_swf_probe_test.py", "tests/menu_swf_assets_test.py", "tests/shader_plan_merge_test.py", "tests/shader_plan_extensions_test.py", "tests/pica_runtime_audit_test.py", "tests/blit_vs_runtime_test.py", "tests/vs_wide_runtime_test.py", "tests/wide_vs_certification_test.py", "tests/shader_draw_resolution_test.py", "tests/multipass_split_test.py", "tests/world_shader_audit_test.py", "tests/deploy_device_test.py", "tests/stream_index_build_test.py", "tests/save_ess_test.py", "tests/capture_raster_test.py", "tests/pex_dump_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py", "tests/sm3_asm_gaps_test.py")
+$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/menu_swf_probe_test.py", "tests/menu_swf_assets_test.py", "tests/shader_plan_merge_test.py", "tests/shader_plan_extensions_test.py", "tests/pica_runtime_audit_test.py", "tests/blit_vs_runtime_test.py", "tests/vs_wide_runtime_test.py", "tests/wide_vs_certification_test.py", "tests/shader_draw_resolution_test.py", "tests/multipass_split_test.py", "tests/world_shader_audit_test.py", "tests/deploy_device_test.py", "tests/stream_index_build_test.py", "tests/save_ess_test.py", "tests/capture_raster_test.py", "tests/capture_info_test.py", "tests/pex_dump_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py", "tests/sm3_asm_gaps_test.py")
 if ($SkipPython) {
     $pyTests = @()
 } else {

@@ -85,23 +85,33 @@ Every variable-length input has a fixed upper bound. Counts above the bound
 are **clamped** and reported with a truncation bit; a slice that is too small
 for the bounded count is an **error**, not a silent partial capture.
 
-| Data | Bound | Flag |
-| --- | --- | --- |
-| Vertex shader bytecode | `D9_CAPTURE_SHADER_MAX_BYTES` = 64 KiB | `D9_CAPTURE_TRUNC_VS` |
-| Pixel shader bytecode | 64 KiB | `D9_CAPTURE_TRUNC_PS` |
-| Vertices | `D9_CAPTURE_MAX_VERTICES` = 256 | `D9_CAPTURE_TRUNC_VERTICES` |
-| Indices | `D9_CAPTURE_MAX_INDICES` = 1024 | `D9_CAPTURE_TRUNC_INDICES` |
-| Texture pixels, all stages together | `D9_CAPTURE_TEXTURE_MAX_BYTES` = 8 MiB | `D9_CAPTURE_TRUNC_TEXTURE`, `D9_CAPTURE_TRUNC_TEXTURE_TOTAL` |
-| Streams | 16 (`D9_MAX_STREAMS`) | `D9_CAPTURE_TRUNC_STREAMS` |
-| Textures / stages | 4 | `D9_CAPTURE_TRUNC_TEXTURES` |
-| Declaration elements | 64 (`D9_MAX_DECL`) | `D9_CAPTURE_TRUNC_DECL` |
-| Draw record count | 32 | `D9_CAPTURE_SKIP` after the cap |
-| Present record count | 8 | `D9_CAPTURE_SKIP` after the cap |
+| Data | Default bound | `TESV_D3D9_CAPTURE_FULL=1` | Flag |
+| --- | --- | --- | --- |
+| Vertex shader bytecode | `D9_CAPTURE_SHADER_MAX_BYTES` = 64 KiB | unchanged | `D9_CAPTURE_TRUNC_VS` |
+| Pixel shader bytecode | 64 KiB | unchanged | `D9_CAPTURE_TRUNC_PS` |
+| Vertices | `D9_CAPTURE_MAX_VERTICES` = 256 | 65,536 | `D9_CAPTURE_TRUNC_VERTICES` |
+| Indices | `D9_CAPTURE_MAX_INDICES` = 1024 | 262,144 | `D9_CAPTURE_TRUNC_INDICES` |
+| Texture pixels, all stages together | `D9_CAPTURE_TEXTURE_MAX_BYTES` = 8 MiB | unchanged | `D9_CAPTURE_TRUNC_TEXTURE`, `D9_CAPTURE_TRUNC_TEXTURE_TOTAL` |
+| Streams | 16 (`D9_MAX_STREAMS`) | unchanged | `D9_CAPTURE_TRUNC_STREAMS` |
+| Textures / stages | 4 | unchanged | `D9_CAPTURE_TRUNC_TEXTURES` |
+| Declaration elements | 64 (`D9_MAX_DECL`) | unchanged | `D9_CAPTURE_TRUNC_DECL` |
+| Draw record count | 32 | unchanged | `D9_CAPTURE_SKIP` after the cap |
+| Present record count | 8 | unchanged | `D9_CAPTURE_SKIP` after the cap |
 
 A vertex stride above 4096, an index size other than 2 or 4, or count×stride
 overflow is `D9_CAPTURE_INVALID`. Vertex and index counts in the snapshot are
-the counts the caller wants documented; the module captures at most the first
-256 vertices / 1024 indices and records both `declared` and `stored` sizes.
+the counts the caller wants documented; by default the module captures at most
+the first 256 vertices / 1024 indices and records both `declared` and `stored`
+sizes.
+
+`TESV_D3D9_CAPTURE_FULL=1` raises only the vertex/index bounds to 65,536 /
+262,144. It also reconstructs an indexed triangle-list's compact source vertex
+window when the snapshot carries a different scratch count. The reconstruction
+uses the existing read-only `d9_com_device()`, stream/buffer getters and
+`d9_decl_decode()`; it does not submit or mutate a draw. The text output records
+`capture.full=1` and `vertices.source=decoded_compact` (or `snapshot` when the
+caller already supplied the full vertex range). Standalone capture users that
+supply a complete `vertices.count == draw.vertex_count` range need no COM device.
 
 The truncation mask is written to the text header, the binary header, and
 `D9CaptureRecordInfo.truncation`. `d9_capture_truncation_text()` renders it as
@@ -465,6 +475,11 @@ probe:
   the COM draw/Present integration.
 * `d3d9_com.c` includes `d3d9_capture.h` when `D9_CAPTURE_HOOK` is enabled.
 
+Source-only worktrees do not carry the git-ignored `staged/` and generated D3DX
+pilot inputs. `N3DS_STAGED_DIR` and `N3DS_PILOT_GEN` may point at read-only
+copies outside the worktree; `fast_slice.ps1` inherits both. This avoids creating
+junctions or modifying `staged/*` in the isolated tree.
+
 ### Initialization and shutdown
 
 Initialize once in `d9_com_start()`, before any device can be created. The COM
@@ -586,9 +601,11 @@ For a raw-stream snapshot (rather than decoded `d->scratch`):
 * Non-indexed strip/fan: first vertex = `draw.start`, count = `primitives+2`.
 * Indexed: the COM `draw_indexed` already receives `MinIndex` (`A(3)`) and
   `NumVertices` (`A(4)`), so first vertex = `base_vertex + min_vertex` and
-  count = `min(vertex_count, 256)`; the module caps at 256.
+  count = `vertex_count`; the default module cap is 256, or 65,536 with
+  `TESV_D3D9_CAPTURE_FULL=1`.
 * Indices: first index = `start_index`, count = the same primitive vertex
-  count; the module caps at 1024 and records the declared count.
+  count; the default module cap is 1024, or 262,144 in full mode, and the
+  declared count is recorded.
 * Byte offset for raw streams is
   `stream.offset + first_vertex * stream.stride`; for indices it is
   `start_index * index_size`. Use `d9_get_buffer_data()` to obtain the base
@@ -752,8 +769,8 @@ python tools/capture_raster.py `
 `--jobs 1..16` parallelizes independent file parsing and FNV-1a validation.
 Rasterization remains ordered because later draws can blend into earlier ones.
 The default is up to 16 parsers, bounded by the number of inputs. The summary
-reports dimensions, covered fragments, non-zero pixels, signatures and wall
-time. `D9CAPPRE` Present files are rejected: they contain no framebuffer bytes.
+reports dimensions, covered fragments, non-zero pixels, their inclusive bounding
+box, signatures and wall time. `D9CAPPRE` Present files are rejected: they contain no framebuffer bytes.
 
 The binary file is authoritative; the sibling `.txt` is useful for inspection
 but is not needed for rendering. The reader checks `D9CAPBIN`, the 32-byte
@@ -776,7 +793,8 @@ guest declaration stream:
   with the sampled texture.
 * 40-byte `D9ColorVertex { x, y, z, u, v, r, g, b, a, w }` is also recognized.
   Its normalized float RGBA is interpolated; the trailing TEXCOORD0.w is not
-  used by the 2D blit. The current COM capture hook does not emit this layout.
+  used by the 2D blit. Full compact indexed capture emits this layout after
+  decoding the declaration's POSITION/TEXCOORD0/optional COLOR0.
 * Other strides fail with a named error instead of guessing a raw FVF layout.
 
 `--position-space auto|screen|clip|object` controls positions:
@@ -818,12 +836,16 @@ The first captured stage-0 texture is sampled. Supported raw formats are:
 | `A8R8G8B8` | 21 | little-endian B,G,R,A |
 | `X8R8G8B8` | 22 | little-endian B,G,R, opaque A |
 | `A8` | 28 | opaque RGB multiplied by A |
+| `DXT1` (BC1) | `0x31545844` | 8-byte 4×4 colour blocks, DDS little-endian order |
+| `DXT5` (BC3) | `0x35545844` | 8-byte alpha + 8-byte colour 4×4 blocks |
 
+For DXT1/DXT5, `row_pitch` is measured in compressed block-row bytes, not
+pixels. Edge blocks are decoded and clipped to the texture dimensions.
 `row_pitch` is honoured, including padding. Only the captured mip level is
 available. Point and bilinear filtering are implemented, with WRAP, MIRROR,
-CLAMP, BORDER and MIRRORONCE addressing. DXT1/3/5, ATI/BC, ETC1, cube and volume
-textures are named unsupported rather than decoded incorrectly. Additional
-stages are not combined because v3 does not contain the texture-stage/TEV
+CLAMP, BORDER and MIRRORONCE addressing. DXT3, ATI/BC4/BC5/BC7, ETC1, cube and
+volume textures are named unsupported rather than decoded incorrectly.
+Additional stages are not combined because v3 does not contain the texture-stage/TEV
 operations needed to combine them.
 
 Alpha test supports all eight D3DCMP functions. Alpha blending supports ADD,
@@ -845,9 +867,10 @@ Run the standard-library tests:
 python tests/capture_raster_test.py
 ```
 
-They cover list/strip/fan, indexed 16/32 draws, colour interpolation, texture
-sampling, alpha blend/test, viewport offsets, fixed-function transforms, PNG
-chunks/dimensions, hash validation and named malformed-stride rejection.
+They cover list/strip/fan, indexed 16/32 draws, colour interpolation, DXT1/BC1
+and DXT5/BC3 reference blocks, compressed row pitch, texture sampling, alpha
+blend/test, viewport offsets, fixed-function transforms, PNG chunks/dimensions,
+hash validation and named malformed-stride rejection.
 
 A real four-capture Bink sequence from
 `E:\menu_capture\run_tesv_slice_8260` was rendered at 512×1024. It produced
@@ -861,9 +884,9 @@ early captures contain only the blue Bink placeholder geometry, not the menu.
   Shader constants, texture-stage operations and the full vertex declaration
   semantics are not in v3. The tool draws decoded positions/UV, white colour
   for `D9Vertex`, and a simple stage-0 texture approximation.
-* Current 20-byte captures cannot reproduce menu vertex tint/COLOR0. Rendering
-  menu geometry later is possible, but exact menu colours require a future
-  capture schema/hook change to preserve `D9ColorVertex` or raw COLOR0.
+* Default 20-byte captures cannot reproduce menu vertex tint/COLOR0. Full
+  compact indexed capture preserves it as 40-byte `D9ColorVertex` when the
+  declaration supplies COLOR0; declarations without COLOR0 still use white.
 * No stencil, scissor rectangle, fog, lighting, mip selection, sRGB conversion,
   multiple texture stages, cube/volume sampling or shader texkill.
 * A Present event has `pixels.captured=0`; it cannot be used as a screenshot.
@@ -891,10 +914,13 @@ python tools/capture_info.py -Dir E:\menu_draw\ --json
 The table lists the file, draw type, primitives, indexed flag, the raw D3D9
 `draw.vertex_count` versus the actually captured `vertices.count`
 (`VCOUNT/CAPT` - the former is often `0` for `DrawPrimitiveUP` while the latter
-is the payload length), viewport, and short z/blend/cull/alpha state labels.
-Present files are reported separately and never participate in draw totals.
-The summary counts draws/presents, primitives, captured vertices/indices and
-files with a `.bin` sibling. Type, cull and blend names follow
+is the payload length), viewport, short z/blend/cull/alpha state labels, captured
+texture formats (`0:DXT1,1:DXT5`, etc.) and truncation names. JSON output also
+includes numeric texture formats, row pitches, stored/declared pixel sizes and
+per-texture truncation flags. Present files are reported separately and never
+participate in draw totals. The summary counts draws/presents, primitives,
+captured vertices/indices, truncated draws and files with a `.bin` sibling.
+Type, cull and blend names follow
 `source/d3d9_core.h` (`D9_TRIANGLELIST=4`, `D9_TRIANGLESTRIP=5`,
 `D9_TRIANGLEFAN=6`).
 

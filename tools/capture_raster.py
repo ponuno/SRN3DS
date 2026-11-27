@@ -29,6 +29,8 @@ TRIANGLE_FAN = 6
 A8R8G8B8 = 21
 X8R8G8B8 = 22
 A8 = 28
+DXT1 = 0x31545844  # BC1
+DXT5 = 0x35545844  # BC3
 D9_VERTEX_STRIDE = 20       # D9Vertex: five little-endian float32 values.
 D9_COLOR_VERTEX_STRIDE = 40 # D9ColorVertex: xyz, uv, rgba, w (all float32).
 
@@ -635,11 +637,21 @@ def _row_vector(matrix: tuple[tuple[float, ...], ...], vector: Sequence[float]) 
 
 
 def _to_shader_vertex(
-    raw: Sequence[float], capture: Capture, space: str
+    raw: Sequence[float], capture: Capture, space: str,
+    raw_bounds: tuple[float, float, float, float, float, float] | None = None,
 ) -> ShaderVertex | None:
     x, y, z, u, v, r, g, b, a = raw
     vp = capture.viewport
-    if space == "screen":
+    if space == "raw":
+        if raw_bounds is None:
+            raise CaptureError("raw position space requires captured XYZ bounds")
+        min_x, max_x, min_y, max_y, min_z, max_z = raw_bounds
+        span_x, span_y, span_z = max_x - min_x, max_y - min_y, max_z - min_z
+        sx = vp.x + ((x - min_x) / span_x if span_x > 0.0 else 0.5) * vp.width
+        sy = vp.y + ((max_y - y) / span_y if span_y > 0.0 else 0.5) * vp.height
+        sz = vp.minz + (clamp01((z - min_z) / span_z) if span_z > 0.0 else 0.0) * (vp.maxz - vp.minz)
+        inv_w = 1.0
+    elif space == "screen":
         sx = vp.x + x
         sy = vp.y + y
         sz = vp.minz + clamp01(z) * (vp.maxz - vp.minz)
@@ -778,52 +790,145 @@ def build_triangles(
     return triangles, warnings
 
 
+def _rgb565(value: int) -> tuple[int, int, int]:
+    r, g, b = value >> 11, (value >> 5) & 0x3F, value & 0x1F
+    return (r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)
+
+
+def _bc_color_palette(block: bytes, offset: int, force_four_color: bool) -> list[tuple[int, int, int, int]]:
+    c0 = struct.unpack_from("<H", block, offset)[0]
+    c1 = struct.unpack_from("<H", block, offset + 2)[0]
+    p0 = (*_rgb565(c0), 255)
+    p1 = (*_rgb565(c1), 255)
+    if force_four_color or c0 > c1:
+        p2 = tuple((2 * p0[i] + p1[i]) // 3 for i in range(3)) + (255,)
+        p3 = tuple((p0[i] + 2 * p1[i]) // 3 for i in range(3)) + (255,)
+    else:
+        p2 = tuple((p0[i] + p1[i]) // 2 for i in range(3)) + (255,)
+        p3 = (0, 0, 0, 0)
+    return [p0, p1, p2, p3]
+
+
+def _bc_color_block(block: bytes, offset: int = 0, force_four_color: bool = False) -> bytes:
+    if len(block) < offset + 8:
+        raise CaptureError("BC color block is shorter than 8 bytes")
+    palette = _bc_color_palette(block, offset, force_four_color)
+    bits = struct.unpack_from("<I", block, offset + 4)[0]
+    rgba = bytearray(64)
+    for i in range(16):
+        rgba[i * 4:i * 4 + 4] = bytes(palette[(bits >> (2 * i)) & 3])
+    return bytes(rgba)
+
+
+def _bc_alpha_palette(a0: int, a1: int) -> list[int]:
+    palette = [a0, a1] + [0] * 6
+    if a0 > a1:
+        for i in range(1, 7):
+            palette[i + 1] = ((7 - i) * a0 + i * a1) // 7
+    else:
+        for i in range(1, 5):
+            palette[i + 1] = ((5 - i) * a0 + i * a1) // 5
+        palette[6], palette[7] = 0, 255
+    return palette
+
+
+def decode_bc1_block(block: bytes) -> bytes:
+    """Decode one little-endian DXT1/BC1 4x4 block to row-major RGBA8."""
+    return _bc_color_block(block)
+
+
+def decode_bc3_block(block: bytes) -> bytes:
+    """Decode one little-endian DXT5/BC3 4x4 block to row-major RGBA8."""
+    if len(block) < 16:
+        raise CaptureError("BC3 block is shorter than 16 bytes")
+    palette = _bc_alpha_palette(block[0], block[1])
+    alpha_bits = int.from_bytes(block[2:8], "little")
+    color = _bc_color_block(block, 8, True)
+    rgba = bytearray(color)
+    for i in range(16):
+        rgba[i * 4 + 3] = palette[(alpha_bits >> (3 * i)) & 7]
+    return bytes(rgba)
+
+
+def decode_bc_block(format_id: int, block: bytes) -> bytes:
+    if format_id == DXT1:
+        return decode_bc1_block(block)
+    if format_id == DXT5:
+        return decode_bc3_block(block)
+    raise CaptureError(f"unsupported BC texture format 0x{format_id:08x}")
+
+
 class DecodedTexture:
     def __init__(self, texture: CapturedTexture, state: DrawState):
         self.width = texture.width
         self.height = texture.height
         self.state = state
         self.border = tuple(value / 255.0 for value in argb_bytes(state.border_color))
+        compressed = texture.format in (DXT1, DXT5)
         if texture.format in (A8R8G8B8, X8R8G8B8):
             bytes_per_pixel = 4
         elif texture.format == A8:
             bytes_per_pixel = 1
+        elif compressed:
+            bytes_per_pixel = 0
         else:
             raise CaptureError(
-                f"texture stage {texture.stage}: unsupported format {texture.format}; "
-                f"supported A8R8G8B8={A8R8G8B8}, X8R8G8B8={X8R8G8B8}, A8={A8}"
+                f"texture stage {texture.stage}: unsupported format 0x{texture.format:08x}; "
+                f"supported A8R8G8B8={A8R8G8B8}, X8R8G8B8={X8R8G8B8}, "
+                f"A8={A8}, DXT1={DXT1}, DXT5={DXT5}"
             )
-        row_bytes = self.width * bytes_per_pixel
+        if compressed:
+            block_bytes = 8 if texture.format == DXT1 else 16
+            blocks_wide = (self.width + 3) // 4
+            blocks_high = (self.height + 3) // 4
+            row_bytes = blocks_wide * block_bytes  # DXT pitch counts block bytes.
+        else:
+            row_bytes = self.width * bytes_per_pixel
         pitch = texture.row_pitch or row_bytes
         if pitch < row_bytes:
             raise CaptureError(
                 f"texture stage {texture.stage}: row pitch {pitch} is smaller than {row_bytes}"
             )
-        required = (self.height - 1) * pitch + row_bytes
+        required = ((blocks_high - 1) * pitch + row_bytes
+                    if compressed else (self.height - 1) * pitch + row_bytes)
         if len(texture.pixels) < required:
             raise CaptureError(
                 f"texture stage {texture.stage}: stored pixels are truncated "
                 f"({len(texture.pixels)} of {required} required bytes)"
             )
         rgba = bytearray(self.width * self.height * 4)
-        row_rgba_bytes = self.width * 4
-        for y in range(self.height):
-            source = texture.pixels[y * pitch:y * pitch + row_bytes]
-            dest = y * row_rgba_bytes
-            if texture.format == A8:
-                rgba[dest:dest + row_rgba_bytes:4] = b"\xff" * self.width
-                rgba[dest + 1:dest + row_rgba_bytes:4] = b"\xff" * self.width
-                rgba[dest + 2:dest + row_rgba_bytes:4] = b"\xff" * self.width
-                rgba[dest + 3:dest + row_rgba_bytes:4] = source
-            else:
-                # D3D9 A8R8G8B8/X8R8G8B8 is B,G,R,A in little-endian memory.
-                rgba[dest:dest + row_rgba_bytes:4] = source[2::4]
-                rgba[dest + 1:dest + row_rgba_bytes:4] = source[1::4]
-                rgba[dest + 2:dest + row_rgba_bytes:4] = source[0::4]
-                if texture.format == X8R8G8B8:
-                    rgba[dest + 3:dest + row_rgba_bytes:4] = b"\xff" * self.width
+        if compressed:
+            for by in range(blocks_high):
+                for bx in range(blocks_wide):
+                    offset = by * pitch + bx * block_bytes
+                    decoded = decode_bc_block(texture.format, texture.pixels[offset:offset + block_bytes])
+                    for y in range(4):
+                        py = by * 4 + y
+                        if py >= self.height:
+                            break
+                        copied = min(4, self.width - bx * 4)
+                        source = (y * 4) * 4
+                        dest = (py * self.width + bx * 4) * 4
+                        rgba[dest:dest + copied * 4] = decoded[source:source + copied * 4]
+        else:
+            row_rgba_bytes = self.width * 4
+            for y in range(self.height):
+                source = texture.pixels[y * pitch:y * pitch + row_bytes]
+                dest = y * row_rgba_bytes
+                if texture.format == A8:
+                    rgba[dest:dest + row_rgba_bytes:4] = b"\xff" * self.width
+                    rgba[dest + 1:dest + row_rgba_bytes:4] = b"\xff" * self.width
+                    rgba[dest + 2:dest + row_rgba_bytes:4] = b"\xff" * self.width
+                    rgba[dest + 3:dest + row_rgba_bytes:4] = source
                 else:
-                    rgba[dest + 3:dest + row_rgba_bytes:4] = source[3::4]
+                    # D3D9 A8R8G8B8/X8R8G8B8 is B,G,R,A in little-endian memory.
+                    rgba[dest:dest + row_rgba_bytes:4] = source[2::4]
+                    rgba[dest + 1:dest + row_rgba_bytes:4] = source[1::4]
+                    rgba[dest + 2:dest + row_rgba_bytes:4] = source[0::4]
+                    if texture.format == X8R8G8B8:
+                        rgba[dest + 3:dest + row_rgba_bytes:4] = b"\xff" * self.width
+                    else:
+                        rgba[dest + 3:dest + row_rgba_bytes:4] = source[3::4]
         self.rgba = bytes(rgba)
 
     @staticmethod
@@ -1100,6 +1205,17 @@ class Framebuffer:
         return sum(1 for offset in range(0, len(self.pixels), 4)
                    if self.pixels[offset:offset + 4] != b"\x00\x00\x00\x00")
 
+    def nonzero_bbox(self) -> list[int] | None:
+        min_x, min_y, max_x, max_y = self.width, self.height, -1, -1
+        for y in range(self.height):
+            row = y * self.width * 4
+            for x in range(self.width):
+                offset = row + x * 4
+                if self.pixels[offset:offset + 4] != b"\x00\x00\x00\x00":
+                    min_x, min_y = min(min_x, x), min(min_y, y)
+                    max_x, max_y = max(max_x, x), max(max_y, y)
+        return None if max_x < 0 else [min_x, min_y, max_x, max_y]
+
 
 def _png_chunk(kind: bytes, data: bytes) -> bytes:
     return (struct.pack(">I", len(data)) + kind + data +
@@ -1182,6 +1298,7 @@ def render_captures(
         "width": width,
         "height": height,
         "nonzero_pixels": framebuffer.nonzero_pixels(),
+        "nonzero_bbox": framebuffer.nonzero_bbox(),
         "covered_pixels": sum(framebuffer.touched),
         "fragments": framebuffer.stats.fragments,
         "culled_triangles": framebuffer.stats.culled,
@@ -1234,6 +1351,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         f"PNG {result['png']} {result['width']}x{result['height']} "
         f"covered_pixels={result['covered_pixels']} nonzero_pixels={result['nonzero_pixels']} "
+        f"nonzero_bbox={result['nonzero_bbox']} "
         f"fragments={result['fragments']} "
         f"culled_triangles={result['culled_triangles']} wall={elapsed:.3f}s"
     )

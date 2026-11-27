@@ -43,7 +43,13 @@ def indices_payload(indices: bytes, size: int, count: int) -> bytes:
 
 def texture_payload(pixels: bytes, width: int, height: int, format_id: int,
                     pitch: int | None = None) -> bytes:
-    pitch = pitch if pitch is not None else width * (1 if format_id == cr.A8 else 4)
+    if pitch is None:
+        if format_id == cr.DXT1:
+            pitch = ((width + 3) // 4) * 8
+        elif format_id == cr.DXT5:
+            pitch = ((width + 3) // 4) * 16
+        else:
+            pitch = width * (1 if format_id == cr.A8 else 4)
     return struct.pack("<11I4Q", 0, 0x50000000, width, height, format_id,
                        1, 0, 0, 0, 0, 0, pitch, len(pixels), len(pixels),
                        cr.fnv1a(pixels)) + pixels
@@ -250,6 +256,58 @@ class CaptureRasterTests(unittest.TestCase):
             state={"alpha_test": 1, "alpha_func": 5, "alpha_ref": 200}))
         self.assertEqual(result["fragments"], 0)
         self.assertEqual(pixel(rows, width, 3, 3), b"\x00\x00\x00\xff")
+
+    def test_dxt1_and_dxt5_reference_blocks(self):
+        # Exact vectors shared with tests/bc_shader_smoke.c / d3d9_bc.c.
+        opaque = bytes((0x00, 0xf8, 0x1f, 0x00, 0xe4, 0xe4, 0xe4, 0xe4))
+        transparent = bytes((0x1f, 0x00, 0x00, 0xf8, 0xe4, 0, 0, 0))
+        bc1 = cr.decode_bc1_block(opaque)
+        self.assertEqual(bc1[:4], b"\xff\x00\x00\xff")
+        self.assertEqual(bc1[4:8], b"\x00\x00\xff\xff")
+        self.assertEqual(bc1[8:12], b"\xaa\x00\x55\xff")
+        self.assertEqual(bc1[12:16], b"\x55\x00\xaa\xff")
+        bc1 = cr.decode_bc1_block(transparent)
+        self.assertEqual(bc1[12:16], b"\x00\x00\x00\x00")
+        self.assertEqual(bc1[8:12], b"\x7f\x00\x7f\xff")
+
+        def alpha_indices() -> bytes:
+            bits = sum((i % 8) << (3 * i) for i in range(16))
+            return b"\xff\x00" + bits.to_bytes(6, "little")
+
+        bc3 = cr.decode_bc3_block(alpha_indices() + opaque)
+        self.assertEqual(bc3[3], 255)
+        self.assertEqual(bc3[7], 0)
+        self.assertEqual(bc3[11], 218)
+        self.assertEqual(bc3[31], 36)
+        bc3 = cr.decode_bc3_block(b"\x00\x64" + alpha_indices()[2:] + opaque)
+        self.assertEqual(bc3[11], 20)
+        self.assertEqual(bc3[27], 0)
+        self.assertEqual(bc3[31], 255)
+        with self.assertRaisesRegex(cr.CaptureError, "BC3 block is shorter"):
+            cr.decode_bc3_block(b"\x00" * 15)
+
+    def test_dxt_texture_row_pitch_is_in_block_bytes(self):
+        red = bytes((0x00, 0xf8, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00))
+        green = bytes((0xe0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
+        pixels = red + red + b"pad!" + green + green + b"tail"
+        texture = cr.CapturedTexture(0, 8, 8, cr.DXT1, 0, 20, pixels)
+        decoded = cr.DecodedTexture(texture, cr.DrawState(address_u=3, address_v=3))
+        self.assertEqual(decoded.rgba[:4], b"\xff\x00\x00\xff")
+        self.assertEqual(decoded.rgba[(4 * 8) * 4:(4 * 8) * 4 + 4], b"\x00\xff\x00\xff")
+        with self.assertRaisesRegex(cr.CaptureError, "row pitch 8 is smaller than 16"):
+            cr.DecodedTexture(cr.CapturedTexture(0, 8, 8, cr.DXT1, 0, 8, pixels), cr.DrawState())
+
+    def test_dxt1_texture_renders_colour(self):
+        red = bytes((0x00, 0xf8, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00))
+        vertices = [
+            (1.0, 1.0, 0.0, 0.0, 0.0),
+            (12.0, 1.0, 0.0, 1.0, 0.0),
+            (1.0, 12.0, 0.0, 0.0, 1.0),
+        ]
+        _result, rows, width = self.render(make_capture(
+            vertices, texture=(4, 4, cr.DXT1, red),
+            state={"mag_filter": 1, "min_filter": 1}))
+        self.assertEqual(pixel(rows, width, 3, 3), b"\xff\x00\x00\xff")
 
     def test_viewport_offset_and_target_dimensions(self):
         vertices = [(0.0, 0.0, 0.0, 0.0, 0.0),

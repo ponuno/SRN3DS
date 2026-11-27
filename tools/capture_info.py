@@ -47,11 +47,17 @@ CMP_NAMES = {
     1: "NEVER", 2: "LESS", 3: "EQUAL", 4: "LEQUAL", 5: "GREATER",
     6: "NOTEQUAL", 7: "GEQUAL", 8: "ALWAYS",
 }
+FORMAT_NAMES = {
+    21: "A8R8G8B8", 22: "X8R8G8B8", 28: "A8",
+    0x31545844: "DXT1", 0x33545844: "DXT3", 0x35545844: "DXT5",
+    0x31495441: "ATI1", 0x32495441: "ATI2",
+    0x55344342: "BC4U", 0x55354342: "BC5U", 0x37434244: "BC7",
+}
 
 # Text fields factually present in the v3 snapshot; missing fields stay None.
 INT_FIELDS = (
     "version", "frame.index", "draw.index", "draw.type", "draw.start",
-    "draw.primitives", "draw.indexed", "draw.base_vertex", "draw.min_vertex",
+    "truncation", "draw.primitives", "draw.indexed", "draw.base_vertex", "draw.min_vertex",
     "draw.vertex_count", "draw.start_index", "viewport.x", "viewport.y",
     "viewport.width", "viewport.height", "viewport.minz", "viewport.maxz",
     "state.z_enable", "state.z_write", "state.z_func", "state.cull",
@@ -91,6 +97,12 @@ def named(names: dict[int, str], value: int | None) -> str:
     if value is None:
         return "?"
     return names.get(value, str(value))
+
+
+def format_name(value: int | None) -> str:
+    if value is None:
+        return "?"
+    return FORMAT_NAMES.get(value, f"0x{value:08x}")
 
 
 def state_labels(fields: dict[str, int | None]) -> dict[str, str]:
@@ -137,11 +149,31 @@ def read_capture(path: Path, root: Path) -> dict[str, Any]:
             "minz": fields["viewport.minz"], "maxz": fields["viewport.maxz"],
         }
 
+    textures = []
+    texture_count = fields["texture_count"] or 0
+    for index in range(texture_count):
+        prefix = f"texture[{index}]"
+        texture_format = to_int(raw.get(prefix + ".format"))
+        textures.append({
+            "stage": to_int(raw.get(prefix + ".stage")),
+            "width": to_int(raw.get(prefix + ".width")),
+            "height": to_int(raw.get(prefix + ".height")),
+            "format": texture_format,
+            "format_name": format_name(texture_format),
+            "row_pitch": to_int(raw.get(prefix + ".row_pitch")),
+            "pixels_declared": to_int(raw.get(prefix + ".pixels.declared")),
+            "pixels_stored": to_int(raw.get(prefix + ".pixels.stored")),
+            "pixels_truncated": to_int(raw.get(prefix + ".pixels.truncated")),
+        })
+
     return {
         "file": path.relative_to(root).as_posix() if root.is_dir() else path.name,
         "format": fmt,
         "kind": kind,
         "version": fields["version"],
+        "capture_full": bool(to_int(raw.get("capture.full"))),
+        "truncation": fields["truncation"],
+        "truncation_names": raw.get("truncation.names", "none"),
         "frame_index": fields["frame.index"],
         "draw_index": fields["draw.index"],
         "draw": {
@@ -165,6 +197,7 @@ def read_capture(path: Path, root: Path) -> dict[str, Any]:
             "count": fields["indices.count"],
             "captured": fields["indices.captured"],
         },
+        "textures": textures,
         "viewport": viewport,
         "state": {key: fields[key] for key in INT_FIELDS if key.startswith("state.")},
         "state_labels": labels,
@@ -173,6 +206,7 @@ def read_capture(path: Path, root: Path) -> dict[str, Any]:
             "width": fields["target.width"],
             "height": fields["target.height"],
             "format": fields["target.format"],
+            "format_name": format_name(fields["target.format"]),
         },
         "present": {
             "frame_index": fields["present.frame_index"],
@@ -203,6 +237,7 @@ def summarize(directory: Path, files: list[dict[str, Any]], errors: list[str]) -
         "vertex_count_ranges": total(draws, "draw", "vertex_count"),
         "indices_captured": total(draws, "indices", "captured"),
         "indices_count": total(draws, "indices", "count"),
+        "truncated_draws": sum(1 for f in draws if f["truncation"]),
         "indexed_draws": sum(1 for f in draws if f["draw"]["indexed"]),
         "with_bin": sum(1 for f in files if f["bin_sibling"]),
         "errors": errors,
@@ -215,12 +250,12 @@ def fmt(value: Any) -> str:
 
 def render_table(summary: dict[str, Any], files: list[dict[str, Any]]) -> str:
     headers = ("FILE", "DRAW", "PRIMS", "IDX", "VCOUNT/CAPT", "VIEWPORT",
-               "Z", "BLEND", "CULL", "ALPHA", "BIN")
+               "Z", "BLEND", "CULL", "ALPHA", "TEX FORMATS", "TRUNC", "BIN")
     rows: list[tuple[str, ...]] = []
     for f in files:
         if f["kind"] == "present":
             rows.append((f["file"], "PRESENT", "-", "-", "-", "-", "-", "-", "-", "-",
-                         "yes" if f["bin_sibling"] else "no"))
+                         "-", "-", "yes" if f["bin_sibling"] else "no"))
             continue
         d = f["draw"]
         vp = f["viewport"]
@@ -229,6 +264,9 @@ def render_table(summary: dict[str, Any], files: list[dict[str, Any]]) -> str:
             vp_text = "{}x{}@{},{}".format(vp["width"], vp["height"], vp["x"], vp["y"])
         counts = "{}/{}".format(fmt(d["vertex_count"]), fmt(f["vertices"]["count"]))
         labels = f["state_labels"]
+        texture_formats = ",".join(
+            f"{item['stage']}:{item['format_name']}" for item in f["textures"]
+        ) or "-"
         rows.append((
             f["file"],
             "{}({})".format(d["type_name"], fmt(d["type"])),
@@ -237,6 +275,7 @@ def render_table(summary: dict[str, Any], files: list[dict[str, Any]]) -> str:
             counts,
             vp_text,
             labels["z"], labels["blend"], labels["cull"], labels["alpha"],
+            texture_formats, f["truncation_names"],
             "yes" if f["bin_sibling"] else "no",
         ))
 
@@ -258,7 +297,8 @@ def render_table(summary: dict[str, Any], files: list[dict[str, Any]]) -> str:
     out.append(
         "Summary: files={files} draws={draws} presents={presents} primitives={primitives} "
         "vertices(captured)={vertices_captured} vertex_count(ranges)={vertex_count_ranges} "
-        "indices(captured)={indices_captured} indexed_draws={indexed_draws} with_bin={with_bin}".format(**summary)
+        "indices(captured)={indices_captured} indexed_draws={indexed_draws} "
+        "truncated_draws={truncated_draws} with_bin={with_bin}".format(**summary)
     )
     if summary["errors"]:
         out.append("Errors: {}".format("; ".join(summary["errors"])))

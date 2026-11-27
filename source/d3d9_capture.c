@@ -1,7 +1,26 @@
 #include "d3d9_capture.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* Full capture is opt-in so normal runs keep the historical bounded payload.
+ * These limits match the core's compact indexed-menu vertex/index bounds. */
+#define D9_CAPTURE_FULL_MAX_VERTICES 65536u
+#define D9_CAPTURE_FULL_MAX_INDICES  262144u
+
+/* The standalone capture smoke links only this module and guest.c.  Weak
+ * declarations let that test keep working while production COM builds resolve
+ * the live compact stream used by TESV_D3D9_CAPTURE_FULL=1. */
+#if defined(__GNUC__) || defined(__clang__)
+#define D9_CAPTURE_WEAK __attribute__((weak))
+#else
+#define D9_CAPTURE_WEAK
+#endif
+extern D9Device *d9_com_device(void) D9_CAPTURE_WEAK;
+extern int d9_get_stream_info(const D9Device *, unsigned, D9Handle *, size_t *, size_t *) D9_CAPTURE_WEAK;
+extern int d9_get_buffer_data(const D9Device *, D9Handle, const void **, size_t *) D9_CAPTURE_WEAK;
+extern int d9_decl_decode(unsigned, const void *, size_t, float *) D9_CAPTURE_WEAK;
 
 /* ---- FNV-1a ---------------------------------------------------------------- */
 
@@ -51,6 +70,11 @@ typedef struct {
     Blob vs, ps;
     Blob vertices, indices;
     Blob textures[D9_CAPTURE_MAX_TEXTURES];
+    D9CaptureBytes vertex_data;
+    unsigned vertex_stride;
+    unsigned vertex_count;
+    int vertices_reconstructed;
+    void *owned_vertices;
     unsigned texture_count;
     unsigned stream_count;
     unsigned decl_count;
@@ -124,6 +148,152 @@ static int mul_size(size_t a, size_t b, size_t *out) {
 }
 
 static size_t min_size(size_t a, size_t b) { return a < b ? a : b; }
+
+static int capture_full_enabled(void) {
+    const char *value = getenv("TESV_D3D9_CAPTURE_FULL");
+    return value && !strcmp(value, "1");
+}
+
+static unsigned vertex_limit(void) {
+    return capture_full_enabled() ? D9_CAPTURE_FULL_MAX_VERTICES : D9_CAPTURE_MAX_VERTICES;
+}
+
+static unsigned index_limit(void) {
+    return capture_full_enabled() ? D9_CAPTURE_FULL_MAX_INDICES : D9_CAPTURE_MAX_INDICES;
+}
+
+static void free_plan(Plan *plan) {
+    if (!plan) return;
+    free(plan->owned_vertices);
+    plan->owned_vertices = NULL;
+}
+
+static const D9VertexElement *find_usage0(const D9CaptureSnapshot *s, unsigned usage) {
+    unsigned count = min_size(s->declaration.count, D9_CAPTURE_MAX_DECL);
+    for (unsigned i = 0; i < count; ++i) {
+        const D9VertexElement *element = &s->declaration.elements[i];
+        if (element->usage == usage && element->usage_index == 0) return element;
+    }
+    return NULL;
+}
+
+/* Compact indexed menu draws submit [BaseVertex+MinIndex, +NumVertices) without
+ * expanding it into d->scratch.  The COM snapshot's ordinary vertex field can
+ * therefore contain a stale earlier scratch stream.  Full capture reconstructs
+ * exactly the compact source window through the existing read-only diagnostic
+ * getters; default capture keeps the historical snapshot behaviour. */
+static int prepare_vertices(const D9CaptureSnapshot *s, Plan *p) {
+    p->vertex_data = s->draw.vertices.data;
+    p->vertex_stride = s->draw.vertices.stride;
+    p->vertex_count = s->draw.vertices.count;
+
+    if (!capture_full_enabled() || !s->draw.indexed || s->draw.type != D9_TRIANGLELIST ||
+        !s->draw.vertex_count || p->vertex_count == s->draw.vertex_count ||
+        s->draw.vertex_count > D9_CAPTURE_FULL_MAX_VERTICES)
+        return D9_CAPTURE_OK;
+    if (!s->declaration.active || s->declaration.position >= D9_CAPTURE_MAX_DECL ||
+        !d9_com_device || !d9_get_stream_info || !d9_get_buffer_data || !d9_decl_decode) {
+        set_error(D9_CAPTURE_INVALID,
+                  "full capture needs a live COM device and active declaration for compact vertices");
+        return D9_CAPTURE_INVALID;
+    }
+
+    const D9VertexElement *position = &s->declaration.elements[s->declaration.position];
+    const D9VertexElement *uv = find_usage0(s, D9_USAGE_TEXCOORD);
+    const D9VertexElement *color = find_usage0(s, D9_USAGE_COLOR);
+    unsigned stream = position->stream;
+    if ((uv && uv->stream != stream) || (color && color->stream != stream)) {
+        set_error(D9_CAPTURE_INVALID,
+                  "full compact capture requires POSITION/TEXCOORD0/COLOR0 on one stream");
+        return D9_CAPTURE_INVALID;
+    }
+
+    const D9CaptureStream *recorded = NULL;
+    unsigned stream_count = min_size(s->stream_count, D9_CAPTURE_MAX_STREAMS);
+    for (unsigned i = 0; i < stream_count; ++i)
+        if (s->streams[i].index == stream) { recorded = &s->streams[i]; break; }
+    if (!recorded) {
+        set_error(D9_CAPTURE_INVALID, "full compact capture has no metadata for stream %u", stream);
+        return D9_CAPTURE_INVALID;
+    }
+
+    D9Device *device = d9_com_device();
+    D9Handle handle = 0;
+    size_t offset = 0, stride = 0;
+    const void *data = NULL;
+    size_t bytes = 0;
+    if (!device || d9_get_stream_info(device, stream, &handle, &offset, &stride) ||
+        !handle || !stride || stride > D9_CAPTURE_MAX_VERTEX_STRIDE ||
+        offset != recorded->offset || stride != recorded->stride ||
+        d9_get_buffer_data(device, handle, &data, &bytes) || !data) {
+        set_error(D9_CAPTURE_POINTER, "full compact capture cannot read vertex stream %u", stream);
+        return D9_CAPTURE_POINTER;
+    }
+
+    int64_t first_signed = (int64_t)s->draw.base_vertex + (int64_t)s->draw.min_vertex;
+    if (first_signed < 0 || (uint64_t)first_signed > (uint64_t)SIZE_MAX) {
+        set_error(D9_CAPTURE_INVALID, "full compact capture has an invalid first vertex");
+        return D9_CAPTURE_INVALID;
+    }
+    size_t first = (size_t)first_signed;
+    size_t first_bytes = 0, span = 0, decoded_bytes = 0;
+    if (mul_size(first, stride, &first_bytes) || first_bytes > SIZE_MAX - offset ||
+        offset + first_bytes > bytes || mul_size(s->draw.vertex_count, stride, &span) ||
+        span > bytes - (offset + first_bytes) ||
+        mul_size(s->draw.vertex_count, sizeof(D9ColorVertex), &decoded_bytes)) {
+        set_error(D9_CAPTURE_INVALID, "full compact vertex window exceeds the bound stream");
+        return D9_CAPTURE_INVALID;
+    }
+
+    D9ColorVertex *decoded = (D9ColorVertex *)malloc(decoded_bytes);
+    if (!decoded) {
+        set_error(D9_CAPTURE_INVALID, "full compact vertex allocation failed");
+        return D9_CAPTURE_INVALID;
+    }
+    const uint8_t *source = (const uint8_t *)data + offset + first_bytes;
+    for (unsigned i = 0; i < s->draw.vertex_count; ++i) {
+        const uint8_t *row = source + (size_t)i * stride;
+        float value[4];
+        if (position->offset >= stride ||
+            d9_decl_decode(position->type, row + position->offset,
+                           stride - position->offset, value)) {
+            free(decoded);
+            set_error(D9_CAPTURE_INVALID, "full compact POSITION decode failed at vertex %u", i);
+            return D9_CAPTURE_INVALID;
+        }
+        D9ColorVertex *out = &decoded[i];
+        out->x = value[0]; out->y = value[1]; out->z = value[2];
+        out->u = out->v = 0.0f;
+        out->r = out->g = out->b = out->a = 1.0f;
+        out->w = 0.0f;
+        if (uv) {
+            if (uv->offset >= stride ||
+                d9_decl_decode(uv->type, row + uv->offset, stride - uv->offset, value)) {
+                free(decoded);
+                set_error(D9_CAPTURE_INVALID, "full compact TEXCOORD0 decode failed at vertex %u", i);
+                return D9_CAPTURE_INVALID;
+            }
+            out->u = value[0]; out->v = value[1];
+        }
+        if (color) {
+            if (color->offset >= stride ||
+                d9_decl_decode(color->type, row + color->offset,
+                               stride - color->offset, value)) {
+                free(decoded);
+                set_error(D9_CAPTURE_INVALID, "full compact COLOR0 decode failed at vertex %u", i);
+                return D9_CAPTURE_INVALID;
+            }
+            out->r = value[0]; out->g = value[1]; out->b = value[2]; out->a = value[3];
+        }
+    }
+
+    p->owned_vertices = decoded;
+    p->vertex_data = (D9CaptureBytes){decoded, 0, decoded_bytes};
+    p->vertex_stride = (unsigned)sizeof(D9ColorVertex);
+    p->vertex_count = s->draw.vertex_count;
+    p->vertices_reconstructed = 1;
+    return D9_CAPTURE_OK;
+}
 
 /* ---- guest/host slices ----------------------------------------------------- */
 
@@ -277,8 +447,8 @@ static uint64_t plan_signature(const D9CaptureSnapshot *s, const Plan *p) {
         h = fnv_u64(h, (uint64_t)st->bytes);
     }
 
-    h = fnv_u32(h, d->vertices.stride);
-    h = fnv_u32(h, d->vertices.count);
+    h = fnv_u32(h, p->vertex_stride);
+    h = fnv_u32(h, p->vertex_count);
     h = fnv_u64(h, p->vertices.hash);
     h = fnv_u32(h, d->indices.size);
     h = fnv_u32(h, d->indices.count);
@@ -322,33 +492,34 @@ static int build_plan(const D9CaptureSnapshot *s, GuestMemory *memory, Plan *p) 
                     &p->ps, &p->truncation);
     if (rc) return rc;
 
-    const D9CaptureVertices *v = &s->draw.vertices;
-    if (v->count) {
+    rc = prepare_vertices(s, p);
+    if (rc) return rc;
+    if (p->vertex_count) {
         size_t declared, capture_bytes;
-        unsigned captured = (unsigned)min_size(v->count, D9_CAPTURE_MAX_VERTICES);
-        if (!v->stride || v->stride > D9_CAPTURE_MAX_VERTEX_STRIDE ||
-            mul_size(v->count, v->stride, &declared) ||
-            mul_size(captured, v->stride, &capture_bytes)) {
+        unsigned captured = (unsigned)min_size(p->vertex_count, vertex_limit());
+        if (!p->vertex_stride || p->vertex_stride > D9_CAPTURE_MAX_VERTEX_STRIDE ||
+            mul_size(p->vertex_count, p->vertex_stride, &declared) ||
+            mul_size(captured, p->vertex_stride, &capture_bytes)) {
             set_error(D9_CAPTURE_INVALID, "invalid vertex count/stride (%u x %u)",
-                      v->count, v->stride);
+                      p->vertex_count, p->vertex_stride);
             return D9_CAPTURE_INVALID;
         }
-        if (v->data.bytes < capture_bytes) {
+        if (p->vertex_data.bytes < capture_bytes) {
             set_error(D9_CAPTURE_INVALID, "vertex slice holds %zu of %zu required bytes",
-                      v->data.bytes, capture_bytes);
+                      p->vertex_data.bytes, capture_bytes);
             return D9_CAPTURE_INVALID;
         }
-        rc = plan_slice(&v->data, memory, capture_bytes, capture_bytes, 0,
+        rc = plan_slice(&p->vertex_data, memory, capture_bytes, capture_bytes, 0,
                         &p->vertices, &p->truncation);
         if (rc) return rc;
         p->vertices.declared = declared;
-        if (captured < v->count) p->truncation |= D9_CAPTURE_TRUNC_VERTICES;
+        if (captured < p->vertex_count) p->truncation |= D9_CAPTURE_TRUNC_VERTICES;
     }
 
     const D9CaptureIndices *ix = &s->draw.indices;
     if (ix->count) {
         size_t declared, capture_bytes;
-        unsigned captured = (unsigned)min_size(ix->count, D9_CAPTURE_MAX_INDICES);
+        unsigned captured = (unsigned)min_size(ix->count, index_limit());
         if ((ix->size != 2 && ix->size != 4) ||
             mul_size(ix->count, ix->size, &declared) ||
             mul_size(captured, ix->size, &capture_bytes)) {
@@ -603,14 +774,14 @@ static int write_binary(FILE *f, const D9CaptureSnapshot *s, const Plan *p,
     }
 
     if (write_section(f, SECTION_VERTICES, 40u + (uint32_t)p->vertices.stored) ||
-        wu32(f, s->draw.vertices.stride) || wu32(f, s->draw.vertices.count) ||
-        wu32(f, (uint32_t)(p->vertices.stored / (s->draw.vertices.stride ?
-              s->draw.vertices.stride : 1))) ||
+        wu32(f, p->vertex_stride) || wu32(f, p->vertex_count) ||
+        wu32(f, (uint32_t)(p->vertices.stored / (p->vertex_stride ?
+              p->vertex_stride : 1))) ||
         wu32(f, (uint32_t)p->vertices.stored) ||
         wu64(f, (uint64_t)p->vertices.declared) || wu64(f, p->vertices.hash) ||
         wu32(f, p->vertices.stored < p->vertices.declared ? 1u : 0u) || wu32(f, 0u))
         return D9_CAPTURE_IO;
-    rc = write_slice(f, &s->draw.vertices.data, memory, p->vertices.stored,
+    rc = write_slice(f, &p->vertex_data, memory, p->vertices.stored,
                      p->vertices.hash);
     if (rc) return rc;
 
@@ -723,6 +894,7 @@ static int write_text(FILE *f, const D9CaptureSnapshot *s, const Plan *p) {
     if (fprintf(f,
         "format=d9_capture\n"
         "version=%u\n"
+        "capture.full=%u\n"
         "signature=0x%016llx\n"
         "truncation=0x%08x\n"
         "truncation.names=%s\n"
@@ -767,7 +939,7 @@ static int write_text(FILE *f, const D9CaptureSnapshot *s, const Plan *p) {
         "state.max_anisotropy=%u\n"
         "state.srgb=%u\n"
         "state.border_color=0x%08x\n",
-        D9_CAPTURE_SCHEMA_VERSION,
+        D9_CAPTURE_SCHEMA_VERSION, capture_full_enabled() ? 1u : 0u,
         (unsigned long long)p->signature, p->truncation, trunc,
         s->frame_index, s->draw_index,
         s->draw.type, s->draw.start, s->draw.primitives,
@@ -847,6 +1019,7 @@ static int write_text(FILE *f, const D9CaptureSnapshot *s, const Plan *p) {
         "vertices.declared_bytes=%zu\n"
         "vertices.hash=0x%016llx\n"
         "vertices.truncated=%u\n"
+        "vertices.source=%s\n"
         "indices.size=%u\n"
         "indices.count=%u\n"
         "indices.captured=%u\n"
@@ -854,12 +1027,13 @@ static int write_text(FILE *f, const D9CaptureSnapshot *s, const Plan *p) {
         "indices.declared_bytes=%zu\n"
         "indices.hash=0x%016llx\n"
         "indices.truncated=%u\n",
-        s->draw.vertices.stride, s->draw.vertices.count,
-        (unsigned)(p->vertices.stored / (s->draw.vertices.stride ?
-                  s->draw.vertices.stride : 1)),
+        p->vertex_stride, p->vertex_count,
+        (unsigned)(p->vertices.stored / (p->vertex_stride ?
+                  p->vertex_stride : 1)),
         p->vertices.stored, p->vertices.declared,
         (unsigned long long)p->vertices.hash,
         p->vertices.stored < p->vertices.declared ? 1u : 0u,
+        p->vertices_reconstructed ? "decoded_compact" : "snapshot",
         s->draw.indices.size, s->draw.indices.count,
         (unsigned)(p->indices.stored / (s->draw.indices.size ?
                   s->draw.indices.size : 1)),
@@ -1101,10 +1275,12 @@ int d9_capture_record(unsigned index, D9CaptureRecordInfo *out) {
 uint64_t d9_capture_signature(const D9CaptureSnapshot *snapshot, GuestMemory *memory,
                               int *error) {
     g.error[0] = 0;
-    Plan plan;
+    Plan plan = {0};
     int rc = build_plan(snapshot, memory, &plan);
+    uint64_t signature = rc == D9_CAPTURE_OK ? plan.signature : 0;
+    free_plan(&plan);
     if (error) *error = rc;
-    return rc == D9_CAPTURE_OK ? plan.signature : 0;
+    return signature;
 }
 
 int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
@@ -1117,13 +1293,13 @@ int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
         return D9_CAPTURE_INVALID;
     }
 
-    Plan plan;
+    Plan plan = {0};
     int rc = build_plan(snapshot, memory, &plan);
-    if (rc) return rc;
+    if (rc) { free_plan(&plan); return rc; }
 
     if (g.flags & D9_CAPTURE_OPT_UNIQUE_ONLY) {
         for (unsigned i = 0; i < g.count; ++i)
-            if (g.seen[i] == plan.signature) return D9_CAPTURE_SKIP;
+            if (g.seen[i] == plan.signature) { free_plan(&plan); return D9_CAPTURE_SKIP; }
     }
 
     char text_path[D9_CAPTURE_PATH_MAX];
@@ -1132,12 +1308,14 @@ int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
     if (rc) {
         set_error(D9_CAPTURE_LIMIT, "no free capture name below %s/%s",
                   g.directory, g.basename);
+        free_plan(&plan);
         return rc;
     }
 
     FILE *binary = fopen(binary_path, "wb");
     if (!binary) {
         set_error(D9_CAPTURE_IO, "cannot create %s", binary_path);
+        free_plan(&plan);
         return D9_CAPTURE_IO;
     }
     rc = write_binary(binary, snapshot, &plan, memory);
@@ -1149,6 +1327,7 @@ int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
         remove(binary_path);
         if (!g.error[0])
             set_error(rc, "failed to write %s", binary_path);
+        free_plan(&plan);
         return rc;
     }
 
@@ -1156,6 +1335,7 @@ int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
     if (!text) {
         set_error(D9_CAPTURE_IO, "cannot create %s", text_path);
         remove(binary_path);
+        free_plan(&plan);
         return D9_CAPTURE_IO;
     }
     rc = write_text(text, snapshot, &plan);
@@ -1168,6 +1348,7 @@ int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
         remove(binary_path);
         if (!g.error[0])
             set_error(rc, "failed to write %s", text_path);
+        free_plan(&plan);
         return rc;
     }
 
@@ -1178,9 +1359,9 @@ int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
     info->truncation = plan.truncation;
     info->vs_hash = plan.vs.hash;
     info->ps_hash = plan.ps.hash;
-    info->vertex_count = snapshot->draw.vertices.count;
+    info->vertex_count = plan.vertex_count;
     info->vertex_captured = (unsigned)(plan.vertices.stored /
-        (snapshot->draw.vertices.stride ? snapshot->draw.vertices.stride : 1));
+        (plan.vertex_stride ? plan.vertex_stride : 1));
     info->index_count = snapshot->draw.indices.count;
     info->index_captured = (unsigned)(plan.indices.stored /
         (snapshot->draw.indices.size ? snapshot->draw.indices.size : 1));
@@ -1203,6 +1384,7 @@ int d9_capture_offer(const D9CaptureSnapshot *snapshot, GuestMemory *memory) {
     strcpy(g.last_binary, binary_path);
     g.count++;
     g.error[0] = 0;
+    free_plan(&plan);
     return D9_CAPTURE_OK;
 }
 
