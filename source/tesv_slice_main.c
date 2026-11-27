@@ -88,7 +88,7 @@ static const FnEntry cube_probe_table[] = {
     {0x30000010u, cube_probe_stub33}
 };
 
-static int run(const char *exe, const char *root, unsigned steps, size_t budget, const char *log,
+static int run(const char *exe, const char *root, uint64_t steps, size_t budget, const char *log,
                const D9Backend *backend, void *backend_ctx) {
     BootSession b;
     n3ds_boot_init(&b, budget);
@@ -205,8 +205,8 @@ out:
     if (log) {
         FILE *f = fopen(log, "w");
         if (f) {
-            fprintf(f, "run rc=%d\nguest_used=%lu steps=%u\napp_region=%u MiB free=%u MiB\n%s\n%s\n", rc,
-                    (unsigned long)b.memory.used, steps, g_region_mib, g_free_mib, b.message, n3ds_lift_fault());
+            fprintf(f, "run rc=%d\nguest_used=%lu steps=%llu\napp_region=%u MiB free=%u MiB\n%s\n%s\n", rc,
+                    (unsigned long)b.memory.used, (unsigned long long)steps, g_region_mib, g_free_mib, b.message, n3ds_lift_fault());
             if (win32_last_exit_from())
                 fprintf(f, "exit code=%lu from=%08lx\n", (unsigned long)win32_last_exit_code(),
                         (unsigned long)win32_last_exit_from());
@@ -303,7 +303,7 @@ int main(void) {
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s TESV.exe [root] [steps] [budget_bytes] [memprobe]\n", argv[0]); return 2; }
     const char *root = argc > 2 ? argv[2] : ".";
-    unsigned steps = argc > 3 ? (unsigned)strtoul(argv[3], NULL, 10) : 200000;
+    uint64_t steps = argc > 3 ? strtoull(argv[3], NULL, 10) : 200000;
     size_t budget = argc > 4 ? (size_t)strtoull(argv[4], NULL, 0) : (64u << 20);
     if (budget < (28u << 20)) budget = 28u << 20;
     if (budget > (256u << 20)) budget = 256u << 20;
