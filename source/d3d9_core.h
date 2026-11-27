@@ -68,6 +68,18 @@ static inline float d9_sampler_lod_bias(uint32_t bits){
 typedef struct {int left,top,right,bottom;} D9Rect;
 typedef struct {
     unsigned z_enable,z_write,z_func,cull,alpha_test,alpha_func,alpha_ref,blend,src_blend,dst_blend,blend_op,color_write;
+    /* GFx's standard state block.  These are real D3DSAMPLERSTATETYPE-style
+     * ids that used to be D3DERR_INVALIDCALL: FOGENABLE(28),
+     * SPECULARENABLE(29), DITHERENABLE(26), CLIPPING(136), LIGHTING(137),
+     * the stencil block (52..59) and SCISSORTESTENABLE(174).  The PICA
+     * fixed-function path has no fog/specular/clip-plane stage and the menu
+     * backend has no scissor stage, so the values are stored (GetRenderState
+     * and state blocks round-trip) and a one-shot diagnostic names the
+     * unimplemented effect.  Stencil enable/ops are stored for the depth
+     * attachment; the backend's Draw uses them only where PICA exposes the
+     * depth test. */
+    unsigned fog_enable,specular_enable,dither_enable,clipping,lighting,scissor_test;
+    unsigned stencil_enable,stencil_fail,stencil_zfail,stencil_pass,stencil_func,stencil_ref,stencil_mask,stencil_write_mask;
     unsigned address_u,address_v,mag_filter,min_filter,mip_filter,max_mip,resident_mips;
     /* Remaining D3DSAMPLERSTATETYPE values.  lod_bias keeps the D3D9 DWORD (the
      * float's bit pattern); border_color is D3DCOLOR 0xAARRGGBB.  address_w is
@@ -755,6 +767,10 @@ int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,
                                  const void *index_data,unsigned index_format,
                                  const void *vertex_data,unsigned vertex_stride);
 int d9_end_scene(D9Device *d);
+/* Publish texture levels that were created/filled inside a frame.  Called at
+ * the real frame boundary (d9_end_scene / d9_present); returns D9_OK or the
+ * first backend failure. */
+int d9_publish_pending_textures(D9Device *d);
 int d9_present(D9Device *d);
 size_t d9_memory_used(const D9Device *d);
 /* Remaining device budget in bytes (limit - d9_memory_used), never negative.

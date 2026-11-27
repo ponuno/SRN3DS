@@ -46,7 +46,7 @@ typedef struct {
     D9Handle cube;unsigned cube_face,cube_level;
     int has_depth;    /* native currently owns a depth-stencil attachment */
 } Target;
-typedef struct {D9Handle id;unsigned w,h,format;} Depth;
+typedef struct {D9Handle id;unsigned w,h,format,lockable;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;unsigned face_mask;} CubeLevel;
 typedef struct {
@@ -56,6 +56,10 @@ typedef struct {
     /* D3DUSAGE_RENDERTARGET: nonzero target handle whose colour buffer is the
      * texture storage.  The Texture owns no separate native allocation. */
     D9Handle rt_target;
+    /* Set when LockRect/UnlockRect wrote the CPU store inside BeginScene; the
+     * GPU copy is published at EndScene or by the next SetTexture outside a
+     * frame. */
+    int pending_upload;
 } Texture;
 typedef struct {
     D9Handle id;unsigned edge,levels,format,pool,usage;
@@ -191,6 +195,11 @@ static D9TexEntry *budget_trim_candidate(D9Device *d,D9Handle *key,unsigned *cou
 }
 static int budget_reserve(D9Device *d,size_t need){
     if(!d)return D9_INVALID;
+    /* A reservation that already fits is a pure accounting operation, so a
+     * texture can be created inside a frame.  Only trimming needs the scene
+     * closed (eviction must not run while draws are queued). */
+    size_t now=d9_memory_used(d);
+    if(now<=d->limit&&need<=d->limit-now)return D9_OK;
     if(d->scene||d->teardown){
         set_diagnosis(d,"budget trim is not allowed inside BeginScene/EndScene");
         return D9_MEMORY;
@@ -241,10 +250,18 @@ static int table_full(D9Device *d,const char *name,unsigned count){
 static int pow2(unsigned n){return n&&n<=1024&&!(n&(n-1));}
 static int dim(unsigned n){return n>=8&&pow2(n);}
 int d9_texture_layout(unsigned w,unsigned h,unsigned f,size_t *pitch,size_t *bytes){
-    if(!pitch||!bytes||!pow2(w)||!pow2(h))return D9_INVALID;
+    if(!pitch||!bytes||!w||!h||w>1024||h>1024)return D9_INVALID;
     unsigned bb=d9_bc_block_bytes(f);
-    if(bb){*pitch=(size_t)((w+3)/4)*bb;*bytes=*pitch*((h+3)/4);return D9_OK;}
-    if(f==D9_A8){*pitch=(size_t)w;*bytes=*pitch*h;return D9_OK;}
+    if(bb){
+        if(!pow2(w)||!pow2(h))return D9_INVALID;
+        *pitch=(size_t)((w+3)/4)*bb;*bytes=*pitch*((h+3)/4);return D9_OK;
+    }
+    /* A8 is a single-channel PICA GPU_A8 texture.  PICA samples it with
+     * CLAMP_TO_EDGE, so the font atlas does not have to be power-of-two: the
+     * guest keeps its logical size and D3D9 normalized texcoords still address
+     * it.  All other formats keep the power-of-two storage rule. */
+    if(f==D9_A8){*pitch=(size_t)w;*bytes=(size_t)w*h;return D9_OK;}
+    if(!pow2(w)||!pow2(h))return D9_INVALID;
     if(f!=D9_A8R8G8B8&&f!=D9_X8R8G8B8)return D9_INVALID;*pitch=(size_t)w*4;*bytes=*pitch*h;return D9_OK;
 }
 static unsigned native_dim(unsigned n){return n<8?8:n;}
@@ -277,6 +294,16 @@ int d9_unswizzle_rgba8(void *dst,size_t dst_pitch,const void *src,
         d[0]=s[1];d[1]=s[2];d[2]=s[3];d[3]=format==D9_X8R8G8B8?255:s[0];
     }return D9_OK;
 }
+static D9DrawState draw_state_defaults(void){
+    return (D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
+        .clipping=1,.lighting=1,
+        .stencil_fail=1,.stencil_zfail=1,.stencil_pass=1,.stencil_func=8,
+        .stencil_mask=0xffffffffu,.stencil_write_mask=0xffffffffu,
+        .address_u=1,.address_v=1,.address_w=1,.mag_filter=1,.min_filter=1,.mip_filter=0,.max_anisotropy=1,
+        .stage_colorop=D9_TOP_SELECTARG1,.stage_colorarg1=D9_TA_TEXTURE,.stage_colorarg2=D9_TA_CURRENT,
+        .stage_alphaop=D9_TOP_SELECTARG1,.stage_alphaarg1=D9_TA_TEXTURE,.stage_alphaarg2=D9_TA_CURRENT,
+        .stage_texcoordindex=0};
+}
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     if(!ops||!ops->texture_create||!ops->texture_upload||!ops->texture_delete||!ops->begin||!ops->draw||!ops->end||!limit)return NULL;
     D9Device *d=calloc(1,sizeof *d);if(!d)return NULL;d->ops=*ops;d->ctx=ctx;d->limit=limit;d->next=1;
@@ -286,11 +313,7 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEX_ENTRIES,&cache_ops,0,0)){
         free(d);return NULL;
     }
-    d->state=(D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
-        .address_u=1,.address_v=1,.address_w=1,.mag_filter=1,.min_filter=1,.mip_filter=0,.max_anisotropy=1,
-        .stage_colorop=D9_TOP_SELECTARG1,.stage_colorarg1=D9_TA_TEXTURE,.stage_colorarg2=D9_TA_CURRENT,
-        .stage_alphaop=D9_TOP_SELECTARG1,.stage_alphaarg1=D9_TA_TEXTURE,.stage_alphaarg2=D9_TA_CURRENT,
-        .stage_texcoordindex=0};
+    d->state=draw_state_defaults();
     d->second=d->state;
     d->second.stage_colorop=d->second.stage_alphaop=D9_TOP_DISABLE;
     d->second.stage_texcoordindex=0;
@@ -447,7 +470,20 @@ static void cube_face_mark_ready(D9Device *d,D9Handle h,unsigned face,unsigned l
 }
 int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned levels,
                          unsigned pool,unsigned usage,int disposable,D9Handle *out){
-    if(!d||d->scene||d->teardown||!out||!d->next||!pow2(w)||!pow2(h)||pool>D9_POOL_SYSTEMMEM)return D9_INVALID;
+    /* CreateTexture is legal inside BeginScene/EndScene in D3D9.  The CPU
+     * store and the native allocation exist immediately; the guest level is
+     * marked not uploaded and is published lazily (LockRect/UnlockRect or the
+     * first SetTexture outside the scene). */
+    if(!d||d->teardown||!out||!d->next||pool>D9_POOL_SYSTEMMEM)return D9_INVALID;
+    int npo2=!(pow2(w)&&pow2(h));
+    if(npo2){
+        /* Only the A8 path is NPOT-capable (PICA CLAMP sampling).  NPOT has no
+         * meaningful mip chain, so exactly one level is required. */
+        if(fmt!=D9_A8||w<8||h<8||w>1024||h>1024||levels!=1){
+            set_diagnosis(d,"only 8..1024 A8 textures may be non-power-of-two with exactly one level");
+            return D9_INVALID;
+        }
+    }
     int padded=w<8||h<8;
     if(padded&&fmt!=D9_A8R8G8B8&&fmt!=D9_X8R8G8B8){
         set_diagnosis(d,"Small textures require uncompressed RGBA8 or XRGB8");return D9_UNSUPPORTED;
@@ -570,6 +606,33 @@ static int upload_texture_level(D9Device *d,Texture *t,unsigned level){
         d9_swizzle_rgba8(tmp,bytes,src,l->pitch,l->w,l->h,t->format);
     if(!rc&&d->ops.texture_upload(d->ctx,t->native,level,tmp,bytes))rc=D9_BACKEND;
     free(tmp);return rc;
+}
+/* Publish CPU levels written inside a frame.  Called at EndScene (frame closed,
+ * GPU idle) and from SetTexture when the caller binds a texture that was
+ * created/filled in the previous frame. */
+static int publish_pending_texture(D9Device *d,Texture *t){
+    if(!d||!t||!t->pending_upload)return D9_OK;
+    if(d->scene||d->teardown||t->cpu_only||!t->native||!t->pixels)return D9_UNSUPPORTED;
+    for(unsigned i=0;i<t->gpu_levels&&i<t->levels;++i){
+        if(t->level[i].uploaded)continue;
+        int rc=upload_texture_level(d,t,i);if(rc)return rc;
+        t->level[i].uploaded=1;
+    }
+    D9TexEntry *e=d9_texcache_find(&d->tex_cache,t->id);
+    if(e&&e->has_gpu&&!e->gpu_ready&&
+       d9_texcache_commit_upload(&d->tex_cache,t->id,t->native,t->gpu_bytes,0)!=D9TEXCACHE_OK)
+        return D9_BACKEND;
+    t->pending_upload=0;return D9_OK;
+}
+int d9_publish_pending_textures(D9Device *d){
+    if(!d||d->teardown||d->scene)return D9_INVALID;
+    int first=D9_OK;
+    for(unsigned i=0;i<MAX_TEXTURES;++i)
+        if(d->textures[i].id&&d->textures[i].pending_upload){
+            int rc=publish_pending_texture(d,&d->textures[i]);
+            if(rc&&first==D9_OK)first=rc;
+        }
+    return first;
 }
 static int rehydrate_texture(D9Device *d,Texture *t){
     if(!d||!t)return D9_INVALID;
@@ -722,7 +785,9 @@ int d9_texture_resource_info(D9Device *d,D9Handle h,unsigned *pool,
 }
 int d9_texture_lock_level_ex(D9Device *d,D9Handle h,unsigned level,void **ptr,size_t *pitch,int readonly){
     Texture *t=d?texture(d,h):NULL;
-    if(!t||d->scene||d->teardown||t->locked||!t->pixels||!ptr||!pitch||level>=t->levels)return D9_INVALID;
+    /* LockRect is legal inside BeginScene; only the GPU publication is
+     * deferred (finish_texture_unlock keeps the CPU store dirty). */
+    if(!t||d->teardown||t->locked||!t->pixels||!ptr||!pitch||level>=t->levels)return D9_INVALID;
     if(d9_texcache_pin(&d->tex_cache,h)!=D9TEXCACHE_OK)return D9_INVALID;
     Level *l=&t->level[level];t->locked=level+1;t->cache_pinned=1;*ptr=t->pixels+l->offset;*pitch=l->pitch;
     (void)readonly;return D9_OK;
@@ -731,10 +796,14 @@ int d9_texture_lock_level(D9Device *d,D9Handle h,unsigned level,void **ptr,size_
     return d9_texture_lock_level_ex(d,h,level,ptr,pitch,0);
 }
 static int finish_texture_unlock(D9Device *d,Texture *t,unsigned level,int readonly){
-    if(!t||level>=t->levels||t->locked!=level+1||d->scene||d->teardown)return D9_INVALID;
+    if(!t||level>=t->levels||t->locked!=level+1||d->teardown)return D9_INVALID;
     Level *l=&t->level[level];
     if(!readonly&&!t->cpu_only&&level<t->gpu_levels){
-        if(t->format==D9_A8){
+        if(d->scene){
+            /* Deferred publication: the guest bytes are already in t->pixels;
+             * d9_set_texture uploads them once the frame is closed. */
+            l->uploaded=0;
+        }else if(t->format==D9_A8){
             if(!d->ops.texture_upload_format){
                 set_diagnosis(d,"A8 texture upload requires backend texture_upload_format");
                 return D9_UNSUPPORTED;
@@ -752,12 +821,20 @@ static int finish_texture_unlock(D9Device *d,Texture *t,unsigned level,int reado
     }
     D9TexEntry *e=d9_texcache_find(&d->tex_cache,t->id);
     int rc=D9TEXCACHE_OK;
+    if(d->scene){
+        /* No GPU work while the frame is open: keep the CPU bytes and let
+         * EndScene/SetTexture publish them. */
+        (void)d9_texcache_unpin(&d->tex_cache,t->id);
+        t->locked=0;t->cache_pinned=0;
+        if(!readonly){t->pending_upload=1;l->uploaded=0;}
+        return D9_OK;
+    }
     if(!readonly&&!t->cpu_only&&e&&e->has_gpu&&!e->gpu_ready)
         rc=d9_texcache_commit_upload(&d->tex_cache,t->id,t->native,t->gpu_bytes,0);
     else
         rc=d9_texcache_abort_upload(&d->tex_cache,t->id);
     if(rc!=D9TEXCACHE_OK)return D9_BACKEND;
-    t->locked=0;t->cache_pinned=0;if(!readonly)l->uploaded=1;return D9_OK;
+    t->locked=0;t->cache_pinned=0;t->pending_upload=0;if(!readonly)l->uploaded=1;return D9_OK;
 }
 int d9_texture_unlock_level(D9Device *d,D9Handle h,unsigned level){Texture *t=d?texture(d,h):NULL;return finish_texture_unlock(d,t,level,0);}
 int d9_texture_lock(D9Device *d,D9Handle h,void **ptr,size_t *pitch){return d9_texture_lock_level(d,h,0,ptr,pitch);}
@@ -1963,11 +2040,7 @@ int d9_reset_device_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int loc
         destroy_target_slot(d,&d->targets[i]);
     d->target=0;
     memset(d->depths,0,sizeof d->depths);d->depth=0;
-    d->state=(D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
-        .address_u=1,.address_v=1,.address_w=1,.mag_filter=1,.min_filter=1,.mip_filter=0,.max_anisotropy=1,
-        .stage_colorop=D9_TOP_SELECTARG1,.stage_colorarg1=D9_TA_TEXTURE,.stage_colorarg2=D9_TA_CURRENT,
-        .stage_alphaop=D9_TOP_SELECTARG1,.stage_alphaarg1=D9_TA_TEXTURE,.stage_alphaarg2=D9_TA_CURRENT,
-        .stage_texcoordindex=0};
+    d->state=draw_state_defaults();
     d->second=d->state;
     d->second.stage_colorop=d->second.stage_alphaop=D9_TOP_DISABLE;
     d->second.stage_texcoordindex=0;
@@ -2165,6 +2238,10 @@ int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
     }
     if(h&&!t->native&&!t->cpu_only&&!t->gpu_only&&t->pool==D9_POOL_MANAGED){
         int rr=rehydrate_texture(d,t);if(rr)return rr;
+    }
+    if(h&&t->pending_upload&&!d->scene){
+        int pr=publish_pending_texture(d,t);
+        if(pr&&!t->level[0].uploaded)return pr;
     }
     if(h&&(!t->native||!t->level[0].uploaded)){
         set_diagnosis(d,"texture native is missing or not uploaded");
@@ -2534,7 +2611,18 @@ static unsigned *render_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned *
     case 19:*min=1;*max=11;return &s->src_blend;case 20:*min=1;*max=11;return &s->dst_blend;
     case 22:*min=1;*max=3;return &s->cull;case 23:*min=1;*max=8;return &s->z_func;
     case 24:*max=255;return &s->alpha_ref;case 25:*min=1;*max=8;return &s->alpha_func;
-    case 168:*max=15;return &s->color_write;case 171:*min=1;*max=5;return &s->blend_op;default:return NULL;}}
+    case 168:*max=15;return &s->color_write;case 171:*min=1;*max=5;return &s->blend_op;
+    /* Stored-but-inert effect switches from the GFx state block. */
+    case 26:return &s->dither_enable;
+    case 28:return &s->fog_enable;case 29:return &s->specular_enable;
+    case 136:return &s->clipping;case 137:return &s->lighting;case 174:return &s->scissor_test;
+    /* D3DRS_STENCILENABLE..STENCILWRITEMASK (52..59). */
+    case 52:return &s->stencil_enable;
+    case 53:case 54:case 55:case 56:*min=1;*max=8;
+        return id==53?&s->stencil_fail:id==54?&s->stencil_zfail:id==55?&s->stencil_pass:&s->stencil_func;
+    case 57:*max=255;return &s->stencil_ref;
+    case 58:case 59:*max=0xffffffffu;return id==58?&s->stencil_mask:&s->stencil_write_mask;
+    default:return NULL;}}
 /* D3DSAMPLERSTATETYPE decode.  The switch below names every state so a refusal
  * can state the exact type and value instead of returning a generic INVALID. */
 static const char *sampler_name(unsigned id){switch(id){
@@ -3487,7 +3575,11 @@ int d9_draw_indexed_primitive_up(D9Device *d,unsigned type,unsigned min_vertex,u
     UpSource up={vertex_data,vertex_stride,(size_t)min_vertex+vertex_count,index_data,index_format==D9_INDEX32?4u:2u};
     return draw(d,type,0,0,primitives,1,1,min_vertex,vertex_count,&up);
 }
-int d9_end_scene(D9Device *d){if(!d||d->teardown||!d->scene)return D9_INVALID;d->ops.end(d->ctx);d->scene=0;return D9_OK;}
+int d9_end_scene(D9Device *d){if(!d||d->teardown||!d->scene)return D9_INVALID;d->ops.end(d->ctx);d->scene=0;
+    /* Textures created or filled inside the frame were held in CPU memory.
+     * Publishing here is outside the scene, so the backend can upload them. */
+    (void)d9_publish_pending_textures(d);
+    return D9_OK;}
 int d9_present(D9Device *d){
     if(!d||d->teardown||!d->scene)return D9_INVALID;
     if(d->back_target){
@@ -3516,7 +3608,11 @@ int d9_present(D9Device *d){
          * so the contents are guaranteed only from the last BeginScene/Clear
          * or lock/unlock until this Present. */
     }
-    d->ops.end(d->ctx);d->scene=0;return D9_OK;
+    d->ops.end(d->ctx);d->scene=0;
+    /* COM EndScene is a state flag; Present is the real frame boundary, so the
+     * deferred texture publication happens here. */
+    (void)d9_publish_pending_textures(d);
+    return D9_OK;
 }
 /* --- depth-stencil surfaces ------------------------------------------------ */
 static Depth *depth_slot(D9Device *d,D9Handle h){
@@ -3528,7 +3624,7 @@ int d9_create_depth_surface(D9Device *d,unsigned w,unsigned h,unsigned format,
                             D9Handle *out){
     if(out)*out=0;
     if(!d||d->teardown||d->scene||!out||!d->next||!d->back_valid||
-       (format!=D9_D24S8&&format!=D9_D24X8)||multisample||quality||lockable)return D9_INVALID;
+       (format!=D9_D24S8&&format!=D9_D24X8)||multisample||quality)return D9_INVALID;
     if(!d->ops.depth_clear)return D9_UNSUPPORTED;
     /* A depth-stencil surface is a descriptor of the single PICA
      * DEPTH24_STENCIL8 attachment of the active target: no VRAM is allocated
@@ -3540,7 +3636,7 @@ int d9_create_depth_surface(D9Device *d,unsigned w,unsigned h,unsigned format,
     if(!back_size&&!pow2)return D9_INVALID;
     Depth *slot=NULL;for(unsigned i=0;i<MAX_DEPTHS;++i)if(!d->depths[i].id){slot=&d->depths[i];break;}
     if(!slot)return table_full(d,"depth-stencil",MAX_DEPTHS);
-    D9Handle id=d->next++;*slot=(Depth){id,w,h,format};*out=id;return D9_OK;
+    D9Handle id=d->next++;*slot=(Depth){id,w,h,format,lockable?1:0};*out=id;return D9_OK;
 }
 int d9_release_depth_surface(D9Device *d,D9Handle h){
     Depth *s=depth_slot(d,h);

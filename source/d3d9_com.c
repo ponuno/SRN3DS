@@ -124,6 +124,10 @@ static struct {
     uint32_t cursor_surface;unsigned cursor_shown;
     unsigned current_palette;uint8_t *palettes[MAX_PALETTES];
     uint32_t pp[14],creation[4],viewport[6],scissor[4];unsigned scissor_warned,gamma_warned;float npatch_segments;
+    /* D3D9 stream frequency, stored verbatim.  0 means the D3D9 default of 1.
+     * The indexed-data bit (0x80000000) is the normal GFx path; the PICA draw
+     * path renders one instance, so INSTANCEDATA (0x40000000) is refused. */
+    unsigned ss_freq[D9_MAX_STREAMS];
     uint16_t gamma[3][256];size_t surface_bytes;
     unsigned frame_index,draw_index,capture_present;uint32_t capture_present_flags;
     char last_shader_rejection[320];
@@ -258,6 +262,7 @@ static void destroy_obj(Obj *o){
         if(o->is_depth){
             if(g.depth==o){g.depth=NULL;if(g.device)(void)d9_set_depth_surface(g.device,0);}
             (void)d9_release_depth_surface(g.device,o->depth);
+            free(o->pixels);o->pixels=NULL;g.surface_bytes-=o->bytes;o->bytes=0;
             o->depth=0;o->is_depth=0;parent=g.dev;
         }
         else if(o==g.back){g.back=NULL;g.rt=NULL;}
@@ -719,6 +724,7 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     free_palettes();g.current_palette=0;
     g.cursor_hotspot_x=g.cursor_hotspot_y=g.cursor_x=g.cursor_y=0;g.cursor_surface=0;g.cursor_shown=0;
     g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;
+    memset(g.ss_freq,0,sizeof g.ss_freq);
     memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);
     memset(&g.constants_c8,0,sizeof g.constants_c8);g.clip_status_union=g.clip_status_intersection=0;
     if(g.device)d9_clear_vs_constants_f(g.device);
@@ -834,7 +840,11 @@ static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
     if(!obj(A(0),DEVICE)||g.phase)RET(INVALID,9);
     if(A(8)){d3d_log("CreateDepthStencilSurface","shared handles are not supported");RET(INVALID,9);}
     if(A(4)||A(5)){d3d_log("CreateDepthStencilSurface","only D3DMULTISAMPLE_NONE with quality zero is implemented");RET(UNAVAILABLE,9);}
-    if(A(6)){d3d_log("CreateDepthStencilSurface","lockable depth-stencil surfaces are not implemented");RET(UNAVAILABLE,9);}
+    /* Lockable D24S8 is real: the descriptor owns a CPU D24S8 shadow that
+     * LockRect/UnlockRect read and write.  PICA has no depth readback/upload
+     * op, so the shadow is the authoritative lock image and the bound GPU
+     * usage still resolves to the target's embedded DEPTH24_STENCIL8
+     * attachment.  This is what GFx asks for (`push 1` at 0xf82616). */
     /* A descriptor of the target's single DEPTH24_STENCIL8 attachment; no VRAM
      * is allocated here.  Binding checks the size against the active target.
      * Power-of-two 8..1024 covers render-target textures; the exact 400x240
@@ -856,8 +866,23 @@ static void create_depth_stencil(CPU *c){uint32_t out=A(7);if(!ptr(out,4))RET(IN
             rc==D9_INVALID?"invalid depth-stencil dimensions or format":"invalid depth-stencil request");
         RET(rc==D9_MEMORY?OUTMEM:rc==D9_INVALID?INVALID:UNAVAILABLE,9);
     }
-    Obj *o=new_obj(SURFACE);if(!o){d9_release_depth_surface(g.device,h);RET(OUTMEM,9);}
-    o->depth=h;o->is_depth=1;o->width=A(1);o->height=A(2);o->format=A(3);o->usage=0;o->pool=0;
+    /* Allocate the lockable CPU shadow before the COM slot: a failure then
+     * leaves neither the descriptor nor the object table dirty. */
+    uint8_t *shadow=NULL;unsigned shadow_bytes=0,shadow_pitch=0;
+    if(A(6)){
+        uint64_t bytes=(uint64_t)A(1)*A(2)*4u;
+        if(bytes>LOCK_STRIDE||bytes>SURFACE_BUDGET-g.surface_bytes){
+            d3d_log("CreateDepthStencilSurface","lockable depth-stencil shadow exceeds the surface budget");
+            d9_release_depth_surface(g.device,h);RET(OUTMEM,9);
+        }
+        shadow=calloc(1,(size_t)bytes);
+        if(!shadow){d9_release_depth_surface(g.device,h);RET(OUTMEM,9);}
+        shadow_bytes=(unsigned)bytes;shadow_pitch=A(1)*4u;
+    }
+    Obj *o=new_obj(SURFACE);
+    if(!o){free(shadow);d9_release_depth_surface(g.device,h);RET(OUTMEM,9);}
+    o->depth=h;o->is_depth=1;o->width=A(1);o->height=A(2);o->format=A(3);o->usage=0;o->pool=0;o->lockable=A(6)!=0;
+    o->pixels=shadow;o->bytes=shadow_bytes;o->pitch=shadow_pitch;g.surface_bytes+=shadow_bytes;
     retain(g.dev);M32(out)=o->guest;
     trace_detail("DepthStencil=0x%08lx %lux%lu Format=%lu (PICA depth attachment)",
         (unsigned long)o->guest,(unsigned long)o->width,(unsigned long)o->height,(unsigned long)o->format);
@@ -1359,7 +1384,9 @@ static void create_ib(CPU *c){uint32_t out=A(5);if(!obj(A(0),DEVICE)||g.phase||!
     if(OBJ_LIMIT_HIT())RET(OUTMEM,7);D9Handle h;int rc=d9_create_index_buffer(g.device,A(1),A(3),&h);if(rc)RET(hr(rc),7);
     Obj *o=new_obj(IB);if(!o){d9_release_buffer(g.device,h);RET(OUTMEM,7);}
     o->handle=h;o->bytes=A(1);o->usage=A(2);o->format=A(3);o->pool=A(4);retain(g.dev);M32(out)=o->guest;g.last_diagnostic[0]=0;RET(OK,7);}
-static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||g.phase||!ptr(out,4))RET(INVALID,9);M32(out)=0;
+static void create_tex(CPU *c){uint32_t out=A(7);if(!obj(A(0),DEVICE)||!ptr(out,4))RET(INVALID,9);M32(out)=0;
+    /* CreateTexture is a legal inside-frame call in D3D9; the core defers GPU
+     * publication to EndScene (see d9_create_texture_ex). */
     if(A(8))RET(INVALID,9);
     if(A(4)==1u){
         unsigned w=A(1),height=A(2),levels=A(3),format=A(5),pool=A(6);
@@ -1526,7 +1553,7 @@ static int lock_buffer(Obj *o,unsigned offset,unsigned bytes,unsigned flags){
     o->lock_guest=address;o->lock_host=host;o->lock_bytes=bytes;o->readonly=!!(flags&0x10);o->lock_rows=1;o->lock_pitch=o->lock_row_bytes=bytes;return D9_OK;
 }
 static int lock_texture(Obj *o,unsigned level,uint32_t rect,unsigned flags){
-    if(!o||o->kind!=TEX||o->lock_guest||g.phase||flags&~0x3010u||(rect&&(flags&0x2000)))return D9_INVALID;
+    if(!o||o->kind!=TEX||o->lock_guest||flags&~0x3010u||(rect&&(flags&0x2000)))return D9_INVALID;
     unsigned w,h;size_t pitch,bytes;if(d9_texture_level_info(g.device,o->handle,level,&w,&h,&pitch,&bytes))return D9_INVALID;
     unsigned x=0,y=0,r=w,b=h;if(rect){if(!ptr(rect,16))return D9_INVALID;x=M32(rect);y=M32(rect+4);r=M32(rect+8);b=M32(rect+12);if(x>=r||y>=b||r>w||b>h)return D9_INVALID;}
     unsigned bb=d9_bc_block_bytes(o->format);size_t offset,row_bytes,rows;
@@ -1543,7 +1570,7 @@ static int lock_texture(Obj *o,unsigned level,uint32_t rect,unsigned flags){
     o->lock_guest=address;o->lock_host=src;o->lock_bytes=(unsigned)span;o->readonly=!!(flags&0x10);o->lock_level=level;
     o->lock_rows=(unsigned)rows;o->lock_pitch=(unsigned)pitch;o->lock_row_bytes=(unsigned)row_bytes;return D9_OK;
 }
-static int unlock(Obj *o){if(!o||!o->lock_guest||g.phase)return D9_INVALID;
+static int unlock(Obj *o){if(!o||!o->lock_guest||(g.phase&&o->kind!=TEX))return D9_INVALID;
     if(!o->readonly){uint8_t *host=o->lock_host,*src=ptr(o->lock_guest,o->lock_bytes);for(unsigned i=0;i<o->lock_rows;++i)
         memcpy(host+(size_t)i*o->lock_pitch,src+(size_t)i*o->lock_pitch,o->lock_row_bytes);}
     int rc=o->kind==TEX?(o->readonly?d9_texture_unlock_readonly(g.device,o->handle,o->lock_level):d9_texture_unlock_level(g.device,o->handle,o->lock_level)):d9_buffer_unlock(g.device,o->handle);
@@ -1868,7 +1895,8 @@ static void surface_container(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(2)
 static int lock_surface_rect(Obj *o,const int32_t r[4],unsigned flags,
                              unsigned *pitch_out,uint32_t *address_out,unsigned *rows_out){
     if(!o||o->kind!=SURFACE||!g.mem||!r||!pitch_out||!address_out||!rows_out)return D9_INVALID;
-    if(o->is_depth)return D9_INVALID;
+    /* Lockable D24S8 descriptors own a CPU shadow; non-lockable ones do not. */
+    if(o->is_depth&&(!o->lockable||!o->pixels))return D9_INVALID;
     if(o==g.back&&!o->lockable)return D9_BACKEND; /* no D3DPRESENTFLAG_LOCKABLE_BACKBUFFER */
     if(o->lock_guest||g.phase)return D9_INVALID;
     /* Explicit/retained targets are readable, and lockable ones are writable. */
@@ -1956,7 +1984,7 @@ static void surface_lock(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
     if(rc==D9_BACKEND)d3d_log("LockRect",o!=g.back||o->lockable?
         "the backend has no readable render-target pixels":
         "the back buffer is not lockable; D3DPRESENTFLAG_LOCKABLE_BACKBUFFER was not requested");
-    else if(rc==D9_INVALID&&o->is_depth)d3d_log("LockRect","depth-stencil surfaces are not lockable here");
+    else if(rc==D9_INVALID&&o->is_depth)d3d_log("LockRect","the depth-stencil surface was not created lockable; Lockable=0");
     RET(hr(rc),4);
 }
 static void surface_unlock(CPU *c){Obj *o=obj(A(0),SURFACE);if(!o)RET(INVALID,1);RET(hr(unlock_surface(o)),1);}
@@ -2348,8 +2376,19 @@ static void stream(CPU *c){Obj *o=obj(A(2),VB);unsigned s=A(1);if(!obj(A(0),DEVI
     int rc=d9_set_stream(g.device,s,o?o->handle:0,A(3),A(4));if(!rc){bind(&g.streams[s],o);g.offsets[s]=A(3);g.strides[s]=A(4);}RET(hr(rc),5);}
 static void get_stream(CPU *c){unsigned s=A(1);if(!obj(A(0),DEVICE)||s>=D9_MAX_STREAMS||!ptr(A(2),4)||!ptr(A(3),4)||!ptr(A(4),4))RET(INVALID,5);
     Obj *o=g.streams[s];retain(o);M32(A(2))=o?o->guest:0;M32(A(3))=g.offsets[s];M32(A(4))=g.strides[s];RET(OK,5);}
-static void stream_freq(CPU *c){draw_probe(c,"SetStreamSourceFreq");if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||A(2)!=1||g.phase==2)RET(UNAVAILABLE,3);RET(OK,3);}
-static void get_stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||!ptr(A(2),4))RET(INVALID,3);M32(A(2))=1;RET(OK,3);}
+static void stream_freq(CPU *c){draw_probe(c,"SetStreamSourceFreq");
+    if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||g.phase==2)RET(INVALID,3);
+    unsigned v=A(2);
+    if(v&0x40000000u){ /* D3DSTREAMSOURCE_INSTANCEDATA */
+        d3d_fail("SetStreamSourceFreq","per-instance stream frequencies (divide-instancing) are not implemented",UNAVAILABLE);
+        RET(UNAVAILABLE,3);
+    }
+    if(!(v&0x3fffffffu)){
+        d3d_fail("SetStreamSourceFreq","the frequency/instance count must be non-zero",INVALID);RET(INVALID,3);
+    }
+    g.ss_freq[A(1)]=v;g.last_diagnostic[0]=0;RET(OK,3);}
+static void get_stream_freq(CPU *c){if(!obj(A(0),DEVICE)||A(1)>=D9_MAX_STREAMS||!ptr(A(2),4))RET(INVALID,3);
+    M32(A(2))=g.ss_freq[A(1)]?g.ss_freq[A(1)]:1;RET(OK,3);}
 /* TESV_DRAW_PROBE: identify guest draw-submit wrappers that set state but
  * never reach the Draw* slot.  The TESV rectangle/quad wrapper at 0xf874c0
  * sets decl/VS/PS/freq/indices and then gates the draw on the high byte of

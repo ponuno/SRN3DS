@@ -179,7 +179,7 @@ static void depth_flow(Harness *h,uint32_t device){
     bad[0]=400;bad[1]=240;bad[2]=80; /* D16 */
     assert(call(h,device,29,bad,8)==0x8876086au&&rd(h,OUT2)==0);
     bad[2]=D9_D24S8;bad[3]=2;assert(call(h,device,29,bad,8)==0x8876086au&&rd(h,OUT2)==0);
-    bad[3]=0;bad[5]=1;assert(call(h,device,29,bad,8)==0x8876086au&&rd(h,OUT2)==0);
+    bad[3]=0;bad[5]=1;{uint32_t dl=0;assert(call(h,device,29,bad,8)==0);dl=rd(h,OUT2);assert(dl);assert(unref(h,dl)==0);}
     bad[5]=0;bad[7]=1;assert(call(h,device,29,bad,8)==0x8876086cu&&rd(h,OUT2)==0);
 
     uint32_t set_depth[]={depth};assert(call(h,device,39,set_depth,1)==0);

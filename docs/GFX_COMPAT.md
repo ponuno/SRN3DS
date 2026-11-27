@@ -8,7 +8,10 @@ It is deliberately not about our AVM/display-list (`menu_swf_*`). The menu in
 the shipping game is drawn by Scaleform inside the guest; AS2/AVM is GFx's
 internal business. Our contract is **D3D9 + BSA/I/O + input**.
 
-Baseline: `80006da` (`gfx-compat`).
+Baseline: `80006da` (`gfx-compat`); follow-up `d3d9-gfx-fixes` closes the
+blockers marked **FIXED** below (lockable depth, the GFx render-state block,
+stream frequency, in-frame `CreateTexture`, NPOT A8).  That follow-up is a host
+COM/null-backend result only — no draw, frame or ARM pixel claim.
 
 ## 1. Method and reproduction
 
@@ -161,12 +164,12 @@ is pushed right before `Pool`.
 
 | Format | Value | Where | Our state |
 |---|---:|---|---|
-| `D3DFMT_A8` | `0x1c` | `0xf822a7`, `0xf822d9`, `0xf82312` (font atlas), `0xf82e39` | **works** — `d9_texture_layout` size 1 B/px, `GPU_A8` backend path |
-| `D3DFMT_A8L8` | `0x33` | `0xf82e9d` | **refused** — not in `d9_texture_layout` |
-| `D3DFMT_A4R4G4B4` | `0x1a` | `0xf82f01` | **refused** |
-| `D3DFMT_A8R8G8B8` | `0x15` | `0xf82f66` | **works** |
+| `D3DFMT_A8` | `0x1c` | `0xf822a7`, `0xf822d9`, `0xf82312` (font atlas), `0xf82e39` | **works** — `d9_texture_layout` size 1 B/px, `GPU_A8` backend path; **NPOT allowed** (8..1024, one level, PICA CLAMP) |
+| `D3DFMT_A8L8` | `0x33` | `0xf82e9d` | **refused** — not in `d9_texture_layout` (latent fallback only) |
+| `D3DFMT_A4R4G4B4` | `0x1a` | `0xf82f01` | **refused** (latent fallback only) |
+| `D3DFMT_A8R8G8B8` | `0x15` | `0xf82f66` | **works** — power-of-two only |
 | `D3DFMT_DXT1/3/5` | `'DXT1/3/5'` | not on this path | accepted by layout, **decoded** by `d9_bc_to_pica` |
-| `D24S8` (depth) | `0x4b` | `0xf82616` | format ok, **lockable bit refused** |
+| `D24S8` (depth) | `0x4b` | `0xf82616` | format ok, **Lockable=1 now creates a CPU D24S8 shadow** (FIXED) |
 
 Important nuance: `0xf8205d`…`0xf83b28` is a **fallback chain**, not four
 independent requests. The code caches the chosen format at `[obj+0x1c]` and,
@@ -176,14 +179,19 @@ failed**. A8 currently succeeds, so those two are latent, not immediate.
 
 Font atlases are created at half the target size with `Levels=1` and
 `Pool=DEFAULT`; the dimension comes from `[obj+0x36c/0x370]`, so they inherit
-whatever the render target size is. Our `pow2(w)&&pow2(h)` requirement is
-satisfied for 512/1024, but a non-power-of-two UI target would turn the atlas
-into `D3DERR_INVALIDCALL`.
+whatever the render target size is.  `d9_texture_layout` now accepts a
+non-power-of-two **A8** size in 8..1024 with exactly one level; the guest keeps
+its logical size and PICA CLAMP sampling addresses it.  RGBA8/XRGB8 and every
+BC format keep the power-of-two rule.  A8L8/A4R4G4B4 stay refused (they are only
+reached if A8 creation fails).
 
 `CreateTexture` with `w<8||h<8` requires RGBA8/XRGB8
-(`d9_create_texture_ex`), and **no texture may be created inside
-`BeginScene`/`EndScene`** (`!d->scene`). GFx creates outside the scene, so both
-are fine today — but a lazier texture manager will hit the second.
+(`d9_create_texture_ex`).  **CreateTexture is now legal inside
+`BeginScene`/`EndScene`** (FIXED): the CPU store and native allocation happen
+immediately, `LockRect`/`UnlockRect` writes stay in the CPU store, and the GPU
+level is published at the real frame boundary (`Present` for COM, `EndScene`
+for the core API).  A texture created and filled in frame *N* binds from frame
+*N+1*; binding it inside the same scene is still a named INVALIDCALL.
 
 ## 5. Shader set: what is real, what is covered
 
@@ -307,13 +315,13 @@ refusal with a non-`S_OK` HRESULT.
 
 | Method / format | Status | Blocker | Priority | Patch sketch |
 |---|---|---|---|---|
-| `CreateDepthStencilSurface(D24S8, lockable=1)` | **REF** | `A(6)` → `UNAVAILABLE`; GFx gets no depth | **P0** | accept lockable as a descriptor flag (ignore it, or back it with a readback surface); keep D24S8/D24X8-only |
+| `CreateDepthStencilSurface(D24S8, lockable=1)` | **OK** (FIXED) | descriptor owns a CPU D24S8 shadow; LockRect/UnlockRect round-trip, binding still uses the embedded PICA attachment | **P0** | done in `d3d9-gfx-fixes`; no depth upload op exists on PICA, so the shadow is lock-authoritative |
 | `CreatePixelShader` (36/38) | **REF**/probe | HAL init `jl` aborts | **P0** | add `mov,mad,mul` (0cce461b) and `texld,texld,lrp` (5b990161) plans; keep refusals named |
 | `SetVertexShader` GFx family | **PART** | decl needs color0+color1; backend emits pos+uv only | **P0** | relax output requirement to "declared ⊆ supported" and add the 5 VS plans |
-| `SetStreamSourceFreq` | **PART** | accepts only `Setting==1` | P0 | accept `1` and `0x1000001`, store the divisor; indexed-data bit is what GFx sets |
-| `SetRenderState` ids 28/29/136/137/152/174 | **REF** (`INVALIDCALL`) | only 7,14,15,19,20,22,23,24,25,27,168,171 exist | **P1** | shadow-store unknown ids, return `S_OK`; only refusal that must stay is a value that changes a TEV draw |
-| `CreateTexture` inside a scene | **REF** | `!d->scene` required | P1 | queue the create or defer binding; document it |
-| `CreateTexture` non-pow2 / <8 px | **REF** | `pow2`, `padded` rules | P1 | allow non-pow2 for A8/RGBA8 by rounding up and keeping the guest size |
+| `SetStreamSourceFreq` | **OK** (FIXED) | accepts `1`, indexed-data `0x80000001` and any indexed-data count; stores per stream; `INSTANCEDATA`/count 0 are named refusals | P0 | done; the PICA draw still renders one instance |
+| `SetRenderState` ids 26/28/29/52..59/136/137/152/174 | **OK** (FIXED) | shadow-stored with range validation; GetRenderState and state blocks round-trip. Fog/specular/clip-plane/scissor effects have no PICA fixed-function stage and are recorded only | **P1** | done in `render_slot` |
+| `CreateTexture` inside a scene | **OK** (FIXED) | deferred publication at Present/EndScene | P1 | done; binds from the next frame |
+| `CreateTexture` non-pow2 / <8 px | **PART** (FIXED for A8) | A8 8..1024 NPOT, one level; RGBA8/BC keep pow2; <8 still RGBA8-only | P1 | done |
 | `CreateTexture A8L8 / A4R4G4B4` | **REF** | layout table has A8/RGBA8/XRGB8/BC only | P2 | only reachable as fallback; map A8L8→A8+RGBA8 pair or expand to RGBA8 |
 | `CreateTexture DXT1/3/5` | **OK** (decode) | needs pow2 ≥8, ≤1024 | P2 | already decodes in `d9_bc_to_pica`; add a test for 2 mips |
 | `CreateTexture A8` | **OK** | `GPU_A8`, 1 B/px | — | — |
@@ -334,10 +342,11 @@ refusal with a non-`S_OK` HRESULT.
 
 ## 7. Top-10 blockers that appear the moment StartMenu opens
 
-1. **`CreateDepthStencilSurface` is refused because GFx asks for a lockable
-   D24S8** (`0xf82616`, `push 1`). The renderer binds no depth; the off-screen
-   pass has nothing to test against. *P0, one-line fix in
-   `create_depth_stencil`.*
+1. **`CreateDepthStencilSurface` refused the lockable D24S8 GFx asks for**
+   (`0xf82616`, `push 1`). **FIXED**: the descriptor owns a zeroed CPU D24S8
+   shadow; `LockRect`/`UnlockRect` read/write it, and the bound GPU usage is
+   still the target's embedded `DEPTH24_STENCIL8` attachment. A non-lockable
+   depth descriptor still refuses LockRect. *P0.*
 2. **36 of 38 StartMenu PS are not executable.** With the skip probe off,
    `CreatePixelShader` returns `NOTAVAILABLE` and `0xf883e1` aborts the whole
    menu HAL. The first missing plan that matters is `0cce461b`
@@ -351,22 +360,23 @@ refusal with a non-`S_OK` HRESULT.
    `d3d9_generated_vs_table.inc` are engine image-space VS. Vertex colour
    therefore never reaches TEV → text and shapes lose their tint even if the
    draw runs. *P0/P1 (needed for correct colour, not for the first pixel).*
-5. **`SetStreamSourceFreq` accepts only `1`.** GFx sets the indexed-data bit on
-   its dynamic VB before `SetIndices`. If the immediate is not exactly 1, the
-   shim returns `UNAVAILABLE` and the rect wrapper bails before the draw.
-   *P0 — verify with `TESV_DRAW_PROBE`, then widen.*
-6. **Unsupported `SetRenderState` ids return `INVALIDCALL`.** GFx sets
-   `FOGENABLE(28)`, `SPECULARENABLE(29)`, `SCISSORTESTENABLE(174)` and three
-   vendor/tessellation ids (`136`, `137`, `152`) as part of its standard block.
-   Even if GFx ignores the HRESULT, scissor/clipping state is silently absent,
-   which matters as soon as the menu clips to a viewport. *P1.*
-7. **A8 is the only font path and it is good — but the atlas size follows the
-   target.** A non-power-of-two RT turns every glyph atlas into
-   `D3DERR_INVALIDCALL` (`0xf822a7`). *P1: relax `pow2` for A8 or clamp the
-   atlas to the next power of two.*
-8. **`CreateTexture` while a scene is open is refused.** Today GFx creates
-   before `BeginScene`; the moment the renderer lazily realises a texture in
-   the middle of a frame the draw is lost. *P1, cheap to make non-fatal.*
+5. **`SetStreamSourceFreq` accepted only `1`.** **FIXED**: the setting is
+   stored per stream; `1`, `0x80000001` (indexed data, one instance) and any
+   indexed-data count are accepted. `D3DSTREAMSOURCE_INSTANCEDATA` and a zero
+   count are named refusals. The PICA draw still emits one instance. *P0 — no
+   longer blocks the rect wrapper; instanced draws are not claimed.*
+6. **Unsupported `SetRenderState` ids returned `INVALIDCALL`.** **FIXED**:
+   `26/28/29/52..59/136/137/152/174` are in `render_slot` with range checks;
+   GetRenderState and state blocks round-trip. Fog/specular/clip-plane have no
+   PICA fixed-function stage and the menu path has no scissor stage, so those
+   effects are recorded, not applied. *P1.*
+7. **A non-power-of-two RT turned every A8 glyph atlas into `INVALIDCALL`.**
+   **FIXED**: A8 is NPOT 8..1024 with one level (PICA CLAMP); RGBA8/BC keep the
+   pow2 rule. *P1.*
+8. **`CreateTexture` while a scene was open was refused.** **FIXED**:
+   creation and CPU Lock/Unlock are legal in frame; the GPU level is published
+   at Present (COM) / EndScene (core), so the texture binds from the next frame.
+   *P1.*
 9. **`A8L8`/`A4R4G4B4` are latent landmines.** They are only requested if A8
    creation fails (`0x1c -> 0x33 -> 0x1a` fallback at `0xf8205d`), but when
    that happens the fallback itself fails and GFx ends with no shadow surface.
@@ -383,7 +393,7 @@ refusal with a non-`S_OK` HRESULT.
 Only four things must be true for *something* to appear, in this order:
 
 1. `CreateDepthStencilSurface(400x240 or pow2, D24S8, lockable=1)` returns
-   `S_OK`.
+   `S_OK`. **FIXED** — verified by `tests/gfx_d3d9_menu_compat_smoke.c`.
 2. `CreatePixelShader` returns `S_OK` for `bfc0b3e0`, `0eb58f00`,
    `0cce461b`, `5b990161` (solid, text, modulate, two-texture lerp) — enough
    for rects, glyphs, tinted shapes and the simple two-map case.

@@ -27,8 +27,12 @@ static int null_texture_create_format(void *ctx,unsigned w,unsigned h,
                                       void **native){
     D9NullStats *s=stats(ctx);
     if(!native){null_log("CreateTexture","null native handle");return -1;}
-    if(!pow2(w)||!pow2(h)||w<8||h<8||!levels||levels>11){
-        null_log("CreateTexture","only power-of-two 8..1024 textures with 1..11 uploaded levels are implemented");
+    if(!w||!h||w>1024||h>1024||!levels||levels>11){
+        null_log("CreateTexture","only 1..1024 textures with 1..11 uploaded levels are implemented");
+        return -1;
+    }
+    if(format!=D9_A8&&(!pow2(w)||!pow2(h))){
+        null_log("CreateTexture","non-power-of-two storage is implemented for A8 only");
         return -1;
     }
     if(format!=D9_A8&&format!=D9_A8R8G8B8&&format!=D9_X8R8G8B8){

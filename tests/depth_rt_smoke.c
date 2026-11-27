@@ -2,8 +2,10 @@
  *
  * A depth-stencil surface is a descriptor of the single PICA DEPTH24_STENCIL8
  * attachment that every colour target already owns; no separate VRAM is
- * allocated.  Creation accepts pow2 8..1024, D24S8/D24X8, no MSAA/lockable; the
- * binding must match the active target exactly, and switching targets under an
+ * allocated.  Creation accepts pow2 8..1024, D24S8/D24X8, no MSAA; a
+ * Lockable=1 descriptor owns a CPU D24S8 shadow for LockRect/UnlockRect while
+ * binding still resolves to the target's embedded attachment.  The binding must
+ * match the active target exactly, and switching targets under an
  * incompatible bound depth is a named refusal.  Clear(Z|STENCIL) reaches the
  * active target's attachment (the null backend records the exact packed value).
  */
@@ -192,7 +194,8 @@ int main(void){
     assert(bind_depth(&h,device,0,0));
     make_depth(&h,device,1024,1024,D9_D24S8,2,0,0,0x8876086au);
     make_depth(&h,device,1024,1024,D9_D24S8,0,1,0,0x8876086au);
-    make_depth(&h,device,1024,1024,D9_D24S8,0,0,1,0x8876086au);
+    /* Lockable=1 is a real CPU D24S8 shadow (GFx asks for it at 0xf82616). */
+    {uint32_t dl=make_depth(&h,device,1024,1024,D9_D24S8,0,0,1,0);assert(dl);assert(unref(&h,dl)==0);}
     {uint32_t a[]={1024,1024,D9_D24S8,0,0,0,OUT2,1};assert(call(&h,device,29,a,8)==0x8876086cu);}
     make_depth(&h,device,1000,1000,D9_D24S8,0,0,0,0x8876086cu);
     make_depth(&h,device,2048,2048,D9_D24S8,0,0,0,0x8876086cu);
@@ -236,7 +239,7 @@ int main(void){
     assert(unref(&h,device)==0&&unref(&h,h.factory)==0);
     harness_stop(&h);
     puts("depth-stencil descriptors: 1024 D24S8/D24X8 create+bind+clear, 512/1024 mismatch and "
-         "target-switch refusals, MSAA/lockable/shared/bad sizes, 400x240 back buffer, "
+         "target-switch refusals, MSAA/lockable shadow/shared/bad sizes, 400x240 back buffer, "
          "render-target texture binding and honest caps passed");
     return 0;
 }
