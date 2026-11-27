@@ -40,3 +40,5 @@ tests/isolated/**/results/
 /t_*.bsa
 /preview*.png
 /tesv_profile.csv
+
+docs/*_diagnostic.png
