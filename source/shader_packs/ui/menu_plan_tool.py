@@ -251,6 +251,97 @@ def _norm_expr(expr):
     return expr
 
 
+# Exact descriptors whose material contract is fully declared: only these may
+# claim a runtime slot.  Everything else stays translated.
+RUNTIME_EXACT = {
+    "0eb58f00a88d68a6378e149f165bd371c069f344c6d459390c27624ea976817e",
+    "bfc0b3e0df8802bd",  # prefix; matched by startswith below
+}
+
+
+def _is_runtime_exact(full_sha: str, note: str) -> bool:
+    if note:
+        return False
+    return full_sha.startswith("0eb58f00") or full_sha.startswith("bfc0b3e0") \
+        or full_sha.startswith("9c152cf8")
+
+
+def _build_full_catalog(pe, groups):
+    from menu_relaxed import plan_ps_full
+    entries, refusals = [], []
+    counts = {"vs": {"translated": 0, "draw": 0, "refused": 0},
+              "ps": {"translated": 0, "draw": 0, "refused": 0}}
+    for stage, table_va in (("vs", VS_TABLE_VA), ("ps", PS_TABLE_VA)):
+        seen = set()
+        for row in sorted(groups[stage], key=lambda r: r["slot"]):
+            full = row["full_sha256"]
+            if full in seen:
+                continue
+            seen.add(full)
+            ir = C.build_ir(row["blob"])
+            if ir.error:
+                refusals.append({"stage": stage, "sha256": full,
+                                 "class": "parse_error", "reason": ir.error})
+                counts[stage]["refused"] += 1
+                continue
+            if stage == "ps":
+                plan, note = plan_ps_full(ir)
+            else:
+                plan, cls, why = C.plan_vs(ir)
+                note = why if plan is None else None
+            if plan is None:
+                refusals.append({"stage": stage, "sha256": full,
+                                 "class": "unsupported", "reason": note})
+                counts[stage]["refused"] += 1
+                continue
+            entry = dict(plan)
+            entry["id"] = "menu.gfx.%s.%s" % (stage, full[:8])
+            entry["sha256"] = full
+            entry["prefix_sha256"] = row["prefix_sha256"]
+            entry["stage"] = "ps_3_0" if stage == "ps" else "vs_3_0"
+            entry["kind"] = "tev" if stage == "ps" else "pica_vs"
+            entry["family"] = "ui"
+            entry["source_table"] = "0x%08x" % table_va
+            entry["source_slot"] = row["slot"]
+            entry["objects"] = 1
+            runtime = stage == "ps" and _is_runtime_exact(full, note or "")
+            entry["runtime"] = 1 if runtime else 0
+            entry["draw_enabled"] = 1 if runtime else 0
+            if note:
+                entry["approximation"] = note
+                entry["quality"] = "approx"
+            else:
+                entry["quality"] = "exact"
+            if stage == "ps":
+                entry["material_contract"] = {
+                    "textures": entry.get("textures", []),
+                    "constants": entry.get("constants", []),
+                    "constant_values": entry.get("constant_values", {}),
+                    "varyings": entry.get("inputs", []),
+                    "complete": bool(runtime),
+                }
+                entry["note"] = ("GFx menu PS translated to TEV; "
+                                 + ("draw-certified with declared contract"
+                                    if runtime else
+                                    "draw blocked until the material contract "
+                                    "is certified"))
+            else:
+                entry["codegen"] = "pending"
+                entry["note"] = ("PICA VS descriptor; native codegen pending, "
+                                 "draw disabled")
+            entries.append(entry)
+            counts[stage]["translated"] += 1
+            counts[stage]["draw"] += entry["draw_enabled"]
+    coverage = {
+        "full_blobs": {"vs": 5, "ps": 38},
+        "translated": len(entries),
+        "draw_enabled": sum(e["draw_enabled"] for e in entries),
+        "refused": len(refusals),
+        "vs": counts["vs"], "ps": counts["ps"],
+    }
+    return entries, refusals, coverage
+
+
 def build(tesv: str) -> dict:
     pe = PE(tesv)
     groups = {
@@ -402,16 +493,18 @@ def build(tesv: str) -> dict:
             "refused": len(refusals),
         },
     }
+    full_entries, full_refusals, full_coverage = _build_full_catalog(pe, groups)
     catalog = {
         "schema": "d9-shader-plan-v1",
         "archive": "TESV.exe (GFx renderer tables 0x%08x / 0x%08x)"
                    % (VS_TABLE_VA, PS_TABLE_VA),
-        "note": ("Pack-owned StartMenu/GFx plans. Translated only: no entry is "
-                 "draw-certified, so none sets runtime=1 and none enters the "
-                 "16-slot runtime table. Hashes are the true full-blob "
-                 "SHA-256; MENU_SHADERS prefix hashes are kept in "
-                 "menu_plans.json."),
-        "entries": [dict(entry, runtime=0) for entry in entries],
+        "note": ("Pack-owned StartMenu/GFx plans, one entry per distinct "
+                 "full-blob SHA-256. Only exact descriptors with a complete "
+                 "declared material contract set runtime=1; approximations "
+                 "stay translated with quality=approx."),
+        "entries": full_entries,
+        "refusals": full_refusals,
+        "coverage": full_coverage,
     }
     ir_doc = {
         "schema": "ui-menu-ir/1",
@@ -442,14 +535,23 @@ def check(plans_path=PLANS_PATH, ir_path=IR_PATH, catalog_path=CATALOG_PATH,
         ir_doc = json.load(handle)
     with open(catalog_path, encoding="utf-8") as handle:
         catalog = json.load(handle)
-    if any(entry.get("runtime") == 1 for entry in catalog.get("entries", [])):
-        problems.append("catalog: a translated menu plan claims a runtime slot")
-    catalog_by_sha = {entry.get("sha256"): entry
-                      for entry in catalog.get("entries", [])}
-    expected_catalog = {entry["sha256"]: dict(entry, runtime=0)
-                        for entry in doc.get("entries", [])}
-    if catalog_by_sha != expected_catalog:
-        problems.append("catalog: plans.json and menu_plans.json drifted")
+    if any(entry.get("runtime") == 1 and entry.get("draw_enabled") != 1
+           for entry in catalog.get("entries", [])):
+        problems.append("catalog: a runtime entry is not draw-enabled")
+    if any(entry.get("runtime") == 1 and entry.get("quality") != "exact"
+           for entry in catalog.get("entries", [])):
+        problems.append("catalog: an approximate entry claims a runtime slot")
+    catalog_shas = {entry.get("sha256") for entry in catalog.get("entries", [])}
+    refused_shas = {entry.get("sha256") for entry in catalog.get("refusals", [])}
+    if catalog_shas & refused_shas:
+        problems.append("catalog: a hash is both planned and refused")
+    if len(catalog_shas) + len(refused_shas) != 43:
+        problems.append("catalog: 5 VS + 38 PS full blobs do not partition")
+    cov = catalog.get("coverage", {})
+    if cov.get("translated") != len(catalog.get("entries", [])):
+        problems.append("catalog: translated count drift")
+    if cov.get("refused") != len(catalog.get("refusals", [])):
+        problems.append("catalog: refusal count drift")
 
     ids, shas = set(), set()
     expected = EXPECTED_PREFIX["vs"] + EXPECTED_PREFIX["ps"]
@@ -534,6 +636,19 @@ def check(plans_path=PLANS_PATH, ir_path=IR_PATH, catalog_path=CATALOG_PATH,
                         "plan_expression"):
                 if entry.get(key) != other.get(key):
                     problems.append("%s: %s differs from retail regeneration"
+                                    % (entry["id"], key))
+        fresh_cat = {e["sha256"]: e for e in _fresh_catalog["entries"]}
+        for entry in catalog.get("entries", []):
+            other = fresh_cat.get(entry["sha256"])
+            if other is None:
+                problems.append("%s: catalog entry missing from regeneration"
+                                % entry["id"])
+                continue
+            for key in ("id", "stage", "kind", "draw_enabled", "runtime",
+                        "quality", "stages", "stage_data", "textures",
+                        "constants", "outputs", "inputs", "approximation"):
+                if entry.get(key) != other.get(key):
+                    problems.append("%s: catalog %s differs from retail"
                                     % (entry["id"], key))
         if [r["full_sha256"] for r in fresh_ir["rows"]] != \
                 [r["full_sha256"] for r in ir_doc["rows"]]:

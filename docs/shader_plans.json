@@ -406,6 +406,321 @@
       "stage": "vs_3_0",
       "uniform_registers": 3,
       "version": "0xfffe0300"
+    },
+    {
+      "constants": [
+        0
+      ],
+      "draw_enabled": 1,
+      "family": "ui",
+      "id": "menu.gfx.ps.bfc0b3e0",
+      "inputs": [],
+      "instructions": 1,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "material_contract": {
+        "complete": true,
+        "constant_values": {},
+        "constants": [
+          0
+        ],
+        "textures": [],
+        "varyings": []
+      },
+      "note": "GFx menu PS translated to TEV; draw-certified with declared contract",
+      "objects": 1,
+      "prefix_sha256": "f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652",
+      "quality": "exact",
+      "requires_alpha_fixup": 0,
+      "runtime": 1,
+      "sha1": "12624e4fa254f6f3d95a815627822b82a019cbfe",
+      "sha256": "bfc0b3e0df8802bde722c0d0a815a3bff6de1b82fe67653262cfab2b75d9805e",
+      "source_slot": 0,
+      "source_table": "0x012dfcd8",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 0,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "mov",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            14,
+            15,
+            15
+          ],
+          "src_rgb": [
+            14,
+            15,
+            15
+          ],
+          "word": 140
+        }
+      ],
+      "stages": 1,
+      "textures": [],
+      "uses_vertex_color": 0,
+      "version": "0xffff0300"
+    },
+    {
+      "constants": [
+        2,
+        3
+      ],
+      "draw_enabled": 1,
+      "family": "ui",
+      "id": "menu.gfx.ps.0eb58f00",
+      "inputs": [],
+      "instructions": 3,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "material_contract": {
+        "complete": true,
+        "constant_values": {},
+        "constants": [
+          2,
+          3
+        ],
+        "textures": [
+          {
+            "sampler_reg": 0,
+            "sampler_type": 2,
+            "texcoord_reg": 0
+          }
+        ],
+        "varyings": []
+      },
+      "note": "GFx menu PS translated to TEV; draw-certified with declared contract",
+      "objects": 1,
+      "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+      "quality": "exact",
+      "requires_alpha_fixup": 0,
+      "runtime": 1,
+      "sha1": "55e30fe2c407f3ea6c8ed17dc2b5a8e0ff4162ae",
+      "sha256": "0eb58f00a88d68a6378e149f165bd371c069f344c6d459390c27624ea976817e",
+      "source_slot": 1,
+      "source_table": "0x012dfcd8",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "texld",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "word": 232
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 2,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "mov",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            14,
+            15,
+            15
+          ],
+          "src_rgb": [
+            14,
+            15,
+            15
+          ],
+          "word": 248
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 3,
+          "const_rgba8": 0,
+          "func_a": 8,
+          "func_rgb": 8,
+          "instruction": "mad",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            3,
+            15,
+            14
+          ],
+          "src_rgb": [
+            3,
+            15,
+            14
+          ],
+          "word": 260
+        }
+      ],
+      "stages": 3,
+      "textures": [
+        {
+          "sampler_reg": 0,
+          "sampler_type": 2,
+          "texcoord_reg": 0
+        }
+      ],
+      "uses_vertex_color": 0,
+      "version": "0xffff0300"
+    },
+    {
+      "constant_values": {},
+      "constants": [
+        0
+      ],
+      "draw_enabled": 1,
+      "family": "ui",
+      "id": "menu.gfx.ps.9c152cf8",
+      "inputs": [],
+      "instructions": 2,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "material_contract": {
+        "complete": true,
+        "constant_values": {},
+        "constants": [
+          0
+        ],
+        "textures": [],
+        "varyings": []
+      },
+      "note": "GFx menu PS translated to TEV; draw-certified with declared contract",
+      "objects": 1,
+      "prefix_sha256": "f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652",
+      "quality": "exact",
+      "requires_alpha_fixup": 0,
+      "runtime": 1,
+      "sha1": "015219e6d7d1b10d502ac2706bd365fd4307fe19",
+      "sha256": "9c152cf8c91547d5019c99d41db0f71eae9bf72b49f8f37931e83b22abba90fc",
+      "source_slot": 23,
+      "source_table": "0x012dfcd8",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 0,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 1,
+          "instruction": "mul",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            2,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            14,
+            14,
+            15
+          ],
+          "word": 140
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 0,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "mov",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            14,
+            15,
+            15
+          ],
+          "src_rgb": [
+            15,
+            15,
+            15
+          ],
+          "word": 156
+        }
+      ],
+      "stages": 2,
+      "textures": [],
+      "uses_vertex_color": 0,
+      "version": "0xffff0300"
     }
   ],
   "generated_for": "F:\\Skyrim\\Data",

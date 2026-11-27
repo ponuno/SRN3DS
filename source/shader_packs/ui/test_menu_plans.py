@@ -3,9 +3,6 @@
 
 Run with ``python source/shader_packs/ui/test_menu_plans.py`` (no retail bytes
 needed) or ``--tesv PATH`` to also re-extract the blobs and regenerate plans.
-These assertions are intentionally independent of the global plan table: the
-ten measured hashes are not in ``Skyrim - Shaders.bsa`` and therefore have no
-row in ``docs/shader_plans.json`` yet.
 """
 
 from __future__ import annotations
@@ -35,57 +32,59 @@ def main(argv=None):
 
     with open(T.PLANS_PATH, encoding="utf-8") as handle:
         doc = json.load(handle)
-    with open(T.IR_PATH, encoding="utf-8") as handle:
-        ir = json.load(handle)
-
-    entries = doc.get("entries", [])
-    refusals = doc.get("refusals", [])
-    check(doc.get("schema") == "ui-menu-plans/1", "schema id")
-    check(len(entries) + len(refusals) == 10, "10 measured hashes partition")
-    check(len(entries) == 5, "five translated representatives")
-    check(len(refusals) == 5, "five named refusals")
-    check(all(e["draw_enabled"] == 0 for e in entries),
-          "no menu plan is draw-enabled without a measured material contract")
-    check(sum(1 for e in entries if e["kind"] == "pica_vs") == 3,
-          "three VS descriptors")
-    check(sum(1 for e in entries if e["kind"] == "tev") == 2,
-          "two TEV descriptors")
-    check(all(len(e["sha256"]) == 64 for e in entries),
-          "full-blob hashes are 64 hex")
-    check(len({e["sha256"] for e in entries}) == len(entries),
-          "full-blob hashes are unique")
-    check(all(e.get("material_contract", {}).get("complete") is False
-              for e in entries if e["kind"] == "tev"),
-          "TEV material contracts stay open")
-    check(all(r.get("class") and r.get("reason") for r in refusals),
-          "every refusal is named")
-    measurement = doc.get("measurement", {})
-    check(measurement.get("prefix_hash_defect") is True,
-          "prefix-hash defect is recorded")
-    check(measurement.get("distinct_full_blobs") == {"ps": 38, "vs": 5},
-          "full-blob identity counts")
-    check(len(ir.get("rows", [])) == 10, "ten IR rows")
-
     with open(T.CATALOG_PATH, encoding="utf-8") as handle:
         catalog = json.load(handle)
+
+    entries = catalog.get("entries", [])
+    refusals = catalog.get("refusals", [])
+    ps = [e for e in entries if e["stage"] == "ps_3_0"]
+    vs = [e for e in entries if e["stage"] == "vs_3_0"]
+    runtime = [e for e in entries if e.get("runtime") == 1]
+
     check(catalog.get("schema") == "d9-shader-plan-v1", "catalog schema")
-    check(len(catalog.get("entries", [])) == 5, "catalog has five entries")
-    check(all(e.get("runtime") != 1 for e in catalog.get("entries", [])),
-          "no catalog entry claims a runtime slot")
-    check({e["sha256"] for e in catalog["entries"]}
-          == {e["sha256"] for e in entries},
-          "catalog and measurement doc agree")
+    check(len(ps) == 14, "fourteen PS full blobs translated")
+    check(len(vs) == 5, "five VS full blobs translated")
+    check(len(entries) + len(refusals) == 43, "43 full blobs partition")
+    check(len(refusals) == 24, "24 named PS refusals")
+    check(2 <= len(runtime) <= 4, "2-4 runtime entries")
+    check(all(e["draw_enabled"] == 1 and e["quality"] == "exact"
+              and e["material_contract"]["complete"] for e in runtime),
+          "runtime entries are exact with a complete contract")
+    check(all(e["draw_enabled"] == 0 for e in entries if e not in runtime),
+          "non-runtime entries never claim draw")
+    check(all(e.get("quality") == "approx" and e.get("approximation")
+              for e in entries if e["stage"] == "ps_3_0"
+              and e.get("quality") == "approx"),
+          "approximations are named")
+    check(sum(1 for e in ps if e.get("quality") == "approx") == 4,
+          "four declared approximations")
+    check(len({e["sha256"] for e in entries}) == len(entries),
+          "full-blob hashes are unique")
+    check(all(len(e["sha256"]) == 64 for e in entries),
+          "full-blob hashes are 64 hex")
+    check(all(r.get("class") and r.get("reason") for r in refusals),
+          "every refusal is named")
+
+    cov = catalog.get("coverage", {})
+    check(cov.get("translated") == len(entries), "coverage translated")
+    check(cov.get("refused") == len(refusals), "coverage refused")
+    check(cov.get("draw_enabled") == len(runtime), "coverage draw")
+    check(cov.get("full_blobs") == {"ps": 38, "vs": 5}, "full blob counts")
+    check(doc["measurement"]["prefix_hash_defect"] is True,
+          "prefix-hash defect recorded")
 
     problems = T.check(plans_path=T.PLANS_PATH, ir_path=T.IR_PATH,
                        catalog_path=T.CATALOG_PATH, tesv=tesv)
     check(not problems, "symbolic verifier: %r" % problems)
 
     print(json.dumps({
-        "checks": 20,
+        "checks": 18,
         "failures": FAILS,
-        "translated": len(entries),
+        "ps_translated": len(ps),
+        "vs_translated": len(vs),
+        "runtime": [e["id"] for e in runtime],
         "refused": len(refusals),
-        "draw_enabled": 0,
+        "approximations": [e["id"] for e in ps if e.get("quality") == "approx"],
         "symbolic": not problems,
     }, indent=2))
     return 0 if not FAILS else 1

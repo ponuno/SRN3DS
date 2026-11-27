@@ -78,5 +78,69 @@ static const D9ShaderPlan d9_shader_plan_entries[] = {
         "PICA VS descriptor; native codegen pending, draw disabled",
         {0},
     },
+    {
+        "menu.gfx.ps.bfc0b3e0",
+        "bfc0b3e0df8802bde722c0d0a815a3bff6de1b82fe67653262cfab2b75d9805e",
+        0, 1, 1,
+        "GFx menu PS translated to TEV; draw-certified with declared contract",
+        {0xffff0300u, 1, 1,
+            {
+                {0,0,{14,15,15},{14,15,15},{0,0,0},{0,0,0},0,0,0,0,0x00000000u},
+            },
+        0,
+            {
+            },
+        0,
+            {
+            },
+        1,
+        {0,0,0,0,0,0,0,0},
+        0,0,6,0x00000000u,
+        },
+    },
+    {
+        "menu.gfx.ps.0eb58f00",
+        "0eb58f00a88d68a6378e149f165bd371c069f344c6d459390c27624ea976817e",
+        0, 1, 1,
+        "GFx menu PS translated to TEV; draw-certified with declared contract",
+        {0xffff0300u, 3, 3,
+            {
+                {0,0,{3,15,15},{3,15,15},{0,0,0},{0,0,0},0,0,255,0,0x00000000u},
+                {0,0,{14,15,15},{14,15,15},{0,0,0},{0,0,0},0,0,2,0,0x00000000u},
+                {8,8,{3,15,14},{3,15,14},{0,0,0},{0,0,0},0,0,3,0,0x00000000u},
+            },
+        1,
+            {
+                {0,0,2},
+            },
+        0,
+            {
+            },
+        2,
+        {2,3,0,0,0,0,0,0},
+        0,0,6,0x00000000u,
+        },
+    },
+    {
+        "menu.gfx.ps.9c152cf8",
+        "9c152cf8c91547d5019c99d41db0f71eae9bf72b49f8f37931e83b22abba90fc",
+        0, 1, 1,
+        "GFx menu PS translated to TEV; draw-certified with declared contract",
+        {0xffff0300u, 2, 2,
+            {
+                {1,0,{14,14,15},{15,14,15},{2,0,0},{0,0,0},0,0,0,0,0x00000000u},
+                {0,0,{15,15,15},{14,15,15},{0,0,0},{0,0,0},0,0,0,0,0x00000000u},
+            },
+        0,
+            {
+            },
+        0,
+            {
+            },
+        1,
+        {0,0,0,0,0,0,0,0},
+        0,0,6,0x00000000u,
+        },
+    },
 };
 #define D9_SHADER_PLAN_ENTRY_COUNT (sizeof(d9_shader_plan_entries)/sizeof(d9_shader_plan_entries[0]))

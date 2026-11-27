@@ -25,9 +25,11 @@ in `Skyrim - Shaders.bsa`; they are in `TESV.exe` in the GFx renderer tables
 (VA `0x12dfca8`, 6 slots, and VA `0x12dfcd8`, 45 slots).  `menu_plan_tool.py`
 reads them in place (nothing retail is copied) and writes:
 
-* `menu_plans.json` — 5 descriptors (3 `pica_vs`, 2 `tev`) and 5 named
-  refusals, one row per measured prefix hash, with both the measured prefix
-  hash and the true full-blob SHA-256;
+* `menu_plans.json` — the ten measured prefix groups (5 descriptors, 5 named
+  refusals), with both the measured prefix hash and the true full-blob SHA-256;
+* `plans.json` — the shared catalogue, one entry per distinct full blob
+  (5 VS + 14 PS translated, 24 PS refused); only exact, fully contracted PS
+  set `runtime: 1`;
 * `menu_ir.json` — derived IR metadata only (opcode names, declarations,
   symbolic final expression); no bytecode.
 
@@ -48,26 +50,31 @@ here are the 10 *measured prefix groups*; `menu_plans.json` records
 `measurement.prefix_hash_defect` and the full-blob counts.  This is a
 measurement defect in the log, not a translation result.
 
-### Coverage of the ten measured groups
+### Coverage of the full catalogue (38 PS / 5 VS full blobs)
 
-| Status | Count |
-|---|---:|
-| translated (3 VS `pica_vs` + 2 PS `tev`) | **5** |
-| draw-enabled | **0** |
-| named refusal | **5** |
+| Status | VS | PS |
+|---|---:|---:|
+| translated | **5** | **14** |
+| draw-enabled / `runtime: 1` | 0 | **3** |
+| named refusal | 0 | 24 |
 
-Draw stays blocked for every entry:
+Runtime entries are exact descriptors with a complete declared material
+contract:
 
-* PICA VS descriptors cannot be draw-enabled before native codegen (schema
-  rule).
-* The two TEV plans (`mov oC0,c0`; `tex0*c2+c3`) are symbolically equal to the
-  IR, but the c0/c2/c3 material binding has not been measured, so
-  `material_contract.complete` is false.
+* `bfc0b3e0` — `oC0 = c0` (solid colour; c0 is the GFx colour transform).
+* `0eb58f00` — `oC0 = tex0 * c2 + c3` (sampler0 2D, c2/c3 colour transform).
+* `9c152cf8` — `oC0 = c0` variant with a second stage.
 
-Named refusals: `01fd3eb5` (temp written twice / alpha in a second varying),
-`b527a010` (`lrp`), `8ced9de9` (`dp4` normal basis needs prebake),
-`1b279738` and `cd1c433b` (YUV literals outside the 8-bit TEV range and
-dataflow).
+Four PS are declared approximations (`quality: approx`): the `8ced9de9` group
+(`ee79ab27`, `95d3d096`, `71d4da27`, `ed5e7b5d`).  TEV has no 4-component dot,
+so the 4x4 `dp4` basis is collapsed to one `DOT3` row; the other rows and the
+c4 alpha/offset term are dropped.  The plan is exact for that declared spec and
+carries the text in `approximation`.
+
+Remaining 24 PS refusals are named: `non_uniform_swizzle: c0.zwzw` (YUV rows),
+`too_many_stages (>6)`, `stage_needs_two_constants`, and `plan_mismatch` for
+the alpha-recombine patterns that need a second live temp.  These need either a
+second pass or a deeper TEV scheduler, not a silent simplification.
 
 ### Verify
 
