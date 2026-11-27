@@ -120,9 +120,13 @@ static uint32_t prefetch_cell_row(StreamCellState *state,
         if (stream_index_find_id(state->index, row.resource_id[i], &res, reason,
                                  sizeof reason) != STREAM_OK)
             continue;
+        uint32_t extent = res.payload_length;
         if (res.flags & STREAM_RESOURCE_FLAG_COMPRESSED) {
-            ++state->metrics.skipped_compressed;
-            continue;
+            if (stream_mount_stage_extent(state->mount, &res, &extent, reason,
+                                          sizeof reason) != STREAM_OK) {
+                ++state->metrics.skipped_compressed;
+                continue;
+            }
         }
         if (!res.payload_length) continue;
         StreamHandle handle = 0;
@@ -132,9 +136,7 @@ static uint32_t prefetch_cell_row(StreamCellState *state,
         ++state->metrics.prefetch_requests;
         if (centre && state->handle_count < STREAM_CELL_IDS)
             state->handles[state->handle_count++] = handle;
-        uint32_t window = res.payload_length < STREAM_WINDOW_MAX
-                              ? res.payload_length
-                              : STREAM_WINDOW_MAX;
+        uint32_t window = extent < STREAM_WINDOW_MAX ? extent : STREAM_WINDOW_MAX;
         working += window;
     }
     if (centre) {

@@ -45,21 +45,29 @@ static uint32_t adler32_bytes(const uint8_t *p, size_t n) {
     return (b << 16) | a;
 }
 
-/* One stored (uncompressed) deflate block in a zlib envelope. */
+/* One or more stored (uncompressed) deflate blocks in a zlib envelope. */
 static size_t zlib_store(uint8_t *dst, size_t cap, const uint8_t *src,
                          size_t n) {
-    size_t need = 2 + 5 + n + 4;
-    if (cap < need || n > 65535u) return 0;
+    size_t blocks = n ? (n + 65534u) / 65535u : 1u;
+    size_t need = 2 + blocks * 5u + n + 4u;
+    if (cap < need) return 0;
     size_t at = 0;
     dst[at++] = 0x78;
     dst[at++] = 0x01;
-    dst[at++] = 0x01;
-    dst[at++] = (uint8_t)n;
-    dst[at++] = (uint8_t)(n >> 8);
-    dst[at++] = (uint8_t)~n;
-    dst[at++] = (uint8_t)(~n >> 8);
-    memcpy(dst + at, src, n);
-    at += n;
+    size_t left = n, pos = 0;
+    do {
+        size_t take = left > 65535u ? 65535u : left;
+        int final = (left == take);
+        dst[at++] = (uint8_t)(final ? 1 : 0);   /* BFINAL | BTYPE=00 */
+        dst[at++] = (uint8_t)take;
+        dst[at++] = (uint8_t)(take >> 8);
+        dst[at++] = (uint8_t)~take;
+        dst[at++] = (uint8_t)(~take >> 8);
+        memcpy(dst + at, src + pos, take);
+        at += take;
+        pos += take;
+        left -= take;
+    } while (left);
     uint32_t adler = adler32_bytes(src, n);
     dst[at++] = (uint8_t)(adler >> 24);
     dst[at++] = (uint8_t)(adler >> 16);
@@ -82,7 +90,7 @@ typedef struct {
     size_t data_start;
 } BuiltBsa;
 
-static uint8_t g_comp[TEST_MAX_FILES][8192];
+static uint8_t g_comp[TEST_MAX_FILES][131072];
 static size_t g_comp_len[TEST_MAX_FILES];
 
 static int build_bsa(uint8_t *out, size_t cap, const TestFile *files,
@@ -231,18 +239,26 @@ static uint8_t g_archive[65536];
 static uint8_t g_payload_a[300];
 static uint8_t g_payload_b[1] = { 0x5a };
 static uint8_t g_payload_c[5000];
+static uint8_t g_payload_d[90000];
+static uint8_t g_archive_big[262144];
 
 static void fill_payloads(void) {
     for (size_t i = 0; i < sizeof g_payload_a; ++i)
         g_payload_a[i] = (uint8_t)(i * 7u + 3u);
     for (size_t i = 0; i < sizeof g_payload_c; ++i)
         g_payload_c[i] = (uint8_t)((i * 13u) ^ (i >> 3));
+    for (size_t i = 0; i < sizeof g_payload_d; ++i)
+        g_payload_d[i] = (uint8_t)((i * 31u) ^ (i >> 5) ^ (i >> 9));
 }
 
 static const TestFile g_files[3] = {
     { "meshes\\a.nif", g_payload_a, sizeof g_payload_a },
     { "meshes\\b.nif", g_payload_b, sizeof g_payload_b },
     { "textures\\x.dds", g_payload_c, sizeof g_payload_c },
+};
+
+static const TestFile g_big_file[1] = {
+    { "meshes\\big.nif", g_payload_d, sizeof g_payload_d },
 };
 
 static void test_ranges(void) {
@@ -404,27 +420,194 @@ static void test_compressed(void) {
     check(bsa_open_reader(counting_read, &reader, built.len, NULL, &archive,
                           reason, sizeof reason) == BSA_OK,
           "compressed fixture opens");
-    BsaMatch a;
-    check(bsa_find(archive, "meshes\\a.nif", &a) == BSA_OK, "compressed find");
-    uint8_t buf[512];
-    uint32_t got = 42;
+    BsaMatch a, b, c;
+    check(bsa_find(archive, "meshes\\a.nif", &a) == BSA_OK, "compressed find a");
+    check(bsa_find(archive, "meshes\\b.nif", &b) == BSA_OK, "compressed find b");
+    check(bsa_find(archive, "textures\\x.dds", &c) == BSA_OK, "compressed find c");
+
+    uint8_t full[5000];
+    size_t full_len = 0;
+    check(bsa_read(archive, &c.entry, full, sizeof full, &full_len, reason,
+                   sizeof reason) == BSA_OK &&
+              full_len == sizeof g_payload_c &&
+              memcmp(full, g_payload_c, full_len) == 0,
+          "compressed full read is the reference");
+
+    uint8_t buf[5000];
+    uint32_t got = 0;
+    uint32_t ranges[][2] = {
+        { 0, 1 }, { 0, 300 }, { 1, 17 }, { 2500, 700 }, { 4999, 1 },
+        { 0, 5000 }, { 1234, 2000 }, { 4300, 700 }, { 7, 0 }, { 5000, 0 }
+    };
+    const char *what[] = {
+        "first byte", "whole record", "second byte window", "middle",
+        "last byte", "full range", "late middle", "tail", "empty at zero",
+        "empty at the end"
+    };
+    for (size_t i = 0; i < sizeof ranges / sizeof ranges[0]; ++i) {
+        memset(buf, 0xAA, sizeof buf);
+        got = 0xDEADBEEF;
+        uint32_t rel = ranges[i][0], n = ranges[i][1];
+        BsaStatus st = bsa_read_range(archive, &c.entry, rel, buf, n, &got,
+                                      reason, sizeof reason);
+        char label[128];
+        snprintf(label, sizeof label, "compressed range %u+%u (%s)", rel, n,
+                 what[i]);
+        check(st == BSA_OK && got == n &&
+                  (n == 0 || memcmp(buf, g_payload_c + rel, n) == 0),
+              label);
+    }
+
+    /* Several consecutive windows of the same record: the first inflates,
+     * the rest are cache hits. */
+    BsaRangeCacheStats before, after;
+    bsa_range_cache_stats(archive, &before);
+    for (uint32_t rel = 0; rel + 600 <= sizeof g_payload_c; rel += 600) {
+        check(bsa_read_range(archive, &c.entry, rel, buf, 600, &got, reason,
+                             sizeof reason) == BSA_OK && got == 600 &&
+                  memcmp(buf, g_payload_c + rel, 600) == 0,
+              "consecutive compressed window matches");
+    }
+    bsa_range_cache_stats(archive, &after);
+    check(after.hits - before.hits >= 8 && after.misses == before.misses,
+          "one inflation serves the following windows");
+    check(after.bytes >= sizeof g_payload_c,
+          "resident cache accounts the inflated record");
+
+    /* Boundaries are named errors, never truncated or garbage. */
+    got = 55;
     reason[0] = 0;
-    check(bsa_read_range(archive, &a.entry, 0, buf, sizeof buf, &got, reason,
-                         sizeof reason) == BSA_ERR_UNSUPPORTED && got == 0 &&
+    check(bsa_read_range(archive, &c.entry, 5001, buf, 0, &got, reason,
+                         sizeof reason) == BSA_ERR_BOUNDS && got == 0 &&
               reason[0] != 0,
-          "compressed range read is unsupported");
+          "compressed rel past the end is refused");
+    got = 55;
+    check(bsa_read_range(archive, &c.entry, 4999, buf, 2, &got, reason,
+                         sizeof reason) == BSA_ERR_BOUNDS && got == 0,
+          "compressed range crossing the end is refused");
+    got = 55;
+    check(bsa_read_range(archive, &c.entry, 0xffffffffu, buf, 1, &got, reason,
+                         sizeof reason) == BSA_ERR_BOUNDS && got == 0,
+          "compressed rel = UINT32_MAX does not wrap");
+    check(bsa_read_range(archive, &a.entry, 0, NULL, 1, &got, reason,
+                         sizeof reason) == BSA_ERR_ARGUMENT && got == 0,
+          "compressed null destination is an argument error");
+
     size_t prefix_len = 0;
     check(bsa_read_prefix(archive, &a.entry, buf, sizeof buf, &prefix_len,
                           reason, sizeof reason) == BSA_OK &&
               prefix_len == sizeof g_payload_a &&
               memcmp(buf, g_payload_a, prefix_len) == 0,
           "bsa_read_prefix still handles compressed entries");
-    size_t full_len = 0;
-    check(bsa_read(archive, &a.entry, buf, sizeof buf, &full_len, reason,
-                   sizeof reason) == BSA_OK &&
-              full_len == sizeof g_payload_a &&
-              memcmp(buf, g_payload_a, full_len) == 0,
-          "bsa_read still inflates compressed entries");
+    bsa_close(archive);
+}
+
+static void test_compressed_cache_limits(void) {
+    BuiltBsa built;
+    memset(g_archive, 0, sizeof g_archive);
+    check(build_bsa(g_archive, sizeof g_archive, g_files, 3, 1, 0, &built),
+          "cache-limit fixture builds");
+    BsaOptions opt;
+    bsa_options_default(&opt);
+    opt.range_cache_bytes = 300;
+    opt.range_cache_entry_bytes = 300;
+    CountingReader reader;
+    memset(&reader, 0, sizeof reader);
+    reader.data = g_archive;
+    reader.size = built.len;
+    BsaArchive *archive = NULL;
+    char reason[BSA_REASON_MAX];
+    check(bsa_open_reader(counting_read, &reader, built.len, &opt, &archive,
+                          reason, sizeof reason) == BSA_OK,
+          "small-cache archive opens");
+    BsaMatch a, b;
+    check(bsa_find(archive, "meshes\\a.nif", &a) == BSA_OK, "find a");
+    check(bsa_find(archive, "meshes\\b.nif", &b) == BSA_OK, "find b");
+
+    uint8_t buf[512];
+    uint32_t got = 0;
+    check(bsa_read_range(archive, &a.entry, 0, buf, 10, &got, reason,
+                         sizeof reason) == BSA_OK && got == 10 &&
+              memcmp(buf, g_payload_a, 10) == 0,
+          "first record inflates into the cache");
+    BsaRangeCacheStats s1;
+    bsa_range_cache_stats(archive, &s1);
+    check(s1.misses == 1 && s1.hits == 0 && s1.bytes == 300,
+          "cache holds exactly the first record");
+    check(bsa_read_range(archive, &a.entry, 100, buf, 10, &got, reason,
+                         sizeof reason) == BSA_OK && got == 10,
+          "second window of the first record works");
+    bsa_range_cache_stats(archive, &s1);
+    check(s1.hits == 1, "second window is a cache hit");
+
+    check(bsa_read_range(archive, &b.entry, 0, buf, 1, &got, reason,
+                         sizeof reason) == BSA_OK && got == 1 &&
+              buf[0] == g_payload_b[0],
+          "second record evicts the first to fit");
+    bsa_range_cache_stats(archive, &s1);
+    check(s1.evictions >= 1 && s1.bytes == 1,
+          "LRU eviction is counted and the resident size shrinks");
+
+    check(bsa_read_range(archive, &a.entry, 0, buf, 10, &got, reason,
+                         sizeof reason) == BSA_OK && got == 10,
+          "evicted record can be inflated again");
+    bsa_range_cache_stats(archive, &s1);
+    check(s1.misses == 3 && s1.hits == 1,
+          "re-inflating an evicted record is a miss");
+
+    bsa_close(archive);
+
+    /* Per-record cap forces the streaming fallback with no cache growth. */
+    opt.range_cache_bytes = 1024u * 1024u;
+    opt.range_cache_entry_bytes = 64;
+    check(bsa_open_reader(counting_read, &reader, built.len, &opt, &archive,
+                          reason, sizeof reason) == BSA_OK,
+          "streaming-limit archive opens");
+    BsaMatch c;
+    check(bsa_find(archive, "textures\\x.dds", &c) == BSA_OK, "find c");
+    check(bsa_read_range(archive, &c.entry, 0, buf, 64, &got, reason,
+                         sizeof reason) == BSA_OK && got == 64 &&
+              memcmp(buf, g_payload_c, 64) == 0,
+          "oversized record streams its head");
+    check(bsa_read_range(archive, &c.entry, 2500, buf, 500, &got, reason,
+                         sizeof reason) == BSA_OK && got == 500 &&
+              memcmp(buf, g_payload_c + 2500, 500) == 0,
+          "oversized record streams a late window");
+    BsaRangeCacheStats s2;
+    bsa_range_cache_stats(archive, &s2);
+    check(s2.bytes == 0 && s2.misses == 2 && s2.hits == 0,
+          "streaming never charges the cache");
+    bsa_close(archive);
+
+    /* A 90 KiB record exercises multi-block deflate and the 32 KiB skip window
+     * at offsets past the ring size. */
+    BuiltBsa big;
+    memset(g_archive_big, 0, sizeof g_archive_big);
+    check(build_bsa(g_archive_big, sizeof g_archive_big, g_big_file, 1, 1, 0,
+                    &big),
+          "large compressed fixture builds");
+    memset(&reader, 0, sizeof reader);
+    reader.data = g_archive_big;
+    reader.size = big.len;
+    check(bsa_open_reader(counting_read, &reader, big.len, &opt, &archive,
+                          reason, sizeof reason) == BSA_OK,
+          "large fixture opens");
+    BsaMatch d;
+    check(bsa_find(archive, "meshes\\big.nif", &d) == BSA_OK, "find big");
+    uint8_t bigbuf[4096];
+    struct { uint32_t rel, len; } br[4] = {
+        { 0u, 700u }, { 40000u, 500u }, { 70000u, 3000u }, { 89999u, 1u }
+    };
+    for (size_t i = 0; i < 4; ++i) {
+        check(bsa_read_range(archive, &d.entry, br[i].rel, bigbuf, br[i].len,
+                             &got, reason, sizeof reason) == BSA_OK &&
+                  got == br[i].len &&
+                  memcmp(bigbuf, g_payload_d + br[i].rel, got) == 0,
+              "large record streams the requested window");
+    }
+    bsa_range_cache_stats(archive, &s2);
+    check(s2.bytes == 0 && s2.misses == 4,
+          "large record never enters the cache");
     bsa_close(archive);
 }
 
@@ -504,6 +687,7 @@ int main(void) {
     test_ranges();
     test_embedded_prefix();
     test_compressed();
+    test_compressed_cache_limits();
     test_index_parser();
     printf("stream_range_smoke: %d checks, %d failure(s)\n", checks, failures);
     return failures ? 1 : 0;

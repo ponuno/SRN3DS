@@ -35,6 +35,24 @@ typedef struct {
 #define BSA_PAGE_CACHE_BYTES (32u * 1024u)
 #define BSA_NAME_GROUP 16u
 
+/* Compressed range cache: an inflated record is at most 4 MiB and the whole
+ * archive keeps at most 8 MiB resident across 16 slots.  Deliberately outside
+ * max_index_bytes (the resident directory stays under 2 MiB). */
+#define BSA_RANGE_CACHE_BYTES (8u * 1024u * 1024u)
+#define BSA_RANGE_ENTRY_BYTES (4u * 1024u * 1024u)
+#define BSA_RANGE_CACHE_SLOTS 16u
+#define BSA_INFLATE_WINDOW 32768u
+
+typedef struct {
+    int used;
+    uint32_t record_index;
+    uint32_t offset;
+    uint32_t stored_size;
+    uint32_t unpacked;
+    uint8_t *data;
+    uint64_t last_use;
+} BsaRangeSlot;
+
 struct BsaArchive {
     BsaReadAt read_at;
     void *ctx;
@@ -57,6 +75,11 @@ struct BsaArchive {
     size_t page_cap;
     uint64_t page_off;
     size_t page_len;
+    /* Compressed range LRU. */
+    BsaRangeSlot range[BSA_RANGE_CACHE_SLOTS];
+    size_t range_bytes;
+    uint64_t range_tick;
+    BsaRangeCacheStats range_stats;
 };
 
 static void set_reason(char *reason, size_t cap, const char *fmt, ...) {
@@ -98,6 +121,8 @@ void bsa_options_default(BsaOptions *options) {
     options->max_index_bytes = BSA_DEFAULT_MAX_INDEX_BYTES;
     options->max_stored_bytes = BSA_DEFAULT_MAX_STORED_BYTES;
     options->max_unpacked_bytes = BSA_DEFAULT_MAX_UNPACKED_BYTES;
+    options->range_cache_bytes = BSA_RANGE_CACHE_BYTES;
+    options->range_cache_entry_bytes = BSA_RANGE_ENTRY_BYTES;
     options->verify_embedded_names = 1;
 }
 
@@ -169,8 +194,14 @@ typedef struct {
     unsigned bitcnt;
     uint8_t *out;
     size_t out_cap;
-    size_t out_pos;
+    size_t out_pos;     /* total bytes emitted, including skipped ones */
     size_t extra;
+    /* Windowed mode (compressed range reads): out_pos is the absolute output
+     * position, the last 32 KiB live in `win` so LZ77 copies survive while
+     * `skip` bytes are discarded, and only bytes at/after `skip` are captured
+     * into `out` (up to out_cap).  win == NULL keeps the direct behaviour. */
+    uint8_t *win;
+    size_t skip;
     int allow_partial;
     int partial;
 } InflateState;
@@ -193,8 +224,23 @@ static void inf_align(InflateState *s) {
 }
 
 static void inf_put(InflateState *s, uint8_t byte) {
+    if (s->win) {
+        size_t total = s->out_pos;
+        s->win[total & (BSA_INFLATE_WINDOW - 1u)] = byte;
+        if (total >= s->skip && total - s->skip < s->out_cap)
+            s->out[total - s->skip] = byte;
+        s->out_pos = total + 1u;
+        return;
+    }
     if (s->out_pos < s->out_cap) s->out[s->out_pos++] = byte;
     else s->extra++;
+}
+
+/* True when the capture window is full and this is a partial read. */
+static int inf_capture_full(const InflateState *s) {
+    if (!s->allow_partial) return 0;
+    if (s->win) return s->out_pos >= s->skip + s->out_cap;
+    return s->out_pos == s->out_cap;
 }
 
 static int huff_build(Huffman *h, const uint8_t *lengths, unsigned count) {
@@ -286,10 +332,14 @@ static int inflate_codes(InflateState *s, const Huffman *lit,
             if (dist_extra[dsym] && inf_bits(s, dist_extra[dsym], &extra)) return -1;
             unsigned distance = dist_base[dsym] + extra;
             if (!distance || distance > s->out_pos) return -1;
-            for (unsigned i = 0; i < length; ++i)
-                inf_put(s, s->out[s->out_pos - distance]);
+            for (unsigned i = 0; i < length; ++i) {
+                uint8_t byte = s->win
+                    ? s->win[(s->out_pos - distance) & (BSA_INFLATE_WINDOW - 1u)]
+                    : s->out[s->out_pos - distance];
+                inf_put(s, byte);
+            }
         }
-        if (s->allow_partial && s->out_pos == s->out_cap) {
+        if (inf_capture_full(s)) {
             s->partial = 1;
             return 0;
         }
@@ -378,7 +428,8 @@ static uint32_t adler32_bytes(const uint8_t *p, size_t n) {
 }
 
 static BsaStatus inflate_raw(const uint8_t *src, size_t src_len,
-                             uint8_t *dst, size_t cap, size_t *out_len,
+                             uint8_t *dst, size_t cap, size_t skip,
+                             uint8_t *win, size_t *out_len,
                              int allow_partial, uint32_t expected_adler,
                              int verify_adler, size_t *consumed, int *ended,
                              char *reason, size_t reason_cap) {
@@ -388,6 +439,8 @@ static BsaStatus inflate_raw(const uint8_t *src, size_t src_len,
     s.in_len = src_len;
     s.out = dst;
     s.out_cap = cap;
+    s.win = win;
+    s.skip = skip;
     s.allow_partial = allow_partial;
 
     uint32_t final = 0;
@@ -415,7 +468,7 @@ static BsaStatus inflate_raw(const uint8_t *src, size_t src_len,
                 return BSA_ERR_DEFLATE;
             }
             for (unsigned i = 0; i < len; ++i) inf_put(&s, s.in[s.in_pos++]);
-            if (s.allow_partial && s.out_pos == s.out_cap) {
+            if (inf_capture_full(&s)) {
                 s.partial = 1;
                 break;
             }
@@ -444,23 +497,30 @@ static BsaStatus inflate_raw(const uint8_t *src, size_t src_len,
                    (unsigned long long)cap);
         return BSA_ERR_FORMAT;
     }
-    if (!s.partial && verify_adler &&
+    if (!s.win && !s.partial && verify_adler &&
         adler32_bytes(dst ? dst : (const uint8_t *)"", s.out_pos) != expected_adler) {
         set_reason(reason, reason_cap, "zlib: Adler-32 mismatch");
         return BSA_ERR_FORMAT;
     }
     if (consumed) *consumed = s.in_pos;
     if (ended) *ended = !s.partial;
-    *out_len = s.out_pos;
+    {
+        size_t captured = s.win
+            ? (s.out_pos > s.skip ? s.out_pos - s.skip : 0)
+            : s.out_pos;
+        if (captured > s.out_cap) captured = s.out_cap;
+        *out_len = captured;
+    }
     return BSA_OK;
 }
 
-static BsaStatus zlib_stream(const uint8_t *src, size_t src_len,
-                             uint8_t *dst, size_t cap, size_t *out_len,
-                             int allow_partial, size_t *consumed, int *ended,
-                             char *reason, size_t reason_cap) {
+static BsaStatus zlib_stream_ex(const uint8_t *src, size_t src_len,
+                                uint8_t *dst, size_t cap, size_t skip,
+                                uint8_t *win, size_t *out_len,
+                                int allow_partial, size_t *consumed, int *ended,
+                                char *reason, size_t reason_cap) {
     if (reason && reason_cap) reason[0] = 0;
-    if (!src || src_len < 6 || (!dst && cap) || !out_len) {
+    if (!src || src_len < 6 || (!dst && cap) || (!win && skip) || !out_len) {
         set_reason(reason, reason_cap,
                    "inflate needs a zlib stream, output pointer and length");
         return BSA_ERR_ARGUMENT;
@@ -478,9 +538,17 @@ static BsaStatus zlib_stream(const uint8_t *src, size_t src_len,
                         ((uint32_t)src[src_len - 3] << 16) |
                         ((uint32_t)src[src_len - 2] << 8) |
                         (uint32_t)src[src_len - 1];
-    return inflate_raw(src + 2, src_len - 6, dst, cap, out_len, allow_partial,
-                       expected, !allow_partial, consumed, ended,
-                       reason, reason_cap);
+    return inflate_raw(src + 2, src_len - 6, dst, cap, skip, win, out_len,
+                       allow_partial, expected, !allow_partial && !win,
+                       consumed, ended, reason, reason_cap);
+}
+
+static BsaStatus zlib_stream(const uint8_t *src, size_t src_len,
+                             uint8_t *dst, size_t cap, size_t *out_len,
+                             int allow_partial, size_t *consumed, int *ended,
+                             char *reason, size_t reason_cap) {
+    return zlib_stream_ex(src, src_len, dst, cap, 0, NULL, out_len,
+                          allow_partial, consumed, ended, reason, reason_cap);
 }
 
 BsaStatus bsa_inflate_zlib(const uint8_t *src, size_t src_len,
@@ -1312,6 +1380,10 @@ BsaStatus bsa_open_reader(BsaReadAt read_at, void *ctx, uint64_t size,
         if (options->max_index_bytes) a->opt.max_index_bytes = options->max_index_bytes;
         if (options->max_stored_bytes) a->opt.max_stored_bytes = options->max_stored_bytes;
         if (options->max_unpacked_bytes) a->opt.max_unpacked_bytes = options->max_unpacked_bytes;
+        if (options->range_cache_bytes)
+            a->opt.range_cache_bytes = options->range_cache_bytes;
+        if (options->range_cache_entry_bytes)
+            a->opt.range_cache_entry_bytes = options->range_cache_entry_bytes;
         a->opt.verify_embedded_names = options->verify_embedded_names;
     }
     BsaStatus st = archive_parse(a, reason, reason_cap);
@@ -1414,6 +1486,8 @@ void bsa_close(BsaArchive *archive) {
     free(archive->tags);
     free(archive->name_checkpoints);
     free(archive->page);
+    for (size_t i = 0; i < BSA_RANGE_CACHE_SLOTS; ++i)
+        free(archive->range[i].data);
     free(archive);
 }
 
@@ -1509,6 +1583,162 @@ static BsaStatus read_payload(const BsaArchive *archive, const BsaEntry *entry,
     return BSA_OK;
 }
 
+/* ------------------------------------------------------------------ */
+/* Compressed range LRU.                                               */
+/* ------------------------------------------------------------------ */
+
+static void range_slot_drop(BsaArchive *a, BsaRangeSlot *s) {
+    if (!s->used) return;
+    if (a->range_bytes >= s->unpacked) a->range_bytes -= s->unpacked;
+    else a->range_bytes = 0;
+    free(s->data);
+    memset(s, 0, sizeof *s);
+}
+
+static BsaRangeSlot *range_lookup(BsaArchive *a, const BsaEntry *entry,
+                                  uint32_t off, uint32_t stored,
+                                  uint32_t unpacked) {
+    for (size_t i = 0; i < BSA_RANGE_CACHE_SLOTS; ++i) {
+        BsaRangeSlot *s = &a->range[i];
+        if (!s->used || s->record_index != entry->record_index) continue;
+        if (s->offset != off || s->stored_size != stored ||
+            s->unpacked != unpacked)
+            continue;
+        s->last_use = ++a->range_tick;
+        ++a->range_stats.hits;
+        return s;
+    }
+    return NULL;
+}
+
+static int range_evict_one(BsaArchive *a) {
+    BsaRangeSlot *victim = NULL;
+    for (size_t i = 0; i < BSA_RANGE_CACHE_SLOTS; ++i) {
+        BsaRangeSlot *s = &a->range[i];
+        if (!s->used) continue;
+        if (!victim || s->last_use < victim->last_use) victim = s;
+    }
+    if (!victim) return 0;
+    range_slot_drop(a, victim);
+    ++a->range_stats.evictions;
+    return 1;
+}
+
+/* Insert an inflated record; ownership of `data` moves to the cache on
+ * success.  Returns NULL when the caller must free `data` and serve directly. */
+static BsaRangeSlot *range_insert(BsaArchive *a, const BsaEntry *entry,
+                                  uint32_t off, uint32_t stored,
+                                  uint32_t unpacked, uint8_t *data) {
+    for (;;) {
+        BsaRangeSlot *slot = NULL;
+        for (size_t i = 0; i < BSA_RANGE_CACHE_SLOTS; ++i) {
+            if (!a->range[i].used) { slot = &a->range[i]; break; }
+        }
+        if (slot &&
+            a->range_bytes + unpacked <= a->opt.range_cache_bytes) {
+            slot->used = 1;
+            slot->record_index = entry->record_index;
+            slot->offset = off;
+            slot->stored_size = stored;
+            slot->unpacked = unpacked;
+            slot->data = data;
+            slot->last_use = ++a->range_tick;
+            a->range_bytes += unpacked;
+            a->range_stats.bytes = a->range_bytes;
+            return slot;
+        }
+        if (!range_evict_one(a)) return NULL;
+    }
+}
+
+void bsa_range_cache_stats(const BsaArchive *archive,
+                           BsaRangeCacheStats *out) {
+    if (!out) return;
+    memset(out, 0, sizeof *out);
+    if (!archive) return;
+    *out = archive->range_stats;
+    out->bytes = archive->range_bytes;
+}
+
+static BsaStatus read_compressed_range(const BsaArchive *archive,
+                                       const BsaEntry *entry, uint32_t off,
+                                       uint32_t len, uint32_t unpacked,
+                                       uint32_t rel, void *dst, uint32_t n,
+                                       uint32_t *out_len, char *reason,
+                                       size_t reason_cap) {
+    BsaArchive *a = (BsaArchive *)(uintptr_t)archive;
+    BsaRangeSlot *slot = range_lookup(a, entry, off, len, unpacked);
+    if (slot) {
+        memcpy(dst, slot->data + rel, n);
+        *out_len = n;
+        return BSA_OK;
+    }
+    ++a->range_stats.misses;
+    if (len > a->opt.max_stored_bytes) {
+        set_reason(reason, reason_cap,
+                   "stored payload %u exceeds limit %u",
+                   len, a->opt.max_stored_bytes);
+        return BSA_ERR_BUDGET;
+    }
+    if (!len) {
+        set_reason(reason, reason_cap, "compressed entry has no deflate payload");
+        return BSA_ERR_FORMAT;
+    }
+    uint8_t *stored = (uint8_t *)malloc(len);
+    if (!stored) return BSA_ERR_IO;
+    BsaStatus st = read_exact(archive, off, stored, len, reason, reason_cap);
+    if (st != BSA_OK) { free(stored); return st; }
+
+    int cacheable = unpacked <= a->opt.range_cache_entry_bytes &&
+                    unpacked <= a->opt.range_cache_bytes;
+    if (cacheable) {
+        /* Policy A: inflate once, keep the record while it is hot. */
+        uint8_t *data = (uint8_t *)malloc(unpacked ? unpacked : 1u);
+        if (data) {
+            size_t full = 0;
+            st = zlib_stream(stored, len, data, unpacked, &full, 0, NULL, NULL,
+                             reason, reason_cap);
+            free(stored);
+            if (st != BSA_OK) { free(data); return st; }
+            if (full != unpacked) {
+                free(data);
+                set_reason(reason, reason_cap,
+                           "inflated %llu bytes, header says %u",
+                           (unsigned long long)full, unpacked);
+                return BSA_ERR_FORMAT;
+            }
+            slot = range_insert(a, entry, off, len, unpacked, data);
+            if (slot) {
+                memcpy(dst, slot->data + rel, n);
+            } else {
+                memcpy(dst, data + rel, n);
+                free(data);
+            }
+            *out_len = n;
+            return BSA_OK;
+        }
+        /* Allocation failure falls through to the streaming path. */
+    }
+
+    /* Policy B: stream the deflate payload, discard through `rel`, capture
+     * `n` bytes.  A 32 KiB ring keeps LZ77 back-references valid. */
+    uint8_t *win = (uint8_t *)malloc(BSA_INFLATE_WINDOW);
+    if (!win) { free(stored); return BSA_ERR_IO; }
+    size_t got = 0;
+    st = zlib_stream_ex(stored, len, (uint8_t *)dst, n, rel, win, &got, 1,
+                        NULL, NULL, reason, reason_cap);
+    free(win);
+    free(stored);
+    if (st != BSA_OK) return st;
+    if (got != n) {
+        set_reason(reason, reason_cap,
+                   "deflate produced %llu of %u bytes for range %u",
+                   (unsigned long long)got, n, rel);
+        return BSA_ERR_FORMAT;
+    }
+    *out_len = n;
+    return BSA_OK;
+}
 BsaStatus bsa_read_prefix(const BsaArchive *archive, const BsaEntry *entry,
                           uint8_t *dst, size_t cap, size_t *out_len,
                           char *reason, size_t reason_cap) {
@@ -1600,9 +1830,16 @@ BsaStatus bsa_read_range(const BsaArchive *archive, const BsaEntry *entry,
                                 reason, reason_cap);
     if (st != BSA_OK) return st;
     if (archive->header.compressed) {
-        set_reason(reason, reason_cap,
-                   "range read of a compressed entry is unsupported");
-        return BSA_ERR_UNSUPPORTED;
+        if ((uint64_t)rel > (uint64_t)unpacked ||
+            (uint64_t)n > (uint64_t)unpacked - rel) {
+            set_reason(reason, reason_cap,
+                       "range %u+%u is outside the %u-byte unpacked payload",
+                       rel, n, unpacked);
+            return BSA_ERR_BOUNDS;
+        }
+        if (!n) return BSA_OK;
+        return read_compressed_range(archive, entry, off, len, unpacked, rel,
+                                     dst, n, out_len, reason, reason_cap);
     }
     /* Uncompressed: the stored payload and the unpacked record are the same
      * bytes.  Check the relative window before touching the destination. */

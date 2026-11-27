@@ -491,6 +491,8 @@ Add-Test "stream_range" $common @("source/bsa_reader.c", "source/asset_stream.c"
 Add-Test "stream_queue" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_queue_smoke.c") @()
 # Cell trigger: synthetic guest tuple + 2-cell index (P0, latch, trim, demand).
 Add-Test "stream_cell" $common @("source/bsa_reader.c", "source/asset_stream.c", "source/stream_cell.c", "source/guest.c", "tests/stream_cell_smoke.c") @()
+# Real-index prefetch over compressed retail records (skips without an index).
+Add-Test "stream_cell_real_prefetch" $common @("source/bsa_reader.c", "source/asset_stream.c", "source/stream_cell.c", "source/guest.c", "tests/stream_cell_real_prefetch_smoke.c") @()
 # Optional real-index Riverwood check; skips at run time unless STREAM_INDEX_REAL
 # is set.  It links the generated stage headers like win32_bsa_overlay, so a
 # source-only worktree simply does not register it.

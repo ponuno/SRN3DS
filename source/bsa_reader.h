@@ -62,6 +62,12 @@ typedef struct {
     uint32_t max_index_bytes;
     uint32_t max_stored_bytes;
     uint32_t max_unpacked_bytes;
+    /* Bounded LRU of fully inflated records used by compressed range reads.
+     * 0 keeps the build defaults (8 MiB total, 4 MiB per record).  Records
+     * larger than either limit are streamed for the requested window and never
+     * cached. */
+    uint32_t range_cache_bytes;
+    uint32_t range_cache_entry_bytes;
     int verify_embedded_names;
 } BsaOptions;
 
@@ -146,15 +152,37 @@ BsaStatus bsa_read(const BsaArchive *archive, const BsaEntry *entry,
 
 /* Read `n` unpacked bytes starting at `rel` directly into `dst`.
  *
- * Only the requested range is read: no buffer for the whole record is
- * allocated and the physical offset is computed in 64 bits after
- * entry_prefix() removed the embedded-name prefix.  `rel == payload_length`
- * with `n == 0` is a valid empty read at the end.  On any error *out_len is
- * zero and nothing after `dst` was written.  Compressed entries refuse with
- * BSA_ERR_UNSUPPORTED: cooked streaming archives store plain payloads. */
+ * Uncompressed entries read only the requested range; the physical offset is
+ * computed in 64 bits after entry_prefix() removed the embedded-name prefix.
+ * `rel == payload_length` with `n == 0` is a valid empty read at the end.
+ *
+ * Compressed (zlib) entries can be read arbitrarily as well.  A record is
+ * inflated once and kept in the archive's bounded LRU (see BsaOptions), so the
+ * next window of the same record is a memory copy; a record larger than the
+ * per-record or total cache limit is streamed for the requested window and
+ * discarded.  `rel`/`n` address the *unpacked* payload.
+ *
+ * For both layouts `rel > unpacked` or `n > unpacked - rel` is BSA_ERR_BOUNDS
+ * (the range is never silently truncated).  On any error *out_len is zero and
+ * nothing after `dst` was written.
+ *
+ * The cache shares the archive's existing single-thread contract: one archive
+ * is used from one cooperative guest thread at a time, exactly like the
+ * read-through page cache and FILE* seek state. */
 BsaStatus bsa_read_range(const BsaArchive *archive, const BsaEntry *entry,
                          uint32_t rel, void *dst, uint32_t n,
                          uint32_t *out_len, char *reason, size_t reason_cap);
+
+/* Metrics for the compressed range cache.  Counters are monotonic; `bytes` is
+ * the number of unreferenced inflated bytes currently resident. */
+typedef struct {
+    uint64_t hits;       /* served from a resident inflated record */
+    uint64_t misses;     /* record not resident (inflated or streamed) */
+    uint64_t evictions;  /* records dropped by the LRU */
+    uint64_t bytes;      /* resident inflated bytes right now */
+} BsaRangeCacheStats;
+void bsa_range_cache_stats(const BsaArchive *archive,
+                           BsaRangeCacheStats *out);
 
 /* Exposed for tests and for the runtime's content identity line. */
 uint32_t bsa_crc32(const void *data, size_t size);

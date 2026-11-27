@@ -1285,6 +1285,35 @@ StreamStatus stream_mount_pump(StreamMount *mount, uint32_t max_quanta,
     return STREAM_OK;
 }
 
+StreamStatus stream_mount_stage_extent(StreamMount *mount,
+                                       const StreamResource *res,
+                                       uint32_t *out, char *reason,
+                                       size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount || !res || !out) return STREAM_ERR_ARGUMENT;
+    *out = res->payload_length;
+    if (!(res->flags & STREAM_RESOURCE_FLAG_COMPRESSED)) return STREAM_OK;
+    BsaArchive *archive = NULL;
+    StreamStatus st = mount_archive(mount, res->archive_index, &archive,
+                                    reason, reason_cap);
+    if (st != STREAM_OK) return st;
+    char want[STREAM_PATH_MAX];
+    st = resource_path_copy(res, want, sizeof want, reason, reason_cap);
+    if (st != STREAM_OK) return st;
+    BsaMatch match;
+    BsaStatus bs = bsa_find(archive, want, &match);
+    if (bs != BSA_OK) {
+        set_reason(reason, reason_cap, "archive directory lost '%s'", want);
+        return STREAM_ERR_FORMAT;
+    }
+    uint32_t unpacked = 0;
+    bs = bsa_unpacked_size(archive, &match.entry, &unpacked, reason,
+                           reason_cap);
+    if (bs != BSA_OK) return STREAM_ERR_FORMAT;
+    *out = unpacked;
+    return STREAM_OK;
+}
+
 StreamStatus stream_mount_prefetch_ex(StreamMount *mount,
                                       const StreamResource *res, uint32_t n,
                                       uint32_t lod, StreamPriority priority,
@@ -1298,6 +1327,13 @@ StreamStatus stream_mount_prefetch_ex(StreamMount *mount,
         return STREAM_ERR_ARGUMENT;
     }
     uint32_t target = res->payload_length;
+    if (res->flags & STREAM_RESOURCE_FLAG_COMPRESSED) {
+        uint32_t unpacked = 0;
+        char why[STREAM_REASON_MAX];
+        if (stream_mount_stage_extent(mount, res, &unpacked, why,
+                                      sizeof why) == STREAM_OK)
+            target = unpacked;
+    }
     if (n && n < target) target = n;
     if (target > mount->config.window_max_bytes)
         target = mount->config.window_max_bytes;

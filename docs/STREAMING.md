@@ -132,8 +132,11 @@ uint32_t ugrids = rd32(0x1241000);    // clamp 1..7
 
 1. Снять `visible` со старых handle.
 2. `stream_mount_prefetch_ex(..., STREAM_PRIO_P0, deadline=0)` для каждой
-   строки; ресурсы с флагом `compressed` пропускаются
-   (`skipped_compressed`), потому что `bsa_read_range()` их не читает.
+   строки; для deflate-ресурса целевой размер берётся из
+   `stream_mount_stage_extent()` (unpacked size), а не из stored
+   `payload_length`. `bsa_read_range()` теперь читает сжатые записи, поэтому
+   пропусков по `compressed` нет; `skipped_compressed` растёт только если
+   архивный extent не разрешился (битый/изменённый индекс).
 3. Все handle центральной строки - `stream_mount_mark_visible(1)`.
 4. `stream_mount_pump(mount, 2, ...)` - не больше двух квантов за кадр.
 5. Если рабочий набор сжался (`working < previous`), `stream_mount_trim()`
@@ -179,16 +182,17 @@ Loose-файлы и записи вне индекса идут старым п�
 ```
 python tests/stream_index_build_test.py                     # 52 checks
 powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
-  -Only stream_range,stream_queue,stream_cell -SkipPython
+  -Only stream_range,stream_queue,stream_cell,stream_cell_real_prefetch -SkipPython
 ```
 
 Результаты в этой ветке:
 
 | тест | результат |
 |---|---|
-| `stream_range_smoke` | 41 checks, 0 failures |
+| `stream_range_smoke` | 91 checks, 0 failures |
 | `stream_queue_smoke` | 67 checks, 0 failures |
 | `stream_cell_smoke` | 57 checks, 0 failures |
+| `stream_cell_real_prefetch` (Riverwood) | 21 checks, 0 failures, 8 compress×, prefetch=8, skipped=0, physical_reads=26 |
 | `stream_index_build_test.py` | 52 checks, 0 failures |
 | `stream_cell_real_smoke` (Riverwood) | 87 checks, 0 failures, 8/8 файлов, overlay resolves=8 |
 
@@ -207,21 +211,40 @@ $env:SKYRIM_ROOT="E:/SteamLibrary/steamapps/common/Skyrim"
 
 Он вызывает настоящие `GetFileAttributesExA`/`CreateFileA`/`ReadFile` через
 BSA overlay; для всех 8 путей Riverwood размер > 0 и чтение возвращает
-байты. Сам `asset_stream` retail-архивы не префетчит: они deflate, а
-`bsa_read_range()` для них возвращает `BSA_ERR_UNSUPPORTED`.
+байты. Overlay сам больше не материализует deflate-запись: `bsa_read_range()`
+читает её напрямую (инфляция один раз в LRU на архив).
+
+`stream_cell_real_prefetch` (регистрируется всегда, пропускается без индекса)
+гоняет настоящий `stream_cell` + pump на retail-архиве:
+
+```
+python tools/stream_index_build.py --data E:/harness_skyrim/Data \
+  --cell RiverwoodSleepingGiantInn --out build/stream_index_riverwood.bin
+$env:STREAM_INDEX_REAL="$PWD/build/stream_index_riverwood.bin"
+powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 `
+  -Only stream_cell_real_prefetch -SkipPython
+```
+
+Наблюдаемые цифры (8/8 строк Riverwood compressed): `prefetch_requests=8`,
+`skipped_compressed=0` (было 8 → prefetch 0), `physical_reads=26`,
+`quanta=26`, `ready=8`; demand-чтение первого ресурса обслуживается из RAM
+(`served=1`).
 
 ARM compile-only (без линковки):
 
 ```
+arm-none-eabi-gcc -O2 -std=gnu11 -march=armv6k ... -Isource -c source/bsa_reader.c
 arm-none-eabi-gcc -O2 -std=gnu11 -march=armv6k ... -Isource -c source/asset_stream.c
 arm-none-eabi-gcc -O2 -std=gnu11 -march=armv6k ... -Isource -c source/stream_cell.c
 ```
 
 ## 7. Что осталось
 
-- **Retail-архивы.** Индекс помечает deflate-записи битом 0; prefetch их
-  пропускает. Для реального prefetch нужен cooked-архив или частичный
-  inflate в очередь - сейчас этого нет.
+- **Retail-архивы.** Записи deflate теперь читаются любым диапазоном:
+  `bsa_read_range()` держит горячую запись в 8 MiB LRU (≤4 MiB на запись),
+  крупные записи стримит через 32 KiB окно. Prefetch сжатых ресурсов работает
+  (см. `stream_cell_real_prefetch`); выигрыш ограничен 8 id на клетку и
+  пропускной способностью одного pump-потока.
 - **8 id на клетку.** Формат schema 1 жёстко задаёт 8; Riverwood усечён с
   292 до 8. Расширение требует смены схемы/записи, а не обхода.
 - **Экстерьер.** Нет WRLD form id в проходе ESM; ключи `kind=1` пишутся
@@ -230,5 +253,5 @@ arm-none-eabi-gcc -O2 -std=gnu11 -march=armv6k ... -Isource -c source/stream_cel
 - **Поток.** Pump синхронный, 2 кванта/кадр, отдельного I/O-потока нет.
 - **GPU.** READY - это RAM, публикации в SKTX/GPU нет.
 - **Метрика "доля P0, догнавших demand"** считается по
-  `prefetch_demand_hits / demand_hits`; на реальном retail-индексе она
-  нулевая, потому что prefetch пропускает compressed.
+  `prefetch_demand_hits / demand_hits`; на retail-индексе окно и demand теперь
+  совпадают, метрика перестала быть структурно нулевой.

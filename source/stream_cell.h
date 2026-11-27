@@ -41,7 +41,7 @@ typedef struct {
     uint64_t rows_found;
     uint64_t rows_missing;
     uint64_t prefetch_requests;    /* accepted admissions, dedup included */
-    uint64_t skipped_compressed;   /* retail deflate rows are not range-readable */
+    uint64_t skipped_compressed;   /* compressed row whose unpacked extent failed */
     uint64_t trim_events;
     uint64_t trim_bytes;
     uint64_t demand_hits;

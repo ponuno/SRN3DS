@@ -428,6 +428,92 @@ static void build_corpus(ParsedArchive *parsed) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Real compressed range reads.  Picks a compressed archive, inflates one
+ * record fully as the reference and compares several windows, including the
+ * boundaries, against it.  Read-only. */
+static void check_real_compressed_ranges(BsaArchive *const *arch,
+                                         const ParsedArchive *parsed) {
+    for (int i = 0; i < g_narch; ++i) {
+        if (!arch[i]) continue;
+        const BsaHeader *h = bsa_header(arch[i]);
+        if (!h || !h->compressed || !parsed[i].files) continue;
+        uint32_t checked = 0;
+        for (uint32_t f = 0; f < parsed[i].files && checked < 2; ++f) {
+            const char *path = parsed[i].paths[f];
+            BsaMatch m;
+            if (!path || bsa_find(arch[i], path, &m) != BSA_OK) continue;
+            uint32_t size = 0;
+            char reason[BSA_REASON_MAX];
+            if (bsa_unpacked_size(arch[i], &m.entry, &size, reason,
+                                  sizeof reason) != BSA_OK ||
+                size < 64u)
+                continue;
+            uint8_t *full = (uint8_t *)xmalloc(size);
+            size_t full_len = 0;
+            BsaStatus st = bsa_read(arch[i], &m.entry, full, size, &full_len,
+                                    reason, sizeof reason);
+            if (st != BSA_OK || full_len != size) {
+                fail("%s: full read of '%s' failed: %s (%s)", g_arch[i].name,
+                     path, bsa_status_name(st), reason);
+                free(full);
+                continue;
+            }
+            uint32_t mid = size / 2u;
+            uint32_t tail = size > 1024u ? size - 1024u : 0u;
+            struct { uint32_t rel, len; const char *what; } ranges[6] = {
+                { 0u, 1u, "first byte" },
+                { 0u, size < 4096u ? size : 4096u, "head window" },
+                { mid, size - mid < 700u ? size - mid : 700u, "middle" },
+                { tail, size - tail, "tail" },
+                { size - 1u, 1u, "last byte" },
+                { mid / 2u, size - mid / 2u < 300u ? size - mid / 2u : 300u,
+                  "early middle" },
+            };
+            uint8_t *buf = (uint8_t *)xmalloc(4096);
+            int ok = 1;
+            for (size_t r = 0; r < sizeof ranges / sizeof ranges[0]; ++r) {
+                uint32_t got = 0;
+                if (ranges[r].len > 4096u) continue;
+                st = bsa_read_range(arch[i], &m.entry, ranges[r].rel, buf,
+                                    ranges[r].len, &got, reason,
+                                    sizeof reason);
+                if (st != BSA_OK || got != ranges[r].len ||
+                    memcmp(buf, full + ranges[r].rel, got) != 0) {
+                    fail("%s: range %u+%u (%s) of '%s' differs: %s (%s)",
+                         g_arch[i].name, ranges[r].rel, ranges[r].len,
+                         ranges[r].what, path, bsa_status_name(st), reason);
+                    ok = 0;
+                }
+            }
+            /* Empty and out-of-bounds edges, once per record. */
+            uint32_t got = 0;
+            if (bsa_read_range(arch[i], &m.entry, size, buf, 0, &got, reason,
+                               sizeof reason) != BSA_OK || got != 0)
+                fail("%s: empty range at the end of '%s' failed", g_arch[i].name,
+                     path);
+            if (bsa_read_range(arch[i], &m.entry, size, buf, 1, &got, reason,
+                               sizeof reason) != BSA_ERR_BOUNDS)
+                fail("%s: range past the end of '%s' was not refused",
+                     g_arch[i].name, path);
+            if (ok) ++checked;
+            free(buf);
+            free(full);
+        }
+        if (checked) {
+            BsaRangeCacheStats cs;
+            bsa_range_cache_stats(arch[i], &cs);
+            printf("bsa_index: %s: compressed ranges verified on %u record(s), "
+                   "cache hits=%llu misses=%llu evictions=%llu bytes=%llu\n",
+                   g_arch[i].name, checked, (unsigned long long)cs.hits,
+                   (unsigned long long)cs.misses,
+                   (unsigned long long)cs.evictions,
+                   (unsigned long long)cs.bytes);
+        }
+        return;
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Main.                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -479,6 +565,8 @@ int main(int argc, char **argv) {
            (unsigned long long)total_folders, total_index / 1024.0,
            total_index / (double)(1u << 20),
            (double)g_narch * 32.0 * 1024.0 / (double)(1u << 20));
+
+    check_real_compressed_ranges(arch, parsed);
 
     /* Reference dump/compare. */
     char ref_path[1024], pid_path[1024], tmpdir[1024];

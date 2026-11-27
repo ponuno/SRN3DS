@@ -274,6 +274,14 @@ StreamStatus stream_mount_prefetch_ex(StreamMount *mount,
                                       uint64_t deadline_ms, StreamHandle *out,
                                       char *reason, size_t reason_cap);
 
+/* Unpacked bytes a prefetch would stage for `res`: the archive's unpacked size
+ * for a compressed record, otherwise `payload_length`.  Callers that account a
+ * working set use this instead of the stored length. */
+StreamStatus stream_mount_stage_extent(StreamMount *mount,
+                                       const StreamResource *res,
+                                       uint32_t *out, char *reason,
+                                       size_t reason_cap);
+
 /* Execute up to `max_quanta` 32-64 KiB reads under the byte budget.  One read
  * is active at a time; the two 64 KiB buffers are rotated and copied into the
  * request's bounded window.  `*out_quanta == 0` with live queued work means

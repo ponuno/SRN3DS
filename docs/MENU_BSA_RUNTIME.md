@@ -13,7 +13,7 @@ runtime, with explicit refusals instead of a fake success.
 
 | File | Purpose |
 |---|---|
-| `source/bsa_reader.h` / `.c` | Bounded read-only BSA v104/v105 reader: header, folder/file records, name block, embedded names, zlib entries, case-insensitive lookup, CRC-32, named errors, exact single-stream inflate helper |
+| `source/bsa_reader.h` / `.c` | Bounded read-only BSA v104/v105 reader: header, folder/file records, name block, embedded names, zlib entries, case-insensitive lookup, CRC-32, named errors, exact single-stream inflate helper, arbitrary compressed range reads with a bounded inflated-record LRU |
 | `source/menu_swf.h` / `.c` | SWF container/FWS/CWS handling, frame header, tag-stream walk with DefineSprite nesting, bounded counts/names summary; ZWS is named `E_NOTIMPL` |
 | `source/menu_swf_display.h` / `.c` | Bounded PlaceObject2/3 display state, ShowFrame snapshots, sprite summaries and DefineFont2/3 glyph metrics |
 | `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 styles/shape records into bounded path summaries, a streaming geometry sink, plus DefineFont2/3 glyph outlines/bounds |
@@ -184,10 +184,23 @@ Safety and bounded behaviour:
 * raw inflate supports stored, fixed-Huffman and dynamic-Huffman deflate blocks,
   verifies the zlib CMF/FLG header and the Adler-32, rejects preset dictionaries,
   reserved block types, bad distances, truncated streams and output overruns;
-* for a compressed prefix read the whole stored entry is read into a temporary
-  buffer bounded by `max_stored_bytes` (default 64 MiB).  The runtime resolver
-  lowers that cap to its `budget_bytes`; this is a deliberate, documented limit,
-  not streaming inflate.
+* for a compressed prefix/full read the whole stored entry is read into a
+  temporary buffer bounded by `max_stored_bytes` (default 64 MiB).  The runtime
+  resolver lowers that cap to its `budget_bytes`; this is a deliberate,
+  documented limit, not streaming inflate.  `bsa_read()`/`bsa_read_prefix()`
+  keep this behaviour and do not touch the range cache;
+* `bsa_read_range()` now reads compressed entries too.  `rel`/`n` address the
+  unpacked payload; `rel > unpacked`, `n > unpacked - rel`, and `rel+n`
+  overflow are `BSA_ERR_BOUNDS` (never a silent short copy).  `rel == unpacked`
+  with `n == 0` is a valid empty read.  The store keeps one inflated record per
+  cache slot: default 8 MiB total, 4 MiB per record, 16 slots (both overridable
+  through `BsaOptions.range_cache_bytes`/`range_cache_entry_bytes`).  A record
+  that does not fit is streamed: the deflate payload is inflated through a
+  32 KiB ring, bytes before `rel` are discarded and only `n` bytes are captured;
+  it is never cached.  Metrics (`bsa_range_cache_stats()`): `hits`, `misses`,
+  `evictions`, resident `bytes`.  The cache is outside `max_index_bytes` and
+  shares the archive's single-thread contract (one cooperative guest thread per
+  archive, like the page cache and `FILE*` seek state).
 
 Named statuses include `BSA_ERR_MAGIC`, `BSA_ERR_VERSION`, `BSA_ERR_BOUNDS`,
 `BSA_ERR_COUNT`, `BSA_ERR_NAME`, `BSA_ERR_DUPLICATE`, `BSA_ERR_UNSUPPORTED`,
@@ -359,6 +372,9 @@ The synthetic coverage is:
   "neither names nor embedded names" refusal;
 * stored-block, fixed-Huffman and dynamic-Huffman inflate, truncated stream,
   bad zlib header, Adler mismatch and bounded prefix/full output;
+* compressed range windows (head/middle/tail/last byte/empty/out-of-bounds)
+  compared byte-for-byte with `bsa_read()`, LRU hits/evictions and the
+  oversized-record streaming fallback (`tests/stream_range_smoke.c`);
 * bad magic, unsupported version, truncation, folder/file count limits, index
   budget, per-file budget, out-of-range record, zero folder-name length and
   duplicate path; tight index budget equal to the final locator size;
