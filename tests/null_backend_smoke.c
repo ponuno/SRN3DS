@@ -383,7 +383,9 @@ int main(int argc,char **argv){
     uint32_t stream[]={0,vb,0,sizeof(D9Vertex)};assert(call(&h,device,100,stream,4)==0);
     clear[0]=0;clear[1]=0;clear[2]=1;assert(call(&h,device,43,clear,6)==0);
     assert(call(&h,device,41,NULL,0)==0&&call(&h,device,41,NULL,0)==0x8876086cu);
-    assert(call(&h,device,43,clear,6)==0x8876086cu&&call(&h,device,17,present,4)==0x8876086cu);
+    /* In-scene Clear is the documented COM relaxation (retail GFx relies on
+     * it); Present still requires EndScene. */
+    assert(call(&h,device,43,clear,6)==0&&call(&h,device,17,present,4)==0x8876086cu);
     assert(call(&h,device,16,reset,1)==0x8876086cu);
     uint32_t draw1[]={D9_TRIANGLELIST,0,1};assert(call(&h,device,81,draw1,3)==0);
     assert(call(&h,device,42,NULL,0)==0&&call(&h,device,42,NULL,0)==0x8876086cu);

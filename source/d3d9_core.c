@@ -3959,6 +3959,17 @@ int d9_depth_surface_info(D9Device *d,D9Handle h,unsigned *width,unsigned *heigh
     Depth *s=depth_slot(d,h);if(!s)return D9_INVALID;
     if(width)*width=s->w;if(height)*height=s->h;if(format)*format=s->format;return D9_OK;
 }
+int d9_clear_target(D9Device *d,uint32_t argb){
+    if(!d||d->teardown||!d->scene)return D9_INVALID;
+    Target *t=d->target?target(d,d->target):
+        (d->back_target?target(d,d->back_target):NULL);
+    /* The implicit screen is not a Target object; the backend already clears
+     * it at BeginScene.  Accept the in-scene colour reset so the guest UI frame
+     * is not aborted, and apply it at the next frame boundary. */
+    if(!t)return D9_OK;
+    if(!d->ops.target_clear)return D9_UNSUPPORTED;
+    return d->ops.target_clear(d->ctx,t->native,argb)?D9_BACKEND:D9_OK;
+}
 int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
     if(!d||d->teardown||!d->scene||!d->depth||!d->ops.depth_clear)return D9_INVALID;
     if(!(flags&6u)||(flags&~7u))return D9_INVALID;
