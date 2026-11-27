@@ -43,6 +43,11 @@ typedef struct {
     unsigned menu_indexed_draws,menu_indexed_vertices,menu_indexed_indices;
     unsigned last_menu_indexed_count,last_menu_index_count;
     uint16_t last_menu_indices[3];
+    /* Verified emitted PICA VS submissions.  The GPU-free host backend records
+     * the already-gated contract (program, declaration, bank) but cannot
+     * rasterise it; these counters prove a draw reached the backend. */
+    unsigned pica_vs_draws,pica_vs_vertices;
+    const char *last_pica_vs_id;
     /* Cube-map creation/upload accounting.  The core owns the six face stores;
      * these counters prove the null backend accepted every face/level. */
     unsigned cube_creates,cube_uploads;

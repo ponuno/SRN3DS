@@ -329,6 +329,9 @@ Add-Test "tev_accuracy" $common ($tevSources + @("tests/tev_accuracy_smoke.c")) 
 Add-Test "menu_light" $common ($tevSources + @("tests/menu_light_smoke.c")) @()
 Add-Test "pica_tev" $common @("source/d3d9_tev.c", "source/d3d9_menu_light.c", "source/d3d9_pica_tev.c", "tests/pica_tev_smoke.c") @()
 Add-Test "shader_plan_table" $common @("source/d3d9_shader_plan.c", "source/d3d9_tev.c", "source/d3d9_adapter.c", "tests/shader_plan_table_smoke.c") @()
+# Measured menu.generic.vs permutations: normal0/color1 inputs, abs opcode,
+# optional color outputs, texgen dp4 c4/c5 and the zyxw colour read.
+Add-Test "menu_vs_family" $common @("source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_menu_light.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_vertex.c", "tests/menu_vs_family_smoke.c") @()
 # Multi-pass plan: one draw call replayed through 2..4 TEV programs with
 # per-pass blend/depth state, no state leak, named refusal before submit.
 Add-Test "shader_plan_multipass" $common ($d3dFull + @("source/d3d9_shader_plan.c", "tests/shader_plan_multipass_smoke.c")) @()

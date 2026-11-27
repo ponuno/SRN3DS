@@ -2048,7 +2048,7 @@ static void surface_dc(CPU *c){Obj *o=obj(A(0),SURFACE);uint32_t out=A(1);
     d3d_log("GetDC","GDI device contexts are not implemented for D3D9 surfaces");RET(UNAVAILABLE,2);
 }
 static void surface_release_dc(CPU *c){if(!obj(A(0),SURFACE))RET(INVALID,2);RET(INVALID,2);}
-static void clear(CPU *c){if(!obj(A(0),DEVICE)||g.phase){d3d_log("Clear","Clear is only valid outside BeginScene/EndScene");RET(INVALID,7);}
+static void clear(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2){d3d_log("Clear","Clear is only valid outside EndScene/Present");RET(INVALID,7);}
     unsigned flags=A(3),count=A(1);uint32_t rects=A(2);
     if(!flags||flags&~7u){d3d_log("Clear","invalid clear flags");RET(INVALID,7);}
     float z=0.0f;uint32_t zbits=A(5);memcpy(&z,&zbits,4);
@@ -2060,6 +2060,29 @@ static void clear(CPU *c){if(!obj(A(0),DEVICE)||g.phase){d3d_log("Clear","Clear 
     if((count==0)!=(rects==0)||(count&&(count>(UINT32_MAX-rects)/16||!ptr(rects,(size_t)count*16)))){
         d3d_log("Clear","invalid rectangle count or pointer");RET(INVALID,7);}
     if(count){d3d_log("Clear","rectangle clears are not implemented; use a full-target clear");RET(UNAVAILABLE,7);}
+    /* Retail GFx issues Clear between BeginScene and EndScene to wipe its UI
+     * render target.  Strict D3D9 returns D3DERR_INVALIDCALL there; PICA has no
+     * such ordering restriction, so the in-scene case clears the active target
+     * immediately instead of dropping the frame's colour reset.  This is a
+     * deliberate relaxation of the D3D9 diagnostic, not a silent no-op: any
+     * backend failure is still returned with its named reason. */
+    if(g.phase==1){
+        int rc=0;
+        if(flags&1u){
+            int crc=d9_clear_target(g.device,A(4));
+            if(crc)rc=crc;
+        }
+        if(!rc&&(flags&6u))rc=d9_clear_depth(g.device,flags,z,A(6));
+        if(rc){
+            const char *why=d9_last_draw_diagnostic(g.device);
+            d3d_log("Clear",why&&*why?why:"in-scene clear rejected by the backend");
+            RET(hr(rc),7);
+        }
+        g.last_diagnostic[0]=0;
+        trace_detail("in-scene Flags=0x%lx Color=0x%08lx Rects=%lu",
+                     (unsigned long)flags,(unsigned long)A(4),(unsigned long)count);
+        RET(OK,7);
+    }
     if(g.clear_pending){d3d_log("Clear","multiple Clear calls before BeginScene are not implemented");RET(UNAVAILABLE,7);}
     g.clear=A(4);g.clear_flags=flags;g.clear_z=A(5);g.clear_stencil=A(6);g.clear_pending=1;g.frame_clear=1;g.clear_target=d9_get_render_target(g.device);
     if(g.backend==d9_null_backend())d9_null_note_clear(flags);
@@ -2371,6 +2394,11 @@ static void get_current_palette(CPU *c){
 }
 static void set_fvf(CPU *c){if(!obj(A(0),DEVICE)||g.phase==2)RET(INVALID,2);
     unsigned fvf=A(1);const char *why=NULL;D9Decl decl;
+    /* FVF 0 is the legal "no FVF, use the explicit declaration" value in D3D9.
+     * GFx calls it after SetVertexDeclaration; it must not be misread as a
+     * malformed positionless FVF. */
+    if(!fvf){if(d9_set_vertex_declaration(g.device,NULL))RET(INVALID,2);
+        bind(&g.declaration,NULL);g.fvf=0;g.last_diagnostic[0]=0;RET(OK,2);}
     if(d9_decl_from_fvf(fvf,g.tnl_proto,&decl,&why)){
         d3d_fail("SetFVF",why?why:"FVF is not an admitted XYZ|TEX1/DIFFUSE variant",UNAVAILABLE);RET(UNAVAILABLE,2);
     }
@@ -2842,6 +2870,11 @@ static int menu_vs_state(void){
                  g.vs->menu.id,g.vs->menu_backend_why);
         return D9_UNSUPPORTED;
     }
+    if(g.vs->menu.backend_uvgen&&(g.constants_mask&0x30u)!=0x30u){
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "%s: texgen dp4 needs vertex constants c4 and c5",g.vs->menu.id);
+        return D9_UNSUPPORTED;
+    }
     return 0;
 }
 static int menu_ps_state(void){
@@ -2984,6 +3017,42 @@ static size_t shader_stream_words(uint32_t address,size_t limit){
     }
     return limit;
 }
+/* Diagnostic: TESV_MENU_SHADER_DUMP=<dir> writes every unique validated token
+ * stream once, as <stage>_<sha256>.bin plus a short text header.  It is
+ * read-only with respect to the device decision and is inert without the env.
+ * This exists so a rejected menu family permutation can be reproduced offline
+ * from its exact bytes instead of a prose reason. */
+static void shader_dump_stream(unsigned kind,const uint32_t *code,size_t words,
+                               const D9ShaderInfo *shape){
+    const char *dir=getenv("TESV_MENU_SHADER_DUMP");
+    if(!dir||!*dir||!code||!words||!shape)return;
+    static char seen_sha[256][65];static unsigned seen_count;
+    size_t hash_words=(shape->saw_end&&shape->words)?shape->words:words;
+    uint8_t dig[D9_MENU_CLOSURE_SHA256_BYTES];
+    d9_menu_closure_sha256(code,hash_words*4,dig);
+    char sha[65];
+    for(unsigned i=0;i<32u;++i)snprintf(sha+i*2,3,"%02x",dig[i]);
+    for(unsigned i=0;i<seen_count;++i)if(!strcmp(seen_sha[i],sha))return;
+    if(seen_count<sizeof seen_sha/sizeof seen_sha[0])
+        snprintf(seen_sha[seen_count++],sizeof seen_sha[0],"%s",sha);
+    char path[520];
+    snprintf(path,sizeof path,"%s\\%s_%s.bin",dir,kind==PS?"ps":"vs",sha);
+    FILE *f=fopen(path,"wb");
+    if(!f)return;
+    fwrite(code,4,hash_words,f);
+    fclose(f);
+    snprintf(path,sizeof path,"%s\\%s_%s.txt",dir,kind==PS?"ps":"vs",sha);
+    f=fopen(path,"w");
+    if(!f)return;
+    fprintf(f,"stage=%s sha256=%s bytes=%lu words=%lu instructions=%u version=0x%08x\n",
+            kind==PS?"ps":"vs",sha,(unsigned long)hash_words*4,
+            (unsigned long)hash_words,(unsigned)shape->instructions,
+            (unsigned)shape->version);
+    for(size_t i=0;i<hash_words;++i)fprintf(f,"%08x%c",code[i],(i%8==7)?'\n':' ');
+    if(hash_words%8)fputc('\n',f);
+    fclose(f);
+}
+
 static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     if(!address||(address&3)||!ptr(out,4)||OBJ_LIMIT_HIT())return INVALID;M32(out)=0;
     size_t count=0;for(size_t i=0;i<g.mem->count;++i){GuestRegion *r=&g.mem->regions[i];if(address>=r->base&&address-r->base<r->size){count=(r->size-(address-r->base))/4;break;}}
@@ -3019,6 +3088,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         free(code);return INVALID;
     }
     size_t stream_words=shape.saw_end&&shape.words?shape.words:words;
+    shader_dump_stream(kind,code,words,&shape);
     /* Measurement-only skip probe: a shader outside the certified closure is
      * represented by a named, non-executable object so the census can pass the
      * renderer's shader wall.  Draws with it are explicitly refused below.
@@ -3126,15 +3196,26 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         int menu_result=d9_menu_shader_match_vs(code,words,&menu,
                                                 menu_why,sizeof menu_why);
         if(menu_result<0){
-            snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
-                      "menu shader: %s",menu_why);
-            fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
-            if(g.shader_skip_probe)
-                return shader_not_executable(kind,out,code,stream_words,menu_why,UNAVAILABLE);
-            d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
-            free(code);return UNAVAILABLE;
+            /* An exact emitted PICA VS remains authoritative even when the
+             * structural family does not describe it (for example a member
+             * that legitimately omits color1). */
+            if(has_pvs){
+                has_menu_vs=0;
+            }else{
+                snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                          "menu shader: %s",menu_why);
+                fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+                if(g.shader_skip_probe)
+                    return shader_not_executable(kind,out,code,stream_words,menu_why,UNAVAILABLE);
+                d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+                free(code);return UNAVAILABLE;
+            }
+        }else if(menu_result>0){
+            /* Prefer the CPU/COM transform only when the member is provably
+             * the fixed position/UV/color0 path; otherwise keep the emitted
+             * PICA VS (if any) and leave the draw to that contract. */
+            has_menu_vs=(!has_pvs||menu.backend_cpu_safe)?1:0;
         }
-        has_menu_vs=menu_result>0;
     }
     /* Exact-hash pixel plan.  The SHA-256 is taken over the validated token
      * bytes through END; a hit selects the offline-compiled TEV descriptor
@@ -3212,12 +3293,16 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
     }
     char menu_backend_why[D9_MENU_SHADER_REASON_MAX];menu_backend_why[0]=0;int menu_backend_ok=1;
     if(has_menu_vs){
-        /* The fixed PICA VS carries position+texcoord0 only.  The certified
-         * menu VS family also declares color0/color1 varyings, so the plan is
-         * selected but the draw gate must refuse by name. */
-        menu_backend_ok=0;
-        snprintf(menu_backend_why,sizeof menu_backend_why,
-                  "fixed PICA vertex shader provides position and texcoord0 only; color0/color1 varyings are not produced");
+        /* A member whose visible position0/texcoord0/color0 path is exactly
+         * the COM core's fixed transform (dp4 c0..c3, texcoord and colour
+         * passthrough) is executable there; logo-lighting work on normal and
+         * color1 is proven off that path by the selector.  Any other member
+         * stays a named refusal. */
+        menu_backend_ok=(int)menu.backend_cpu_safe;
+        if(!menu_backend_ok)
+            snprintf(menu_backend_why,sizeof menu_backend_why,
+                     "menu.generic.vs member is not the fixed CPU transform "
+                     "(position dp4 c0..c3 + texcoord/color passthrough)");
     }
     if(kind==PS&&result==D9_SHADER_TEV&&!has_plan_ps){
         D9PicaTevReject reason;char backend_why[256];
@@ -3628,6 +3713,11 @@ static int shader_state(void){
         return D9_UNSUPPORTED;
     }
     d9_set_pica_vs(g.device,NULL,NULL,NULL);
+    if(g.vs&&g.vs->has_menu_vs)
+        d9_set_menu_vs_helpers(g.device,(int)g.vs->menu.backend_uvgen,
+                               (int)g.vs->menu.backend_color_swap);
+    else
+        d9_set_menu_vs_helpers(g.device,0,0);
     int plan_state=plan_draw_state();
     if(plan_state)return plan_state;
     /* The PICA VS contract owns the draw: the WVP comes from the uniform bank,

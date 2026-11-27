@@ -146,6 +146,8 @@ struct D9Device {
     float vs_constants_f[D9_VS_CONST_F_REGS][4];
     uint32_t vs_constants_f_mask[D9_VS_CONST_F_REGS / 32u];
     int pica_vs_active;
+    int menu_uvgen;
+    int menu_color_swap;
     D9PicaVsProgram pica_vs_program;
     D9PicaVsDecl pica_vs_decl;
     D9PicaVsBank pica_vs_bank;
@@ -2628,6 +2630,11 @@ int d9_set_pica_vs(D9Device *d,const D9PicaVsProgram *program,
     return D9_OK;
 }
 int d9_pica_vs_active(const D9Device *d){return d?d->pica_vs_active:0;}
+void d9_set_menu_vs_helpers(D9Device *d,int uvgen,int color_swap){
+    if(!d)return;
+    d->menu_uvgen=uvgen?1:0;
+    d->menu_color_swap=color_swap?1:0;
+}
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;d->transforms[which]=*m;return D9_OK;}
 int d9_set_clip_plane(D9Device *d,unsigned index,const float plane[4]){
@@ -3131,6 +3138,15 @@ static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9
         if(decl->uv!=UINT32_MAX){p=&decl->elements[decl->uv];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),uv))return D9_INVALID;}
         if(decl->color!=UINT32_MAX){p=&decl->elements[decl->color];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),rgba))return D9_INVALID;}
         if(decl->normal!=UINT32_MAX){p=&decl->elements[decl->normal];if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,d9_decl_type_size(p->type),nrm))return D9_INVALID;}
+        /* Selected menu.generic.vs helpers: the certified GFx texgen is
+         * dp4(position, c4/c5); the BGR colour read is zyxw. */
+        if(d->menu_uvgen){
+            uv[0]=d->vs_constants_f[4][0]*pos[0]+d->vs_constants_f[4][1]*pos[1]+
+                  d->vs_constants_f[4][2]*pos[2]+d->vs_constants_f[4][3];
+            uv[1]=d->vs_constants_f[5][0]*pos[0]+d->vs_constants_f[5][1]*pos[1]+
+                  d->vs_constants_f[5][2]*pos[2]+d->vs_constants_f[5][3];
+        }
+        if(d->menu_color_swap){float t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}
         *out=(D9Vertex){pos[0],pos[1],pos[2],uv[0],uv[1]};
         *col=(D9ColorVertex){pos[0],pos[1],pos[2],uv[0],uv[1],rgba[0],rgba[1],rgba[2],rgba[3],uv[2]};
         normal[0]=nrm[0];normal[1]=nrm[1];normal[2]=nrm[2];

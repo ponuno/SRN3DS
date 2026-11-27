@@ -81,6 +81,18 @@ typedef struct {
     uint8_t input_usage[D9_MENU_SHADER_MAX_INPUTS];
     uint8_t input_index[D9_MENU_SHADER_MAX_INPUTS];
     uint32_t output_semantic_mask;        /* D9_MENU_VS_OUT_* */
+    /* VS-only: 1 when the program's visible 2D outputs (position0, texcoord0,
+     * color0) are exactly the fixed CPU/COM transform the core already applies
+     * (dp4 c0..c3 * position, texcoord passthrough, colour passthrough).
+     * Extra logo-lighting work (normal input, color1) is then provably not on
+     * the position/UV/color0 path and is ignored.  Zero means the backend
+     * cannot execute the member and the draw stays a named refusal. */
+    uint32_t backend_cpu_safe;
+    /* Extra fixed-path state needed by a CPU-safe member.  backend_uvgen means
+     * texcoord0 is dp4(position, c4/c5); backend_color_swap means COLOR0 is
+     * read with the zyxw swizzle (red/blue swap). */
+    uint32_t backend_uvgen;
+    uint32_t backend_color_swap;
 } D9MenuShaderMatch;
 
 /* Match a ps_3_0 stream against the two certified bytecode menu entries.

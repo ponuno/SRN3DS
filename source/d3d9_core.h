@@ -628,6 +628,14 @@ int d9_depth_surface_info(D9Device *d,D9Handle h,unsigned *width,unsigned *heigh
  * depth_clear.  flags may be D3DCLEAR_ZBUFFER (2), D3DCLEAR_STENCIL (4) or
  * both. */
 int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil);
+/* Clear the active colour target *inside* an open scene.  Retail GFx calls
+ * IDirect3DDevice9::Clear between BeginScene and EndScene to wipe the current
+ * UI render target; strict D3D9 refuses that, but PICA has no such ordering
+ * rule, so the COM bridge forwards the clear instead of dropping the frame's
+ * only colour reset.  argb is the D3DCOLOR value.  Returns D9_OK, D9_INVALID
+ * when no scene/target exists, or D9_UNSUPPORTED when the implicit screen has
+ * no clearable Target object. */
+int d9_clear_target(D9Device *d,uint32_t argb);
 /* StretchRect-class GPU copy between LDR surfaces.  dst/src are render-target
  * handles (zero = the back buffer: the retained target when lockable, the
  * implicit screen otherwise); either rect may be NULL for the whole surface.
@@ -765,6 +773,10 @@ int d9_set_shader_clip(D9Device *d,const D9Matrix *rows);
 int d9_set_pica_vs(D9Device *d,const D9PicaVsProgram *program,
                    const D9PicaVsDecl *decl,const D9PicaVsBank *bank);
 int d9_pica_vs_active(const D9Device *d);
+/* Fixed COM/CPU menu transform helpers for a selected menu.generic.vs member.
+ * uvgen reproduces texcoord0 = dp4(position, c4/c5); color_swap reproduces the
+ * zyxw COLOR0 read (red/blue swap).  Both are reset by the next call. */
+void d9_set_menu_vs_helpers(D9Device *d,int uvgen,int color_swap);
 /* 1 when the backend exposes draw_pica_vs; the gate needs this before it lets
  * a skinned batch through. */
 int d9_pica_vs_backend(const D9Device *d);

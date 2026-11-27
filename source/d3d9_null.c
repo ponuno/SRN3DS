@@ -595,11 +595,23 @@ static int null_draw_menu_indexed(void *ctx,const D9ColorVertex *vertices,size_t
 }
 static int null_draw_pica_vs(void *ctx,const D9SkinVertex *vertices,size_t count,
                              const D9PicaVsDraw *draw){
-    (void)ctx;(void)vertices;(void)count;(void)draw;
-    null_log("draw_pica_vs",
-             "host null backend has no PICA200 shader program, vertex loader or "
-             "uniform bank; the skinned stream is refused by name");
-    return -1;
+    D9NullStats *s=ctx;
+    if(!s||!s->scene){null_log("draw_pica_vs","no scene is active");return -1;}
+    if(!vertices||!count||!draw||!draw->program||!draw->decl||!draw->bank){
+        null_log("draw_pica_vs","incomplete verified PICA VS draw contract");
+        return -1;
+    }
+    /* The host backend has no PICA200 shader program, vertex loader or uniform
+     * bank.  It can still record that COM passed the full verified contract
+     * (exact bytecode hash, declaration, bank) instead of dropping the batch
+     * before the backend.  No pixel is written; present pixels still come only
+     * from the explicit Present blit.  This is a measurement submission. */
+    ++s->pica_vs_draws;
+    s->pica_vs_vertices+=(unsigned)count;
+    s->last_pica_vs_id=draw->program->id;
+    null_log("draw_pica_vs","MEASUREMENT ONLY: verified PICA VS submission recorded; "
+             "the host null backend does not rasterise it");
+    return 0;
 }
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,

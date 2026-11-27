@@ -307,18 +307,20 @@ int main(void){
     assert(call(&h,h.device,81,draw,3)==UNAVAILABLE);
     assert(mock.draws==before);
     assert(strstr(d9_com_last_diagnostic(),"PICA")!=NULL||
-           strstr(d9_com_last_diagnostic(),"vertex shader")!=NULL);
+           strstr(d9_com_last_diagnostic(),"vertex shader")!=NULL||
+           strstr(d9_com_last_diagnostic(),"CPU transform")!=NULL);
     assert(call(&h,h.device,42,NULL,0)==0);
     assert(call(&h,h.device,17,present,4)==0);
     assert(set_vertex_shader(&h,0)==0);
     fvf=0x102;assert(call(&h,h.device,89,&fvf,1)==0);
 
-    /* Missing color1 output is a named refusal with no partial object. */
+    /* color1 output is optional (the measured GFx set has a position+texgen
+     * member without it); the object is created and the draw gate decides. */
     vn=build_menu_vs(vscode,1,0);
     assert(!guest_write(&h.memory,CODE,vscode,vn*4));
     assert(!guest_write32(&h.memory,OUT,0xDEADBEEFu));
-    assert(create_vertex_shader(&h,CODE,OUT)==UNAVAILABLE);
-    assert(rd(&h,OUT)==0&&strstr(d9_com_last_shader_rejection(),"color1")!=NULL);
+    assert(create_vertex_shader(&h,CODE,OUT)==0);
+    assert(rd(&h,OUT)!=0);
 
     /* Leave a TEV shader bound across COM shutdown of an adopted device. */
     n=0;code[n++]=VER;

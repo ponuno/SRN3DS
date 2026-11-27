@@ -141,10 +141,30 @@ per-vertex color1 interpolation: PICA has one interpolated vertex colour and the
 fragment-lighting source is a different, material/light-driven value.  The
 menu-light plan therefore uses the explicit c8 fold documented above.
 
-The fixed PICA vertex shader still emits position+texcoord0 only, so the
-`menu.generic.vs` family is selected and then refused at draw time by name.  A
-material loader must still supply normal/tangent evidence and the c8 ambient
-value.  No menu frame or pixel proof is claimed.
+Measured retail permutations (dumped with `TESV_MENU_SHADER_DUMP=<dir>`) add
+`normal0`/`color1` inputs and opcode `0x23` (`abs`) to the static family.
+`color0`/`color1` outputs are optional: the five emitted GFx programs include a
+position+texgen member without them.  A member is marked CPU-executable only
+when its *visible* outputs are exactly the COM fixed transform:
+
+- position0 = four `dp4` rows `c0..c3` against POSITION0;
+- texcoord0 = `mov` from a texcoord input, or `dp4 c4/c5` against POSITION0
+  (the core reproduces the latter from the VS constant bank);
+- color0 = `mov` from COLOR0, with identity or `zyxw` (red/blue swap).
+
+Logo-lighting work on NORMAL and COLOR1 is allowed but must not feed those
+three outputs.  Members that do not match remain a named refusal.  If an exact
+emitted PICA VS exists in `d3d9_pica_vs_menu_table.inc`, it is kept as the
+authoritative descriptor unless the CPU-safe path above applies.  The global
+caps are unchanged.  No menu frame or pixel proof is claimed.
+
+### 1.5 In-scene Clear
+
+Retail GFx calls `IDirect3DDevice9::Clear` between BeginScene and EndScene.
+Strict D3D9 refuses it; the COM bridge now clears the active colour/depth
+target immediately instead of dropping the frame's reset.  This is a
+deliberate diagnostic relaxation (documented in `source/d3d9_com.c`), not a
+silent no-op: backend failures and rectangle clears remain named refusals.
 
 Render-target textures use an explicit `D9Backend.target_texture()` sample view;
 core stores that handle in `Texture.native` instead of assuming a target is a

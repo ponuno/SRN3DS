@@ -743,7 +743,9 @@ static void test_menu_runtime_vs_family(void) {
     CHECK_EQ(vs.kind, D9_MENU_SHADER_NONE);
     CHECK_EQ(vs.plan.stages, 0);
 
-    /* Missing color1 output is a named vs_3_0 refusal, never a partial match. */
+    /* color1 is optional: the measured GFx set includes position+texgen
+     * programs without a color1 output.  A duplicate color0 declaration is
+     * still a structural member, not a partial match. */
     uint32_t *mutated = copy_words(menu_generic_vs, MENU_GENERIC_VS_WORDS);
     CHECK(mutated != 0);
     if (!mutated) return;
@@ -752,13 +754,14 @@ static void test_menu_runtime_vs_family(void) {
     if (at > 0) {
         mutated[at + 1] = (mutated[at + 1] & ~(0x1Fu | (0xFu << 16))) | 10u;
         CHECK_EQ(d9_menu_shader_match_vs(mutated, MENU_GENERIC_VS_WORDS,
-                                         &vs, why, sizeof why), -1);
-        CHECK_EQ(vs.kind, D9_MENU_SHADER_NONE);
-        CHECK(strstr(why, "color1") != 0);
+                                         &vs, why, sizeof why), 1);
+        CHECK_EQ(vs.kind, D9_MENU_SHADER_GENERIC_VS);
     }
     free(mutated);
 
-    /* Normal/tangent input is outside the static menu family. */
+    /* A normal0 declaration is a measured StartMenu permutation.  It is
+     * selectable because the logo path consumes it, but the synthetic stream
+     * has no matching body, so it is not CPU-safe. */
     mutated = copy_words(menu_generic_vs, MENU_GENERIC_VS_WORDS);
     CHECK(mutated != 0);
     if (!mutated) return;
@@ -767,8 +770,44 @@ static void test_menu_runtime_vs_family(void) {
     if (at > 0) {
         mutated[at + 1] = (mutated[at + 1] & ~0x1Fu) | 3u; /* normal0 */
         CHECK_EQ(d9_menu_shader_match_vs(mutated, MENU_GENERIC_VS_WORDS,
-                                         &vs, why, sizeof why), -1);
-        CHECK(strstr(why, "normal0") != 0);
+                                         &vs, why, sizeof why), 1);
+        CHECK_EQ(vs.kind, D9_MENU_SHADER_GENERIC_VS);
+        CHECK_EQ(vs.backend_cpu_safe, 0u);
+    }
+    free(mutated);
+
+    /* color1 input is also a measured permutation; the family accepts it. */
+    mutated = copy_words(menu_generic_vs, MENU_GENERIC_VS_WORDS);
+    CHECK(mutated != 0);
+    if (!mutated) return;
+    at = find_dcl(mutated, MENU_GENERIC_VS_WORDS, 10, 0, 1);
+    CHECK(at > 0);
+    if (at > 0) {
+        mutated[at + 1] = (mutated[at + 1] & ~(0xFu << 16)) | (1u << 16);
+        CHECK_EQ(d9_menu_shader_match_vs(mutated, MENU_GENERIC_VS_WORDS,
+                                         &vs, why, sizeof why), 1);
+        CHECK_EQ(vs.kind, D9_MENU_SHADER_GENERIC_VS);
+    }
+    free(mutated);
+
+    /* opcode 0x23 is abs in vs_3_0 and appears in the measured set. */
+    mutated = copy_words(menu_generic_vs, MENU_GENERIC_VS_WORDS);
+    CHECK(mutated != 0);
+    if (!mutated) return;
+    at = -1;
+    for (size_t i = 1; i + 3 < MENU_GENERIC_VS_WORDS; ++i) {
+        uint32_t token = mutated[i];
+        if ((token & 0xFFFFu) == 0x01u && ((token >> 24) & 0xFu) == 2u) {
+            at = (int)i;
+            break;
+        }
+    }
+    CHECK(at > 0);
+    if (at > 0) {
+        mutated[at] = (mutated[at] & 0xFFFF0000u) | 0x23u;
+        CHECK_EQ(d9_menu_shader_match_vs(mutated, MENU_GENERIC_VS_WORDS,
+                                         &vs, why, sizeof why), 1);
+        CHECK_EQ(vs.kind, D9_MENU_SHADER_GENERIC_VS);
     }
     free(mutated);
 
