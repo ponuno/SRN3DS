@@ -8,10 +8,10 @@ landscape multitexture, LOD and world-map overlay
 * chunks: **327** / unique hashes: **247** (all PS; measured rows are all
   `terrain/landscape`, no shipped `grass/trees` rows)
 * exact-subset coverage: 0 translated, 0 draw-enabled, 247 refused
-* port-lite coverage: **19 translated / 49 chunks, 0 draw-enabled, 228 refused**
+* port-lite coverage: **138 translated / 190 chunks, 0 draw-enabled, 109 refused**
 * generated IR table: [`terrain_classes.json`](terrain_classes.json)
-* named refusals: [`refusals.json`](refusals.json) (228 remaining hashes)
-* plan catalogue: [`plans.json`](plans.json) (19 explicit approximations; no runtime entries)
+* named refusals: [`refusals.json`](refusals.json) (109 remaining hashes)
+* plan catalogue: [`plans.json`](plans.json) (138 explicit approximations; no runtime entries)
 * approximation report: [`approximations.json`](approximations.json)
 * reproducible classifier: [`classify.py`](classify.py)
 * approximation generator: [`approximate.py`](approximate.py)
@@ -26,7 +26,7 @@ lower bound of at most 6, no control flow, only direct opcodes, and no `def`
 component outside `[0,1]` other than `0`, `1` or `-1`.
 
 **Exact-subset result: 0 hashes / 0 chunks.**  No original-equivalent plan was
-emitted.  The port-lite follow-up explicitly approximates 19 hashes instead of
+emitted.  The port-lite follow-up explicitly approximates 138 hashes instead of
 refusing the whole family; see below.  `def_literal_out_of_range` was only the
 census's first rejection, and fixing literal range alone unlocks none of the
 original shaders.
@@ -72,38 +72,48 @@ not automatically alpha-blended overlays.
 `terrain_classes.json` carries every SHA-256, chunk count, package/meta, opcode
 histogram, sampled units, exact `def` vectors, CTAB vocabulary, stage lower
 bound, blockers and named refusal.  `refusals.json` is the compact per-hash
-named-refusal catalogue for the 228 still-unplanned hashes.  Neither stores
+named-refusal catalogue for the 109 still-unplanned hashes.  Neither stores
 retail bytecode.
 
-## Port-lite adaptation: 19 translated hashes / 49 chunks
+## Port-lite adaptation: 138 translated hashes / 190 chunks
 
 Every entry in `plans.json` has `quality: "approx"`, an explicit `approximation`
 object, a declared simplified specification and a symbolic verification against
-that specification.  No entry claims equivalence to the retail shader.
+that specification.  No entry claims equivalence to the retail shader.  All 138
+plans carry a measured static material contract; 10 one-texture plans are
+runtime candidates, but every entry stays `draw_enabled: 0` / `runtime: 0`.
 
 | Policy | Hashes | Chunks | TEV stages | Textures | Declared simplification / visual effect |
 |---|---:|---:|---:|---:|---|
-| `unlit_diffuse_baseline` | 6 | 14 | 1 | 1 | Keep `DiffuseSampler`; drop normal lighting, height/parallax and shadows. Flat unlit albedo. |
+| `unlit_diffuse_baseline` | 11 | 23 | 1 | 1 | Keep `DiffuseSampler`; drop normal lighting, height/parallax, shadows and every extra layer. Flat unlit albedo. |
 | `unlit_diffuse_overlay_pass` | 7 | 7 | 1 | 1 | Keep base diffuse; drop world-map normal, LOD-noise and lighting detail. Source-alpha overlay state is preserved externally. |
-| `near_three_equal` | 6 | 28 | 3 | 3 | Keep diffuse0..2 with a quantized equal-ish mix; drop diffuse3..5, all normal maps and LOD. Smooth but flatter layer blending. |
+| `dominant_three_layers` | 60 | 80 | 3 | 3 | Keep fixed texture units 0..2 of the 12/13-layer multitexture shaders with a quantized equal-ish mix; drop the other 9–10 layers, all normal/height samplers and lighting. |
+| `lod_ladder_default_near3` | 60 | 80 | 3 | 3 | Same three-unit mix for the 14/15-layer LOD shaders, declared as the **near** tier of a near/mid/far = 3/2/1 ladder. One plan per hash; mid/far are runtime distance tiers, not separate committed plans. |
 
-`near_three_equal` uses two PICA interpolations with literals `127/255` and
+The three-layer policies use two PICA interpolations with literals `127/255` and
 `170/255`; effective weights are approximately `0.332026 / 0.334641 / 0.333333`.
-Maximum deviation from equal thirds is **0.001307**.  The original-error bound is
-conservatively **1.0 per channel** because three layers and all lighting are
-dropped.  A per-cell weight histogram is not present in the corpus, so no
-fabricated “typical cell” statistic is reported.
+Maximum deviation from equal thirds is **0.001307**.  The corpus has no per-cell
+weight histogram, so the **error against the original weights is reported as
+`not_measured`**, not invented.  Layer selection is fixed to units 0..2; no layer
+is claimed to be dominant by weight.  The original-error bound remains a
+conservative **1.0 per channel** because the dropped layers, normal maps and
+lighting are unmeasured.
 
-Five one-texture plans have a complete static material contract and are marked
-`runtime_candidate: 1`.  They remain `draw_enabled: 0` / `runtime: 0`: the
-runtime cannot yet select the terrain approximation policy and no live
-texture/format/sampler binding was observed.  The three-texture plans also need
-the generic backend's multi-texture gate; overlay plans need the external
-source-alpha contract wired explicitly.
+Each plan also records its original `def` policy.  `0`/`1`/`-1` are named as
+foldable selectors; `0.08`, `-0.04`, `2`, `3`, `20` and the other out-of-range
+literals are listed as `uniform_or_approximated` and are dropped together with
+the original expression.  Nothing is silently clamped.
+
+Ten one-texture plans have a complete static material contract and are marked
+`runtime_candidate: 1` (five were already translated before this expansion).
+They remain `draw_enabled: 0` / `runtime: 0`: the runtime cannot yet select the
+terrain approximation policy and no live texture/format/sampler binding was
+observed.  The three-texture plans also need the generic backend's multi-texture
+gate; overlay plans need the external source-alpha contract wired explicitly.
 
 Atlas/prebake was not selected: the corpus does not contain a baked atlas or a
-measured common-UV/material table.  Multi-pass was not selected for these 19:
-the declared single-pass approximations fit PICA's 3-unit / 6-stage envelope.
+measured common-UV/material table.  Multi-pass was not selected: every committed
+approximation fits PICA's 3-unit / 6-stage envelope in one pass.
 
 ## `def` values and the schema request
 
@@ -158,9 +168,9 @@ instructions and need normal prebake plus a one-accumulator DAG scheduler.
 Many also contain `nrm`, `rsq`, `rcp`, `pow`, `cmp`, `dp2add` or loops.  The
 12–15-texture classes additionally require a real multi-pass contract.
 
-The 19 port-lite entries above therefore verify only their declared simplified
-specifications, never the original `oC0`.  The remaining 228 hashes stay named
-`terrain.needs_multipass` (218) or `terrain.stage_budget` (10).
+The 138 port-lite entries above therefore verify only their declared simplified
+specifications, never the original `oC0`.  The remaining 109 hashes stay named
+`terrain.needs_multipass` (103) or `terrain.stage_budget` (6).
 
 ## Reproduce and test
 
@@ -175,7 +185,7 @@ python tools\shaders\plan_verify.py --plans source\shader_packs\terrain\plans.js
 
 The pack-local IR regression rebuilds the complete classification table from
 `corpus.json`, `ps_ir.bin` and the read-only retail CTABs, then compares it
-field for field.  The approximation regression rebuilds all 19 plans and
+field for field.  The approximation regression rebuilds all 138 plans and
 re-runs their symbolic simplified-spec verification.  Original-shader
 equivalence is deliberately not claimed.
 

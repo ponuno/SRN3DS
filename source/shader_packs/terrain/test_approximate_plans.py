@@ -33,18 +33,19 @@ class ApproximatePlanTest(unittest.TestCase):
         cls.rows = {row["sha256"]: row for row in cls.table["hashes"]}
 
     def test_counts_and_policies(self):
-        self.assertEqual(len(self.plans), 19)
+        self.assertEqual(len(self.plans), 138)
         self.assertEqual(sum(self.rows[plan["sha256"]]["chunks"]
-                             for plan in self.plans), 49)
+                             for plan in self.plans), 190)
         self.assertEqual(collections.Counter(plan["approximation"]["policy"]
                                              for plan in self.plans), {
-            "unlit_diffuse_baseline": 6,
+            "unlit_diffuse_baseline": 11,
             "unlit_diffuse_overlay_pass": 7,
-            "near_three_equal": 6,
+            "dominant_three_layers": 60,
+            "lod_ladder_default_near3": 60,
         })
         self.assertEqual(collections.Counter((plan["stages"], len(plan["textures"]))
                                              for plan in self.plans), {
-            (1, 1): 13, (3, 3): 6,
+            (1, 1): 18, (3, 3): 120,
         })
 
     def test_honesty_fields_and_runtime_gate(self):
@@ -52,13 +53,64 @@ class ApproximatePlanTest(unittest.TestCase):
             self.assertEqual(plan["quality"], "approx")
             self.assertIn("dropped_policy", plan["approximation"])
             self.assertIn("expected_visual", plan["approximation"])
+            self.assertIn("layers_kept", plan["approximation"])
+            self.assertIn("weight_error_vs_original", plan["approximation"])
+            self.assertEqual(plan["approximation"]["weight_error_vs_original"]["status"],
+                             "not_measured")
+            self.assertIn("def_policy", plan["approximation"])
             self.assertEqual((plan["draw_enabled"], plan["runtime"]), (0, 0))
             self.assertEqual(plan["pass"], 1)
             self.assertLessEqual(plan["stages"], 6)
             self.assertLessEqual(len(plan["textures"]), 3)
             self.assertEqual(plan["material_contract"]["status"], "measured_static")
             self.assertTrue(plan["draw_blockers"])
-        self.assertEqual(sum(plan["runtime_candidate"] for plan in self.plans), 5)
+        self.assertEqual(sum(plan["runtime_candidate"] for plan in self.plans), 10)
+
+    def test_layer_policies_and_lod_ladder(self):
+        for plan in self.plans:
+            approximation = plan["approximation"]
+            row = self.rows[plan["sha256"]]
+            if plan["simplified_spec"]["kind"] == "single":
+                self.assertEqual(approximation["layers_kept"], 1)
+                self.assertEqual(approximation["kept_samplers"], [0])
+                self.assertNotIn("lod_tiers", approximation)
+            else:
+                self.assertEqual(approximation["layers_kept"], 3)
+                self.assertEqual(approximation["kept_samplers"], [0, 1, 2])
+                self.assertEqual(approximation["dropped_layers"],
+                                 row["texture_layers"] - 3)
+                self.assertAlmostEqual(sum(approximation["weights"]), 1.0)
+                if row["class"] == "terrain.multitexture_14_15_lod":
+                    self.assertEqual(approximation["policy"],
+                                     "lod_ladder_default_near3")
+                    self.assertEqual(approximation["lod_tiers"],
+                                     {"near": 3, "mid": 2, "far": 1})
+                    self.assertEqual(approximation["lod_tier_default"], "near")
+                else:
+                    self.assertEqual(approximation["policy"],
+                                     "dominant_three_layers")
+                    self.assertNotIn("lod_tiers", approximation)
+
+    def test_def_policy_is_explicit(self):
+        for plan in self.plans:
+            policy = plan["approximation"]["def_policy"]
+            row = self.rows[plan["sha256"]]
+            expected_hard = sorted({float(value)
+                                    for definition in row["defs"]
+                                    for value in definition["values"]
+                                    if value < 0 or value > 1})
+            expected_uniform = sorted({float(value)
+                                       for definition in row["defs"]
+                                       for value in definition["values"]
+                                       if value not in (-1, 0, 1)})
+            self.assertEqual(policy["hard_values_present"], expected_hard)
+            self.assertEqual(policy["uniform_or_approximated"], expected_uniform)
+            self.assertEqual(policy["literal_folded"], ["0", "1", "-1"])
+            self.assertTrue(all(value not in (-1.0, 0.0, 1.0)
+                                for value in policy["uniform_or_approximated"]))
+            if 2.0 in expected_hard:
+                self.assertIn(2.0, policy["uniform_or_approximated"])
+
 
     def test_symbolic_simplified_spec(self):
         for plan in self.plans:
@@ -98,22 +150,23 @@ class ApproximatePlanTest(unittest.TestCase):
     def test_manifest_and_refusals(self):
         manifest = load(PACK_DIR / "manifest.json")
         self.assertEqual(manifest["coverage"], {
-            "translated": 19, "draw-enabled": 0, "refused": 228,
+            "translated": 138, "draw-enabled": 0, "refused": 109,
             "contract_only": 0,
         })
         self.assertEqual({entry["sha256"] for entry in manifest["plans"]},
                          {plan["sha256"] for plan in self.plans})
         refusals = load(PACK_DIR / "refusals.json")["hashes"]
         refused = {row["sha256"] for row in refusals}
-        self.assertEqual(len(refused), 228)
+        self.assertEqual(len(refused), 109)
         self.assertFalse(refused & {plan["sha256"] for plan in self.plans})
 
     def test_regeneration(self):
         corpus = Path(r"E:\host_sm3")
-        if not (corpus / "corpus.json").exists():
-            self.skipTest("host canonical IR absent")
+        data = Path(r"F:\Skyrim\Data")
+        if not (data / "Skyrim - Shaders.bsa").exists():
+            self.skipTest("retail shader archive absent")
         regenerated, _ = approximate.build_plans(corpus, PACK_DIR / "manifest.json",
-                                                  r"F:\Skyrim\Data")
+                                                  str(data))
         self.assertEqual(regenerated, self.doc)
         self.assertEqual(approximate.build_report(self.plans, PACK_DIR / "terrain_classes.json"),
                          load(PACK_DIR / "approximations.json"))

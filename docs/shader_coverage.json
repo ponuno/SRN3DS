@@ -73,12 +73,12 @@
    "owner": "sm3-agent-terrain",
    "chunks": 327,
    "unique_hashes": 247,
-   "translated": 19,
+   "translated": 138,
    "draw_enabled": 0,
-   "refused": 228,
+   "refused": 109,
    "contract_only": 0,
    "refused_classes": {
-    "def_literal_out_of_range": 228
+    "def_literal_out_of_range": 109
    },
    "needs": [
     "literal range rewrite (def outside RGBA8 [0,1])"
@@ -135,20 +135,20 @@
  ],
  "extra_plans": {
   "plans": 19,
-  "draw_enabled": 3,
+  "draw_enabled": 6,
   "by_pack": {
    "ui": {
     "plans": 19,
-    "draw_enabled": 3,
+    "draw_enabled": 6,
     "exact": 15,
     "approx": 4
    }
   }
  },
  "total": {
-  "translated": 174,
+  "translated": 293,
   "draw-enabled": 10,
-  "refused": 6475,
+  "refused": 6356,
   "chunks": 10475,
   "unique_hashes": 6659
  },
