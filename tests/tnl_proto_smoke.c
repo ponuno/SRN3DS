@@ -139,8 +139,13 @@ static void run_off(void){
     assert(strstr(d9_com_last_diagnostic(),"TESV_D3D9_TNL_PROTO"));
     assert(call(&h,device,45,(uint32_t[]){256,MAT},2)==0x8876086au);
     assert(strstr(d9_com_last_diagnostic(),"TESV_D3D9_TNL_PROTO"));
-    /* The production render-state surface stays closed too. */
-    assert(call(&h,device,57,(uint32_t[]){137,1},2)==0x8876086cu);
+    /* The production render-state surface keeps the real T&L switches closed.
+     * D3DRS_LIGHTING is the deliberate exception: GFx state blocks set it, and
+     * rejecting it stalled the menu, so it is stored-but-inert on the shader
+     * path (see d9_set_render_state / render_slot). */
+    assert(call(&h,device,57,(uint32_t[]){D9_RS_LOCALVIEWER,1},2)==0x8876086cu);
+    assert(call(&h,device,57,(uint32_t[]){D9_RS_NORMALIZENORMALS,1},2)==0x8876086cu);
+    assert(call(&h,device,57,(uint32_t[]){D9_RS_LIGHTING,1},2)==0);
     assert(unref(&h,device)==0&&unref(&h,h.factory)==0);
     harness_stop(&h);
     puts("CPU T&L off: normal FVF/light/material/transform calls are named refusals, DevCaps 0x00082000 passed");
