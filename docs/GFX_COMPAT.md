@@ -168,6 +168,8 @@ is pushed right before `Pool`.
 | `D3DFMT_A8L8` | `0x33` | `0xf82e9d` | **refused** — not in `d9_texture_layout` (latent fallback only) |
 | `D3DFMT_A4R4G4B4` | `0x1a` | `0xf82f01` | **refused** (latent fallback only) |
 | `D3DFMT_A8R8G8B8` | `0x15` | `0xf82f66` | **works** — power-of-two only |
+| `D3DFMT_R8G8B8` | `0x14` | D3DX file loaders (189 retail + 58 mod DDS) | **D3DX-only** — 24bpp B,G,R rows with `(w*3+3)&~3` pitch expand to A8R8G8B8 (A=255); direct `CreateTexture`/`CheckDeviceFormat` refused by name |
+| `D3DFMT_A8B8G8R8` | `0x20` | D3DX file loaders (13 UBE files) | **D3DX-only** — DDS memory R,G,B,A is repacked to B,G,R,A on upload |
 | `D3DFMT_DXT1/3/5` | `'DXT1/3/5'` | not on this path | accepted by layout, **decoded** by `d9_bc_to_pica` |
 | `ATI2` / `BC5U` | `'ATI2'`/`'BC5U'` | no retail/mod file measured | accepted, decoded to R,G / B=0,A=255; see `docs/TEXTURE_FORMATS.md` |
 | `ATI1` / `BC4U` | `'ATI1'`/`'BC4U'` | 7 UBE tint masks (mod) | accepted, decoded to R / G=B=0,A=255 |
@@ -197,6 +199,14 @@ non-power-of-two **A8** size in 8..1024 with exactly one level; the guest keeps
 its logical size and PICA CLAMP sampling addresses it.  RGBA8/XRGB8 and every
 BC format keep the power-of-two rule.  A8L8/A4R4G4B4 stay refused (they are only
 reached if A8 creation fails).
+
+The 24-bit corpus is handled at the D3DX layer, not by `CreateTexture`
+(`docs/TEXTURE_FORMATS.md` §2a): `R8G8B8` DDS rows are B,G,R with a
+`(w*3+3)&~3` pitch and expand to A8R8G8B8 with A=255; `A8B8G8R8` DDS bytes
+R,G,B,A are repacked to B,G,R,A.  Mips, cube faces and volume slices are
+converted independently.  `CheckDeviceFormat` reports both as source-only
+with the named "expanded to A8R8G8B8" reason.  Remaining: the 1x1 A8B8G8R8
+UBE eye cube (backend cube floor is 8x8), the L8 retail volume, and BC7.
 
 `CreateTexture` with `w<8||h<8` requires RGBA8/XRGB8
 (`d9_create_texture_ex`).  **CreateTexture is now legal inside

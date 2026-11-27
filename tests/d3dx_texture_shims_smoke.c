@@ -15,6 +15,7 @@
  */
 #include "d3d9_com.h"
 #include "d3d9_null.h"
+#include "d3d9_bc.h"
 #include "d3dx_texture_shims.h"
 #include "n3ds_lift_runtime.h"
 #include "win32_shims.h"
@@ -56,6 +57,8 @@
 #define HR_NOTAVAILABLE 0x8876086au
 
 #define FMT_A8R8G8B8 21u
+#define FMT_R8G8B8 20u
+#define FMT_A8B8G8R8 32u
 #define FMT_DXT1 0x31545844u
 #define FMT_ATI2 0x32495441u
 #define FMT_DX10 0x30315844u
@@ -117,6 +120,37 @@ static size_t make_a8r8g8b8_dds(uint8_t *b,unsigned w,unsigned h,unsigned mips,u
     for(unsigned l=0;l<mips;++l){
         size_t bytes=(size_t)cw*4u*ch;
         for(size_t k=0;k<bytes;++k)b[off+k]=(uint8_t)(seed+l*37u+k);
+        off+=bytes;
+        if(cw>1)cw>>=1;if(ch>1)ch>>=1;
+    }
+    return off;
+}
+/* R8G8B8: 24bpp, DDS rows padded to 4 bytes, memory order B,G,R. */
+static size_t make_rgb24_dds(uint8_t *b,unsigned w,unsigned h,unsigned mips,unsigned seed){
+    size_t off=dds_header(b,w,h,mips,0x40u,0,24,0x00ff0000u,0x0000ff00u,
+                          0x000000ffu,0,0,1);
+    unsigned cw=w,ch=h;
+    for(unsigned l=0;l<mips;++l){
+        size_t pitch=d9_rgb24_pitch(cw);
+        for(unsigned y=0;y<ch;++y)
+            for(unsigned x=0;x<cw;++x){
+                uint8_t *p=b+off+(size_t)y*pitch+(size_t)x*3u;
+                p[0]=(uint8_t)(seed+x*3u+l);p[1]=(uint8_t)(seed+y*5u+l);
+                p[2]=(uint8_t)(seed+x+y+l);
+            }
+        off+=pitch*ch;
+        if(cw>1)cw>>=1;if(ch>1)ch>>=1;
+    }
+    return off;
+}
+/* A8B8G8R8: 32bpp, masks R=0xff/G=0xff00/B=0xff0000/A=0xff000000. */
+static size_t make_abgr8_dds(uint8_t *b,unsigned w,unsigned h,unsigned mips,unsigned seed){
+    size_t off=dds_header(b,w,h,mips,0x41u,0,32,0x000000ffu,0x0000ff00u,
+                          0x00ff0000u,0xff000000u,0,1);
+    unsigned cw=w,ch=h;
+    for(unsigned l=0;l<mips;++l){
+        size_t bytes=(size_t)cw*4u*ch;
+        for(size_t k=0;k<bytes;++k)b[off+k]=(uint8_t)(seed+l*17u+k);
         off+=bytes;
         if(cw>1)cw>>=1;if(ch>1)ch>>=1;
     }
@@ -193,6 +227,44 @@ static void sandbox_remove(void){
 static void set_guest_path(Harness *h,const char *path){
     assert(strlen(path)<260);
     assert(!guest_write(&h->memory,DATA,path,strlen(path)+1));
+}
+/* Optional real-corpus check: only runs when the sample exists outside the
+ * repository, so the committed test stays self-contained.  The DDS bytes are
+ * loaded through the same D3DXCreateTextureFromFileInMemory export and the
+ * resulting texture is locked to prove nonzero expanded pixels and size. */
+static void real_sample(Harness *h,const char *path,unsigned want_w,unsigned want_h,
+                        unsigned want_fmt){
+    FILE *f=fopen(path,"rb");
+    if(!f){fprintf(stderr,"[d3dx] real sample absent, skipped: %s\n",path);return;}
+    if(fseek(f,0,SEEK_END)||ftell(f)<=0){fclose(f);return;}
+    long n=ftell(f);if(fseek(f,0,SEEK_SET)){fclose(f);return;}
+    uint8_t *data=malloc((size_t)n);assert(data);
+    assert(fread(data,1,(size_t)n,f)==(size_t)n);fclose(f);
+    const uint32_t base=SCRATCH+0x10000u;
+    uint32_t span=(uint32_t)(((size_t)n+0xfffu)&~0xfffu);
+    assert(!guest_map(&h->memory,base,span));
+    assert(!guest_write(&h->memory,base,data,(size_t)n));
+    free(data);
+    uint32_t args[]={base,(uint32_t)n,INFO};
+    assert(shim_call(h,"D3DXGetImageInfoFromFileInMemory",args,3)==HR_OK);
+    assert(rd(h,INFO+0)==want_w&&rd(h,INFO+4)==want_h&&rd(h,INFO+16)==want_fmt);
+    uint32_t ct[]={h->device,base,(uint32_t)n,OUT};
+    assert(shim_call(h,"D3DXCreateTextureFromFileInMemory",ct,4)==HR_OK);
+    uint32_t tex=rd(h,OUT);assert(tex);
+    uint32_t lock[]={0,OUT2,0,0};
+    assert(call(h,tex,19,lock,4)==HR_OK);
+    size_t expect_pitch=(size_t)want_w*4u;
+    assert(rd(h,OUT2)==expect_pitch);
+    const uint8_t *px=guest_ptr(&h->memory,rd(h,OUT2+4),expect_pitch*want_h);
+    assert(px);
+    size_t nonzero=0;for(size_t i=0;i<expect_pitch*want_h;++i)nonzero+=(px[i]!=0);
+    assert(nonzero);
+    uint32_t level=0;assert(call(h,tex,20,&level,1)==HR_OK);
+    assert(call(h,tex,2,NULL,0)==0);
+    fprintf(stderr,"[d3dx] real %ux%u fmt %u sample loaded: %lu/%lu nonzero bytes\n",
+            want_w,want_h,want_fmt,(unsigned long)nonzero,
+            (unsigned long)(expect_pitch*want_h));
+    guest_unmap(&h->memory,base);
 }
 
 int main(void){
@@ -362,6 +434,92 @@ int main(void){
     assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),256),src+128,256));
     level=0;assert(call(&h,tex,20,&level,1)==HR_OK);
     assert(call(&h,tex,2,NULL,0)==0);
+
+    /* 4a1. 16x16 R8G8B8 (24bpp, B,G,R rows padded to 4 bytes) with 2 mips:
+     * the loader must expand to A8R8G8B8 with A=255 and keep each mip's own
+     * pitch. */
+    dds_a8=make_rgb24_dds(ddsbuf,16,16,2,0x11);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,dds_a8));
+    src=guest_ptr(&h.memory,DATA,dds_a8);assert(src);
+    {uint32_t ri[]={DATA,(uint32_t)dds_a8,INFO};
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",ri,3)==HR_OK);
+     assert(rd(&h,INFO+12)==2&&rd(&h,INFO+16)==FMT_R8G8B8);}
+    {uint32_t rct[]={h.device,DATA,(uint32_t)dds_a8,OUT};
+     assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",rct,4)==HR_OK);}
+    tex=rd(&h,OUT);assert(tex);
+    {uint32_t rl[]={0,OUT2,0,0};assert(call(&h,tex,19,rl,4)==HR_OK);
+     assert(rd(&h,OUT2)==64);
+     uint8_t expected[16*16*4];
+     assert(!d9_rgb24_to_bgra8(expected,sizeof expected,src+128,
+                               d9_rgb24_pitch(16),d9_rgb24_pitch(16)*16,16,16));
+     assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),sizeof expected),expected,
+                    sizeof expected));
+     level=0;assert(call(&h,tex,20,&level,1)==HR_OK);}
+    {uint32_t rl[]={1,OUT2,0,0};assert(call(&h,tex,19,rl,4)==HR_OK);
+     assert(rd(&h,OUT2)==32);
+     size_t src_bytes=d9_rgb24_pitch(16)*16;
+     uint8_t expected[8*8*4];
+     assert(!d9_rgb24_to_bgra8(expected,sizeof expected,src+128+src_bytes,
+                               d9_rgb24_pitch(8),d9_rgb24_pitch(8)*8,8,8));
+     assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),sizeof expected),expected,
+                    sizeof expected));
+     level=1;assert(call(&h,tex,20,&level,1)==HR_OK);}
+    assert(call(&h,tex,2,NULL,0)==0);
+
+    /* 4a2. A8B8G8R8 (memory R,G,B,A) must reach storage as B,G,R,A. */
+    dds_a8=make_abgr8_dds(ddsbuf,8,8,2,0x70);
+    assert(!guest_write(&h.memory,DATA,ddsbuf,dds_a8));
+    src=guest_ptr(&h.memory,DATA,dds_a8);assert(src);
+    {uint32_t ai[]={DATA,(uint32_t)dds_a8,INFO};
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",ai,3)==HR_OK);
+     assert(rd(&h,INFO+12)==2&&rd(&h,INFO+16)==FMT_A8B8G8R8);}
+    {uint32_t act[]={h.device,DATA,(uint32_t)dds_a8,OUT};
+     assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",act,4)==HR_OK);}
+    tex=rd(&h,OUT);assert(tex);
+    {uint32_t al[]={0,OUT2,0,0};assert(call(&h,tex,19,al,4)==HR_OK);
+     assert(rd(&h,OUT2)==32);
+     uint8_t expected[8*8*4];
+     assert(!d9_abgr8_to_bgra8(expected,sizeof expected,src+128,32,32*8,8,8));
+     assert(!memcmp(guest_ptr(&h.memory,rd(&h,OUT2+4),sizeof expected),expected,
+                    sizeof expected));
+     level=0;assert(call(&h,tex,20,&level,1)==HR_OK);}
+    assert(call(&h,tex,2,NULL,0)==0);
+
+    /* 4a3. Cube and volume: the same expansion covers six faces / slices.
+     * Creation succeeds; pixel packing is the shared 2D helper above. */
+    {size_t n=dds_header(ddsbuf,8,8,1,0x40u,0,24,0x00ff0000u,0x0000ff00u,
+                         0x000000ffu,0,0xfe00u,1);
+     size_t face=d9_rgb24_pitch(8)*8u;
+     for(size_t k=0;k<6u*face;++k)ddsbuf[n+k]=(uint8_t)(0x40+k);n+=6u*face;
+     assert(!guest_write(&h.memory,DATA,ddsbuf,n));
+     uint32_t cc[]={h.device,DATA,(uint32_t)n,OUT};
+     assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cc,4)==HR_OK);
+     assert(rd(&h,OUT));assert(call(&h,rd(&h,OUT),2,NULL,0)==0);}
+    {size_t n=dds_header(ddsbuf,8,8,1,0x41u,0,32,0x000000ffu,0x0000ff00u,
+                         0x00ff0000u,0xff000000u,0xfe00u,1);
+     for(size_t k=0;k<6u*8u*8u*4u;++k)ddsbuf[n+k]=(uint8_t)(0x80+k);n+=6u*8u*8u*4u;
+     assert(!guest_write(&h.memory,DATA,ddsbuf,n));
+     uint32_t cc[]={h.device,DATA,(uint32_t)n,OUT};
+     assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cc,4)==HR_OK);
+     assert(rd(&h,OUT));assert(call(&h,rd(&h,OUT),2,NULL,0)==0);}
+    /* The real UBE eye cube is 1x1 A8B8G8R8; the backend floor is 8x8, so this
+     * is a named refusal rather than a generic backend failure. */
+    {size_t n=dds_header(ddsbuf,1,1,1,0x41u,0,32,0x000000ffu,0x0000ff00u,
+                         0x00ff0000u,0xff000000u,0xfe00u,1);
+     for(size_t k=0;k<6u*4u;++k)ddsbuf[n+k]=0;n+=6u*4u;
+     assert(!guest_write(&h.memory,DATA,ddsbuf,n));
+     uint32_t cc[]={h.device,DATA,(uint32_t)n,OUT};
+     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+     assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cc,4)==HR_NOTAVAILABLE);
+     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"8x8"));}
+    {size_t n=dds_header(ddsbuf,8,8,1,0x40u,0,24,0x00ff0000u,0x0000ff00u,
+                         0x000000ffu,0,0x00200000u,2);
+     size_t plane=d9_rgb24_pitch(8)*8u;
+     for(size_t k=0;k<2u*plane;++k)ddsbuf[n+k]=(uint8_t)(0x20+k);n+=2u*plane;
+     assert(!guest_write(&h.memory,DATA,ddsbuf,n));
+     uint32_t vc[]={h.device,DATA,(uint32_t)n,OUT};
+     assert(shim_call(&h,"D3DXCreateVolumeTextureFromFileInMemory",vc,4)==HR_OK);
+     assert(rd(&h,OUT));assert(call(&h,rd(&h,OUT),2,NULL,0)==0);}
 
     /* 4a2. DX10 BC7 is refused by name, not guessed. */
     {size_t n=dds_header(ddsbuf,8,8,1,0x4u,FMT_DX10,0,0,0,0,0,0,1);
@@ -677,6 +835,17 @@ int main(void){
     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
     assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",wrong,4)==HR_INVALIDCALL);
     assert(rd(&h,OUT)==0);
+
+    /* 9. Real corpus samples, when present on this machine.  One retail
+     *    R8G8B8 256x256 tint mask (BSA extraction path is external) and one
+     *    16x16 UBE A8B8G8R8 eye map.  Both must lock to w*4 pitch with
+     *    nonzero decoded bytes. */
+    {const char *r8=getenv("SKYRIM_R8G8B8_SAMPLE");
+     if(!r8||!*r8)
+         r8="E:\\Skyrim_N3DS_build\\assets\\textures\\format_samples\\khajiitnose01.dds";
+     real_sample(&h,r8,256,256,FMT_R8G8B8);}
+    real_sample(&h,"E:\\SkyrimMods\\mods\\UBE 2.0\\textures\\!COR\\Eyes_ILV\\eye01_outer_m.dds",
+                16,16,FMT_A8B8G8R8);
 
     assert(call(&h,h.device,2,NULL,0)==0);
     assert(call(&h,h.factory,2,NULL,0)==0);

@@ -1,7 +1,8 @@
 # Texture formats needed by the world (retail corpus + installed mods)
 
 Status: **measurement + format support note**, 2026-11-27. No frame is
-claimed. `DevCaps` is unchanged (`0x00082000`).
+claimed. `DevCaps` is unchanged (`0x00082000`). R8G8B8 and A8B8G8R8 are now
+decoded (see §2a); BC7, the L8 volume and the 1x1 eye cube remain open.
 
 The question is which DDS pixel formats the bridge must recognise for the
 retail game and for what is actually installed, not which formats D3D9 in
@@ -57,14 +58,58 @@ cube). Volume: exactly one, the retail L8 `noisevolume.dds`.
 * **BC7 is present only in UBE 2.0 (120 files, eyes/body/head/paint/nails).**
   These are DX10-header assets with no BC7 decoder in this tree. They are
   refused by name; see section 4.
-* **Uncompressed 24-bit RGB (247 files) is not supported by the D3DX shim.**
-  Retail usage is limited (189 files); the shim's `format_name` knows the name
-  but `level_layout`/`texture_format_supported` do not create it. This remains
-  open.
-* **A8B8G8R8 (13 mod files)** parses to a known format name but is likewise
-  not created by the shim. Also open.
+* **Uncompressed 24-bit RGB (247 files) is now supported by the D3DX shim.**
+  Retail usage is limited (189 files, all 256x256 1-mip tint masks in
+  `Skyrim - Textures.bsa`); every file expands to A8R8G8B8 on upload with
+  A=255. See §2a.
+* **A8B8G8R8 (13 mod files, UBE 2.0)** is likewise expanded on upload, with
+  the B/R bytes swapped from the DDS R,G,B,A memory order. See §2a.
 * **The L8 volume** is the only volume format in the corpus; the volume loader
-  today handles BC/RGBA, not L8. Open.
+  still handles only BC/RGBA/expanded formats, not L8. Open.
+* **The 1x1 A8B8G8R8 UBE eye cube** is refused by name: the PICA/backend cube
+  floor is 8x8 and no 1x1 cube padding exists. Open.
+
+## 2a. 24-bit and BGR-first DDS loaders (closed)
+
+Verified on the real corpus, not guessed:
+
+* Retail R8G8B8: `khajiitnose01.dds` and `argoniancheeks03.dds` (extracted from
+  `Skyrim - Textures.bsa`) have masks R=`0x00ff0000`, G=`0x0000ff00`,
+  B=`0x000000ff`, bits=24. Little-endian DDS pixels are therefore **B,G,R**.
+  The first nonzero pixel of `argoniancheeks03.dds` is bytes `2d 52 4f`
+  (B=45, G=82, R=79), proving the order. Rows are padded to four bytes:
+  `pitch = (w*3 + 3) & ~3` (256x256 -> 768; a 17-pixel row would be 52).
+* Mod A8B8G8R8: `eye01_outer_m.dds` (16x16, 5 mips) has masks R=`0xff`,
+  G=`0xff00`, B=`0xff0000`, A=`0xff000000`; memory bytes are **R,G,B,A** and
+  the first row is `ff ff 00 00 ...` (R=255,G=255,B=0,A=0).
+* PICA samples RGBA8 (`GPU_RGBA8`, byte order in the tiled store A,B,G,R), so
+  both source layouts are expanded to the bridge's A8R8G8B8 CPU layout
+  (B,G,R,A) before upload:
+  * `d9_rgb24_to_bgra8` copies B,G,R and writes A=255, honouring the DDS row
+    pitch including the 4-byte padding.
+  * `d9_abgr8_to_bgra8` swaps R and B and keeps G,A.
+* Every mip level is converted separately from its own source pitch/offset.
+  Cube faces are converted face by face and volume slices slice by slice.
+  The created resource and its `GetLevelDesc` report A8R8G8B8, which is what
+  the PICA path can actually store; the DDS/image info still reports the file
+  format.
+
+`CheckDeviceFormat` deliberately does **not** claim direct storage for these
+formats: `CreateTexture(R8G8B8/A8B8G8R8)` is not implemented (the bridge has
+no 24-bit/BGR-first guest layout). The answer is
+`D3DERR_NOTAVAILABLE` with the reason "expanded to A8R8G8B8 by the D3DX
+texture loader". This is honest: the game reaches these files through D3DX,
+not through `CreateTexture`.
+
+Tests: `tests/bc_shader_smoke.c` checks the 24-bit row pitch (17->52, 16->48),
+both byte orders, and truncated/undersized input; `tests/d3dx_texture_shims_smoke.c`
+loads a 16x16 two-mip R8G8B8 and an 8x8 two-mip A8B8G8R8, verifies
+each locked mip against the converter, creates an 8x8 R8G8B8 cube, an 8x8
+A8B8G8R8 cube and an 8x8x2 R8G8B8 volume, refuses the 1x1 A8B8G8R8 cube by
+name, and (when the samples exist) loads the real 256x256 retail R8G8B8
+`khajiitnose01.dds` (69,559 nonzero bytes of 262,144) and the 16x16 UBE
+A8B8G8R8 `eye01_outer_m.dds` (512 of 1,024). `tests/check_format_matrix_smoke.c`
+asserts the source-only `CheckDeviceFormat` answer.
 
 ## 3. BC5 / BC4 decoder
 
@@ -141,8 +186,11 @@ fallback is a probe, not a capability.
 
 | Gap | Why it remains |
 | --- | --- |
-| Uncompressed R8G8B8 DDS creation (247 files) | layout/upload need a 24→32-bit expansion and a policy for 3-byte rows; not needed by retail menu path measured so far |
-| A8B8G8R8 DDS creation (13 mod files) | recognised by header parser, but not in `texture_format_supported`; channel-order conversion needs an explicit test |
-| L8 volume (1 retail file) | volume upload only implements block/RGBA formats |
+| L8 volume (1 retail file) | volume upload only implements block/RGBA/expanded formats |
 | BC7 (120 mod files) | named refusal; requires a real BC7 decoder or re-export |
+| 1x1 A8B8G8R8 eye cube (1 UBE file) | backend cube floor is 8x8; no 1x1 cube padding/upscale path |
+| Direct `CreateTexture` R8G8B8/A8B8G8R8 | source-only formats: D3DX loaders expand them, direct storage is not implemented and `CheckDeviceFormat` says so |
 | True float RT | impossible on PICA200; LDR fallback stays measurement-only |
+
+**Closed by this change:** R8G8B8 (247 files: 189 retail + 58 mod) and
+A8B8G8R8 2D/cube>=8 (13 mod files) load through the D3DX shim into A8R8G8B8.

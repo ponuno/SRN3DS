@@ -218,8 +218,14 @@ static unsigned bc_bytes(unsigned format){
        format==D3DFMT_ATI2||format==D3DFMT_BC5U)return 16u;
     return 0;
 }
+/* R8G8B8/A8B8G8R8 are DDS source layouts: PICA has no 24-bit or BGR-first
+ * sampler format, so every loader expands them to A8R8G8B8 on upload. */
+static int expand_source(unsigned format){
+    return format==D3DFMT_R8G8B8||format==D3DFMT_A8B8G8R8;
+}
 static int texture_format_supported(unsigned format){
-    return bc_bytes(format)||format==D3DFMT_A8R8G8B8||format==D3DFMT_X8R8G8B8;
+    return bc_bytes(format)||format==D3DFMT_A8R8G8B8||format==D3DFMT_X8R8G8B8||
+           expand_source(format);
 }
 static const char *format_name(unsigned f){
     switch(f){
@@ -248,8 +254,11 @@ static int level_layout(unsigned format,unsigned w,unsigned h,size_t *pitch,size
     if(!w||!h||!pitch||!bytes)return -1;
     unsigned bb=bc_bytes(format);
     if(bb){*pitch=(size_t)((w+3u)/4u)*bb;*bytes=*pitch*((h+3u)/4u);return 0;}
-    if(format==D3DFMT_A8R8G8B8||format==D3DFMT_X8R8G8B8){
+    if(format==D3DFMT_A8R8G8B8||format==D3DFMT_X8R8G8B8||format==D3DFMT_A8B8G8R8){
         *pitch=(size_t)w*4u;*bytes=*pitch*h;return 0;
+    }
+    if(format==D3DFMT_R8G8B8){
+        *pitch=(size_t)d9_rgb24_pitch(w);*bytes=*pitch*h;return 0;
     }
     return -1;
 }
@@ -260,7 +269,8 @@ static int parse_checked(const char *who,const uint8_t *p,size_t n,DdsImage *d){
     int rc=parse_dds(p,n,d);
     if(rc)
         reject("%s: %s (host shim supports legacy DXT1/3/5, ATI1/BC4, "
-               "ATI2/BC5 and A8R8G8B8/X8R8G8B8 DDS)",who,
+               "ATI2/BC5, A8R8G8B8/X8R8G8B8, and R8G8B8/A8B8G8R8 DDS expanded "
+               "to A8R8G8B8)",who,
                rc==-2&&g.dds_note[0]?g.dds_note:
                rc==-2?"unsupported DDS pixel format/header":"not a DDS file");
     return rc;
@@ -341,6 +351,18 @@ static int decode_bc_level(unsigned format,const uint8_t *src,size_t src_pitch,
     return 0;
 }
 
+/* Expand one R8G8B8/A8B8G8R8 level to top-first A8R8G8B8 bytes (B,G,R,A). */
+static int decode_uncompressed_level(unsigned format,const uint8_t *src,
+                                     size_t src_pitch,size_t src_bytes,
+                                     unsigned w,unsigned h,uint8_t *dst){
+    size_t dst_bytes=(size_t)w*h*4u;
+    if(format==D3DFMT_R8G8B8)
+        return d9_rgb24_to_bgra8(dst,dst_bytes,src,src_pitch,src_bytes,w,h);
+    if(format==D3DFMT_A8B8G8R8)
+        return d9_abgr8_to_bgra8(dst,dst_bytes,src,src_pitch,src_bytes,w,h);
+    return -1;
+}
+
 /* Create and fill an IDirect3DTexture9 from an already-parsed DDS.  The output
  * format is either the file format or, when a BC file was requested as
  * A8R8G8B8, the decoded RGBA8 form.  pool/usage are passed to the bridge;
@@ -364,7 +386,18 @@ static uint32_t create_2d_from_dds_ex(const char *who,uint32_t device,const uint
         return D3DX_D3DERR_NOTAVAILABLE;
     }
     int decode_bc=out_format==D3DFMT_A8R8G8B8&&bc_bytes(d->format);
-    if(out_format!=d->format&&!decode_bc){
+    int expand=expand_source(d->format);
+    if(expand){
+        /* Default creation uses the file format; the storage format is always
+         * the expanded A8R8G8B8, so an explicit A8R8G8B8 request is honoured. */
+        if(out_format!=d->format&&out_format!=D3DFMT_A8R8G8B8){
+            reject("%s: requested format %s cannot be produced from DDS format %s",
+                   who,format_name(out_format),format_name(d->format));
+            return D3DX_D3DERR_NOTAVAILABLE;
+        }
+        out_format=D3DFMT_A8R8G8B8;
+    }
+    if(out_format!=d->format&&!decode_bc&&!expand){
         reject("%s: requested format %s cannot be produced from DDS format %s",
                who,format_name(out_format),format_name(d->format));
         return D3DX_D3DERR_NOTAVAILABLE;
@@ -451,6 +484,20 @@ static uint32_t create_2d_from_dds_ex(const char *who,uint32_t device,const uint
                 return D3DXERR_INVALIDDATA;
             }
             upload=decoded;upload_pitch=(size_t)w*4u;upload_bytes=(size_t)decoded_bytes;
+        }else if(expand){
+            uint64_t decoded_bytes=(uint64_t)w*h*4u;
+            decoded=malloc((size_t)decoded_bytes);
+            if(!decoded){
+                d9_com_host_release(texture);
+                reject("%s: out of host memory for expanded level %u",who,i);
+                return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+            }
+            if(decode_uncompressed_level(d->format,p+offset,pitch,bytes,w,h,decoded)){
+                free(decoded);d9_com_host_release(texture);
+                reject("%s: DDS level %u could not be expanded to A8R8G8B8",who,i);
+                return D3DXERR_INVALIDDATA;
+            }
+            upload=decoded;upload_pitch=(size_t)w*4u;upload_bytes=(size_t)decoded_bytes;
         }
         hr=d9_com_host_upload_texture_level(texture,i,upload,upload_pitch,upload_bytes);
         free(decoded);
@@ -465,6 +512,9 @@ static uint32_t create_2d_from_dds_ex(const char *who,uint32_t device,const uint
     *out=texture;
     if(decode_bc)
         fprintf(stderr,"[d3dx] %s: %ux%u %s decoded to A8R8G8B8, %u level(s)\n",
+                who,d->width,d->height,format_name(d->format),d->mips);
+    else if(expand)
+        fprintf(stderr,"[d3dx] %s: %ux%u %s expanded to A8R8G8B8, %u level(s)\n",
                 who,d->width,d->height,format_name(d->format),d->mips);
     else
         fprintf(stderr,"[d3dx] %s: %ux%u %s, %u level(s), pool=%u usage=0x%lx\n",
@@ -702,7 +752,8 @@ static void shim_create_tex_ex_a(CPU *c){
     unsigned out_format=d.format;
     if(format){
         if(format==d.format)out_format=d.format;
-        else if(format==D3DFMT_A8R8G8B8&&bc_bytes(d.format))out_format=D3DFMT_A8R8G8B8;
+        else if(format==D3DFMT_A8R8G8B8&&(bc_bytes(d.format)||expand_source(d.format)))
+            out_format=D3DFMT_A8R8G8B8;
         else{
             reject("D3DXCreateTextureFromFileExA: requested format %s cannot be "
                    "produced from DDS format %s",
@@ -748,6 +799,8 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
         reject("%s: cube DDS format %s is not implemented",who,format_name(d->format));
         return D3DX_D3DERR_NOTAVAILABLE;
     }
+    int expand=expand_source(d->format);
+    unsigned storage_format=expand?D3DFMT_A8R8G8B8:d->format;
     unsigned edge=d->width,w=edge,h=edge,max_mips=1;
     if(edge>1024u||(edge&(edge-1u))){
         reject("%s: cube edge %u is not a power of two up to 1024",who,edge);
@@ -755,6 +808,12 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
     }
     if(bc_bytes(d->format)&&edge<8u){
         reject("%s: compressed cube edge %u is below the 8x8 floor",who,edge);
+        return D3DX_D3DERR_NOTAVAILABLE;
+    }
+    if(!bc_bytes(d->format)&&edge<8u){
+        reject("%s: uncompressed cube edge %u is below the backend's 8x8 PICA floor; "
+               "the 1x1 A8B8G8R8 eye cube in the UBE corpus is refused by name",
+               who,edge);
         return D3DX_D3DERR_NOTAVAILABLE;
     }
     while(w>1||h>1){if(w>1)w>>=1;if(h>1)h>>=1;++max_mips;}
@@ -776,7 +835,7 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
         return D3DXERR_INVALIDDATA;
     }
     uint32_t cube=0;
-    uint32_t hr=d9_com_host_create_cube_texture(device,edge,d->mips,0,d->format,
+    uint32_t hr=d9_com_host_create_cube_texture(device,edge,d->mips,0,storage_format,
                                                 pool,&cube);
     if(hr){
         reject("%s: %s",who,d9_com_last_diagnostic());
@@ -790,7 +849,28 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
             if(level_layout(d->format,w,h,&pitch,&bytes)){
                 d9_com_host_release(cube);return D3DX_D3DERR_NOTAVAILABLE;
             }
-            hr=d9_com_host_upload_cube_face_level(cube,face,level,p+offset,pitch,bytes);
+            uint8_t *expanded=NULL;
+            const void *upload=p+offset;
+            size_t upload_pitch=pitch,upload_bytes=bytes;
+            if(expand){
+                uint64_t expanded_bytes=(uint64_t)w*h*4u;
+                expanded=malloc((size_t)expanded_bytes);
+                if(!expanded){
+                    d9_com_host_release(cube);
+                    reject("%s: out of host memory for face %u level %u",who,face,level);
+                    return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+                }
+                if(decode_uncompressed_level(d->format,p+offset,pitch,bytes,w,h,expanded)){
+                    free(expanded);d9_com_host_release(cube);
+                    reject("%s: face %u level %u could not be expanded to A8R8G8B8",
+                           who,face,level);
+                    return D3DXERR_INVALIDDATA;
+                }
+                upload=expanded;upload_pitch=(size_t)w*4u;upload_bytes=(size_t)expanded_bytes;
+            }
+            hr=d9_com_host_upload_cube_face_level(cube,face,level,upload,upload_pitch,
+                                                  upload_bytes);
+            free(expanded);
             if(hr){
                 reject("%s: face %u level %u upload failed (%s)",who,face,level,
                        d9_com_last_diagnostic());
@@ -801,8 +881,8 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
         }
     }
     *out=cube;
-    fprintf(stderr,"[d3dx] %s: %ux%u cube %s, 6 faces x %u level(s)\n",
-            who,edge,edge,format_name(d->format),d->mips);
+    fprintf(stderr,"[d3dx] %s: %ux%u cube %s%s, 6 faces x %u level(s)\n",
+            who,edge,edge,format_name(d->format),expand?" expanded to A8R8G8B8":"",d->mips);
     return D3DX_OK;
 }
 
@@ -847,6 +927,8 @@ static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uin
         reject("%s: volume DDS format %s is not implemented",who,format_name(d->format));
         return D3DX_D3DERR_NOTAVAILABLE;
     }
+    int expand=expand_source(d->format);
+    unsigned storage_format=expand?D3DFMT_A8R8G8B8:d->format;
     if(d->width>1024u||d->height>1024u||d->depth>1024u||
        (d->width&(d->width-1u))||(d->height&(d->height-1u))||(d->depth&(d->depth-1u))){
         reject("%s: volume dimensions %ux%ux%u are not power-of-two up to 1024",
@@ -863,7 +945,7 @@ static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uin
     size_t total=0,w=d->width,h=d->height,depth=d->depth;
     for(unsigned i=0;i<d->mips;++i){
         size_t pitch,plane;
-        if(d9_texture_layout(w,h,d->format,&pitch,&plane)){
+        if(level_layout(d->format,w,h,&pitch,&plane)){
             reject("%s: volume level %u format/dimensions are unsupported",who,i);
             return D3DX_D3DERR_NOTAVAILABLE;
         }
@@ -880,7 +962,7 @@ static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uin
     }
     uint32_t volume=0;
     uint32_t hr=d9_com_host_create_volume_texture(device,d->width,d->height,d->depth,
-                                                  d->mips,0,d->format,pool,&volume);
+                                                  d->mips,0,storage_format,pool,&volume);
     if(hr){
         reject("%s: %s",who,d9_com_last_diagnostic());
         return hr;
@@ -888,11 +970,42 @@ static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uin
     size_t offset=d->data_offset;w=d->width;h=d->height;depth=d->depth;
     for(unsigned i=0;i<d->mips;++i){
         size_t pitch=0,plane=0;
-        if(d9_texture_layout(w,h,d->format,&pitch,&plane)){
+        if(level_layout(d->format,w,h,&pitch,&plane)){
             d9_com_host_release(volume);return D3DX_D3DERR_NOTAVAILABLE;
         }
         size_t bytes=plane*depth;
-        hr=d9_com_host_upload_volume_level(volume,i,p+offset,pitch,plane,bytes);
+        uint8_t *expanded=NULL;
+        const void *upload=p+offset;
+        size_t upload_pitch=pitch,upload_plane=plane,upload_bytes=bytes;
+        if(expand){
+            size_t out_pitch=(size_t)w*4u,out_plane=out_pitch*(size_t)h;
+            uint64_t out_bytes=(uint64_t)out_plane*depth;
+            if(out_bytes>SIZE_MAX){
+                d9_com_host_release(volume);
+                reject("%s: expanded level %u is too large",who,i);
+                return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+            }
+            expanded=malloc((size_t)out_bytes);
+            if(!expanded){
+                d9_com_host_release(volume);
+                reject("%s: out of host memory for expanded level %u",who,i);
+                return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+            }
+            for(size_t z=0;z<depth;++z){
+                if(decode_uncompressed_level(d->format,p+offset+z*plane,pitch,plane,
+                                             w,h,expanded+z*out_plane)){
+                    free(expanded);d9_com_host_release(volume);
+                    reject("%s: level %u slice %lu could not be expanded to A8R8G8B8",
+                           who,i,(unsigned long)z);
+                    return D3DXERR_INVALIDDATA;
+                }
+            }
+            upload=expanded;upload_pitch=out_pitch;upload_plane=out_plane;
+            upload_bytes=(size_t)out_bytes;
+        }
+        hr=d9_com_host_upload_volume_level(volume,i,upload,upload_pitch,upload_plane,
+                                           upload_bytes);
+        free(expanded);
         if(hr){
             reject("%s: level %u upload failed (%s)",who,i,d9_com_last_diagnostic());
             d9_com_host_release(volume);
@@ -902,8 +1015,9 @@ static uint32_t create_volume_from_dds(const char *who,uint32_t device,const uin
         if(w>1)w>>=1;if(h>1)h>>=1;if(depth>1)depth>>=1;
     }
     *out=volume;
-    fprintf(stderr,"[d3dx] %s: %ux%ux%u volume %s, %u level(s)\n",
-            who,d->width,d->height,d->depth,format_name(d->format),d->mips);
+    fprintf(stderr,"[d3dx] %s: %ux%ux%u volume %s%s, %u level(s)\n",
+            who,d->width,d->height,d->depth,format_name(d->format),
+            expand?" expanded to A8R8G8B8":"",d->mips);
     return D3DX_OK;
 }
 

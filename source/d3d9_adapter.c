@@ -16,6 +16,8 @@ _Static_assert(offsetof(D9Caps9,ps20)==264,"D3DCAPS9 PS20Caps");
 _Static_assert(offsetof(D9Caps9,max_vertex_shader_30_instruction_slots)==296,"D3DCAPS9 SM3 slots");
 
 enum {DEVTYPE_HAL=1,RTYPE_SURFACE=1,RTYPE_TEXTURE=3,RTYPE_VOLUMETEXTURE=4,RTYPE_CUBETEXTURE=5};
+#define D3DFMT_R8G8B8 20u
+#define D3DFMT_A8B8G8R8 32u
 #define DEV_DRAWPRIMITIVES2 0x00002000u
 #define DEV_DRAWPRIMITIVES2EX 0x00008000u
 #define DEV_HWTRANSFORMANDLIGHT 0x00010000u
@@ -90,6 +92,9 @@ static int fmt_volume_nonrt(unsigned format){
     return fmt_rgba(format)||fmt_block(format);
 }
 static int fmt_depth(unsigned format){return format==D9_D24S8||format==D9_D24X8;}
+static int fmt_expand_source(unsigned format){
+    return format==D3DFMT_R8G8B8||format==D3DFMT_A8B8G8R8;
+}
 static int fmt_hdr(unsigned format){return format==0x6fu||format==0x71u||format==0x72u;}
 static D9AdapterAnswer ok_answer(const char *reason){
     D9AdapterAnswer a={D9_ADAPTER_OK,reason};return a;
@@ -215,6 +220,14 @@ D9AdapterAnswer d9_adapter_answer_device_format(unsigned adapter,unsigned device
         return bad_answer("invalid adapter or device type");
     if(adapter_format!=D9_X8R8G8B8)
         return no_answer("adapter format is not X8R8G8B8 (0x16)");
+    /* File-source layouts: the D3DX shim expands these into A8R8G8B8 before
+     * upload, so the guest never calls CreateTexture with them and the bridge
+     * has no direct 24-bit/BGR-first storage.  Name that instead of a
+     * catch-all, while keeping the capability answer honest. */
+    if(usage==0&&fmt_expand_source(format))
+        return no_answer("R8G8B8/A8B8G8R8 DDS files are expanded to A8R8G8B8 by "
+                         "the D3DX texture loader; this format has no direct "
+                         "D3D9 texture/surface storage");
 
     if(resource_type==RTYPE_SURFACE){
         if(usage==0){

@@ -7,6 +7,35 @@ unsigned d9_bc_block_bytes(unsigned f){
     if(f==D9_DXT3||f==D9_DXT5||f==D9_ATI2||f==D9_BC5U)return 16;
     return 0;
 }
+unsigned d9_rgb24_pitch(unsigned w){return (w*3u+3u)&~3u;}
+/* The 24-bit DDS pixel masks are R=0x00ff0000, G=0x0000ff00, B=0x000000ff, so
+ * each pixel is three bytes in B,G,R order; the missing alpha is opaque.
+ * A8B8G8R8 is the byte-swapped 32-bit layout: R,G,B,A in memory. */
+static int unpack_rows(void *dst,size_t dst_bytes,const void *src,size_t src_pitch,
+                       size_t src_bytes,unsigned w,unsigned h,unsigned bytes_per_pixel){
+    if(!dst||!src||!w||!h||src_pitch<(size_t)w*bytes_per_pixel||
+       dst_bytes<(size_t)w*h*4u||
+       (h>1u&&src_pitch>(SIZE_MAX-(size_t)w*bytes_per_pixel)/(h-1u))||
+       (size_t)(h-1u)*src_pitch+(size_t)w*bytes_per_pixel>src_bytes)return D9_INVALID;
+    uint8_t *out=dst;const uint8_t *in=src;
+    for(unsigned y=0;y<h;++y){
+        for(unsigned x=0;x<w;++x){
+            const uint8_t *s=in+(size_t)y*src_pitch+(size_t)x*bytes_per_pixel;
+            uint8_t *d=out+((size_t)y*w+x)*4u;
+            if(bytes_per_pixel==3u){d[0]=s[0];d[1]=s[1];d[2]=s[2];d[3]=255;}
+            else{d[0]=s[2];d[1]=s[1];d[2]=s[0];d[3]=s[3];}
+        }
+    }
+    return D9_OK;
+}
+int d9_rgb24_to_bgra8(void *dst,size_t dst_bytes,const void *src,size_t src_pitch,
+                      size_t src_bytes,unsigned w,unsigned h){
+    return unpack_rows(dst,dst_bytes,src,src_pitch,src_bytes,w,h,3u);
+}
+int d9_abgr8_to_bgra8(void *dst,size_t dst_bytes,const void *src,size_t src_pitch,
+                      size_t src_bytes,unsigned w,unsigned h){
+    return unpack_rows(dst,dst_bytes,src,src_pitch,src_bytes,w,h,4u);
+}
 static unsigned rd16(const uint8_t *p){return (unsigned)p[0]|(unsigned)p[1]<<8;}
 static void rgb565(uint8_t c[4],unsigned n){unsigned r=n>>11,g=(n>>5)&63,b=n&31;
     c[0]=(uint8_t)((r<<3)|(r>>2));c[1]=(uint8_t)((g<<2)|(g>>4));c[2]=(uint8_t)((b<<3)|(b>>2));c[3]=255;}

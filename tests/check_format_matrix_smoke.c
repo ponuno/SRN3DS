@@ -14,6 +14,7 @@ enum { USAGE_RT=0x00000001u, USAGE_DS=0x00000002u, USAGE_DYNAMIC=0x00000200u,
        USAGE_QF=0x00020000u, USAGE_QW=0x00200000u, USAGE_SRGBREAD=0x00010000u,
        USAGE_POSTPIXEL=0x00080000u };
 enum { FMT_A8R8G8B8=21u, FMT_X8R8G8B8=22u, FMT_A8=28u,
+       FMT_R8G8B8=20u, FMT_A8B8G8R8=32u,
        FMT_DXT1=0x31545844u, FMT_DXT3=0x33545844u, FMT_DXT5=0x35545844u,
        FMT_ATI1=0x31495441u, FMT_BC4U=0x55344342u,
        FMT_ATI2=0x32495441u, FMT_BC5U=0x55354342u,
@@ -156,6 +157,19 @@ int main(void) {
     for (unsigned i=0;i<sizeof tex2d/sizeof *tex2d;++i)
         expect_format("texture 2D plain", 0, 1, FMT_X8R8G8B8, 0, RT_TEXTURE,
                       tex2d[i], D9_ADAPTER_OK, "2D texture");
+    /* 24-bit/BGR-first DDS source layouts: the D3DX loader expands them, but
+     * CheckDeviceFormat must not claim direct CreateTexture storage. */
+    expect_format("texture R8G8B8 source-only", 0, 1, FMT_X8R8G8B8, 0,
+                  RT_TEXTURE, FMT_R8G8B8, D9_ADAPTER_UNAVAILABLE,
+                  "expanded to A8R8G8B8");
+    expect_format("texture A8B8G8R8 source-only", 0, 1, FMT_X8R8G8B8, 0,
+                  RT_TEXTURE, FMT_A8B8G8R8, D9_ADAPTER_UNAVAILABLE,
+                  "expanded to A8R8G8B8");
+    expect_format("cube R8G8B8 source-only", 0, 1, FMT_X8R8G8B8, 0, RT_CUBE,
+                  FMT_R8G8B8, D9_ADAPTER_UNAVAILABLE, "expanded to A8R8G8B8");
+    expect_format("volume A8B8G8R8 source-only", 0, 1, FMT_X8R8G8B8, 0,
+                  RT_VOLUME, FMT_A8B8G8R8, D9_ADAPTER_UNAVAILABLE,
+                  "expanded to A8R8G8B8");
     expect_format("texture D24S8", 0, 1, FMT_X8R8G8B8, 0, RT_TEXTURE,
                   FMT_D24S8, D9_ADAPTER_UNAVAILABLE, "2D texture format");
     expect_format("texture 0x71 no-hdr", 0, 1, FMT_X8R8G8B8, 0, RT_TEXTURE,

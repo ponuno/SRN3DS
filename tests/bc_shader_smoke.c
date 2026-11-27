@@ -48,6 +48,37 @@ static void decoder(void){uint8_t rgba[64],b[16]={0};
     assert(!d9_texture_layout(64,64,D9_ATI1,&pitch,&bytes)&&pitch==128&&bytes==2048);
 }
 
+static void uncompressed(void){
+    /* 24-bit rows are padded to 4 bytes: 17*3=51 -> 52, 16*3=48 stays 48. */
+    assert(d9_rgb24_pitch(17)==52&&d9_rgb24_pitch(16)==48&&d9_rgb24_pitch(1)==4);
+    const unsigned w=3,h=2,pitch=12;
+    uint8_t src[24];memset(src,0xee,sizeof src);
+    for(unsigned i=0;i<9;++i)src[i]=(uint8_t)(1+i);       /* row 0: B,G,R... */
+    for(unsigned i=0;i<9;++i)src[pitch+i]=(uint8_t)(10+i);/* row 1 */
+    uint8_t dst[24];memset(dst,0,sizeof dst);
+    assert(!d9_rgb24_to_bgra8(dst,sizeof dst,src,pitch,sizeof src,w,h));
+    /* Source bytes B,G,R are already the A8R8G8B8 byte order; alpha fills 255. */
+    for(unsigned i=0;i<6;++i){
+        unsigned row=i/3,pix=i%3;
+        assert(dst[(row*w+pix)*4+0]==src[row*pitch+pix*3+0]);
+        assert(dst[(row*w+pix)*4+1]==src[row*pitch+pix*3+1]);
+        assert(dst[(row*w+pix)*4+2]==src[row*pitch+pix*3+2]);
+        assert(dst[(row*w+pix)*4+3]==255);
+    }
+    assert(d9_rgb24_to_bgra8(dst,23,src,pitch,sizeof src,w,h)==D9_INVALID);
+    assert(d9_rgb24_to_bgra8(dst,sizeof dst,src,8,sizeof src,w,h)==D9_INVALID);
+    assert(d9_rgb24_to_bgra8(dst,sizeof dst,src,pitch,pitch+8,w,h)==D9_INVALID);
+    assert(d9_rgb24_to_bgra8(NULL,sizeof dst,src,pitch,sizeof src,w,h)==D9_INVALID);
+
+    /* A8B8G8R8 memory order is R,G,B,A; A8R8G8B8 needs B,G,R,A. */
+    const uint8_t abgr[8]={10,20,30,40, 1,2,3,4};
+    uint8_t bgra[8];memset(bgra,0,sizeof bgra);
+    assert(!d9_abgr8_to_bgra8(bgra,sizeof bgra,abgr,8,sizeof abgr,2,1));
+    static const uint8_t expect[8]={30,20,10,40, 3,2,1,4};
+    assert(!memcmp(bgra,expect,sizeof expect));
+    assert(d9_abgr8_to_bgra8(bgra,sizeof bgra,abgr,7,sizeof abgr,2,1)==D9_INVALID);
+}
+
 static void show(const char *text){puts(text);}
 
 /* Hand-built SM3/edge-case token streams. Offsets are bytes from the start of
@@ -234,4 +265,4 @@ static void shaders(void){D9ShaderInfo i;char text[64];
     assert(d9_shader_analyze(altered,d9_demo_ps_words+3,&i)==D9_SHADER_PS_TEXTURE&&i.words==d9_demo_ps_words+3);
     assert(i.stream==D9_SHADER_STREAM_VALID&&i.instructions==4);
 }
-int main(void){decoder();shaders();shader_diagnostics();puts("BC1/BC2/BC3 block alpha/color, tiled output, pitches, SM2 templates and structured SM2/SM3 diagnostics passed");return 0;}
+int main(void){decoder();uncompressed();shaders();shader_diagnostics();puts("BC1/BC2/BC3 block alpha/color, 24-bit/BGR unpack, tiled output, pitches, SM2 templates and structured SM2/SM3 diagnostics passed");return 0;}
