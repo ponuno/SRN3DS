@@ -826,12 +826,47 @@ void n3ds_lift_thread_switch(N3dsThreadRtState *from, N3dsThreadRtState *to) {
     }
 }
 void rt_int3(CPU *c,uint32_t addr) {rt_unimpl(c,addr,"int3");}
+/* TESV_MENU_TRACE=1: log the retail StartMenu state-machine milestones and the
+ * menu singleton/fade state at each entry.  Static map: WinMain 0x69de08 calls
+ * 0x876f60(1); the factory 0x876fc0 runs the ctor 0x876b90, which calls
+ * Menu::CreateMovie 0xa60c80 -> 0xa60c10 formats "Interface/%s.swf" and opens it
+ * through 0xa5eaa0/0xa5ed20.  0x8779d0 dispatches menu messages (type 0 invokes
+ * GFx "FadeInMenu" at 0x877a50); 0x8765f0 is the GFx "fadeOutStarted" callback
+ * and the only writer of the byte at 0x1b3fc94.  0x876bf0/0x876a50 drive the
+ * per-frame "ConfirmContinue" callback.  Diagnostic only; changes no state. */
+static int menu_trace_on(void){
+    static int v=-1;
+    if(v<0){const char*e=getenv("TESV_MENU_TRACE");v=e&&*e&&strcmp(e,"0");}
+    return v;
+}
+static void menu_trace(CPU *c,uint32_t addr){
+    if(!menu_trace_on())return;
+    static const uint32_t va[]={
+        0x0069de08u,0x00876f60u,0x00876fc0u,0x00876b90u,0x00a60c80u,0x00a60c10u,
+        0x00a5eaa0u,0x00a5ed20u,0x008779d0u,0x008765f0u,0x00876bf0u,0x00876a50u,
+        0x00a64ba0u,0x00a64940u};
+    unsigned i,n=sizeof va/sizeof va[0];
+    for(i=0;i<n&&va[i]!=addr;++i);
+    if(i==n)return;
+    static unsigned seen[sizeof va/sizeof va[0]];
+    if(seen[i]>=4)return;
+    ++seen[i];
+    uint32_t from=0,sing=0,flag94=0;
+    if(memory) (void)guest_read32(memory,c->r[4],&from);
+    if(memory){
+        (void)guest_read32(memory,0x1b3fc98u,&sing);
+        (void)guest_read32(memory,0x1b3fc94u,&flag94);
+    }
+    fprintf(stderr,"[menu] enter %08x from=%08x singleton=%08x flag94=%u\n",
+            (unsigned)addr,(unsigned)from,(unsigned)sing,(unsigned)(flag94&0xffu));
+}
 /* Resolve one call target across all tiers. AOT wins. A container record that
  * explicitly declares a pre-entry cold block must precede slice IR, whose
  * frame starts at the exact entry and cannot execute that block. All other
  * calls keep the verified slice IR before the all-functions container. */
 int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return 0;
+    menu_trace(c, addr);
     if (addr == 0x00ac6c10u && getenv("TESV_STREAM_TRACE")) stream_trace(c);
     if (a43f_on()) {
         n3ds_a43f_trace_dispatch(c, addr);
