@@ -17,10 +17,13 @@ benchmark and its blit shader are not.
 | Variable | Values | Default |
 | --- | --- | --- |
 | `N3DS_SR` | `off`, `nearest`, `bilinear`, `tev2d`, `tev2dq` | `off` |
-| `N3DS_SR_SCALE` | `0.5` .. `1.0` (percent `50`..`100` also accepted) | `0.8` |
+| `N3DS_SR_SCALE` | `0.5` .. `1.0` (percent `50`..`100` also accepted) | `0.53` |
 | `N3DS_SR_DRS` | `0` / `1` | `0` |
 
-Example: `N3DS_SR=tev2dq N3DS_SR_SCALE=0.8`.
+The default `0.53` is the POT-fit optimum for the 240x400 portrait target: it
+is the integer percentage that leaves the fewest unused texels in the rounded
+texture (`n3ds_sr_pick_scale`). Example:
+`N3DS_SR=tev2dq N3DS_SR_SCALE=0.53`.
 
 On a real 3DS (or in an emulator whose homebrew loader does not forward the
 host environment) the same keys are read from `sdmc:/N3DS_SR.cfg`, one
@@ -29,14 +32,14 @@ host environment) the same keys are read from `sdmc:/N3DS_SR.cfg`, one
 ```
 # sdmc:/N3DS_SR.cfg
 mode=tev2dq
-scale=0.8
+scale=0.53
 drs=0
 ```
 
 Startup writes one line to `sdmc:/N3DS_SR.log` and one line to stderr:
 
 ```
-PICA_SR_ACTIVE mode=tev2dq scale=80% texture=256x512 passes=4 steps=1
+PICA_SR_ACTIVE mode=tev2dq scale=53% texture=128x256 passes=4 steps=1
 ```
 
 Mode names are case-insensitive.  An unknown name, an out-of-range scale or an
@@ -47,17 +50,19 @@ allocation failure logs a named reason (`[d3d9-citro] PICA-SR: ...`) and keeps
 
 1. `begin()` binds the **scaled scene target** instead of the LCD framebuffer
    when SR is active.  Its storage keeps the framebuffer's portrait 240x400
-   orientation, scaled by `N3DS_SR_SCALE` (0.8 -> 192x320, POT 256x512), so the
-   guest's screen clip matrices are used unmodified.
+   orientation, scaled by `N3DS_SR_SCALE` (default 0.53 -> 127x212 in a
+   128x256 POT texture), so the guest's screen clip matrices are used
+   unmodified.
 2. `target_viewport(400, 240)` becomes
-   `C3D_SetViewport(0, 0, 400*scale, 240*scale)` (0.8 -> 320x192).  A guest
+   `C3D_SetViewport(0, 0, 400*scale, 240*scale)` (0.53 -> 212x127).  A guest
    viewport is expressed in 400x240 units, so multiplying it by the scale keeps
    the same relative framing inside the 192x320 storage.  Scissor state is not
    touched (the COM layer does not implement a scissor stage yet).
 3. Guest draws (`draw`, `draw_colored`, `draw_menu*`, `draw_cube`,
    `draw_pica_vs`) go to that target and set `sr_draws`.  Depth clear uses the
-   same target, so the DEPTH24_STENCIL8 attachment moves with the colour
-   storage.
+   same target; the SR scene target carries a **D16** attachment (the guest
+   never enables a stencil test in this backend), so only the implicit screen
+   frame pays 2 bytes/px instead of 4.
 4. `end()` runs the kernel chain from the scene texture to `c->target` and then
    `C3D_FrameEnd` performs the display transfer, exactly like the direct path.
 
@@ -106,8 +111,34 @@ viewport and the UV region change, so no per-step reallocation happens.
   Skyrim's normal frame path does not do this.
 - `N3DS_SR_SCALE=1.0` still costs one blit and one extra target.  `off` is the
   only zero-cost path.
-- VRAM: scene target (RGBA8) + DEPTH24_STENCIL8 + scratch RGBA8, all POT.  At
-  0.8 that is 512 KiB + 512 KiB + 512 KiB.  Allocation failure disables SR.
+- VRAM: scene target (RGBA8) + **D16** depth + one scratch RGBA8, all POT.
+  `nearest`/`bilinear` allocate no scratch (single pass).  Sizes for the
+  240x400 portrait target (`n3ds_sr_storage_size`, KiB):
+
+  | scale | content | POT | scene | depth D16 | scratch | total |
+  | --- | --- | --- | ---: | ---: | ---: | ---: |
+  | 0.50 | 120x200 | 128x256 | 128 | 64 | 128 | 320 |
+  | **0.53 (default)** | **127x212** | **128x256** | **128** | **64** | **128** | **320** |
+  | 0.64 | 154x256 | 256x256 | 256 | 128 | 256 | 640 |
+  | 0.80 | 192x320 | 256x512 | 512 | 256 | 512 | 1280 |
+
+  The same 0.8 plan previously cost 1536 KiB (scene 512 + DEPTH24_STENCIL8 512
+  + scratch 512), so D16 alone saves 256 KiB there and the 0.53 default saves
+  1216 KiB versus the old 0.8/D24S8 combination.  Allocation failure disables
+  SR.
+
+  The **scratch target is the only ping-pong buffer**: pass *i* reads one of
+  scene/scratch and writes the other, so `tev2d` and `tev2dq` never hold a
+  third colour target.  The scratch render target has no depth attachment.
+
+- **NPOT is not used.**  citro3d's `C3D_TexInitWithParams` rejects any
+  dimension that is not a power of two in [8,1024] (`checkTexSize` in
+  `source/texture.c`), and render targets are created from that texture.  A
+  hand-rolled NPOT `C3D_Tex` would have to bypass the public API and assume an
+  unverified 8x8-tile layout for both rendering and sampling; that cannot be
+  validated without hardware and is intentionally not enabled.  The supported
+  equivalent is the POT allocation plus the UV crop used here: unused texels
+  cost memory but never affect sampling.
 - The library is a **spatial** upscaler: no motion vectors, no temporal
   accumulation, no jitter.  It improves edges and mid-band detail over plain
   bilinear but cannot recover sub-pixel information.
@@ -118,10 +149,15 @@ viewport and the UV region change, so no per-step reallocation happens.
 
 - **Host**: `tests/n3ds_sr_smoke.c` (run with
   `tools/run_host_tests.ps1 -Only n3ds_sr`).  Covers mode/scale/DRS parsing,
-  rejection of bad values, scaled sizes, POT rounding, the UV region and the
-  2D/2DQ pass plans.  No GPU involved.
-- **ARM**: `tools/build.ps1 -Mode com` compiles and links the backend,
-  `n3ds_sr.c`, `fsr3ds.c` and the new `d9shader_sr` program.
+  rejection of bad values, scaled sizes, POT rounding, the POT-fit scale
+  picker, the scene/depth/scratch byte plan (including the D16 depth size),
+  the UV region and the 2D/2DQ pass plans.  No GPU involved.
+- **ARM**: the changed translation units (`source/n3ds_sr.c`,
+  `source/d3d9_citro3d.c`) compile cleanly with devkitARM in
+  `-Mode graphics` / `-Mode com` (objects archived in the isolated build).
+  The **link** of both modes fails on base `8a8f743` for unrelated OFILES
+  omissions (`bsa_reader.o`, `menu_bsa_runtime.o` for com; `d3d9_pica_vs.o`
+  for graphics); that is not caused by this change.
 - **Azahar**: see `docs/PICA_SR.md` §Evidence below / the archived
   `build_azahar/<stamp>-*` directories.  The emulator does not emulate PICA SR
   performance; frame numbers from Azahar are wall-clock of the host, so they
@@ -140,6 +176,7 @@ Azahar 2126.2, `-Mode com` demo, `build_azahar/` (each directory has
 | `20261127-064447-picasr_tev2d` | `mode=tev2d scale=0.8` | 2-pass LITE, framing matches `off` |
 | `20261127-064509-picasr_tev2dq` | `mode=tev2dq scale=0.8` | 4-pass 2DQ chain |
 | `20261127-064550-picasr_tev2dq_064` | `mode=tev2dq scale=0.64` | 4-pass at 64% |
+| `20261127-094000-picasr_05_prev` | `mode=tev2dq scale=0.5` (pre-change 06:53 binary) | 4-pass at 50%; `N3DS_SR.log` last line `SCALE=50%`, screenshot archived.  The strict app-log check failed because that pre-change binary writes no `Skyrim_N3DS.log`; the visual frame is present. |
 | `20261127-064623-picasr_tev2d_drs` | `mode=tev2d drs=1` | DRS frame, no crash |
 | `20261127-064949-picasr_final_tev2dq` | `mode=tev2dq scale=0.8` | blank capture (emulator window not yet painted) - not evidence |
 | `20261127-065022-picasr_final_retry` | `mode=tev2dq scale=0.8` | final build, same frame as above |
@@ -147,6 +184,12 @@ Azahar 2126.2, `-Mode com` demo, `build_azahar/` (each directory has
 `sdmc:/N3DS_SR.log` in each SR run contains exactly the parsed line, e.g.
 `N3DS_SR=tev2dq N3DS_SR_SCALE=64% N3DS_SR_DRS=0`, so the screenshot mode is
 not inferred from the filename.
+
+The `0.53` default is covered by the host size/POT tests; no fresh Azahar run
+of the new default exists yet because base `8a8f743` does not link a com
+`.3dsx` (see the ARM note above), and the archived `0.5`/`0.64` screenshots
+come from the pre-change binary.  D16 changes only the SR depth attachment,
+not the visible colour path.
 
 Azahar is vsync-locked at 59.8-60.0 FPS in every run (including `off`), so
 these runs prove correctness and framing, **not** frame cost.  No device

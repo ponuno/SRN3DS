@@ -215,8 +215,14 @@ static int sr_init(D9Citro *c)
         return 0;
 
     n3ds_sr_scene_size(SR_STORE_W, SR_STORE_H, c->sr.scale_pct, &c->sr_max_w, &c->sr_max_h);
-    unsigned tw = n3ds_sr_pow2(c->sr_max_w);
-    unsigned th = n3ds_sr_pow2(c->sr_max_h);
+    /* POT is mandatory: citro3d's C3D_TexInitWithParams only accepts power-of-
+     * two dimensions in [8,1024] (checkTexSize in source/texture.c).  The
+     * scaled content (e.g. 127x212) is placed at the texture origin and the UV
+     * region crops the unused border, so no separate NPOT path is needed. */
+    N3dsSrStorage st;
+    n3ds_sr_storage_size(SR_STORE_W, SR_STORE_H, c->sr.scale_pct, 2, &st);
+    unsigned tw = st.tex_w;
+    unsigned th = st.tex_h;
     if (tw > 1024 || th > 1024)
     {
         sr_log("%ux%u storage exceeds the 1024 PICA texture limit; SR off", tw, th);
@@ -236,8 +242,12 @@ static int sr_init(D9Citro *c)
                tw, th, (unsigned)(vramSpaceFree() >> 10));
         return -1;
     }
+    /* D16 is enough for the SR scene target: the guest never enables a
+     * stencil test in this backend, and only the implicit screen frame is
+     * redirected here.  The game's own implicit target keeps D24S8, as do all
+     * explicit/retained targets (see target_depth_attach). */
     c->sr_scene_rt = C3D_RenderTargetCreateFromTex(&c->sr_scene_tex, GPU_TEXFACE_2D, 0,
-                                                   GPU_RB_DEPTH24_STENCIL8);
+                                                   GPU_RB_DEPTH16);
     if (!c->sr_scene_rt)
     {
         sr_log("scene target %ux%u depth attachment failed (vram free %u KiB); SR off",
@@ -246,6 +256,10 @@ static int sr_init(D9Citro *c)
         return -1;
     }
 
+    /* One scratch colour target is the whole ping-pong: pass i reads one of
+     * scene/scratch and writes the other.  Single-pass copy modes allocate no
+     * scratch, and the scratch target has no depth attachment, so no third
+     * buffer is ever held. */
     if (c->sr_passes > 1)
     {
         if (sr_tex_alloc(&c->sr_scratch_tex, tw, th))
@@ -275,9 +289,14 @@ static int sr_init(D9Citro *c)
 
     char text[160];
     n3ds_sr_describe(&c->sr, text, sizeof text);
+    n3ds_sr_storage_size(SR_STORE_W, SR_STORE_H, c->sr.scale_pct,
+                         (unsigned)c->sr_passes, &st);
     sr_log("%s: backbuffer %ux%u -> %ux%u, POT %ux%u, %d pass(es), %u DRS step(s), libFSR3DS %s",
            text, SR_BACK_W, SR_BACK_H, c->sr_w, c->sr_h, tw, th, c->sr_passes,
            n3ds_sr_drs_steps(&c->sr), fsr3dsVersion());
+    sr_log("VRAM: scene %u KiB + depth(D16) %u KiB + scratch %u KiB = %u KiB",
+           st.scene_bytes >> 10, st.depth_bytes >> 10,
+           st.scratch_bytes >> 10, st.total_bytes >> 10);
     sr_log_file(text);
     fprintf(stderr, "PICA_SR_ACTIVE mode=%s scale=%u%% texture=%ux%u passes=%d steps=%u\n",
             n3ds_sr_mode_name(c->sr.mode), c->sr_pct, tw, th, c->sr_passes,
@@ -1109,15 +1128,19 @@ static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
  * d9_set_depth_surface path validates the descriptor size and calls
  * target_depth_attach.  The core's per-target callbacks replace the old
  * always-embedded depth policy. */
-/* Clear the depth attachment of the currently bound colour target.  PICA stores
- * depth and stencil in one DEPTH24_STENCIL8 buffer, so a depth clear writes the
- * packed word (and, with it, the stencil byte). */
+/* Clear the depth attachment of the currently bound colour target.  Game and
+ * explicit targets store depth and stencil in one DEPTH24_STENCIL8 buffer, so
+ * a depth clear writes the packed word (and, with it, the stencil byte).  The
+ * SR scene target is D16, so the 24-bit quantised depth is narrowed to 16 bits
+ * there; GX_FILL_16BIT_DEPTH writes the low 16 bits of the fill word. */
 static int depth_clear(void *ctx,unsigned flags,uint32_t depth_stencil){
     D9Citro *c=ctx;
     if(!c||!c->scene||!(flags&6u)||(flags&~7u))return -1;
     C3D_RenderTarget *rt=c->active_target?((NativeTargetHead *)c->active_target)->target:screen_rt(c);
     if(!rt)return -1;
-    C3D_RenderTargetClear(rt,C3D_CLEAR_DEPTH,0,depth_stencil);
+    uint32_t value=depth_stencil;
+    if(rt==c->sr_scene_rt)value=(depth_stencil&0xffffffu)>>8;
+    C3D_RenderTargetClear(rt,C3D_CLEAR_DEPTH,0,value);
     return 0;
 }
 /* Logical viewport for the current offscreen target.  C3D_FrameDrawOn sets the

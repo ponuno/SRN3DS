@@ -37,6 +37,21 @@ typedef struct
     unsigned drs;       /* 0/1: dynamic resolution scaling inside [50,scale] */
 } N3dsSrConfig;
 
+/* POT storage plan for the SR scene target.  The scene colour texture and the
+ * scratch colour texture are RGBA8; the scene target's depth attachment is
+ * D16 (2 bytes/px) because the guest never tests stencil into the SR target.
+ * scratch_bytes is 0 for single-pass modes (nearest/bilinear), which do not
+ * allocate a scratch target at all. */
+typedef struct
+{
+    unsigned w, h;          /* scaled content, portrait storage orientation */
+    unsigned tex_w, tex_h;  /* POT storage actually allocated */
+    unsigned scene_bytes;   /* RGBA8 colour storage */
+    unsigned depth_bytes;   /* D16 depth attachment */
+    unsigned scratch_bytes; /* RGBA8 ping-pong target, 0 when passes <= 1 */
+    unsigned total_bytes;   /* scene + depth + scratch */
+} N3dsSrStorage;
+
 typedef struct
 {
     unsigned op;   /* N3dsSrOp */
@@ -49,7 +64,8 @@ typedef struct
 #define N3DS_SR_2DQ_LOW_RADIUS     0.800f
 #define N3DS_SR_2DQ_SHARP_RADIUS   1.000f
 
-/* Defaults: N3DS_SR=off, N3DS_SR_SCALE=0.8, N3DS_SR_DRS=0. */
+/* Defaults: N3DS_SR=off, N3DS_SR_SCALE=0.53, N3DS_SR_DRS=0.  The scale is the
+ * POT-fit optimum for a 240x400 portrait target (see n3ds_sr_pick_scale). */
 void n3ds_sr_config_defaults(N3dsSrConfig *cfg);
 
 /* "off" | "nearest" | "bilinear" | "tev2d" | "tev2dq" -> N3dsSrMode,
@@ -75,6 +91,18 @@ unsigned n3ds_sr_scaled(unsigned base, unsigned pct);
 
 /* Smallest power of two >= n, clamped to [8, 1024] (PICA texture limit). */
 unsigned n3ds_sr_pow2(unsigned n);
+
+/* POT storage plan for a scaled 240x400-style target.  `passes` is the plan
+ * length from n3ds_sr_plan (1 -> no scratch, >1 -> one ping-pong scratch).
+ * All values are bytes; dimensions are clamped by n3ds_sr_pow2. */
+void n3ds_sr_storage_size(unsigned store_w, unsigned store_h, unsigned pct,
+                          unsigned passes, N3dsSrStorage *out);
+
+/* Pick the scale in [50,100] that wastes the fewest POT texels for
+ * store_w x store_h, i.e. maximises (scaled_w*scaled_h)/(tex_w*tex_h).
+ * Ties keep the lower percentage (cheaper memory).  For 240x400 this is 53,
+ * which fills 128x256 with 127x212 content (82% of the storage). */
+unsigned n3ds_sr_pick_scale(unsigned store_w, unsigned store_h);
 
 /* DRS ladder: index 0 == scale_pct, each next step 8 points lower, floor 50.
  * Returns 1 when DRS is off. */

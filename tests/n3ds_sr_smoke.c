@@ -28,6 +28,7 @@ int main(void) {
     assert(n3ds_sr_parse_scale("80%", &pct) == 0 && pct == 80);
     assert(n3ds_sr_parse_scale("1", &pct) == 0 && pct == 100);
     assert(n3ds_sr_parse_scale("0.64", &pct) == 0 && pct == 64);
+    assert(n3ds_sr_parse_scale("0.53", &pct) == 0 && pct == 53);
     assert(n3ds_sr_parse_scale("0.5", &pct) == 0 && pct == 50);
     assert(n3ds_sr_parse_scale("0.49", &pct) != 0);
     assert(n3ds_sr_parse_scale("120", &pct) != 0);
@@ -38,7 +39,8 @@ int main(void) {
     /* --- defaults and key/value parsing ---------------------------------- */
     N3dsSrConfig cfg;
     n3ds_sr_config_defaults(&cfg);
-    assert(cfg.mode == N3DS_SR_OFF && cfg.scale_pct == 80 && cfg.drs == 0);
+    /* 53%: best POT fill for 240x400 -> 127x212 in 128x256 (82%). */
+    assert(cfg.mode == N3DS_SR_OFF && cfg.scale_pct == 53 && cfg.drs == 0);
 
     assert(n3ds_sr_config_key(&cfg, "mode", "tev2dq") == 0);
     assert(cfg.mode == N3DS_SR_TEV2DQ);
@@ -84,6 +86,45 @@ int main(void) {
     assert(n3ds_sr_pow2(3) == 8);
     assert(n3ds_sr_pow2(2000) == 1024);
 
+    /* --- POT-fit scale selection ---------------------------------------- */
+    /* 53% fills 128x256 with 127x212 content; this beats 50/64/80 and all
+     * other integer percentages for a 240x400 portrait target. */
+    assert(n3ds_sr_pick_scale(240, 400) == 53);
+    assert(n3ds_sr_pick_scale(0, 400) == 50);
+    assert(n3ds_sr_pick_scale(240, 400) == n3ds_sr_pick_scale(400, 240));
+
+    /* --- storage plan (RGBA8 scene + D16 depth + RGBA8 scratch) ---------- */
+    N3dsSrStorage st;
+    n3ds_sr_storage_size(240, 400, 50, 2, &st);
+    assert(st.w == 120 && st.h == 200 && st.tex_w == 128 && st.tex_h == 256);
+    assert(st.scene_bytes == 128u << 10);
+    assert(st.depth_bytes == 64u << 10);   /* D16 */
+    assert(st.scratch_bytes == 128u << 10);
+    assert(st.total_bytes == 320u << 10);
+
+    n3ds_sr_storage_size(240, 400, 53, 2, &st);
+    assert(st.w == 127 && st.h == 212 && st.tex_w == 128 && st.tex_h == 256);
+    assert(st.total_bytes == 320u << 10);  /* same cost, more pixels than 50 */
+
+    n3ds_sr_storage_size(240, 400, 64, 2, &st);
+    assert(st.w == 154 && st.h == 256 && st.tex_w == 256 && st.tex_h == 256);
+    assert(st.scene_bytes == 256u << 10 && st.depth_bytes == 128u << 10);
+    assert(st.scratch_bytes == 256u << 10 && st.total_bytes == 640u << 10);
+
+    n3ds_sr_storage_size(240, 400, 80, 4, &st);
+    assert(st.w == 192 && st.h == 320 && st.tex_w == 256 && st.tex_h == 512);
+    assert(st.scene_bytes == 512u << 10 && st.depth_bytes == 256u << 10);
+    assert(st.scratch_bytes == 512u << 10 && st.total_bytes == 1280u << 10);
+
+    /* Single-pass modes allocate no scratch target. */
+    n3ds_sr_storage_size(240, 400, 53, 1, &st);
+    assert(st.scratch_bytes == 0 && st.total_bytes == 192u << 10);
+    /* D16 is exactly half the RGBA8 scene storage. */
+    assert(st.depth_bytes == st.scene_bytes / 2);
+    n3ds_sr_storage_size(0, 400, 50, 2, &st);
+    assert(st.tex_w == 0 && st.total_bytes == 0);
+    n3ds_sr_storage_size(240, 400, 50, 2, NULL); /* must not crash */
+
     unsigned w, h;
     n3ds_sr_scene_size(240, 400, 80, &w, &h);
     assert(w == 192 && h == 320);
@@ -102,6 +143,7 @@ int main(void) {
     /* --- DRS ladder ------------------------------------------------------ */
     n3ds_sr_config_defaults(&cfg);
     cfg.mode = N3DS_SR_TEV2D;
+    cfg.scale_pct = 80;
     assert(n3ds_sr_drs_steps(&cfg) == 1);
     assert(n3ds_sr_drs_scale_pct(&cfg, 3) == 80); /* clamps at the only step */
     cfg.drs = 1;

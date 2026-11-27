@@ -60,7 +60,7 @@ void n3ds_sr_config_defaults(N3dsSrConfig *cfg)
     if (!cfg)
         return;
     cfg->mode = N3DS_SR_OFF;
-    cfg->scale_pct = 80;
+    cfg->scale_pct = n3ds_sr_pick_scale(240, 400);
     cfg->drs = 0;
 }
 
@@ -195,6 +195,50 @@ unsigned n3ds_sr_pow2(unsigned n)
     return p;
 }
 
+void n3ds_sr_storage_size(unsigned store_w, unsigned store_h, unsigned pct,
+                          unsigned passes, N3dsSrStorage *out)
+{
+    if (!out)
+        return;
+    memset(out, 0, sizeof *out);
+    if (!store_w || !store_h)
+        return;
+    n3ds_sr_scene_size(store_w, store_h, pct, &out->w, &out->h);
+    out->tex_w = n3ds_sr_pow2(out->w);
+    out->tex_h = n3ds_sr_pow2(out->h);
+    unsigned long long px = (unsigned long long)out->tex_w * out->tex_h;
+    out->scene_bytes = (unsigned)(px * 4ull); /* RGBA8 */
+    out->depth_bytes = (unsigned)(px * 2ull); /* D16, no stencil in SR target */
+    out->scratch_bytes = passes > 1 ? (unsigned)(px * 4ull) : 0;
+    out->total_bytes = out->scene_bytes + out->depth_bytes + out->scratch_bytes;
+}
+
+unsigned n3ds_sr_pick_scale(unsigned store_w, unsigned store_h)
+{
+    if (!store_w || !store_h)
+        return 50;
+    unsigned best = 50;
+    unsigned long long best_content = 0, best_area = 1;
+    for (unsigned pct = 50; pct <= 100; ++pct)
+    {
+        unsigned w, h;
+        n3ds_sr_scene_size(store_w, store_h, pct, &w, &h);
+        unsigned long long area = (unsigned long long)n3ds_sr_pow2(w) *
+                                  n3ds_sr_pow2(h);
+        unsigned long long content = (unsigned long long)w * h;
+        /* Compare content/area without floating point; strict > keeps the
+         * lower percentage on a tie (same fill, less memory). */
+        if ((unsigned long long)content * best_area >
+            (unsigned long long)best_content * area)
+        {
+            best = pct;
+            best_content = content;
+            best_area = area;
+        }
+    }
+    return best;
+}
+
 unsigned n3ds_sr_drs_steps(const N3dsSrConfig *cfg)
 {
     if (!cfg || !cfg->drs)
@@ -212,7 +256,7 @@ unsigned n3ds_sr_drs_steps(const N3dsSrConfig *cfg)
 unsigned n3ds_sr_drs_scale_pct(const N3dsSrConfig *cfg, unsigned index)
 {
     if (!cfg || !cfg->drs)
-        return cfg ? cfg->scale_pct : 80;
+        return cfg ? cfg->scale_pct : n3ds_sr_pick_scale(240, 400);
     unsigned pct = cfg->scale_pct;
     while (index-- && pct > 50)
         pct = pct > 58 ? pct - 8 : 50;
