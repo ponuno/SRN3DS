@@ -106,6 +106,22 @@ static const FnEntry cube_probe_table[] = {
     {0x30000010u, cube_probe_stub33}
 };
 
+/* Measurement hooks called by n3ds_lift_runtime.c: a guest sample every 1024
+ * dispatches (peak between snapshots) and one snapshot on the first fault.
+ * Neither touches dispatch or fault semantics. */
+static int g_exit_snapshot_done;
+void n3ds_mem_guest_sample(size_t used, unsigned regions) {
+    mem_stats_sample_guest(used, regions);
+}
+void n3ds_mem_fault_sample(void) {
+    mem_stats_snapshot("fault", NULL);
+}
+/* atexit covers a normal main() return even when run() never reached its
+ * reporting block; run() marks the flag so the log gets exactly one exit line. */
+static void mem_exit_snapshot(void) {
+    if (!g_exit_snapshot_done) mem_stats_snapshot("exit", "when=atexit");
+}
+
 /* Called before every snapshot (frame/alloc/exit) so the periodic line carries
  * live guests, both IR caches, the texture cache and the OS region. */
 static void mem_refresh(void *ctx) {
@@ -117,9 +133,33 @@ static void mem_refresh(void *ctx) {
     mem_stats_set_irdecode(ir.bytes, ir.blocks);
     N3dsIrcStats irc = {0};
     if (n3ds_lift_container_stats(&irc) == 0)
-        mem_stats_set_irc(irc.cache_bytes, irc.cache_records);
+        mem_stats_set_irc_detail(n3ds_lift_container_index_bytes(),
+                                 irc.cache_bytes, irc.cache_records);
     else
         mem_stats_set_irc(0, 0);
+    /* Host allocation accounting: calls/failures and the Win32 commit promise,
+     * plus guest backing failures.  All measured by the shims. */
+    Win32AllocStats as = {0};
+    win32_alloc_stats(&as);
+    Win32VaStats vs = {0};
+    win32_va_stats(&vs);
+    MemStatsAlloc ma = {
+        .calls = as.va_calls + as.heap_calls + as.crt_calls,
+        .failures = as.failures,
+        .peak_live = as.peak_live,
+        .backing_failures = b->memory.backing_failures,
+        .va_live = as.va_live,
+        .heap_live = as.heap_live,
+        .crt_live = as.crt_live,
+        .va_reserved_live = vs.reserved_live,
+        .va_committed_live = vs.committed_live,
+        .va_committed_peak = vs.committed_peak,
+        .va_backed_live = vs.backed_live,
+        .va_backed_peak = vs.backed_peak,
+        .va_reservations = vs.reservations,
+        .va_commit_failures = vs.commit_failures,
+    };
+    mem_stats_set_alloc(&ma);
     D9Device *dev = d9_com_device();
     if (dev) {
         D9TexCacheStats tc;
@@ -167,7 +207,9 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
     n3ds_boot_init(&b, budget);
     mem_stats_set_refresh(mem_refresh, &b);
     mem_stats_set_guest(b.memory.used, b.memory.limit, b.memory.count);
-    mem_stats_snapshot("start", NULL);
+    /* Pre-load: guest_init() has not mapped the PE/stack/heap yet, so this line
+     * is expected to show guest_used=0.  tag=init is the first real reading. */
+    mem_stats_snapshot("start", "phase=preload");
     int rc = -1;
     IrCacheStats ir_stats = {0};
     if (n3ds_boot_add_file(&b, "TESV.exe", exe, 0)) {
@@ -250,6 +292,9 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
         goto out;
     }
     if (n3ds_ir_cache_init(4u << 20) != 0) printf("IR cache: 4 MiB allocation failed; using default\n");
+    /* Every guest region, the bound container index and the IR cache exist at
+     * this point; this is the measured starting point of the run. */
+    mem_stats_snapshot("init", NULL);
     n3ds_pilot_set_steps(steps);
     uint32_t status = 0;
     rt_prof_reset();
@@ -300,7 +345,8 @@ out:
     }
     fprintf(stderr,"[d3dx] D3DXCompileShader entries: %u\n",
             d3dx_surface_compile_shader_calls());
-    mem_stats_snapshot("exit", NULL);
+    mem_stats_snapshot("exit", "when=run");
+    g_exit_snapshot_done = 1;
     win32_memory_report(stderr);
     d3dx_surface_shutdown();
     d3dx_texture_shims_uninstall();
@@ -315,6 +361,7 @@ int main(void) {
     mem_stats_init();
     mem_stats_configure(TESV_HEAP_MIB, TESV_LINEAR_MIB, TESV_RESERVE_MIB);
     mem_stats_set_log_path(MEM_STATS_PATH);
+    atexit(mem_exit_snapshot);
     {
         const char *e = getenv("N3DS_MEM_EVERY");
         if (e && *e) {
@@ -417,6 +464,7 @@ int main(int argc, char **argv) {
     mem_stats_init();
     mem_stats_configure(TESV_HEAP_MIB, TESV_LINEAR_MIB, TESV_RESERVE_MIB);
     mem_stats_set_log_path(getenv("N3DS_MEM_LOG"));
+    atexit(mem_exit_snapshot);
     const char *root = argc > 2 ? argv[2] : ".";
     uint64_t steps = argc > 3 ? strtoull(argv[3], NULL, 10) : 200000;
     size_t budget = argc > 4 ? (size_t)strtoull(argv[4], NULL, 0)

@@ -108,6 +108,8 @@ static void test_guest_and_format(void)
     CHECK(strstr(line, "guest_regions=5") != NULL);
     CHECK(strstr(line, "newlib_peak=2500") != NULL);
     CHECK(strstr(line, "irc_bytes=4194304") != NULL);
+    CHECK(strstr(line, "irc_index_bytes=0") != NULL);
+    CHECK(strstr(line, "irc_cache_bytes=4194304") != NULL);
     CHECK(strstr(line, "irdec_bytes=1234") != NULL);
     CHECK(strstr(line, "irdec_blocks=9") != NULL);
     CHECK(strstr(line, "bsa_archives=13") != NULL);
@@ -209,6 +211,77 @@ static void test_bsa_stream_counters(void)
     CHECK(strstr(line, "stream_budget_denied=5") != NULL);
 }
 
+/* The slice logs tag=start before guest_init() maps anything, tag=init after
+ * the PE/stack/heap are mapped, tag=fault from the fault hook and tag=exit at
+ * the end.  Peak must survive later frees, including samples between tags. */
+static void test_timing_and_peak(void)
+{
+    mem_stats_configure(120, 24, 4);
+    char line[3072];
+
+    mem_stats_set_guest(0, 10000, 0);
+    mem_stats_format(line, sizeof line, "start", "phase=preload");
+    CHECK(strstr(line, "mem tag=start ") == line);
+    CHECK(strstr(line, "guest_used=0") != NULL);
+    CHECK(strstr(line, "guest_peak=0") != NULL);
+    CHECK(strstr(line, "guest_regions=0") != NULL);
+    CHECK(strstr(line, "phase=preload") != NULL);
+
+    mem_stats_set_guest(4096, 10000, 2);
+    mem_stats_format(line, sizeof line, "init", NULL);
+    CHECK(strstr(line, "guest_used=4096") != NULL);
+    CHECK(strstr(line, "guest_peak=4096") != NULL);
+    CHECK(strstr(line, "guest_regions=2") != NULL);
+
+    /* Lightweight sample between snapshots records the real peak ... */
+    mem_stats_sample_guest(8192, 3);
+    /* ... and a later shrink does not erase it. */
+    mem_stats_sample_guest(512, 3);
+    mem_stats_format(line, sizeof line, "fault", NULL);
+    CHECK(strstr(line, "guest_used=512") != NULL);
+    CHECK(strstr(line, "guest_peak=8192") != NULL);
+    CHECK(strstr(line, "guest_regions=3") != NULL);
+
+    /* Container total is index + resident cache, with both parts visible. */
+    mem_stats_set_irc_detail(1000, 2000, 7);
+    mem_stats_format(line, sizeof line, "irc", NULL);
+    CHECK(strstr(line, "irc_bytes=3000") != NULL);
+    CHECK(strstr(line, "irc_index_bytes=1000") != NULL);
+    CHECK(strstr(line, "irc_cache_bytes=2000") != NULL);
+    CHECK(strstr(line, "irc_records=7") != NULL);
+
+    MemStatsAlloc a = {
+        .calls = 120, .failures = 3, .peak_live = 900000,
+        .backing_failures = 2, .va_live = 1000, .heap_live = 2000,
+        .crt_live = 3000, .va_reserved_live = 5000, .va_committed_live = 4000,
+        .va_committed_peak = 4500, .va_backed_live = 3500,
+        .va_backed_peak = 3900, .va_reservations = 4, .va_commit_failures = 1,
+    };
+    mem_stats_set_alloc(&a);
+    mem_stats_format(line, sizeof line, "alloc", NULL);
+    CHECK(strstr(line, "alloc_calls=120") != NULL);
+    CHECK(strstr(line, "alloc_failures_host=3") != NULL);
+    CHECK(strstr(line, "alloc_peak_live=900000") != NULL);
+    CHECK(strstr(line, "heap_live=2000") != NULL);
+    CHECK(strstr(line, "crt_live=3000") != NULL);
+    CHECK(strstr(line, "va_live=1000") != NULL);
+    CHECK(strstr(line, "va_reserved_live=5000") != NULL);
+    CHECK(strstr(line, "va_committed_peak=4500") != NULL);
+    CHECK(strstr(line, "va_backed_peak=3900") != NULL);
+    CHECK(strstr(line, "va_reservations=4") != NULL);
+    CHECK(strstr(line, "va_commit_failures=1") != NULL);
+    CHECK(strstr(line, "guest_backing_failures=2") != NULL);
+    /* No linear/VRAM probe on the host slice: report that honestly. */
+    CHECK(strstr(line, "linear_probe=0") != NULL);
+    CHECK(strstr(line, "vram_probe=0") != NULL);
+
+    /* NULL clears host allocation counters without touching the guest peak. */
+    mem_stats_set_alloc(NULL);
+    mem_stats_format(line, sizeof line, "cleared", NULL);
+    CHECK(strstr(line, "alloc_calls=0") != NULL);
+    CHECK(strstr(line, "guest_peak=8192") != NULL);
+}
+
 static void install_fake(FakeHeap *f)
 {
     f->linear = 1000;
@@ -255,6 +328,8 @@ static void test_space_accounting(void)
     CHECK(strstr(line, "linear_min_free=900") != NULL);
     CHECK(strstr(line, "linear_fail_n=1") != NULL);
     CHECK(strstr(line, "linear_fail_bytes=250") != NULL);
+    CHECK(strstr(line, "linear_probe=1") != NULL);
+    CHECK(strstr(line, "vram_probe=1") != NULL);
     CHECK(strstr(line, "vram_live=512") != NULL);
     CHECK(strstr(line, "vram_peak=512") != NULL);
     CHECK(strstr(line, "vram_min_free=3584") != NULL);
@@ -275,6 +350,7 @@ int main(void)
     test_parse();
     test_guest_and_format();
     test_bsa_stream_counters();
+    test_timing_and_peak();
     test_space_accounting();
     if (g_failures) {
         fprintf(stderr, "mem_stats: %d failure(s)\n", g_failures);

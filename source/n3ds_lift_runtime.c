@@ -19,6 +19,12 @@ extern int tesv_cecdc0_source_decide(GuestMemory *m, uint32_t frame,
 __attribute__((weak)) void rt_bsa_trace(CPU *c, uint32_t addr) {
     (void)c; (void)addr;
 }
+/* Measurement-only memory samples; the slice overrides both.  Recording the
+ * guest high-water mark must never alter dispatch or fault behaviour. */
+__attribute__((weak)) void n3ds_mem_guest_sample(size_t used, unsigned regions) {
+    (void)used; (void)regions;
+}
+__attribute__((weak)) void n3ds_mem_fault_sample(void) {}
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -498,6 +504,10 @@ int n3ds_lift_container_stats(N3dsIrcStats *out) {
     return 0;
 }
 
+uint64_t n3ds_lift_container_index_bytes(void) {
+    return ir_container ? n3ds_irc_index_size(ir_container) : 0;
+}
+
 static int container_aot_pred(void *user, uint32_t addr) {
     (void)user;
     /* TESV_A43F_TRACE: run the traced leaf through the container's exact
@@ -919,7 +929,11 @@ int n3ds_lift_has_function(uint32_t address){
 }
 const char *n3ds_lift_fault(void){return fault;}
 void rt_unimpl(CPU *c,uint32_t addr,const char *what) {
-    (void)c;snprintf(fault,sizeof fault,"Guest fault at %08lx: %s",(unsigned long)addr,what?what:"unknown");
+    (void)c;
+    /* Measurement hook only: the fault text and longjmp below are unchanged. */
+    if (memory) n3ds_mem_guest_sample(memory->used, (unsigned)memory->count);
+    n3ds_mem_fault_sample();
+    snprintf(fault,sizeof fault,"Guest fault at %08lx: %s",(unsigned long)addr,what?what:"unknown");
     fprintf(stderr,"%s\n",fault);if(active)longjmp(active->jb,1);abort();
 }
 void n3ds_lift_exit(uint32_t code){exit_code=code;if(active)longjmp(active->jb,2);abort();}
@@ -964,11 +978,19 @@ void n3ds_lift_thread_switch(N3dsThreadRtState *from, N3dsThreadRtState *to) {
     }
 }
 void rt_int3(CPU *c,uint32_t addr) {rt_unimpl(c,addr,"int3");}
+/* Measurement only: a peak can appear between snapshots, so sample the guest
+ * high-water mark every 1024 dispatches (one increment + branch otherwise). */
+static unsigned mem_sample_tick;
+static void mem_sample_dispatch(void) {
+    if (memory && ((++mem_sample_tick & 1023u) == 0))
+        n3ds_mem_guest_sample(memory->used, (unsigned)memory->count);
+}
 /* Resolve one call target across all tiers. AOT wins. A container record that
  * explicitly declares a pre-entry cold block must precede slice IR, whose
  * frame starts at the exact entry and cannot execute that block. All other
  * calls keep the verified slice IR before the all-functions container. */
 int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
+    mem_sample_dispatch();
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return 0;
     menu_trace(c, addr);
     if (addr == 0x00ac6c10u && getenv("TESV_STREAM_TRACE")) stream_trace(c);
@@ -1051,6 +1073,7 @@ static void trace_indirect_fault(CPU *c,uint32_t target){
     }
 }
 void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
+    mem_sample_dispatch();
     if (tesv_cube_probe_dispatch && tesv_cube_probe_dispatch(c, addr)) return;
     menu_trace(c, addr);
     g_last_call=addr; g_last_cpu=c;

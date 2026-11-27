@@ -45,7 +45,10 @@ typedef struct {
     unsigned arena_count;
     uint64_t arena_bytes;
 
+    MemStatsAlloc alloc;
+
     uint64_t irc_bytes, irc_records;
+    uint64_t irc_index_bytes, irc_cache_bytes;
     uint64_t irdec_bytes, irdec_blocks;
     uint64_t bsa_resident;
     uint64_t bsa_index, bsa_page_cache, bsa_range_cache;
@@ -172,6 +175,22 @@ void mem_stats_set_guest(size_t used, size_t limit, unsigned regions)
     if (used > g.guest_peak) g.guest_peak = used;
 }
 
+void mem_stats_sample_guest(size_t used, unsigned regions)
+{
+    g.guest_used = used;
+    g.guest_regions = regions;
+    if (used > g.guest_peak) g.guest_peak = used;
+}
+
+void mem_stats_set_alloc(const MemStatsAlloc *stats)
+{
+    if (!stats) {
+        memset(&g.alloc, 0, sizeof g.alloc);
+        return;
+    }
+    g.alloc = *stats;
+}
+
 void mem_stats_set_newlib(size_t used, size_t free_bytes)
 {
     g.have_newlib = 1;
@@ -201,6 +220,17 @@ void mem_stats_set_irc(uint64_t bytes, uint64_t records)
 {
     g.irc_bytes = bytes;
     g.irc_records = records;
+    g.irc_index_bytes = 0;
+    g.irc_cache_bytes = bytes;
+}
+
+void mem_stats_set_irc_detail(uint64_t index_bytes, uint64_t cache_bytes,
+                              uint64_t cache_records)
+{
+    g.irc_index_bytes = index_bytes;
+    g.irc_cache_bytes = cache_bytes;
+    g.irc_bytes = index_bytes + cache_bytes;
+    g.irc_records = cache_records;
 }
 
 void mem_stats_set_irdecode(uint64_t bytes, uint64_t blocks)
@@ -419,14 +449,16 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
            (unsigned long long)g.newlib_used, (unsigned long long)g.newlib_peak,
            (unsigned long long)g.newlib_free, g.have_newlib);
     APPEND(" linear_live=%llu linear_peak=%llu linear_free=%llu "
-           "linear_min_free=%llu linear_fail_n=%llu linear_fail_bytes=%llu",
+           "linear_min_free=%llu linear_fail_n=%llu linear_fail_bytes=%llu "
+           "linear_probe=%d vram_probe=%d",
            (unsigned long long)g.space_live[MEM_STATS_LINEAR],
            (unsigned long long)g.space_peak[MEM_STATS_LINEAR],
            (unsigned long long)g.space_free[MEM_STATS_LINEAR],
            (unsigned long long)(g.have_space[MEM_STATS_LINEAR]
                                     ? g.space_min[MEM_STATS_LINEAR] : 0),
            (unsigned long long)g.fail_requests[MEM_STATS_LINEAR],
-           (unsigned long long)g.fail_bytes[MEM_STATS_LINEAR]);
+           (unsigned long long)g.fail_bytes[MEM_STATS_LINEAR],
+           g.probes.linear_free != NULL, g.probes.vram_free != NULL);
     APPEND(" vram_live=%llu vram_peak=%llu vram_free=%llu vram_min_free=%llu "
            "vram_fail_n=%llu vram_fail_bytes=%llu",
            (unsigned long long)g.space_live[MEM_STATS_VRAM],
@@ -440,10 +472,14 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
     for (unsigned i = 0; i < g.arena_count; ++i)
         APPEND(" arena_%s=%llu", g.arena[i].name,
                (unsigned long long)g.arena[i].bytes);
-    APPEND(" irc_bytes=%llu irc_records=%llu irdec_bytes=%llu irdec_blocks=%llu "
+    APPEND(" irc_bytes=%llu irc_index_bytes=%llu irc_cache_bytes=%llu "
+           "irc_records=%llu irdec_bytes=%llu irdec_blocks=%llu "
            "bsa_resident=%llu bsa_index=%llu bsa_page_cache=%llu "
            "bsa_range_cache=%llu bsa_archives=%u bsa_mounted=%u have_bsa=%d",
-           (unsigned long long)g.irc_bytes, (unsigned long long)g.irc_records,
+           (unsigned long long)g.irc_bytes,
+           (unsigned long long)g.irc_index_bytes,
+           (unsigned long long)g.irc_cache_bytes,
+           (unsigned long long)g.irc_records,
            (unsigned long long)g.irdec_bytes, (unsigned long long)g.irdec_blocks,
            (unsigned long long)g.bsa_resident,
            (unsigned long long)g.bsa_index,
@@ -479,6 +515,25 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
            (unsigned long long)g.os_used, (unsigned long long)g.os_free,
            (unsigned long long)g.os_size, g.have_os_region,
            (unsigned long long)g.alloc_failures);
+    APPEND(" alloc_calls=%llu alloc_failures_host=%llu alloc_peak_live=%llu "
+           "heap_live=%llu crt_live=%llu va_live=%llu "
+           "va_reserved_live=%llu va_committed_live=%llu va_committed_peak=%llu "
+           "va_backed_live=%llu va_backed_peak=%llu va_reservations=%llu "
+           "va_commit_failures=%llu guest_backing_failures=%llu",
+           (unsigned long long)g.alloc.calls,
+           (unsigned long long)g.alloc.failures,
+           (unsigned long long)g.alloc.peak_live,
+           (unsigned long long)g.alloc.heap_live,
+           (unsigned long long)g.alloc.crt_live,
+           (unsigned long long)g.alloc.va_live,
+           (unsigned long long)g.alloc.va_reserved_live,
+           (unsigned long long)g.alloc.va_committed_live,
+           (unsigned long long)g.alloc.va_committed_peak,
+           (unsigned long long)g.alloc.va_backed_live,
+           (unsigned long long)g.alloc.va_backed_peak,
+           (unsigned long long)g.alloc.va_reservations,
+           (unsigned long long)g.alloc.va_commit_failures,
+           (unsigned long long)g.alloc.backing_failures);
     if (extra && *extra) APPEND(" %s", extra);
     APPEND("\n");
 #undef APPEND

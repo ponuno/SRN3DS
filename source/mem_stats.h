@@ -47,6 +47,19 @@ typedef struct {
  * guest, IR, texture-cache and OS-region counters.  May be NULL. */
 typedef void (*MemStatsRefresh)(void *ctx);
 
+/* Host-side allocation counters (win32 shims + guest backing).  Filled by the
+ * slice's refresh callback; flat values keep mem_stats free of shim headers. */
+typedef struct {
+    uint64_t calls;             /* VirtualAlloc/HeapAlloc/CRT allocation calls */
+    uint64_t failures;          /* refused host/guest allocation requests */
+    uint64_t peak_live;         /* peak of va+heap+crt live, bytes */
+    uint64_t backing_failures;  /* GuestMemory.backing_failures */
+    uint64_t va_live, heap_live, crt_live;
+    uint64_t va_reserved_live, va_committed_live, va_committed_peak;
+    uint64_t va_backed_live, va_backed_peak, va_reservations;
+    uint64_t va_commit_failures;
+} MemStatsAlloc;
+
 /* ---- profile arithmetic --------------------------------------------------- */
 /* 1 when heap + linear + non-heap fits the 178 MiB region. */
 int mem_stats_profile_valid(unsigned heap_mib, unsigned linear_mib);
@@ -67,9 +80,19 @@ void mem_stats_set_refresh(MemStatsRefresh fn, void *ctx);
 
 /* ---- counters ------------------------------------------------------------- */
 void mem_stats_set_guest(size_t used, size_t limit, unsigned regions);
+/* Lightweight high-water sample: updates used/peak/regions only and keeps the
+ * last limit.  The runtime calls this every N guest dispatches so a peak that
+ * appears between snapshots is not lost. */
+void mem_stats_sample_guest(size_t used, unsigned regions);
+/* Host allocation counts and VA promise/backing peaks (see MemStatsAlloc). */
+void mem_stats_set_alloc(const MemStatsAlloc *stats);
 void mem_stats_set_newlib(size_t used, size_t free_bytes);
 void mem_stats_note_arena(const char *name, size_t bytes);
 void mem_stats_set_irc(uint64_t bytes, uint64_t records);
+/* Total = index + resident cache bytes.  The split is logged so an "irc_bytes"
+ * number can be traced back to the container's two allocations. */
+void mem_stats_set_irc_detail(uint64_t index_bytes, uint64_t cache_bytes,
+                              uint64_t cache_records);
 void mem_stats_set_irdecode(uint64_t bytes, uint64_t blocks);
 /* `resident_bytes` is measured (bsa_resident_bytes() summed over open archives),
  * never an estimate.  This compatibility overload takes `archives` as both the

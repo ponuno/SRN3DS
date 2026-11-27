@@ -114,3 +114,13 @@ int n3ds_lift_container_state(void);   /* 0 untried, 1 open, -1 unavailable */
 const char *n3ds_lift_container_error(void);
 /* Returns 0 and fills stats when the container is open, -1 otherwise. */
 int n3ds_lift_container_stats(N3dsIrcStats *out);
+/* Resident index bytes of the open container (0 when none is bound). */
+uint64_t n3ds_lift_container_index_bytes(void);
+
+/* ---- memory-measurement hooks ---------------------------------------------
+ * Weak no-ops in the runtime so ordinary test binaries link unchanged; a
+ * measurement build (tesv_slice) provides strong definitions.  The guest
+ * sample runs every 1024 dispatches and on the first fault; it only records
+ * GuestMemory.used/count, never changes execution. */
+void n3ds_mem_guest_sample(size_t used, unsigned regions);
+void n3ds_mem_fault_sample(void);

@@ -107,6 +107,12 @@ static struct {
 
 void win32_set_memory_probe(int on) { memt.probe = on ? 1 : 0; }
 int win32_memory_probe(void) { return memt.probe; }
+void win32_alloc_stats(Win32AllocStats *out) {
+    if (!out) return;
+    *out = (Win32AllocStats){
+        memt.va_calls, memt.heap_calls, memt.crt_calls, memt.failures,
+        memt.va_live, memt.heap_live, memt.crt_live, memt.peak_live};
+}
 static uint64_t *mem_live(int kind) {
     return kind == MEM_VA ? &memt.va_live : kind == MEM_HEAP ? &memt.heap_live : &memt.crt_live;
 }

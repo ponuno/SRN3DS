@@ -80,6 +80,12 @@ void win32_set_last_error(uint32_t value);
 void win32_set_memory_probe(int on);
 int win32_memory_probe(void);
 void win32_memory_report(FILE *f);
+typedef struct {
+    uint64_t va_calls, heap_calls, crt_calls;
+    uint64_t failures;
+    uint64_t va_live, heap_live, crt_live, peak_live;
+} Win32AllocStats;
+void win32_alloc_stats(Win32AllocStats *out);
 /* VirtualAlloc accounting (reservations never inflate committed bytes).
  * Semantics: MEM_RESERVE records address space only in the VA window
  * 0x40000000..0x70000000 (768 MiB, 64 KiB allocation granularity); MEM_COMMIT
