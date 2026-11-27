@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <stdarg.h>
 #include <ctype.h>
 #include <limits.h>
@@ -2763,6 +2764,193 @@ static void s_stricmp(CPU *c){CRT(icmp(str(c,A(0)),str(c,A(1))));}
 static void s_strcpy(CPU *c){const char *s=str(c,A(1));size_t n=strlen(s)+1;memmove(checked(c,A(0),(uint32_t)n),s,n);CRT(A(0));}
 static void s_strdup(CPU *c){const char *s=str(c,A(0));uint32_t n=(uint32_t)strlen(s)+1,p=heap_alloc(&heap,n);if(p)memcpy(checked(c,p,n),s,n);CRT(p);}
 
+/* ---- CRT numeric conversions, classification, randomness -------------------
+ * Reached by the engine's script/console argument parsing (atof/strtod), the
+ * profiler and log formatters (_itoa/_ultoa), parsers (isalnum/isalpha/...)
+ * and the double-returning math entry points.  The VM itself has no OS timer
+ * of its own (TESV imports no waitable-timer/queue-timer API); its update
+ * budget is measured with GetTickCount/QueryPerformanceCounter, which already
+ * live here.
+ *
+ * `_errno` must be a pointer into guest memory that outlives the call, so the
+ * slot is allocated lazily from the guest heap instead of being reported from
+ * a host static (the guest would dereference a host address).
+ */
+#define CRT_EINVAL 22
+#define CRT_EDOM   33
+#define CRT_ERANGE 34
+static uint32_t crt_errno_addr;
+static uint32_t crt_errno_ptr(void){
+    if(!crt_errno_addr){crt_errno_addr=heap_alloc(&heap,4);if(crt_errno_addr)M32(crt_errno_addr)=0;}
+    return crt_errno_addr;
+}
+static void crt_set_errno(int v){uint32_t p=crt_errno_ptr();if(p)M32(p)=v;}
+static void s__errno(CPU *c){
+    uint32_t p=crt_errno_ptr();
+    if(!p)FAIL(ERR_NO_MEMORY,0,0);
+    CRT(p);
+}
+/* msvcrt rand(): state = state*214013+2531011; result = (state>>16)&0x7fff. */
+static uint32_t crt_rand_state=1;
+static void s_srand(CPU *c){crt_rand_state=A(0);CRT(0);}
+static void s_rand(CPU *c){crt_rand_state=crt_rand_state*UINT32_C(214013)+UINT32_C(2531011);CRT((crt_rand_state>>16)&0x7fffu);}
+/* Single guest thread runs at a time (see win32_thread.h), so the CRT's stdio
+ * lock ids cannot be contended.  Keeping these as explicit no-ops is stronger
+ * than pretending to lock and avoids re-entering the host CRT from a shim. */
+static void s__lock(CPU *c){(void)A(0);CRT(0);}
+static void s__unlock(CPU *c){(void)A(0);CRT(0);}
+/* ASCII classification only: the emulated code page stays CP1252/single-byte,
+ * and a non-ASCII lead byte must not be reported as a letter. */
+static int crt_isalpha(int ch){return (ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z');}
+static int crt_isdigit(int ch){return ch>='0'&&ch<='9';}
+static int crt_isxdigit(int ch){return crt_isdigit(ch)||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F');}
+static int crt_isspace(int ch){return ch==' '||(ch>='\t'&&ch<='\r');}
+static void s_isalnum(CPU *c){int ch=(int)A(0);CRT(crt_isalpha(ch)||crt_isdigit(ch));}
+static void s_isalpha(CPU *c){CRT(crt_isalpha((int)A(0)));}
+static void s_isdigit(CPU *c){CRT(crt_isdigit((int)A(0)));}
+static void s_isspace(CPU *c){CRT(crt_isspace((int)A(0)));}
+static void s_isxdigit(CPU *c){CRT(crt_isxdigit((int)A(0)));}
+static void s_isleadbyte(CPU *c){(void)A(0);CRT(0);} /* CP1252 has no lead bytes */
+static void s_iswalpha(CPU *c){CRT(crt_isalpha((int)A(0)));}
+static void s_iswdigit(CPU *c){CRT(crt_isdigit((int)A(0)));}
+static void s_iswspace(CPU *c){CRT(crt_isspace((int)A(0)));}
+static void s_iswpunct(CPU *c){int ch=(int)A(0);CRT(ch>0x20&&ch<0x7f&&!crt_isalpha(ch)&&!crt_isdigit(ch));}
+static unsigned char crt_ch(uint32_t s,uint32_t i){const char *p=guest_ptr(mem,s+i,1);return p?(unsigned char)*p:0;}
+/* strtod: leading whitespace, sign, decimal digits, optional fraction and
+ * exponent, plus the lowercase/uppercase inf/infinity/nan spellings msvcrt
+ * accepts.  The accepted prefix is re-parsed by the host strtod in the "C"
+ * locale; endptr points at the first rejected guest byte.  Hex floats are not
+ * accepted (the 2011 msvcrt this engine ships with does not parse them). */
+static double crt_strtod(CPU *c,uint32_t s,uint32_t endp,double *out){
+    uint32_t i=0;
+    while(crt_isspace(crt_ch(s,i)))++i;
+    uint32_t num_start=i;
+    int neg=0;
+    if(crt_ch(s,i)=='+'||crt_ch(s,i)=='-'){neg=crt_ch(s,i)=='-';++i;}
+    char buf[80];size_t n=0;int digits=0;
+    if(crt_ch(s,i)=='0'&&(crt_ch(s,i+1)=='x'||crt_ch(s,i+1)=='X')){
+        buf[n++]='0';digits=1;++i; /* "0x" is not a hex float: consume the 0 only */
+    } else {
+        while(crt_isdigit(crt_ch(s,i))&&n<sizeof buf-1){buf[n++]=(char)crt_ch(s,i++);++digits;}
+        if(crt_ch(s,i)=='.'){
+            if(n<sizeof buf-1)buf[n++]='.';++i;
+            while(crt_isdigit(crt_ch(s,i))&&n<sizeof buf-1){buf[n++]=(char)crt_ch(s,i++);++digits;}
+        }
+        if(digits&&(crt_ch(s,i)=='e'||crt_ch(s,i)=='E')){
+            uint32_t save=i;size_t mark=n;
+            if(n<sizeof buf-1)buf[n++]='e';++i;
+            if(crt_ch(s,i)=='+'||crt_ch(s,i)=='-'){if(n<sizeof buf-1)buf[n++]=(char)crt_ch(s,i);++i;}
+            if(crt_isdigit(crt_ch(s,i))){
+                while(crt_isdigit(crt_ch(s,i))&&n<sizeof buf-1)buf[n++]=(char)crt_ch(s,i++);
+            } else { i=save; n=mark; }
+        }
+    }
+    if(!digits){
+        /* inf / infinity / nan, case-insensitive, matching msvcrt. */
+        static const char *words[3]={"infinity","inf","nan"};
+        for(int w=0;w<3;++w){
+            size_t k=0;while(words[w][k]&&lower_ascii(crt_ch(s,num_start+k))==(unsigned char)words[w][k])++k;
+            if(words[w][k])continue;
+            i=num_start+k;
+            if(endp)M32(endp)=s+i;
+            return neg?-(w==2?__builtin_nan(""):__builtin_huge_val())
+                      :(w==2?__builtin_nan(""):__builtin_huge_val());
+        }
+        if(endp)M32(endp)=s; /* no conversion: endptr is the original string */
+        return 0.0;
+    }
+    if(endp)M32(endp)=s+i;
+    buf[n]=0;
+    (void)out;
+    double v=strtod(buf,NULL);
+    return neg?-v:v;
+}
+/* ---- double-returning CRT entry points (x87 ABI) ---------------------------
+ * These guests call the CRT with cdecl arguments and read the result from ST0,
+ * exactly like the d3d9_* float-return shims.  Stack arguments are addressed by
+ * byte offset because a `double` occupies two 4-byte slots: `fmod(x,y)` has y
+ * at offset 8, not at slot 1.  _CIxxx is the compiler helper for a float
+ * argument promoted to a double CRT call. */
+static double crt_dbl(CPU *c,unsigned off){double d=0;memcpy(&d,checked(c,c->r[4]+4+off,8),8);return d;}
+static float crt_flt(CPU *c,unsigned off){float f=0;memcpy(&f,checked(c,c->r[4]+4+off,4),4);return f;}
+#define RETD_(v,n) do{double d_=(double)(v);fpush(c,d_);c->r[0]=0;c->r[4]+=4+4*(n);return;}while(0)
+static void s_strtod(CPU *c){
+    double v=crt_strtod(c,A(0),A(1),NULL);
+    if(v>1.7976931348623157e308||v<-1.7976931348623157e308)crt_set_errno(CRT_ERANGE);
+    else crt_set_errno(0);
+    RETD_(v,2);
+}
+static void s_atof(CPU *c){RETD_(crt_strtod(c,A(0),0,NULL),1);}
+/* _itoa/_ultoa: buffer/radix contract of msvcrt, return the buffer pointer. */
+static uint32_t crt_utoa(CPU *c,uint32_t value,uint32_t dst,int radix,int is_signed){
+    if(radix<2||radix>36)return 0;
+    char tmp[34];int n=0;uint32_t v=value;int neg=0;
+    if(is_signed&&(int32_t)value<0){neg=1;v=(uint32_t)(-(int64_t)(int32_t)value);}
+    do{int d=(int)(v%(uint32_t)radix);tmp[n++]=(char)(d<10?'0'+d:'a'+d-10);v/=(uint32_t)radix;}while(v);
+    if(neg)tmp[n++]='-';
+    uint8_t *p=checked(c,dst,(uint32_t)n+1);
+    for(int k=0;k<n;++k)p[k]=(uint8_t)tmp[n-1-k];
+    p[n]=0;
+    return dst;
+}
+static void s__itoa(CPU *c){
+    uint32_t r=crt_utoa(c,A(0),A(1),(int)A(2),1);
+    if(!r)FAIL(ERR_INVALID_PARAMETER,0,3);
+    CRT(r);
+}
+static void s__ultoa(CPU *c){
+    uint32_t r=crt_utoa(c,A(0),A(1),(int)A(2),0);
+    if(!r)FAIL(ERR_INVALID_PARAMETER,0,3);
+    CRT(r);
+}
+static void s_ceil(CPU *c){RETD_(ceil(crt_dbl(c,0)),2);}
+static void s_floor(CPU *c){RETD_(floor(crt_dbl(c,0)),2);}
+static void s_sqrt(CPU *c){
+    double x=crt_dbl(c,0);
+    if(x<0.0){crt_set_errno(CRT_EDOM);RETD_(__builtin_nan(""),2);}
+    crt_set_errno(0);RETD_(sqrt(x),2);
+}
+static void s_fmod(CPU *c){
+    double y=crt_dbl(c,8);
+    if(y==0.0){crt_set_errno(CRT_EDOM);RETD_(__builtin_nan(""),4);}
+    crt_set_errno(0);RETD_(fmod(crt_dbl(c,0),y),4);
+}
+static void s_pow(CPU *c){
+    double x=crt_dbl(c,0),y=crt_dbl(c,8),r=pow(x,y);
+    if(x<0.0&&floor(y)!=y){crt_set_errno(CRT_EDOM);RETD_(__builtin_nan(""),4);}
+    crt_set_errno(0);RETD_(r,4);
+}
+static void s_frexp(CPU *c){
+    int e=0;double r=frexp(crt_dbl(c,0),&e);
+    uint32_t p=A(2);if(p)M32(p)=(uint32_t)e;
+    RETD_(r,3);
+}
+static void s_ldexp(CPU *c){RETD_(ldexp(crt_dbl(c,0),(int)A(2)),3);}
+static void s_modf(CPU *c){
+    double ip=0.0,r=modf(crt_dbl(c,0),&ip);
+    uint32_t p=A(2);
+    if(p)memcpy(checked(c,p,8),&ip,8);
+    RETD_(r,3);
+}
+static void s__finite(CPU *c){double x=crt_dbl(c,0);result(c,__builtin_isfinite(x)?1u:0u,2);}
+static void s__isnan(CPU *c){double x=crt_dbl(c,0);result(c,__builtin_isnan(x)?1u:0u,2);}
+/* _CI*: one float argument, double result (two floats for atan2/fmod/pow). */
+#define CI1(name,expr) static void s__CI##name(CPU *c){float x=crt_flt(c,0);RETD_(expr,1);}
+#define CI2(name,expr) static void s__CI##name(CPU *c){float x=crt_flt(c,0),y=crt_flt(c,4);RETD_(expr,2);}
+CI1(acos,acos((double)x))
+CI1(asin,asin((double)x))
+CI1(atan,atan((double)x))
+CI1(cos,cos((double)x))
+CI1(exp,exp((double)x))
+CI1(log,log((double)x))
+CI1(sin,sin((double)x))
+CI1(sqrt,sqrt((double)x))
+CI2(atan2,atan2((double)x,(double)y))
+CI2(fmod,fmod((double)x,(double)y))
+CI2(pow,pow((double)x,(double)y))
+#undef CI1
+#undef CI2
+
 /* Case-insensitive equality for ASCII identifiers (INI names, env names). */
 static int ci_eq(const char *a,const char *b){
     while(*a&&*b){if(lower_ascii((unsigned char)*a)!=lower_ascii((unsigned char)*b))return 0;++a;++b;}
@@ -3934,7 +4122,23 @@ static void s_BinkCopyToBufferRect(CPU *c){
  X("msvcrt.dll","qsort",qsort) X("msvcrt.dll","strtol",strtol) X("msvcrt.dll","strtoul",strtoul) \
  X("msvcrt.dll","atoi",atoi) X("msvcrt.dll","atol",atol) \
  X("msvcrt.dll","setlocale",setlocale) X("msvcrt.dll","_setlocale",setlocale) \
- X("msvcrt.dll","localeconv",localeconv)
+ X("msvcrt.dll","localeconv",localeconv) \
+ X("msvcrt.dll","_errno",_errno) X("msvcrt.dll","strtod",strtod) X("msvcrt.dll","atof",atof) \
+ X("msvcrt.dll","_itoa",_itoa) X("msvcrt.dll","_ultoa",_ultoa) X("msvcrt.dll","_ltoa",_itoa) \
+ X("msvcrt.dll","rand",rand) X("msvcrt.dll","srand",srand) \
+ X("msvcrt.dll","_lock",_lock) X("msvcrt.dll","_unlock",_unlock) \
+ X("msvcrt.dll","isalnum",isalnum) X("msvcrt.dll","isalpha",isalpha) X("msvcrt.dll","isdigit",isdigit) \
+ X("msvcrt.dll","isspace",isspace) X("msvcrt.dll","isxdigit",isxdigit) X("msvcrt.dll","isleadbyte",isleadbyte) \
+ X("msvcrt.dll","iswalpha",iswalpha) X("msvcrt.dll","iswdigit",iswdigit) X("msvcrt.dll","iswspace",iswspace) \
+ X("msvcrt.dll","iswpunct",iswpunct) \
+ X("msvcrt.dll","ceil",ceil) X("msvcrt.dll","floor",floor) X("msvcrt.dll","sqrt",sqrt) \
+ X("msvcrt.dll","fmod",fmod) X("msvcrt.dll","pow",pow) X("msvcrt.dll","frexp",frexp) \
+ X("msvcrt.dll","ldexp",ldexp) X("msvcrt.dll","modf",modf) \
+ X("msvcrt.dll","_finite",_finite) X("msvcrt.dll","_isnan",_isnan) \
+ X("msvcrt.dll","_CIacos",_CIacos) X("msvcrt.dll","_CIasin",_CIasin) X("msvcrt.dll","_CIatan",_CIatan) \
+ X("msvcrt.dll","_CIatan2",_CIatan2) X("msvcrt.dll","_CIcos",_CIcos) X("msvcrt.dll","_CIexp",_CIexp) \
+ X("msvcrt.dll","_CIfmod",_CIfmod) X("msvcrt.dll","_CIlog",_CIlog) X("msvcrt.dll","_CIpow",_CIpow) \
+ X("msvcrt.dll","_CIsin",_CIsin) X("msvcrt.dll","_CIsqrt",_CIsqrt)
 #define DEF(d,n,f) {d,n,s_##f},
 static const struct {const char *dll,*name;GuestFn fn;} defs[]={K(DEF) C(DEF) BINK(DEF)};
 #undef DEF
