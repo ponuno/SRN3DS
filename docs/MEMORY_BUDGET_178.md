@@ -288,3 +288,26 @@ working set: guest `used`/`peak` must still fit below it at cell transitions.
   (would change both RAM and IO accounting).
 - Whether raising the linear heap above 8 MiB requires a matching `osSetMemMode`
   change for the 178 MiB CIA title.
+
+### Texture-cache limit vs the 8/24 MiB linear heap
+
+`N3DS_TEX_GUEST_LIMIT`/`N3DS_TEX_GPU_LIMIT` bound the *cache's* accounting, not
+`linearAlloc` or newlib. GPU texture natives live in PICA VRAM (6 MiB total),
+allocated through `C3D_TexInit`; the guest copies live in newlib/guest memory.
+The limits are a working-set policy so a profile can show which of the two
+pools grows during a cell transition. They do not reserve or cap linear:
+
+* 24 MiB linear profile: the cache can hold more GPU copies, but PICA VRAM is
+  still the hard 6 MiB wall. Set `N3DS_TEX_GPU_LIMIT` below VRAM only to force
+  early LRU churn; it cannot create VRAM.
+* 8 MiB linear profile: keep `N3DS_TEX_GUEST_LIMIT` modest (for example `4M` or
+  `8M`) so evicted GPU copies do not all retain a rehydratable CPU source.
+  Default (`0`) remains unlimited and is unchanged by this work.
+
+Frame pinning is orthogonal: pinned bytes are reported by `tex_pinned` and
+`tex_pinned_refusals`. A high `tex_pinned` at Present is expected (the frame's
+working set); a growing `tex_pinned_refusals` means the limit is below the
+per-frame working set and must be raised or the draw set reduced. The overlay's
+`tex_trims`/`tex_trim_evictions` still count automatic budget trims; explicit
+`d9_texture_cache_trim()` calls are visible as `trims` in
+`d9_texture_cache_stats()`.

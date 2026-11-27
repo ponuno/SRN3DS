@@ -54,6 +54,7 @@ typedef struct {
     size_t tex_guest, tex_gpu, tex_guest_peak, tex_gpu_peak;
     size_t tex_guest_limit, tex_gpu_limit;
     unsigned tex_trims, tex_trim_evictions, tex_evictions_gpu;
+    unsigned tex_non_evictable, tex_pinned, tex_pinned_refusals;
 
     int have_os_region;
     uint64_t os_size, os_used, os_free;
@@ -238,6 +239,14 @@ void mem_stats_set_tex_limits(size_t guest_limit, size_t gpu_limit)
     g.tex_gpu_limit = gpu_limit;
 }
 
+void mem_stats_set_tex_pins(unsigned non_evictable, unsigned pinned,
+                            unsigned pinned_refusals)
+{
+    g.tex_non_evictable = non_evictable;
+    g.tex_pinned = pinned;
+    g.tex_pinned_refusals = pinned_refusals;
+}
+
 uint64_t mem_stats_space_begin(int space)
 {
     if (space != MEM_STATS_LINEAR && space != MEM_STATS_VRAM) return 0;
@@ -404,13 +413,15 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
            (unsigned long long)g.bsa_resident, g.bsa_archives, g.have_bsa);
     APPEND(" tex_guest=%llu tex_gpu=%llu tex_guest_peak=%llu tex_gpu_peak=%llu "
            "tex_guest_limit=%llu tex_gpu_limit=%llu "
-           "tex_trims=%u tex_trim_evictions=%u tex_evictions_gpu=%u",
+           "tex_trims=%u tex_trim_evictions=%u tex_evictions_gpu=%u "
+           "tex_non_evictable=%u tex_pinned=%u tex_pinned_refusals=%u",
            (unsigned long long)g.tex_guest, (unsigned long long)g.tex_gpu,
            (unsigned long long)g.tex_guest_peak,
            (unsigned long long)g.tex_gpu_peak,
            (unsigned long long)g.tex_guest_limit,
            (unsigned long long)g.tex_gpu_limit, g.tex_trims,
-           g.tex_trim_evictions, g.tex_evictions_gpu);
+           g.tex_trim_evictions, g.tex_evictions_gpu,
+           g.tex_non_evictable, g.tex_pinned, g.tex_pinned_refusals);
     APPEND(" os_region_used=%llu os_region_free=%llu os_region_size=%llu "
            "have_os_region=%d alloc_failures=%llu",
            (unsigned long long)g.os_used, (unsigned long long)g.os_free,

@@ -404,6 +404,14 @@ typedef struct {
      * by name instead of drawing through the legacy path. */
     int (*draw_pica_vs)(void *ctx,const D9SkinVertex *vertices,size_t count,
                         const D9PicaVsDraw *draw);
+    /* Optional GPU completion barrier, appended after draw_pica_vs so every
+     * existing positional initializer keeps its meaning.  Called by Present
+     * after ops.end and after deferred texture publication, before the core
+     * releases frame-scoped texture pins.  A backend whose commands execute
+     * asynchronously must wait for them here (C3D_FrameSync); when NULL the
+     * core treats ops.end as the synchronous frame boundary, which is the
+     * documented contract of the host/null backend. */
+    int (*frame_sync)(void *ctx);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -812,9 +820,14 @@ int d9_evict_managed_resources(D9Device *d);
 /* Read-only copy of the device's texture-cache counters (cube/volume included). */
 int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out);
 /* Diagnostic residency policy: byte caps for guest (CPU) and GPU copies.
- * 0 means no limit.  Env N3DS_TEX_{GUEST,GPU}_LIMIT is applied by d3d9_com. */
+ * 0 means no limit.  d9_create_device() applies N3DS_TEX_GUEST_LIMIT and
+ * N3DS_TEX_GPU_LIMIT: a plain byte count or a K/M/G suffix (8M = 8 MiB).
+ * Unset or invalid leaves that pool unlimited (the historical behaviour). */
 int d9_texture_cache_set_limits(D9Device *d,size_t guest_limit,
                                 size_t gpu_limit);
+/* Read back the active limits (0 = unlimited). */
+int d9_texture_cache_get_limits(D9Device *d,size_t *guest_limit,
+                                size_t *gpu_limit);
 /* Diagnostic residency control: evict unpinned GPU/guest copies until the
  * requested targets are met.  Cube/volume entries with a CPU store are
  * rehydratable; render-target cubes are explicit-release-only and are skipped.

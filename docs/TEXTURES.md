@@ -448,3 +448,71 @@ and TESV targets.
 * Core ownership wiring is applied, but full MANAGED eviction/rehydrate, Reset
   handle preservation, dynamic DISCARD, and automatic disposable guest drop
   remain pending. DEFAULT and MANAGED still retain guest copies.
+
+## 9. Frame pinning and cache limits (tex-limits)
+
+The PICA backend submits draws asynchronously. A native texture referenced by a
+draw that was already sent to the GPU must not be evicted or deleted until the
+GPU has consumed it. `d3d9_texcache` therefore carries two frame-scoped pins per
+entry, in addition to the plain LockRect/upload pins:
+
+* `bound_frame` — set when a texture occupies a sampler slot (`SetTexture`,
+  `SetCubeTexture`, `SetVolumeTexture`, stage 0 or 1). Rebinding the slot
+  releases only this pin, so a texture that was bound but never drawn becomes
+  LRU-eligible again.
+* `draw_frame` — set when a draw that samples the currently bound slots is
+  submitted. It survives an unbind; the GPU command still reads the native.
+* Both pins are idempotent within one frame generation, are replaced (not
+  accumulated) if a guest spans generations without Present, and are released
+  only by `d9_texcache_frame_clear()`.
+
+The core (`d3d9_core.c`) increments a generation per Present. After `ops.end`
+closes the frame and after deferred uploads, `Present` calls the optional
+backend `frame_sync` hook and only then clears the old generation. The citro3d
+backend implements `frame_sync` as `C3D_FrameSync()`; the null/host backend
+leaves it NULL and is documented as a synchronous frame boundary. Textures
+still bound at that point are re-pinned for the next generation, because D3D9
+sampler bindings survive Present. Explicit `ReleaseTexture` is allowed to drop
+frame pins and remove the entry: every backend delete callback already waits for
+the GPU (citro3d calls `C3D_FrameSync` before `C3D_TexDelete`). Plain pins
+(LockRect, in-flight upload) still refuse removal.
+
+Eviction considers only `!pins && !no_evict` LRU entries. If the pool is full
+and every candidate is pinned, the allocation fails with
+`D9TEXCACHE_GPU_FULL`/`_GUEST_FULL`, `stats.pinned_refusals` increments, and the
+core sets a named diagnosis:
+
+```
+texture cache GPU limit N bytes reached (used M); all K live candidates are
+pinned by textures referenced by submitted GPU draws (P pinned); allocation
+refused until Present
+```
+
+Nothing is freed or silently reused in that path. `stats.pinned` reports entries
+with any pin, `stats.non_evictable` the explicit-release-only entries.
+
+### Limits
+
+`N3DS_TEX_GUEST_LIMIT` / `N3DS_TEX_GPU_LIMIT` are read by `d9_create_device()`.
+They accept a byte count or a `K`/`M`/`G` suffix (`8M` = 8 MiB); unset, empty or
+invalid means **0 = unlimited**, so default behaviour is unchanged. On reaching
+a limit, reserve/trim evicts unpinned, evictable LRU entries (oldest `last_use`
+first) and retries. `d9_texture_cache_set_limits()` changes the caps at runtime;
+`d9_texture_cache_get_limits()` reads them back.
+
+Counters in `d9_texture_cache_stats()` / the `mem_stats` tex line:
+`trims`, `budget_trims`, `budget_trim_evictions`, `evictions_gpu`,
+`non_evictable`, `pinned`, `pinned_refusals`, plus peaks and byte counts. The
+existing `tex_trims`/`tex_trim_evictions` overlay fields keep their budget-trim
+meaning; `tex_non_evictable`, `tex_pinned` and `tex_pinned_refusals` are new.
+
+Host coverage: `texcache_pinning` (cache policy) and `texcache_limits_core`
+(env parser, 2D/cube/volume/RT pins, named refusal, unpin at Present). Both run
+under ASan/UBSan. Regressions `budget_trim`, `texture_update`,
+`cube_volume_residency`, `render_texture`, `com`, `menu_indexed_draw` pass.
+
+Remaining: frame pins assume one logical frame per Present; a guest that
+submits across several Present calls is covered per generation, but a texture
+kept bound forever stays resident (correct for D3D9). PICA volume sampling is
+still refused by the citro3d backend, so the volume pin path is exercised only
+through the host/null backend.

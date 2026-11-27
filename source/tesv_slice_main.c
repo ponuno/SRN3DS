@@ -122,10 +122,13 @@ static void mem_refresh(void *ctx) {
     D9Device *dev = d9_com_device();
     if (dev) {
         D9TexCacheStats tc;
-        if (d9_texture_cache_stats(dev, &tc) == D9_OK)
+        if (d9_texture_cache_stats(dev, &tc) == D9_OK) {
             mem_stats_set_texcache(tc.guest_bytes, tc.gpu_bytes, tc.peak_guest,
                                    tc.peak_gpu, tc.budget_trims,
                                    tc.budget_trim_evictions, tc.evictions_gpu);
+            mem_stats_set_tex_pins(tc.non_evictable, tc.pinned,
+                                   tc.pinned_refusals);
+        }
     }
     /* The overlay reports archives, not resident index bytes; report exactly
      * what the existing API knows (have_bsa stays 0). */

@@ -37,6 +37,31 @@ static int scaled_readback_from_env(void){
     const char *s=getenv("TESV_D3D9_SCALED_READBACK");
     return s&&strcmp(s,"1")==0;
 }
+/* Texture-cache limits: N3DS_TEX_GUEST_LIMIT / N3DS_TEX_GPU_LIMIT accept a
+ * plain byte count or a K/M/G suffix (8M = 8 MiB).  Unset, empty or invalid
+ * means "no limit", which keeps the historical unlimited behaviour. */
+static size_t tex_limit_from_env(const char *name){
+    const char *s=getenv(name);
+    if(!s||!*s)return 0;
+    while(*s==' '||*s=='\t')++s;
+    if(!*s||*s=='-'||*s=='+')return 0;
+    char *end=NULL;
+    unsigned long long v=strtoull(s,&end,10);
+    if(end==s)return 0;
+    while(*end==' '||*end=='\t')++end;
+    unsigned long long scale=1;
+    if(*end){
+        if(*end=='k'||*end=='K')scale=1024ull;
+        else if(*end=='m'||*end=='M')scale=1024ull*1024ull;
+        else if(*end=='g'||*end=='G')scale=1024ull*1024ull*1024ull;
+        else return 0;
+        ++end;
+        while(*end==' '||*end=='\t')++end;
+        if(*end)return 0;
+    }
+    if(v>SIZE_MAX/scale)return 0;
+    return (size_t)(v*scale);
+}
 typedef struct {D9Handle id;unsigned kind;uint8_t *data;size_t bytes;int locked;} Buffer;
 typedef struct {
     D9Handle id;size_t offset,stride;
@@ -98,6 +123,10 @@ struct D9Device {
     Depth depths[MAX_DEPTHS];D9Handle depth;
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
+    /* Frame-scoped texture pinning.  Every bind takes a slot pin and every
+     * submitted draw takes a usage pin; both are released only after the GPU
+     * completion barrier at Present. */
+    uint32_t frame_generation;
     Stream streams[D9_MAX_STREAMS];D9Handle index,texture;const D9TevProgram *pixel_shader;D9Decl declaration;int decl_active;
     float tev_constants[D9_TEV_CONSTANT_ROWS][4];
     /* Derived plan constants written by d9_set_derived_constants().  The mask
@@ -249,6 +278,79 @@ void d9_pica_transform(D9Matrix *out,const D9Matrix *w,const D9Matrix *v,const D
     for(unsigned i=0;i<4;++i){out->m[0][i]=b.m[i][1];out->m[1][i]=-b.m[i][0];out->m[2][i]=b.m[i][2]-b.m[i][3];out->m[3][i]=b.m[i][3];}
 }
 static void set_diagnosis(D9Device *d,const char *why){if(!d)return;if(!why)why="";snprintf(d->diagnosis,sizeof d->diagnosis,"%s",why);}
+/* --- frame-scoped texture pins -------------------------------------------- */
+static void frame_bind_texture(D9Device *d,D9Handle h){
+    if(d&&h&&d->frame_generation)
+        (void)d9_texcache_frame_bind(&d->tex_cache,h,d->frame_generation);
+}
+static void frame_unbind_texture(D9Device *d,D9Handle h){
+    if(d&&h&&d->frame_generation)
+        (void)d9_texcache_frame_unbind(&d->tex_cache,h,d->frame_generation);
+}
+/* A sampler slot is about to be overwritten: its previous occupant is no
+ * longer referenced by the slot.  A draw pin, if any, survives. */
+static void frame_clear_slot(D9Device *d,D9Handle *slot){
+    if(d&&slot&&*slot){frame_unbind_texture(d,*slot);*slot=0;}
+}
+/* A draw is about to be submitted: every currently bound texture becomes
+ * reachable by GPU commands that may still be pending at Present. */
+static void frame_pin_draw_set(D9Device *d){
+    if(!d||!d->frame_generation)return;
+    D9Handle h[6]={d->texture,d->texture1,d->cube_texture,d->cube_texture1,
+                   d->volume_texture,d->volume_texture1};
+    for(unsigned i=0;i<6;++i)
+        if(h[i])(void)d9_texcache_frame_pin(&d->tex_cache,h[i],d->frame_generation);
+}
+/* Present is the only safe unpin point: ops.end has closed the frame and the
+ * backend's frame_sync (when present) waited for the GPU.  Without frame_sync
+ * ops.end is the documented synchronous boundary (host/null backends). */
+static void frame_boundary(D9Device *d){
+    if(!d)return;
+    if(d->ops.frame_sync)(void)d->ops.frame_sync(d->ctx);
+    if(d->frame_generation)
+        (void)d9_texcache_frame_clear(&d->tex_cache,d->frame_generation);
+    if(++d->frame_generation==0)d->frame_generation=1;
+    /* Sampler slots keep their D3D9 binding across Present.  The previous
+     * frame's draw pins are gone, but a still-bound texture must stay resident
+     * for the next frame, so re-take its slot pin under the new generation. */
+    frame_bind_texture(d,d->texture);
+    frame_bind_texture(d,d->texture1);
+    frame_bind_texture(d,d->cube_texture);
+    frame_bind_texture(d,d->cube_texture1);
+    frame_bind_texture(d,d->volume_texture);
+    frame_bind_texture(d,d->volume_texture1);
+}
+/* Explicit ReleaseTexture may legally drop a texture whose commands are still
+ * queued: every backend delete callback waits for the GPU (citro3d calls
+ * C3D_FrameSync before C3D_TexDelete).  Frame pins therefore only defer LRU
+ * eviction; an explicit release drops them and retries.  Plain pins (LockRect,
+ * in-flight upload) still refuse. */
+static int cache_remove_released(D9Device *d,D9Handle h){
+    int rc=d9_texcache_remove(&d->tex_cache,h);
+    if(rc==D9TEXCACHE_PINNED){
+        (void)d9_texcache_frame_forget(&d->tex_cache,h);
+        rc=d9_texcache_remove(&d->tex_cache,h);
+    }
+    return rc;
+}
+/* Turn a cache allocation refusal into a named diagnosis.  A full pool whose
+ * candidates are all pinned by submitted draws is a latency condition, not a
+ * plain out-of-memory condition; callers must be able to tell them apart. */
+static int cache_refusal_named(D9Device *d,int rc){
+    if(rc==D9TEXCACHE_OK)return rc;
+    if((rc==D9TEXCACHE_GPU_FULL||rc==D9TEXCACHE_GUEST_FULL)&&
+       d9_texcache_last_refusal_pinned(&d->tex_cache)){
+        D9TexCacheStats st;d9_texcache_stats(&d->tex_cache,&st);
+        int gpu=rc==D9TEXCACHE_GPU_FULL;
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "texture cache %s limit %zu bytes reached (used %zu); the pool is exhausted and every live candidate matching the request is pinned by textures referenced by submitted GPU draws (%u entries live, %u pinned); allocation refused until Present",
+                 gpu?"GPU":"guest",
+                 gpu?d->tex_cache.gpu_limit:d->tex_cache.guest_limit,
+                 gpu?st.gpu_bytes:st.guest_bytes,
+                 st.entries,st.pinned);
+    }
+    return rc;
+}
 static int table_full(D9Device *d,const char *name,unsigned count){
     if(d)snprintf(d->diagnosis,sizeof d->diagnosis,
                   "%s table exhausted (%u entries)",name,count);
@@ -317,9 +419,12 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     d->target_native_max=target_native_max_from_env();
     d->scaled_readback=scaled_readback_from_env();
     D9TexCacheOps cache_ops={d,cache_release_guest,cache_release_gpu};
-    if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEX_ENTRIES,&cache_ops,0,0)){
+    if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEX_ENTRIES,&cache_ops,
+                        tex_limit_from_env("N3DS_TEX_GUEST_LIMIT"),
+                        tex_limit_from_env("N3DS_TEX_GPU_LIMIT"))){
         free(d);return NULL;
     }
+    d->frame_generation=1;
     d->state=draw_state_defaults();
     d->second=d->state;
     d->second.stage_colorop=d->second.stage_alphaop=D9_TOP_DISABLE;
@@ -443,7 +548,9 @@ static int register_subtexture(D9Device *d,D9Handle key,uint8_t *pixels,size_t c
     }
     if(!cpu_only){
         D9TexGpuRegistration reg={native,gpu,1,release,d,(D9TexRehydrateToken)key};
-        if(d9_texcache_attach_gpu(&d->tex_cache,key,&reg)!=D9TEXCACHE_OK){
+        int rc=d9_texcache_attach_gpu(&d->tex_cache,key,&reg);
+        if(rc!=D9TEXCACHE_OK){
+            cache_refusal_named(d,rc);
             (void)d9_texcache_remove(&d->tex_cache,key);
             delete_unowned_native(d,native);
             return D9_BACKEND;
@@ -532,7 +639,9 @@ int d9_create_texture_ex(D9Device *d,unsigned w,unsigned h,unsigned fmt,unsigned
         D9TexRehydrateToken token=(pool==D9_POOL_MANAGED)?(D9TexRehydrateToken)key:
                                    D9TEXCACHE_NO_REHYDRATE_TOKEN;
         D9TexGpuRegistration reg={t.native,t.gpu_bytes,1,cache_release_gpu,d,token};
-        if(d9_texcache_attach_gpu(&d->tex_cache,key,&reg)!=D9TEXCACHE_OK){
+        int rc=d9_texcache_attach_gpu(&d->tex_cache,key,&reg);
+        if(rc!=D9TEXCACHE_OK){
+            cache_refusal_named(d,rc);
             (void)d9_texcache_remove(&d->tex_cache,key);delete_unowned_native(d,t.native);return D9_BACKEND;
         }
     }
@@ -566,7 +675,9 @@ int d9_create_texture_sktx(D9Device *d,const void *sktx_data,size_t bytes,
         }
     }
     D9TexGpuRegistration reg={t.native,t.gpu_bytes,1,cache_release_gpu,d,D9TEXCACHE_NO_REHYDRATE_TOKEN};
-    if(d9_texcache_add_gpu(&d->tex_cache,d->next,&reg)!=D9TEXCACHE_OK){
+    int arc=d9_texcache_add_gpu(&d->tex_cache,d->next,&reg);
+    if(arc!=D9TEXCACHE_OK){
+        cache_refusal_named(d,arc);
         delete_unowned_native(d,t.native);return D9_BACKEND;
     }
     size_t offset=0;
@@ -855,7 +966,7 @@ int d9_release_texture(D9Device *d,D9Handle h){Texture *t=d?texture(d,h):NULL;if
         memset(t,0,sizeof *t);
         return d9_release_render_target(d,tgt);
     }
-    int rc=d9_texcache_remove(&d->tex_cache,h);
+    int rc=cache_remove_released(d,h);
     if(rc!=D9TEXCACHE_OK){
         if(rc==D9TEXCACHE_RELEASE_FAILED){
             D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
@@ -1071,7 +1182,7 @@ int d9_release_cube_texture(D9Device *d,D9Handle h){
      * release leaves the cube alive, but a later GetCubeMapSurface recreates
      * any view it still needs. */
     release_cube_face_targets(d,c);
-    int rc=d9_texcache_remove(&d->tex_cache,h);
+    int rc=cache_remove_released(d,h);
     if(rc!=D9TEXCACHE_OK){
         if(rc==D9TEXCACHE_RELEASE_FAILED){
             /* Mirror the 2D contract: copies the cache already released are
@@ -1238,6 +1349,16 @@ int d9_bind_cube_texture(D9Device *d,unsigned stage,D9Handle h){
         }
         d9_texcache_touch(&d->tex_cache,h);
     }
+    if(stage){
+        frame_clear_slot(d,&d->cube_texture1);
+        frame_clear_slot(d,&d->texture1);
+        frame_clear_slot(d,&d->volume_texture1);
+    }else{
+        frame_clear_slot(d,&d->cube_texture);
+        frame_clear_slot(d,&d->texture);
+        frame_clear_slot(d,&d->volume_texture);
+    }
+    frame_bind_texture(d,h);
     if(stage){d->cube_texture1=h;d->texture1=0;d->volume_texture1=0;}
     else{d->cube_texture=h;d->texture=0;d->volume_texture=0;}
     return D9_OK;
@@ -1394,7 +1515,7 @@ int d9_release_volume_texture(D9Device *d,D9Handle h){
         if(d->volume_texture1==h)d->volume_texture1=0;
         memset(v,0,sizeof *v);return D9_OK;
     }
-    int rc=d9_texcache_remove(&d->tex_cache,h);
+    int rc=cache_remove_released(d,h);
     if(rc!=D9TEXCACHE_OK){
         if(rc==D9TEXCACHE_RELEASE_FAILED){
             D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);
@@ -1538,6 +1659,16 @@ int d9_bind_volume_texture(D9Device *d,unsigned stage,D9Handle h){
         }
         d9_texcache_touch(&d->tex_cache,h);
     }
+    if(stage){
+        frame_clear_slot(d,&d->volume_texture1);
+        frame_clear_slot(d,&d->texture1);
+        frame_clear_slot(d,&d->cube_texture1);
+    }else{
+        frame_clear_slot(d,&d->volume_texture);
+        frame_clear_slot(d,&d->texture);
+        frame_clear_slot(d,&d->cube_texture);
+    }
+    frame_bind_texture(d,h);
     if(stage){d->volume_texture1=h;d->texture1=0;d->cube_texture1=0;}
     else{d->volume_texture=h;d->texture=0;d->cube_texture=0;}
     return D9_OK;
@@ -2254,9 +2385,19 @@ int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
         set_diagnosis(d,"texture native is missing or not uploaded");
         return D9_INVALID;
     }
-    if(stage)d->cube_texture1=0;else d->cube_texture=0;
-    if(stage)d->volume_texture1=0;else d->volume_texture=0;
+    if(stage){
+        frame_clear_slot(d,&d->texture1);
+        frame_clear_slot(d,&d->cube_texture1);
+        frame_clear_slot(d,&d->volume_texture1);
+    }else{
+        frame_clear_slot(d,&d->texture);
+        frame_clear_slot(d,&d->cube_texture);
+        frame_clear_slot(d,&d->volume_texture);
+    }
     if(h&&!t->rt_target){D9TexEntry *e=d9_texcache_find(&d->tex_cache,h);if(!e||!e->has_gpu||!e->gpu_ready)return D9_INVALID;d9_texcache_touch(&d->tex_cache,h);}
+    /* Render-target textures have no LRU-managed native (the Target owns it),
+     * but pinning the entry when one exists keeps the policy uniform. */
+    frame_bind_texture(d,h);
     if(stage)d->texture1=h;else d->texture=h;return D9_OK;}
 int d9_set_pixel_shader(D9Device *d,const D9TevProgram *program){if(!d)return D9_INVALID;d->pixel_shader=program;return D9_OK;}
 int d9_set_derived_constants(D9Device *d,const float (*values)[4],uint32_t mask){
@@ -3462,6 +3603,9 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     }
     if(t&&(t->locked||!t->level[0].uploaded))return D9_INVALID;
     if(t&&d->decl_active&&d->declaration.uv==UINT32_MAX)return D9_INVALID;
+    /* Everything reachable by the command we are about to submit must stay
+     * resident until the backend proves the frame completed at Present. */
+    frame_pin_draw_set(d);
     DrawStream streams[D9_MAX_STREAMS]={0};size_t max_index;if(prepare_streams(d,streams,&max_index,up))return D9_INVALID;
     if(d->pica_vs_active)
         return draw_skinned(d,streams,max_index,type,base,start,primitives,indexed,
@@ -3706,7 +3850,7 @@ int d9_present(D9Device *d){
     if(!d||d->teardown||!d->scene)return D9_INVALID;
     if(d->back_target){
         Target *bt=target(d,d->back_target);
-        if(!bt||!d->ops.target_blit||!d->ops.target_bind){d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;}
+        if(!bt||!d->ops.target_blit||!d->ops.target_bind){d->ops.end(d->ctx);d->scene=0;frame_boundary(d);return D9_BACKEND;}
         D9BlitRegion src,dst;
         memset(&src,0,sizeof src);memset(&dst,0,sizeof dst);
         src.surface=(D9BlitSurface){bt->native,d->back_w,d->back_h,bt->format,d->back_tex_w,d->back_tex_h};
@@ -3715,7 +3859,7 @@ int d9_present(D9Device *d){
         dst.width=dst.surface.width;dst.height=dst.surface.height;
         /* Present is the only operation that targets the LCD screen. */
         if(d->ops.target_bind(d->ctx,NULL)){
-            d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
+            d->ops.end(d->ctx);d->scene=0;frame_boundary(d);return D9_BACKEND;
         }
         int rc=d->ops.target_blit(d->ctx,&dst,&src,D9_FILTER_POINT);
         if(rc!=D9_BLIT_OK){
@@ -3723,7 +3867,7 @@ int d9_present(D9Device *d){
             /* Leave the frame with the retained target selected and finish it,
              * so a rejected Present cannot wedge the BeginScene state machine. */
             (void)d->ops.target_bind(d->ctx,bt->native);
-            d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;
+            d->ops.end(d->ctx);d->scene=0;frame_boundary(d);return D9_BACKEND;
         }
         /* D3DSWAPEFFECT_DISCARD: the retained pixels are not carried into the
          * next frame.  The next BeginScene clears them (see begin_scene_ex),
@@ -3734,6 +3878,8 @@ int d9_present(D9Device *d){
     /* COM EndScene is a state flag; Present is the real frame boundary, so the
      * deferred texture publication happens here. */
     (void)d9_publish_pending_textures(d);
+    /* Release the frame's texture pins only after the GPU completion barrier. */
+    frame_boundary(d);
     return D9_OK;
 }
 /* --- depth-stencil surfaces ------------------------------------------------ */
@@ -3961,6 +4107,12 @@ int d9_texture_cache_set_limits(D9Device *d,size_t guest_limit,size_t gpu_limit)
     if(!d)return D9_INVALID;
     return d9_texcache_set_limits(&d->tex_cache,guest_limit,gpu_limit)==D9TEXCACHE_OK
         ?D9_OK:D9_INVALID;
+}
+int d9_texture_cache_get_limits(D9Device *d,size_t *guest_limit,size_t *gpu_limit){
+    if(!d)return D9_INVALID;
+    if(guest_limit)*guest_limit=d->tex_cache.guest_limit;
+    if(gpu_limit)*gpu_limit=d->tex_cache.gpu_limit;
+    return D9_OK;
 }
 int d9_texture_cache_trim(D9Device *d,size_t guest_target,size_t gpu_target,
                           unsigned *evicted){

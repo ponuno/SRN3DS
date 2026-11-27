@@ -1027,6 +1027,13 @@ static int draw_pica_vs(void *ctx,const D9SkinVertex *vertices,size_t count,
     prepare_draw(c);
     return 0;
 }
+/* Backend GPU completion barrier.  The core calls this from Present after
+ * ops.end closed the frame and before it releases frame-scoped texture pins:
+ * a texture referenced by a submitted draw must not be evicted or deleted
+ * while PICA commands still read it. */
+static int frame_sync(void *ctx){
+    (void)ctx;C3D_FrameSync();return 0;
+}
 static void end(void *ctx){
     D9Citro *c=ctx;
     if(c->scene){
@@ -1395,4 +1402,4 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
      * PROJECTION and SHADOW_CUBE only; there is no 3D texture mode, so volume
      * sampling is refused by name and the PICA backend also has no
      * texture_create_volume callback. */
-    NULL,NULL,target_has_depth,target_depth_attach,draw_pica_vs};return &ops;}
+    NULL,NULL,target_has_depth,target_depth_attach,draw_pica_vs,frame_sync};return &ops;}

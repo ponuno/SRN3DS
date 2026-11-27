@@ -80,6 +80,10 @@ void mem_stats_set_texcache(size_t guest_bytes, size_t gpu_bytes,
                             unsigned budget_trim_evictions,
                             unsigned evictions_gpu);
 void mem_stats_set_tex_limits(size_t guest_limit, size_t gpu_limit);
+/* Frame-scoped pin visibility: entries with pins, no_evict entries, and the
+ * cumulative count of allocations refused because every candidate was pinned. */
+void mem_stats_set_tex_pins(unsigned non_evictable, unsigned pinned,
+                            unsigned pinned_refusals);
 
 /* Wrap one allocation in a space.  `space_begin` returns the current free
  * counter; `space_end` takes the observed delta, updates the high-water mark and

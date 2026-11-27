@@ -447,3 +447,17 @@ already working, unreachable, or cosmetic for the first frame.
   from the on-disk `TESV.exe` (the shipped tables differ from the runtime
   image, as `docs/MENU_SHADERS.md` warns). Their element usage must be read
   from the runtime via `TESV_D3D9_TRACE`, not guessed.
+
+## 10. Texture residency: frame pinning and limits
+
+PICA executes the frame's commands after `EndScene`, so a texture sampled by a
+submitted draw is protected until `C3D_FrameSync` proves completion. The core
+pins textures on every sampler bind and again on draw submission, and releases
+the pins in `Present` after the backend `frame_sync` hook (citro3d:
+`C3D_FrameSync`). A pool that cannot evict anything because all candidates are
+pinned refuses the allocation with a named `pinned` diagnosis instead of
+fencing a native the GPU may still read. See `docs/TEXTURES.md` section 9.
+
+`N3DS_TEX_GUEST_LIMIT` / `N3DS_TEX_GPU_LIMIT` (bytes or K/M/G, 0 = unlimited)
+cap the cache, not `DevCaps` or the device budget. They are a residency policy,
+not a format or capability change; `DevCaps` is untouched.

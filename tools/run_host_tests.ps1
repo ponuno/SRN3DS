@@ -312,6 +312,11 @@ Add-Test "graphics" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("sourc
 Add-Test "vertex" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("tests/vertex_smoke.c")) @()
 Add-Test "texture_residency" $common @("source/d3d9_texcache.c", "tests/texture_residency_smoke.c") @()
 Add-Test "texture_residency_upload" $common @("source/d3d9_texcache.c", "source/d3d9_texture_data.c", "tests/texture_residency_upload_smoke.c") @()
+# Frame-scoped pinning: bind/draw pins survive allocations until the frame
+# boundary; a pool whose candidates are all pinned refuses with a marker.
+Add-Test "texcache_pinning" $common @("source/d3d9_texcache.c", "tests/texcache_pinning_smoke.c") @()
+# Cache limits from N3DS_TEX_*_LIMIT plus cube/volume/RT pinning through the core.
+Add-Test "texcache_limits_core" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader_plan.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3dx_texture_shims.c") + $picaSources + @("tests/texcache_limits_core_smoke.c")) @()
 Add-Test "texture_container" $common @("source/d3d9_texture_data.c", "tests/texture_container_smoke.c") @()
 Add-Test "texture_runtime" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/texture_runtime_smoke.c") @()
 Add-Test "bc_shader" $common ($d3dFull + @("tests/bc_shader_smoke.c")) @()

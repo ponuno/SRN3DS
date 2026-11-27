@@ -214,16 +214,40 @@ static int pool_has_room(size_t used, size_t bytes, size_t limit, int gpu) {
     return D9TEXCACHE_OK;
 }
 
+/* Classify an eviction refusal: is a live copy in the wanted pool pinned by a
+ * bound draw (last_refusal_pinned) or merely no_evict/absent?  Only pinned
+ * candidates make the refusal a GPU-latency problem the caller must name. */
+static void note_eviction_refusal(D9TexCache *cache, int want_gpu,
+                                  int want_guest) {
+    unsigned pinned = 0;
+    for (unsigned i = 0; i < cache->capacity; ++i) {
+        const D9TexEntry *entry = &cache->entry[i];
+        if (!entry_is_live(entry)) continue;
+        if (!((want_gpu && entry->has_gpu) ||
+              (want_guest && entry->has_guest))) continue;
+        if (entry->pins) ++pinned;
+    }
+    if (pinned) {
+        cache->last_refusal_pinned = 1;
+        ++cache->pinned_refusals;
+    } else {
+        cache->last_refusal_pinned = 0;
+    }
+}
+
 static int reserve_bytes(D9TexCache *cache, int want_gpu, int want_guest,
                          size_t bytes, size_t limit, uint64_t exclude_key,
                          int exclude, unsigned *evicted) {
     size_t used = want_gpu ? cache->gpu_bytes : cache->guest_bytes;
     int rc = pool_has_room(used, bytes, limit, want_gpu);
     if (rc != D9TEXCACHE_OK || !bytes) return rc;
+    cache->last_refusal_pinned = 0;
     while (limit && used > limit - bytes) {
         rc = evict_one(cache, want_gpu, want_guest, exclude_key, exclude, evicted);
-        if (rc == D9TEXCACHE_PINNED)
+        if (rc == D9TEXCACHE_PINNED) {
+            note_eviction_refusal(cache, want_gpu, want_guest);
             return want_gpu ? D9TEXCACHE_GPU_FULL : D9TEXCACHE_GUEST_FULL;
+        }
         if (rc != D9TEXCACHE_OK) return rc;
         used = want_gpu ? cache->gpu_bytes : cache->guest_bytes;
     }
@@ -509,13 +533,86 @@ int d9_texcache_unpin(D9TexCache *cache, uint64_t key) {
     return D9TEXCACHE_OK;
 }
 
+/* Take one frame-scoped pin.  A pin left over from an older generation is
+ * replaced instead of accumulating, so a guest that never presents cannot
+ * starve eviction forever. */
+static int frame_take_pin(D9TexCache *cache, uint64_t key, uint32_t frame,
+                          uint32_t *slot) {
+    if (!cache || !frame) return D9TEXCACHE_INVALID;
+    D9TexEntry *entry = d9_texcache_find(cache, key);
+    if (!entry) return D9TEXCACHE_NOT_FOUND;
+    if (*slot == frame) return D9TEXCACHE_OK;
+    if (*slot) {
+        if (entry->pins) --entry->pins;
+        *slot = 0;
+    }
+    if (entry->pins == UINT16_MAX) return D9TEXCACHE_PINNED;
+    ++entry->pins;
+    *slot = frame;
+    ++cache->frame_pins;
+    return D9TEXCACHE_OK;
+}
+
+int d9_texcache_frame_bind(D9TexCache *cache, uint64_t key, uint32_t frame) {
+    D9TexEntry *entry = cache ? d9_texcache_find(cache, key) : NULL;
+    if (!entry) return cache ? D9TEXCACHE_NOT_FOUND : D9TEXCACHE_INVALID;
+    return frame_take_pin(cache, key, frame, &entry->bound_frame);
+}
+
+int d9_texcache_frame_unbind(D9TexCache *cache, uint64_t key, uint32_t frame) {
+    if (!cache) return D9TEXCACHE_INVALID;
+    D9TexEntry *entry = d9_texcache_find(cache, key);
+    if (!entry) return D9TEXCACHE_NOT_FOUND;
+    if (entry->bound_frame != frame) return D9TEXCACHE_OK;
+    entry->bound_frame = 0;
+    if (entry->pins) --entry->pins;
+    return D9TEXCACHE_OK;
+}
+
+int d9_texcache_frame_pin(D9TexCache *cache, uint64_t key, uint32_t frame) {
+    D9TexEntry *entry = cache ? d9_texcache_find(cache, key) : NULL;
+    if (!entry) return cache ? D9TEXCACHE_NOT_FOUND : D9TEXCACHE_INVALID;
+    return frame_take_pin(cache, key, frame, &entry->draw_frame);
+}
+
+unsigned d9_texcache_frame_clear(D9TexCache *cache, uint32_t frame) {
+    if (!cache || !frame) return 0;
+    unsigned cleared = 0;
+    for (unsigned i = 0; i < cache->capacity; ++i) {
+        D9TexEntry *entry = &cache->entry[i];
+        if (!entry_is_live(entry)) continue;
+        unsigned drop = 0;
+        if (entry->bound_frame == frame) { entry->bound_frame = 0; ++drop; }
+        if (entry->draw_frame == frame) { entry->draw_frame = 0; ++drop; }
+        if (!drop) continue;
+        entry->pins = entry->pins >= drop ? (uint16_t)(entry->pins - drop) : 0;
+        ++cleared;
+    }
+    return cleared;
+}
+
+int d9_texcache_last_refusal_pinned(const D9TexCache *cache) {
+    return cache ? (int)cache->last_refusal_pinned : 0;
+}
+
+int d9_texcache_frame_forget(D9TexCache *cache, uint64_t key) {
+    if (!cache) return D9TEXCACHE_INVALID;
+    D9TexEntry *entry = d9_texcache_find(cache, key);
+    if (!entry) return D9TEXCACHE_NOT_FOUND;
+    if (entry->bound_frame) { entry->bound_frame = 0; if (entry->pins) --entry->pins; }
+    if (entry->draw_frame) { entry->draw_frame = 0; if (entry->pins) --entry->pins; }
+    return D9TEXCACHE_OK;
+}
+
 int d9_texcache_trim(D9TexCache *cache, size_t guest_target,
                      size_t gpu_target, unsigned *evicted) {
     if (!cache) return D9TEXCACHE_INVALID;
     unsigned count = 0;
+    ++cache->trims;
     while (cache->guest_bytes > guest_target) {
         int rc = evict_one(cache, 0, 1, 0, 0, &count);
         if (rc != D9TEXCACHE_OK) {
+            if (rc == D9TEXCACHE_PINNED) note_eviction_refusal(cache, 0, 1);
             if (evicted) *evicted = count;
             update_peaks(cache);
             return rc == D9TEXCACHE_PINNED ? D9TEXCACHE_GUEST_FULL : rc;
@@ -524,6 +621,7 @@ int d9_texcache_trim(D9TexCache *cache, size_t guest_target,
     while (cache->gpu_bytes > gpu_target) {
         int rc = evict_one(cache, 1, 0, 0, 0, &count);
         if (rc != D9TEXCACHE_OK) {
+            if (rc == D9TEXCACHE_PINNED) note_eviction_refusal(cache, 1, 0);
             if (evicted) *evicted = count;
             update_peaks(cache);
             return rc == D9TEXCACHE_PINNED ? D9TEXCACHE_GPU_FULL : rc;
@@ -596,6 +694,9 @@ void d9_texcache_stats(const D9TexCache *cache, D9TexCacheStats *out) {
     out->budget_trim_evictions = cache->budget_trim_evictions;
     out->budget_trim_evicted_bytes = cache->budget_trim_evicted_bytes;
     out->budget_trim_failures = cache->budget_trim_failures;
+    out->trims = cache->trims;
+    out->pinned_refusals = cache->pinned_refusals;
+    out->frame_pins = cache->frame_pins;
     out->evictions_gpu = cache->evictions_gpu;
     out->evictions_guest = cache->evictions_guest;
     out->guest_drops = cache->guest_drops;

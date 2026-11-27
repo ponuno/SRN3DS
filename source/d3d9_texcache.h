@@ -92,6 +92,12 @@ typedef struct {
     D9TexRehydrateToken rehydrate_token;
     uint64_t last_use;
     uint16_t pins;
+    /* Frame-scoped pins.  bound_frame is set while the texture occupies a
+     * sampler slot; draw_frame is set once a draw referencing it has been
+     * submitted.  Both contribute exactly one to pins and are released by
+     * d9_texcache_frame_clear() after the GPU finished the frame. */
+    uint32_t bound_frame;
+    uint32_t draw_frame;
     uint8_t has_guest;
     uint8_t has_gpu;
     uint8_t gpu_ready;       /* direct add=1; core-allocated native starts at 0 */
@@ -118,6 +124,9 @@ typedef struct {
     unsigned budget_trim_evictions;
     size_t budget_trim_evicted_bytes;
     unsigned budget_trim_failures;
+    unsigned trims;            /* explicit d9_texcache_trim() calls */
+    unsigned pinned_refusals;  /* allocations refused because candidates were pinned */
+    unsigned frame_pins;       /* frame-scoped pins taken (bound or draw) */
     unsigned evictions_gpu;
     unsigned evictions_guest;
     unsigned guest_drops;
@@ -155,6 +164,10 @@ typedef struct {
     unsigned budget_trim_evictions;
     size_t budget_trim_evicted_bytes;
     unsigned budget_trim_failures;
+    unsigned trims;
+    unsigned pinned_refusals;
+    unsigned frame_pins;
+    unsigned last_refusal_pinned;
     unsigned evictions_gpu;
     unsigned evictions_guest;
     unsigned guest_drops;
@@ -249,6 +262,32 @@ int d9_texcache_abort_upload(D9TexCache *cache, uint64_t key);
 int d9_texcache_touch(D9TexCache *cache, uint64_t key);
 int d9_texcache_pin(D9TexCache *cache, uint64_t key);
 int d9_texcache_unpin(D9TexCache *cache, uint64_t key);
+
+/* Frame-scoped pinning, for asynchronous GPU backends.
+ *
+ * d9_texcache_frame_bind() pins a texture that currently occupies a sampler
+ * slot; d9_texcache_frame_unbind() releases only that slot pin (used when the
+ * slot is rebound, so a texture that was never drawn is evictable again).
+ * d9_texcache_frame_pin() records that a submitted draw references the
+ * texture; it survives an unbind because the GPU still needs the native.
+ * Both are idempotent within one frame value and contribute one pin each.
+ * frame values are opaque and non-zero; the core uses a per-present
+ * generation counter.  d9_texcache_frame_clear(frame) releases every pin for
+ * that generation and returns the number of entries unpinned; call it only
+ * after the backend proves the frame's GPU commands completed (FrameSync). */
+int d9_texcache_frame_bind(D9TexCache *cache, uint64_t key, uint32_t frame);
+int d9_texcache_frame_unbind(D9TexCache *cache, uint64_t key, uint32_t frame);
+int d9_texcache_frame_pin(D9TexCache *cache, uint64_t key, uint32_t frame);
+unsigned d9_texcache_frame_clear(D9TexCache *cache, uint32_t frame);
+/* Drop both frame-scoped pins of one entry without touching plain pins.  Used
+ * by explicit ReleaseTexture, whose backend deletion already waits for the GPU
+ * (citro3d C3D_FrameSync) before freeing the native. */
+int d9_texcache_frame_forget(D9TexCache *cache, uint64_t key);
+
+/* Non-zero when the most recent allocation refusal happened because every
+ * eviction candidate in the exhausted pool was pinned (rather than no_evict,
+ * or simply larger than the whole limit).  Pairs with stats.pinned_refusals. */
+int d9_texcache_last_refusal_pinned(const D9TexCache *cache);
 
 /* Evict the oldest unpinned GPU/guest copies until need more bytes fit.
  * Returns D9TEXCACHE_OK when the requested space is available, otherwise the
