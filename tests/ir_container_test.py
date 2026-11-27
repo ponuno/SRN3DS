@@ -244,7 +244,8 @@ def main():
 
     print(f"work: {work}")
     packer = build(clang, [ROOT / "tests" / "ir_container_pack.c",
-                           ROOT / "source" / "ir_decode.c"],
+                           ROOT / "source" / "ir_decode.c",
+                           ROOT / "source" / "ir_core.c"],
                    work / "ir_container_pack.exe")
     integ = build(clang, [ROOT / "tests" / "ir_container_integrity.c",
                           ROOT / "source" / "ir_container.c",
