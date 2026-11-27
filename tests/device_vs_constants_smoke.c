@@ -224,13 +224,22 @@ int main(void) {
     uint32_t bad_ptr_b[] = {0, 0, 1};
     assert(device_call(&demo, 98, bad_ptr_b, 3) == ERR_INVALID);
     float vf_over[2][4] = {{1, 2, 3, 4}, {5, 6, 7, 8}};
-    assert(set_f(&demo, 8, (const float *)vf_over, 2) == ERR_INVALID);
-    assert(device_call(&demo, 95, (uint32_t[]){9, OUT, 0}, 3) == ERR_INVALID);
+    float vf_high[1][4] = {{9, 10, 11, 12}};
+    /* The VS float bank is the full D3D9 c0..c255 window.  c255 is the last
+     * register; a range crossing it, or starting at c256, is refused.  The old
+     * c0..c8 menu window no longer rejects c9. */
+    assert(set_f(&demo, 255, (const float *)vf_high, 1) == 0);
+    assert(set_f(&demo, 255, (const float *)vf_over, 2) == ERR_INVALID);
+    assert(set_f(&demo, 256, (const float *)vf_high, 1) == ERR_INVALID);
+    assert(set_f(&demo, 8, (const float *)vf_over, 2) == 0);
+    assert(device_call(&demo, 95, (uint32_t[]){256, OUT, 0}, 3) == ERR_INVALID);
 
     assert(get_f(&demo, 0, 8) == 0);
     expect_block(&demo, OUT, vf, 8 * 16);
-    assert(get_f(&demo, 8, 1) == 0);
-    expect_block(&demo, OUT, c8, sizeof c8);
+    assert(get_f(&demo, 8, 2) == 0);
+    expect_block(&demo, OUT, vf_over, sizeof vf_over);
+    assert(get_f(&demo, 255, 1) == 0);
+    expect_block(&demo, OUT, vf_high, sizeof vf_high);
     assert(get_i(&demo, 0, 8) == 0);
     expect_block(&demo, OUT, vi, sizeof vi);
     assert(get_b(&demo, 0, 8) == 0);

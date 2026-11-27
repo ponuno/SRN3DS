@@ -53,7 +53,7 @@ int d9_decl_init_why(D9Decl *d,const D9VertexElement *e,unsigned n,char *why,siz
     if(why&&cap)why[0]=0;
     if(!d||!e||!n||n>D9_MAX_DECL)
         DECL_REJECT("declaration needs 1..%u elements",D9_MAX_DECL);
-    D9Decl tmp={.count=n,.position=UINT32_MAX,.uv=UINT32_MAX,.color=UINT32_MAX,.normal=UINT32_MAX};
+    D9Decl tmp={.count=n,.position=UINT32_MAX,.uv=UINT32_MAX,.color=UINT32_MAX,.normal=UINT32_MAX,.weight=UINT32_MAX,.index=UINT32_MAX};
     unsigned position_seen=0,positiont_seen=0;
     for(unsigned i=0;i<n;++i){const D9VertexElement *x=e+i;unsigned size=d9_decl_type_size(x->type),end=(unsigned)x->offset+size;
         if(x->stream>=D9_MAX_STREAMS)
@@ -99,6 +99,11 @@ int d9_decl_init_why(D9Decl *d,const D9VertexElement *e,unsigned n,char *why,siz
         if(x->usage==D9_USAGE_NORMAL&&!x->usage_index){if(d9_decl_components(x->type)<3)
             DECL_REJECT("element %u normal0 %s has fewer than 3 components",i,decl_type_name(x->type));
             tmp.normal=i;}
+        /* Skinning inputs.  The generic draw path ignores them; the verified
+         * PICA VS gate requires exactly FLOAT4/UBYTE4N.  Admit the element so a
+         * skinned declaration is not misreported as malformed. */
+        if(x->usage==D9_USAGE_BLENDWEIGHT&&!x->usage_index)tmp.weight=i;
+        if(x->usage==D9_USAGE_BLENDINDICES&&!x->usage_index)tmp.index=i;
         tmp.elements[i]=*x;
     }
     if(tmp.position==UINT32_MAX)

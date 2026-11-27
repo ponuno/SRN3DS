@@ -112,6 +112,39 @@ typedef struct {
 int d9_pica_vs_bank(const D9PicaVsProgram *program, D9PicaVsBank *out,
                     char *why, size_t why_size);
 
+/* Complete draw contract, in one host-testable step:
+ *   1. program is a verified emitted .shbin (`d9_pica_vs_validate`),
+ *   2. an active D3D9 declaration supplies every input (`declare`),
+ *   3. the uniform bank maps the 4-bone/WVP window (`bank`),
+ *   4. every bank row was written (`bank_ready` against `mask`),
+ *   5. the backend exposes a draw_pica_vs callback.
+ * Returns 0 and fills out_decl/out_bank, or -1 with a named reason.  The gate
+ * never falls back to the legacy path. */
+int d9_pica_vs_gate(const D9PicaVsProgram *program, const D9Decl *decl,
+                    int backend_available, const uint32_t *mask, unsigned words,
+                    D9PicaVsDecl *out_decl, D9PicaVsBank *out_bank,
+                    char *why, size_t why_size);
+
+/* Interleaved PICA vertex layout for one declaration: attributes are packed in
+ * loader order (ascending vN), stride is the sum of their component sizes.
+ * `d9_pica_vs_pack_vertex` writes exactly that many bytes. */
+unsigned d9_pica_vs_vertex_stride(const D9PicaVsDecl *decl);
+/* BufInfo_Add permutation for the packed layout (nibble i = attribute i). */
+uint64_t d9_pica_vs_bufinfo_permutation(const D9PicaVsDecl *decl);
+int d9_pica_vs_pack_vertex(const D9PicaVsDecl *decl, const D9SkinVertex *v,
+                           uint8_t *dst);
+
+/* What the backend callback needs.  rows/row_mask are the D3D9 VS float bank
+ * and its dirty mask; only written rows may reach C3D_FVUnifSet. */
+typedef struct {
+    const D9PicaVsProgram *program;
+    const D9PicaVsDecl *decl;
+    const D9PicaVsBank *bank;
+    const float (*rows)[4];
+    const uint32_t *row_mask;
+    unsigned row_mask_words;
+} D9PicaVsDraw;
+
 /* True only when every D3D register the bank reads was written by
  * SetVertexShaderConstantF.  `mask` has `words` 32-bit words; bit (reg & 31)
  * of word (reg >> 5) is set when c<reg> was written.  Eight words cover the

@@ -4,6 +4,7 @@
 #include "d3d9_vertex.h"
 #include "d3d9_tev.h"
 #include "d3d9_texcache.h"
+#include "d3d9_pica_vs.h"
 
 /* Deliberately small fixed-function D3D9 subset, separate from guest COM ABI. */
 typedef struct D9Device D9Device;
@@ -377,6 +378,17 @@ typedef struct {
      * depth_attachment_embedded policy. */
     int (*target_has_depth)(void *ctx,void *native);
     int (*target_depth_attach)(void *ctx,void *native);
+    /* Optional verified PICA VS skinned draw, appended after target_depth_attach
+     * so every existing positional initializer keeps its meaning.  vertices are
+     * decoded D9SkinVertex values; draw carries the emitted program, the packed
+     * loader declaration, the 4-bone/WVP bank and the full c0..c255 float bank
+     * with its dirty mask.  The backend packs the attributes in loader order,
+     * calls BufInfo_Add with the declaration's attribute permutation,
+     * C3D_FVUnifSet only for written bank rows, then C3D_DrawElements.  NULL
+     * means the skinned fetch contract cannot be submitted; the core refuses
+     * by name instead of drawing through the legacy path. */
+    int (*draw_pica_vs)(void *ctx,const D9SkinVertex *vertices,size_t count,
+                        const D9PicaVsDraw *draw);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -646,6 +658,7 @@ int d9_get_tev_constants(const D9Device *d,float out[9][4]);
 #define D9_PS_CONST_F_REGS 8u
 #define D9_PS_CONST_I_REGS 8u
 #define D9_PS_CONST_B_REGS 8u
+#define D9_VS_CONST_F_REGS 256u
 #define D9_VS_CONST_I_REGS 8u
 #define D9_VS_CONST_B_REGS 8u
 int d9_set_ps_constants_f(D9Device *d,unsigned start,const float *values,unsigned count);
@@ -654,6 +667,15 @@ int d9_set_ps_constants_i(D9Device *d,unsigned start,const int32_t *values,unsig
 int d9_get_ps_constants_i(const D9Device *d,unsigned start,int32_t *values,unsigned count);
 int d9_set_ps_constants_b(D9Device *d,unsigned start,const int32_t *values,unsigned count);
 int d9_get_ps_constants_b(const D9Device *d,unsigned start,int32_t *values,unsigned count);
+/* Full D3D9 vertex-shader float bank, c0..c255.  The verified PICA VS programs
+ * read c0..c11 (4-bone palette) and c180..c183 (+c184 for the 17-row program),
+ * so the old c0..c8 menu window was not enough.  The dirty mask has eight
+ * 32-bit words: bit (reg & 31) of word (reg >> 5) is set only after a real
+ * write, and the backend calls C3D_FVUnifSet only for set rows. */
+int d9_set_vs_constants_f(D9Device *d,unsigned start,const float (*values)[4],unsigned count);
+int d9_get_vs_constants_f(const D9Device *d,unsigned start,float (*values)[4],unsigned count);
+const uint32_t *d9_vs_constants_f_mask(const D9Device *d);
+void d9_clear_vs_constants_f(D9Device *d);
 /* Vertex-shader integer/bool registers.  Same bounded API-state treatment as
  * PS I/B: exact round-trip, but the accepted vertex subset has no integer,
  * predicate or flow-control opcode, so they do not feed a draw.  The float
@@ -687,6 +709,18 @@ int d9_set_tnl_state(D9Device *d,const D9TnlState *state);
 int d9_multiply_transform(D9Device *d,unsigned which,const D9Matrix *m);
 /* Shader constants c0..c3 as four D3D column-vector clip rows, or NULL for fixed transforms. */
 int d9_set_shader_clip(D9Device *d,const D9Matrix *rows);
+/* Select the verified PICA VS draw contract for the next d9_draw_* call.
+ * program/decl/bank are copied; NULL clears the selection.  The COM gate calls
+ * d9_pica_vs_gate() first, so this only records an already-validated contract.
+ * The draw is refused by name when the backend has no draw_pica_vs callback,
+ * the active declaration lost its BLENDWEIGHT0/BLENDINDICES0 inputs, or the
+ * bank's rows are no longer written. */
+int d9_set_pica_vs(D9Device *d,const D9PicaVsProgram *program,
+                   const D9PicaVsDecl *decl,const D9PicaVsBank *bank);
+int d9_pica_vs_active(const D9Device *d);
+/* 1 when the backend exposes draw_pica_vs; the gate needs this before it lets
+ * a skinned batch through. */
+int d9_pica_vs_backend(const D9Device *d);
 /* Six D3D user clip planes.  Values are copied and must be finite.  PICA has
  * no user clip-plane stage, so any draw with D3DRS_CLIPPLANEENABLE != 0 is a
  * named D9_UNSUPPORTED refusal; disabled planes are stored but never applied. */

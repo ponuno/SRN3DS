@@ -17,10 +17,27 @@ enum {
     D9_FVF_XYZRHW_DIFFUSE_TEX1=D9_FVF_XYZRHW|D9_FVF_DIFFUSE|D9_FVF_TEX1 /* 0x144 */
 };
 typedef struct {uint16_t stream,offset;uint8_t type,method,usage,usage_index;} D9VertexElement;
+enum {D9_USAGE_BLENDWEIGHT=1,D9_USAGE_BLENDINDICES=2};
 typedef struct {
     D9VertexElement elements[D9_MAX_DECL];unsigned count,position,uv,color,normal,stream_mask,position_t;
+    /* BLENDWEIGHT0/BLENDINDICES0 element indices, or UINT32_MAX.  The verified
+     * PICA VS path decodes them beside position/uv/color/normal; the generic
+     * draw path ignores them. */
+    unsigned weight,index;
     unsigned required[D9_MAX_STREAMS];
 } D9Decl;
+/* Decoded skinned vertex for the verified PICA VS path.  weight is the
+ * BLENDWEIGHT0 float4; index is BLENDINDICES0 after normalisation, quantised
+ * back to the 0..255 byte the PICA loader reads.  The other fields are the same
+ * decode the fixed-function path uses. */
+typedef struct {
+    float x,y,z;
+    float u,v;
+    float r,g,b,a;
+    float nx,ny,nz;
+    float weight[4];
+    uint8_t index[4];
+} D9SkinVertex;
 unsigned d9_decl_type_size(unsigned type);
 unsigned d9_decl_components(unsigned type);
 /* Decode an LE element into floats with D3D9 default (0,0,0,1). */

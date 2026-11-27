@@ -685,7 +685,7 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
      * no material-precondition evidence. */
     d9_menu_closure_reset();
     d9_menu_shader_runtime_reset();
-    memset(&g.constants_c8,0,sizeof g.constants_c8);upload_tev_constants();
+    memset(&g.constants_c8,0,sizeof g.constants_c8);d9_clear_vs_constants_f(g.device);upload_tev_constants();
     M32(out)=g.dev->guest;RET(OK,7);}
 static void reset_device(CPU *c){uint32_t pp=A(1);
     if(!obj(A(0),DEVICE)||!ptr(pp,56)){d3d_log("Reset","invalid device or presentation parameters");RET(INVALID,2);}
@@ -720,6 +720,7 @@ static void reset_device(CPU *c){uint32_t pp=A(1);
     g.fvf=g.constants_mask=g.clear_pending=g.frame_clear=0;g.clear=0xff000000u;g.clear_flags=1;g.clear_target=0;g.clear_z=g.clear_stencil=0;
     memset(&g.constants,0,sizeof g.constants);memset(&g.constants_hi,0,sizeof g.constants_hi);
     memset(&g.constants_c8,0,sizeof g.constants_c8);g.clip_status_union=g.clip_status_intersection=0;
+    if(g.device)d9_clear_vs_constants_f(g.device);
     g.rt=g.back;default_viewport();default_gamma();
     (void)d9_set_tnl_proto(g.device,g.tnl_proto);
     d9_menu_closure_reset();d9_menu_shader_runtime_reset();upload_tev_constants();
@@ -2703,6 +2704,7 @@ uint32_t d9_com_menu_set_ambient_emissive(const float rgba[4]){
     if(!rgba||!g.device)return INVALID;
     for(unsigned i=0;i<4;++i)if(!isfinite(rgba[i]))return INVALID;
     memcpy(g.constants_c8,rgba,16);g.constants_mask|=1u<<8;
+    if(g.device)d9_set_vs_constants_f(g.device,8,(const float (*)[4])rgba,1);
     upload_tev_constants();
     d9_menu_shader_note_preconditions(D9_MENU_SHADER_PRE_AMBIENT_EMISSIVE_VARYING);
     return OK;
@@ -3264,11 +3266,14 @@ static void upload_tev_constants(void){
     memcpy(bank[8],g.constants_c8,16);
     if(g.device)d9_set_tev_constants(g.device,bank);
 }
-static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!obj(A(0),DEVICE)||start>=9||n>9-start||g.phase==2||(n&&!ptr(p,n*16)))RET(INVALID,4);
-    float values[9][4];if(n)memcpy(values,ptr(p,n*16),n*16);for(unsigned i=0;i<n;++i)for(unsigned j=0;j<4;++j)if(!isfinite(values[i][j]))RET(INVALID,4);
-    for(unsigned i=0;i<n;++i){memcpy(vs_const_row(start+i),values[i],16);g.constants_mask|=1u<<(start+i);}upload_tev_constants();RET(OK,4);}
-static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=9||n>9-start||(n&&!ptr(A(2),n*16)))RET(INVALID,4);
-    for(unsigned i=0;i<n;++i)memcpy(ptr(A(2)+i*16,16),vs_const_row(start+i),16);RET(OK,4);}
+static void set_vs_const(CPU *c){unsigned start=A(1),n=A(3);uint32_t p=A(2);if(!obj(A(0),DEVICE)||start>=D9_VS_CONST_F_REGS||n>D9_VS_CONST_F_REGS-start||g.phase==2||(n&&!ptr(p,(size_t)n*16)))RET(INVALID,4);
+    float values[D9_VS_CONST_F_REGS][4];if(n)memcpy(values,ptr(p,(size_t)n*16),(size_t)n*16);
+    if(n&&d9_set_vs_constants_f(g.device,start,(const float (*)[4])values,n))RET(INVALID,4);
+    for(unsigned i=0;i<n;++i)if(start+i<9)memcpy(vs_const_row(start+i),values[i],16);
+    for(unsigned i=0;i<n;++i)if(start+i<9)g.constants_mask|=1u<<(start+i);
+    upload_tev_constants();RET(OK,4);}
+static void get_vs_const(CPU *c){unsigned start=A(1),n=A(3);if(!obj(A(0),DEVICE)||start>=D9_VS_CONST_F_REGS||n>D9_VS_CONST_F_REGS-start||(n&&!ptr(A(2),(size_t)n*16)))RET(INVALID,4);
+    if(n&&d9_get_vs_constants_f(g.device,start,(float (*)[4])ptr(A(2),(size_t)n*16),n))RET(INVALID,4);RET(OK,4);}
 /* ---- pixel-shader constants --------------------------------------------- */
 /* The float bank is exactly the PICA TEV external-constant window c0..c7.
  * I/B registers are API state with no accepted-opcode consumer; they still
@@ -3419,48 +3424,28 @@ static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2
 static int plan_draw_state(void){
     char why[192];
     if(g.vs&&g.vs->pica_vs){
-        /* Full emitted-PICA-VS contract.  Each step is a named refusal; the
-         * shader is never submitted on a partial declaration or a short
-         * palette/uniform bank. */
+        /* Full emitted-PICA-VS contract in one host-testable gate: verified
+         * .shbin, active declaration with position/weight/index, 4-bone/WVP
+         * bank, every needed row written, and a backend draw_pica_vs.  Any
+         * missing step is a named refusal; the shader is never submitted on a
+         * partial contract. */
         const D9PicaVsProgram *pv=g.vs->pica_vs;
         char pwhy[192];
-        if(d9_pica_vs_validate(pv,pwhy,sizeof pwhy)){
-            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",pwhy);
-            return D9_UNSUPPORTED;
-        }
         const D9Decl *decl=g.declaration?g.declaration->declaration:NULL;
-        if(!decl){
-            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
-                     "PICA VS %s: draw has no active vertex declaration",pv->id);
-            return D9_UNSUPPORTED;
-        }
         D9PicaVsDecl loaders;D9PicaVsBank bank;
-        if(d9_pica_vs_declare(pv,decl,&loaders,pwhy,sizeof pwhy)){
+        if(d9_pica_vs_gate(pv,decl,d9_pica_vs_backend(g.device),
+                           d9_vs_constants_f_mask(g.device),
+                           D9_VS_CONST_F_REGS/32u,&loaders,&bank,
+                           pwhy,sizeof pwhy)){
             snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",pwhy);
             return D9_UNSUPPORTED;
         }
-        if(d9_pica_vs_bank(pv,&bank,pwhy,sizeof pwhy)){
-            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",pwhy);
-            return D9_UNSUPPORTED;
-        }
-        /* The current VS constant window is c0..c8; the emitted program reads
-         * the 4-bone palette c0..c11 and WVP c180..c183.  Until the D3D9
-         * constant bank is widened, this refusal names exactly what is
-         * missing instead of drawing with stale rows. */
-        uint32_t mask[8];memset(mask,0,sizeof mask);
-        for(unsigned i=0;i<9;++i)
-            if(g.constants_mask&(1u<<i))mask[i>>5]|=1u<<(i&31u);
-        if(d9_pica_vs_bank_ready(&bank,mask,8,pwhy,sizeof pwhy)){
+        if(d9_set_pica_vs(g.device,pv,&loaders,&bank)){
             snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
-                     "PICA VS %s: %s (D3D9 VS constant window is c0..c8)",
-                     pv->id,pwhy);
+                     "PICA VS %s: could not record the draw contract",pv->id);
             return D9_UNSUPPORTED;
         }
-        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
-                 "PICA VS %s: program, declaration and palette window verified; "
-                 "the skinned vertex-fetch/stream submit path is not wired yet",
-                 pv->id);
-        return D9_UNSUPPORTED;
+        return 0;
     }
     if(g.vs&&g.vs->plan){
         if(d9_shader_plan_draw_allowed(g.vs->plan,why,sizeof why)){
@@ -3500,8 +3485,13 @@ static int shader_state(void){
                  "shader-skip probe: draw with a code-less shader is refused (measurement only)");
         return D9_UNSUPPORTED;
     }
+    d9_set_pica_vs(g.device,NULL,NULL,NULL);
     int plan_state=plan_draw_state();
     if(plan_state)return plan_state;
+    /* The PICA VS contract owns the draw: the WVP comes from the uniform bank,
+     * not the c0..c3 shader-clip rows, and the core applies its own
+     * declaration/bank checks. */
+    if(d9_pica_vs_active(g.device))return 0;
     /* A selected menu plan still needs its declaration/material preconditions
      * and a backend that can execute it.  Both are named refusals here, before
      * the draw, so the batch is never partially submitted. */

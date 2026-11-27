@@ -587,6 +587,14 @@ static int null_draw_menu_indexed(void *ctx,const D9ColorVertex *vertices,size_t
     s->triangles+=(unsigned)(index_count/3);s->vertices+=count;
     return 0;
 }
+static int null_draw_pica_vs(void *ctx,const D9SkinVertex *vertices,size_t count,
+                             const D9PicaVsDraw *draw){
+    (void)ctx;(void)vertices;(void)count;(void)draw;
+    null_log("draw_pica_vs",
+             "host null backend has no PICA200 shader program, vertex loader or "
+             "uniform bank; the skinned stream is refused by name");
+    return -1;
+}
 static const D9Backend backend={null_texture_create,null_texture_upload,null_texture_delete,null_begin,null_draw,null_end,
     NULL,NULL,NULL,null_target_create,null_target_delete,null_target_bind,null_target_clear,null_target_read,null_target_blit,null_draw_colored,null_draw_two,
     null_target_write,null_depth_clear,null_target_viewport,null_draw_menu,null_target_texture,
@@ -594,7 +602,7 @@ static const D9Backend backend={null_texture_create,null_texture_upload,null_tex
     null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete,
     null_cube_face_create,null_cube_face_delete,
     null_texture_create_format,null_texture_upload_format,null_draw_menu_indexed,
-    null_draw_volume,NULL};
+    null_draw_volume,NULL,NULL,NULL,null_draw_pica_vs};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

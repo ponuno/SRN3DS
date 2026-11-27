@@ -10,9 +10,15 @@
 #include "d3d9_pica_citro3d.h"
 #include "d3d9_color_tev.h"
 #include "d3d9_cube_coords.h"
+#include "d3d9_pica_vs_device.h"
 
 #define FRAME_VERTICES 16384u
 #define FRAME_INDICES 262144u
+/* Verified PICA VS batches are bounded by the core's 4,096-vertex scratch and
+ * packed in loader order (at most five attributes, 44 bytes today). */
+#define FRAME_SKIN_VERTICES 4096u
+#define FRAME_SKIN_STRIDE 64u
+#define FRAME_SKIN_BYTES (FRAME_SKIN_VERTICES*FRAME_SKIN_STRIDE)
 /* Indexed menu batches may use the full 16-bit vertex range.  Keep the older
  * 16k arena policy for ordinary/cube colour draws, but give the compact menu
  * path its own 65,536-entry allocation instead of rejecting the real 57,484
@@ -51,6 +57,12 @@ struct D9Citro {
      * before the GPU consumes them. */
     uint16_t *arena_index;
     size_t cursor_index;
+    /* Verified PICA VS path: one program loaded at a time, packed vertices and
+     * 16-bit indices in per-frame arenas, full c0..c255 dirtied-row bank. */
+    D9PicaVsDevice pica_vs;
+    const D9PicaVsProgram *pica_vs_program;
+    uint8_t *arena_skin;
+    size_t cursor_skin;
 };
 D9Citro *d9_citro_open(void){
     D9Citro *c=calloc(1,sizeof *c);if(!c)return NULL;
@@ -74,6 +86,7 @@ D9Citro *d9_citro_open(void){
     c->uniform_cube=shaderInstanceGetUniformLocation(c->program_cube.vertexShader,"clip");if(c->uniform_cube<0)goto fail;
     c->arena_cube=linearAlloc(FRAME_VERTICES*sizeof(D9CubeVertex));if(!c->arena_cube)goto fail;
     c->arena_index=linearAlloc(FRAME_INDICES*sizeof(uint16_t));if(!c->arena_index)goto fail;
+    c->arena_skin=linearAlloc(FRAME_SKIN_BYTES);if(!c->arena_skin)goto fail;
     return c;
 fail:d9_citro_close(c);return NULL;
 }
@@ -83,6 +96,8 @@ void d9_citro_close(D9Citro *c){
     if(c->arena_color)linearFree(c->arena_color);
     if(c->arena_cube)linearFree(c->arena_cube);
     if(c->arena_index)linearFree(c->arena_index);
+    if(c->arena_skin)linearFree(c->arena_skin);
+    d9_pica_vs_device_close(&c->pica_vs);
     if(c->program_cube_ready)shaderProgramFree(&c->program_cube);if(c->shader_cube)DVLB_Free(c->shader_cube);
     if(c->program_color_ready)shaderProgramFree(&c->program_color);if(c->shader_color)DVLB_Free(c->shader_color);
     if(c->program_ready)shaderProgramFree(&c->program);if(c->shader)DVLB_Free(c->shader);
@@ -198,7 +213,7 @@ static void prepare_draw(D9Citro *c){
 }
 static int begin(void *ctx,uint32_t argb){
     D9Citro *c=ctx;if(c->scene||!C3D_FrameBegin(C3D_FRAME_SYNCDRAW))return -1;
-    c->scene=1;c->cursor=0;c->cursor_color=0;c->cursor_cube=0;c->cursor_index=0;c->active_target=NULL;
+    c->scene=1;c->cursor=0;c->cursor_color=0;c->cursor_cube=0;c->cursor_index=0;c->cursor_skin=0;c->active_target=NULL;
     uint32_t rgba=(argb<<8)|(argb>>24);
     C3D_RenderTargetClear(c->target,C3D_CLEAR_ALL,rgba,0);
     if(!C3D_FrameDrawOn(c->target)){C3D_FrameEnd(0);c->scene=0;return -1;}
@@ -542,6 +557,68 @@ static int draw_menu_indexed(void *ctx,const D9ColorVertex *vertices,size_t coun
     if(!indices||!clip)return -1;
     return draw_menu_ex(ctx,vertices,count,clip,texture0,texture1,state,constants,indices,index_count);
 }
+static GPU_FORMATS skin_format(uint8_t format){
+    return format==D9_PICA_VS_FMT_UBYTE_NORM?GPU_UNSIGNED_BYTE:GPU_FLOAT;
+}
+/* Verified PICA VS submit: pack the decoded skin stream in declaration order,
+ * bind the emitted program, upload only dirty uniform rows, then one
+ * C3D_DrawElements over a per-frame 16-bit index list. */
+static int draw_pica_vs(void *ctx,const D9SkinVertex *vertices,size_t count,
+                        const D9PicaVsDraw *draw){
+    D9Citro *c=ctx;
+    if(!c||!c->scene||!vertices||!draw||!draw->program||!draw->decl||
+       !draw->bank||!draw->rows||!draw->row_mask||!count||count%3||
+       count>FRAME_SKIN_VERTICES||count>65535u)return -1;
+    const D9PicaVsProgram *program=draw->program;
+    if(c->pica_vs_program!=program){
+        char why[192];
+        d9_pica_vs_device_close(&c->pica_vs);
+        c->pica_vs_program=NULL;
+        if(d9_pica_vs_device_open(&c->pica_vs,program,why,sizeof why)){
+            fprintf(stderr,"[d3d9-citro] draw_pica_vs: %s\n",why);
+            return -1;
+        }
+        c->pica_vs_program=program;
+    }
+    unsigned stride=d9_pica_vs_vertex_stride(draw->decl);
+    if(!stride||stride>FRAME_SKIN_STRIDE)return -1;
+    size_t bytes=count*stride;
+    if(bytes>FRAME_SKIN_BYTES-c->cursor_skin)return -1;
+    if(count>FRAME_INDICES-c->cursor_index)return -1;
+    uint8_t *dst=c->arena_skin+c->cursor_skin;
+    for(size_t i=0;i<count;++i)
+        if(d9_pica_vs_pack_vertex(draw->decl,&vertices[i],dst+i*stride))return -1;
+    GSPGPU_FlushDataCache(dst,bytes);
+    uint16_t *indices=c->arena_index+c->cursor_index;
+    for(size_t i=0;i<count;++i)indices[i]=(uint16_t)i;
+    GSPGPU_FlushDataCache(indices,count*sizeof *indices);
+    C3D_BindProgram(&c->pica_vs.program);
+    C3D_AttrInfo *attr=C3D_GetAttrInfo();AttrInfo_Init(attr);
+    for(unsigned i=0;i<draw->decl->count;++i){
+        const D9PicaVsLoader *loader=&draw->decl->loader[i];
+        AttrInfo_AddLoader(attr,(int)loader->reg,skin_format(loader->format),
+                           (int)loader->components);
+    }
+    C3D_BufInfo *buf=C3D_GetBufInfo();BufInfo_Init(buf);
+    if(BufInfo_Add(buf,dst,(ptrdiff_t)stride,(int)draw->decl->count,
+                   d9_pica_vs_bufinfo_permutation(draw->decl))<0){
+        fprintf(stderr,"[d3d9-citro] draw_pica_vs: BufInfo_Add rejected the packed stream\n");
+        prepare_draw(c);
+        return -1;
+    }
+    /* Only rows the guest really wrote may reach the PICA uniform bank. */
+    for(unsigned row=0;row<draw->bank->rows;++row){
+        unsigned reg=draw->bank->d3d_reg[row];
+        if((draw->row_mask[reg>>5]>>(reg&31u)&1u)==0)continue;
+        const float *r=draw->rows[reg];
+        C3D_FVUnifSet(GPU_VERTEX_SHADER,(int)row,r[0],r[1],r[2],r[3]);
+    }
+    C3D_DrawElements(GPU_TRIANGLES,(int)count,C3D_UNSIGNED_SHORT,indices);
+    c->cursor_skin+=bytes;
+    c->cursor_index+=count;
+    prepare_draw(c);
+    return 0;
+}
 static void end(void *ctx){D9Citro *c=ctx;if(c->scene){C3D_FrameEnd(0);c->scene=0;}c->active_target=NULL;}
 static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
     (void)ctx;if(!native||w<8||h<8||w>1024||h>1024||(w&(w-1))||(h&(h-1))||
@@ -854,4 +931,4 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
      * PROJECTION and SHADOW_CUBE only; there is no 3D texture mode, so volume
      * sampling is refused by name and the PICA backend also has no
      * texture_create_volume callback. */
-    NULL,NULL,target_has_depth,target_depth_attach};return &ops;}
+    NULL,NULL,target_has_depth,target_depth_attach,draw_pica_vs};return &ops;}

@@ -103,11 +103,18 @@ struct D9Device {
     uint32_t ps_constants_f_mask;
     int32_t vs_constants_i[D9_VS_CONST_I_REGS][4];
     uint8_t vs_constants_b[D9_VS_CONST_B_REGS];
+    float vs_constants_f[D9_VS_CONST_F_REGS][4];
+    uint32_t vs_constants_f_mask[D9_VS_CONST_F_REGS / 32u];
+    int pica_vs_active;
+    D9PicaVsProgram pica_vs_program;
+    D9PicaVsDecl pica_vs_decl;
+    D9PicaVsBank pica_vs_bank;
     D9Matrix transforms[3],shader_clip;int scene,shader_active;D9DrawState state,second;
     D9TnlState tnl;int tnl_proto;
     D9Handle texture1,cube_texture,cube_texture1,volume_texture,volume_texture1;
     D9Vertex scratch[MAX_DRAW_VERTICES];unsigned scratch_count;
     D9ColorVertex color_scratch[MAX_DRAW_VERTICES];unsigned color_scratch_count;
+    D9SkinVertex skin_scratch[MAX_DRAW_VERTICES];unsigned skin_scratch_count;
     unsigned cube_faces[MAX_DRAW_VERTICES]; /* per-output-vertex D3D cube face */
     unsigned view_w,view_h;
     char diagnosis[224];
@@ -1973,6 +1980,7 @@ int d9_reset_device_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int loc
     memset(d->ps_constants_b,0,sizeof d->ps_constants_b);d->ps_constants_f_mask=0;
     memset(d->vs_constants_i,0,sizeof d->vs_constants_i);
     memset(d->vs_constants_b,0,sizeof d->vs_constants_b);
+    d9_clear_vs_constants_f(d);d->pica_vs_active=0;
     d9_tnl_defaults(&d->tnl);
     d->texture=d->texture1=d->cube_texture=d->cube_texture1=
         d->volume_texture=d->volume_texture1=0;
@@ -2304,6 +2312,45 @@ int d9_get_vs_constants_b(const D9Device *d,unsigned start,int32_t *values,unsig
     return D9_OK;
 }
 unsigned d9_ps_constants_f_mask(const D9Device *d){return d?d->ps_constants_f_mask&0xFFu:0u;}
+int d9_set_vs_constants_f(D9Device *d,unsigned start,const float (*values)[4],unsigned count){
+    if(!d||start>D9_VS_CONST_F_REGS||count>D9_VS_CONST_F_REGS-start)return D9_INVALID;
+    if(count&&!values)return D9_INVALID;
+    for(unsigned i=0;i<count;++i){
+        for(unsigned j=0;j<4;++j)if(!isfinite(values[i][j]))return D9_INVALID;
+    }
+    for(unsigned i=0;i<count;++i){
+        memcpy(d->vs_constants_f[start+i],values[i],16);
+        d->vs_constants_f_mask[(start+i)>>5]|=1u<<((start+i)&31u);
+    }
+    return D9_OK;
+}
+int d9_get_vs_constants_f(const D9Device *d,unsigned start,float (*values)[4],unsigned count){
+    if(!d||start>D9_VS_CONST_F_REGS||count>D9_VS_CONST_F_REGS-start)return D9_INVALID;
+    if(count&&!values)return D9_INVALID;
+    for(unsigned i=0;i<count;++i)memcpy(values[i],d->vs_constants_f[start+i],16);
+    return D9_OK;
+}
+const uint32_t *d9_vs_constants_f_mask(const D9Device *d){
+    return d?d->vs_constants_f_mask:NULL;
+}
+void d9_clear_vs_constants_f(D9Device *d){
+    if(!d)return;
+    memset(d->vs_constants_f,0,sizeof d->vs_constants_f);
+    memset(d->vs_constants_f_mask,0,sizeof d->vs_constants_f_mask);
+}
+int d9_pica_vs_backend(const D9Device *d){return d&&d->ops.draw_pica_vs?1:0;}
+int d9_set_pica_vs(D9Device *d,const D9PicaVsProgram *program,
+                   const D9PicaVsDecl *decl,const D9PicaVsBank *bank){
+    if(!d)return D9_INVALID;
+    if(!program){d->pica_vs_active=0;memset(&d->pica_vs_program,0,sizeof d->pica_vs_program);return D9_OK;}
+    if(!decl||!bank)return D9_INVALID;
+    d->pica_vs_program=*program;
+    d->pica_vs_decl=*decl;
+    d->pica_vs_bank=*bank;
+    d->pica_vs_active=1;
+    return D9_OK;
+}
+int d9_pica_vs_active(const D9Device *d){return d?d->pica_vs_active:0;}
 int d9_set_transform(D9Device *d,unsigned which,const D9Matrix *m){if(!d||!m||which>2)return D9_INVALID;
     for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j)if(!isfinite(m->m[i][j]))return D9_INVALID;d->transforms[which]=*m;return D9_OK;}
 int d9_set_clip_plane(D9Device *d,unsigned index,const float plane[4]){
@@ -2804,6 +2851,42 @@ static int fetch(D9Device *d,const DrawStream *s,uint64_t index,D9Vertex *out,D9
            isfinite(col->r)&&isfinite(col->g)&&isfinite(col->b)&&isfinite(col->a)&&isfinite(col->w)&&
            isfinite(normal[0])&&isfinite(normal[1])&&isfinite(normal[2])?D9_OK:D9_INVALID;
 }
+/* Skinned decode for the verified PICA VS path: the ordinary position/uv/
+ * color/normal decode plus BLENDWEIGHT0 (float4) and BLENDINDICES0 (normalised
+ * bytes quantised back to 0..255).  A declaration without both inputs is a
+ * named refusal; the shader is never submitted with default weights. */
+static int fetch_skin(D9Device *d,const DrawStream *s,uint64_t index,
+                      D9SkinVertex *out){
+    const D9Decl *decl=&d->declaration;
+    if(decl->weight==UINT32_MAX||decl->index==UINT32_MAX)return D9_UNSUPPORTED;
+    D9Vertex v;D9ColorVertex c;float normal[3];
+    int rc=fetch(d,s,index,&v,&c,normal);
+    if(rc)return rc;
+    out->x=v.x;out->y=v.y;out->z=v.z;out->u=v.u;out->v=v.v;
+    out->r=c.r;out->g=c.g;out->b=c.b;out->a=c.a;
+    out->nx=normal[0];out->ny=normal[1];out->nz=normal[2];
+    const D9VertexElement *p=&decl->elements[decl->weight];
+    float w[4];
+    if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,
+                      d9_decl_type_size(p->type),w))return D9_INVALID;
+    for(unsigned i=0;i<4;++i){if(!isfinite(w[i]))return D9_INVALID;out->weight[i]=w[i];}
+    p=&decl->elements[decl->index];
+    float raw[4];
+    if(d9_decl_decode(p->type,s[p->stream].data+(size_t)index*s[p->stream].stride+p->offset,
+                      d9_decl_type_size(p->type),raw))return D9_INVALID;
+    /* d9_decl_decode normalises UBYTE4N to 0..1; the PICA loader wants the
+     * original 0..255 byte back.  Raw UBYTE4 already carries 0..255. */
+    float scale=p->type==D9_DECL_UBYTE4N?255.0f:1.0f;
+    for(unsigned i=0;i<4;++i){
+        float f=raw[i];
+        if(!isfinite(f))return D9_INVALID;
+        f*=scale;
+        if(f<0.0f)f=0.0f;
+        if(f>255.0f)f=255.0f;
+        out->index[i]=(uint8_t)(f+0.5f);
+    }
+    return D9_OK;
+}
 static size_t triangle_index(unsigned type,size_t i){size_t t=i/3,c=i%3;
     if(type==D9_TRIANGLELIST)return i;
     if(type==D9_TRIANGLEFAN)return c?t+c:0;
@@ -2964,6 +3047,81 @@ static int draw_menu_indexed_text(D9Device *d,
     }
     return D9_OK;
 }
+/* Verified PICA VS batch.  Decodes every output vertex into the skinned scratch
+ * stream and submits exactly one backend call.  The fragment stage is not part
+ * of this contract yet: a bound texture or pixel shader is a named refusal
+ * rather than a draw with stale TEV state. */
+static int draw_skinned(D9Device *d,const DrawStream streams[D9_MAX_STREAMS],
+                        size_t max_index,unsigned type,int32_t base,unsigned start,
+                        unsigned primitives,int indexed,int limited,unsigned min,
+                        unsigned count,const UpSource *up,const uint8_t *ixdata,
+                        size_t ixbytes,unsigned step){
+    if(!d->ops.draw_pica_vs){
+        set_diagnosis(d,"PICA VS skinned draw requires the backend draw_pica_vs "
+                        "callback; this backend cannot submit the stream");
+        return D9_UNSUPPORTED;
+    }
+    if(!d->decl_active){
+        set_diagnosis(d,"PICA VS skinned draw has no active vertex declaration");
+        return D9_UNSUPPORTED;
+    }
+    if(d->declaration.weight==UINT32_MAX||d->declaration.index==UINT32_MAX){
+        set_diagnosis(d,d->declaration.weight==UINT32_MAX?
+            "PICA VS skinned draw: the declaration has no BLENDWEIGHT0 element":
+            "PICA VS skinned draw: the declaration has no BLENDINDICES0 element");
+        return D9_UNSUPPORTED;
+    }
+    if(d->texture||d->pixel_shader){
+        set_diagnosis(d,"PICA VS skinned draw has no fragment-stage contract yet; "
+                        "unbind the texture and pixel shader for the VS-only submit");
+        return D9_UNSUPPORTED;
+    }
+    char why[192];
+    if(d9_pica_vs_bank_ready(&d->pica_vs_bank,d->vs_constants_f_mask,
+                             D9_VS_CONST_F_REGS/32u,why,sizeof why)){
+        set_diagnosis(d,why);
+        return D9_UNSUPPORTED;
+    }
+    size_t n=(size_t)primitives*3;
+    if(type!=D9_TRIANGLELIST)n=(size_t)primitives+2;
+    if(n>MAX_DRAW_VERTICES){
+        set_diagnosis(d,"PICA VS skinned draw exceeds the 4,096-vertex scratch bound");
+        return D9_UNSUPPORTED;
+    }
+    if(indexed&&!(up&&up->indices)&&((size_t)start>ixbytes/step||n>ixbytes/step-(size_t)start))
+        return D9_INVALID;
+    for(size_t i=0;i<n;++i){
+        size_t rel=triangle_index(type,i);int64_t index=(int64_t)start+(int64_t)rel;
+        if(indexed){const uint8_t *p=ixdata+((size_t)start+rel)*step;
+            uint32_t raw=(uint32_t)p[0]|(uint32_t)p[1]<<8;
+            if(step==4)raw|=(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
+            if(limited&&(raw<min||(uint64_t)raw>=((uint64_t)min+count)))return D9_INVALID;
+            index=(int64_t)base+raw;}
+        if(index<0||(uint64_t)index>max_index)return D9_INVALID;
+        int rc=fetch_skin(d,streams,(uint64_t)index,&d->skin_scratch[i]);
+        if(rc){
+            set_diagnosis(d,rc==D9_UNSUPPORTED?
+                "PICA VS skinned draw: the declaration lost BLENDWEIGHT0/BLENDINDICES0":
+                "PICA VS skinned vertex decode failed");
+            return rc;
+        }
+    }
+    d->skin_scratch_count=(unsigned)n;
+    D9PicaVsDraw draw;
+    memset(&draw,0,sizeof draw);
+    draw.program=&d->pica_vs_program;
+    draw.decl=&d->pica_vs_decl;
+    draw.bank=&d->pica_vs_bank;
+    draw.rows=(const float (*)[4])d->vs_constants_f;
+    draw.row_mask=d->vs_constants_f_mask;
+    draw.row_mask_words=D9_VS_CONST_F_REGS/32u;
+    if(d->ops.draw_pica_vs(d->ctx,d->skin_scratch,n,&draw)){
+        set_diagnosis(d,"PICA VS skinned draw rejected by the backend");
+        return D9_BACKEND;
+    }
+    set_diagnosis(d,"");
+    return D9_OK;
+}
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
     unsigned max_prims=(indexed&&up&&up->indices)?MAX_INDEXED_MENU_INDICES/3u:MAX_DRAW_VERTICES/3u;
     if(!d||d->teardown||!d->scene||(type!=D9_TRIANGLELIST&&type!=D9_TRIANGLESTRIP&&type!=D9_TRIANGLEFAN)||!primitives||primitives>max_prims||(limited&&!count))return D9_INVALID;
@@ -3085,6 +3243,9 @@ static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned p
     if(t&&(t->locked||!t->level[0].uploaded))return D9_INVALID;
     if(t&&d->decl_active&&d->declaration.uv==UINT32_MAX)return D9_INVALID;
     DrawStream streams[D9_MAX_STREAMS]={0};size_t max_index;if(prepare_streams(d,streams,&max_index,up))return D9_INVALID;
+    if(d->pica_vs_active)
+        return draw_skinned(d,streams,max_index,type,base,start,primitives,indexed,
+                            limited,min,count,up,ixdata,ixbytes,step);
     /* Test-only CPU T&L: light object-space vertices before the existing draw
      * path.  POSITIONT bypasses the transform, so it is never lit (D3D does the
      * same for pre-transformed vertices). */

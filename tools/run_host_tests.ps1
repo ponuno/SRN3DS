@@ -304,6 +304,10 @@ Add-Test "shader_plan_table" $common @("source/d3d9_shader_plan.c", "source/d3d9
 # Verified emitted PICA VS: embedded .shbin SHA-256, declaration mapping and
 # the 4-bone palette/WVP uniform bank, without opening a device.
 Add-Test "pica_vs_runtime" $common @("source/d3d9_pica_vs.c", "tests/pica_vs_runtime_smoke.c") @()
+# Verified PICA VS skinned draw: 256-row dirty-mask bank, declaration
+# BLENDWEIGHT/BLENDINDICES decode, packed loader stream and the backend
+# draw_pica_vs gate (missing program/declaration/bank/backend all refused).
+Add-Test "pica_vs_draw" $common ($d3dFull + $picaSources + @("source/d3d9_menu_light.c", "tests/pica_vs_draw_smoke.c")) @()
 # CreatePixelShader exact-hash plan wiring: own hash -> TEV object, foreign hash
 # -> named refusal, plan draw precondition, caps unchanged.  The test hook only
 # routes lookup at a caller-owned table; production builds never see it.

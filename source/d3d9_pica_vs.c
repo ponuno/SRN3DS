@@ -391,6 +391,131 @@ int d9_pica_vs_bank_ready(const D9PicaVsBank *bank, const uint32_t *mask,
     return 0;
 }
 
+int d9_pica_vs_gate(const D9PicaVsProgram *program, const D9Decl *decl,
+                    int backend_available, const uint32_t *mask, unsigned words,
+                    D9PicaVsDecl *out_decl, D9PicaVsBank *out_bank,
+                    char *why, size_t why_size) {
+    if (why && why_size) why[0] = 0;
+    if (out_decl) memset(out_decl, 0, sizeof *out_decl);
+    if (out_bank) memset(out_bank, 0, sizeof *out_bank);
+    if (!program) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "no verified PICA VS program (exact vs_3_0 SHA-256 miss)");
+        return -1;
+    }
+    char step[192];
+    if (d9_pica_vs_validate(program, step, sizeof step)) {
+        if (why && why_size) snprintf(why, why_size, "%s", step);
+        return -1;
+    }
+    if (!decl || decl->count == 0) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "PICA VS %s: draw has no active vertex declaration",
+                     program->id);
+        return -1;
+    }
+    if (!out_decl || !out_bank) {
+        if (why && why_size) snprintf(why, why_size, "invalid gate output");
+        return -1;
+    }
+    if (d9_pica_vs_declare(program, decl, out_decl, step, sizeof step)) {
+        if (why && why_size) snprintf(why, why_size, "%s", step);
+        return -1;
+    }
+    if (d9_pica_vs_bank(program, out_bank, step, sizeof step)) {
+        if (why && why_size) snprintf(why, why_size, "%s", step);
+        return -1;
+    }
+    if (d9_pica_vs_bank_ready(out_bank, mask, words, step, sizeof step)) {
+        if (why && why_size) snprintf(why, why_size, "%s", step);
+        return -1;
+    }
+    if (!backend_available) {
+        if (why && why_size)
+            snprintf(why, why_size,
+                     "PICA VS %s: backend has no draw_pica_vs callback; "
+                     "the skinned stream cannot be submitted", program->id);
+        return -1;
+    }
+    return 0;
+}
+
+/* --- packed skinned vertex ------------------------------------------------ */
+
+static unsigned attr_component_size(uint8_t format, unsigned components) {
+    if (format == D9_PICA_VS_FMT_FLOAT) return components * 4u;
+    if (format == D9_PICA_VS_FMT_UBYTE_NORM) return components;
+    return 0;
+}
+
+unsigned d9_pica_vs_vertex_stride(const D9PicaVsDecl *decl) {
+    unsigned stride = 0;
+    if (!decl) return 0;
+    for (unsigned i = 0; i < decl->count; ++i) {
+        unsigned size = attr_component_size(decl->loader[i].format,
+                                            decl->loader[i].components);
+        if (!size) return 0;
+        stride += size;
+    }
+    return stride;
+}
+
+uint64_t d9_pica_vs_bufinfo_permutation(const D9PicaVsDecl *decl) {
+    uint64_t permutation = 0;
+    if (!decl || decl->count > 8u) return 0;
+    for (unsigned i = 0; i < decl->count; ++i)
+        permutation |= (uint64_t)i << (i * 4u);
+    return permutation;
+}
+
+static const float *attr_source(const D9PicaVsLoader *loader,
+                                const D9SkinVertex *v) {
+    switch (loader->attr) {
+    case D9_PICA_VS_ATTR_POSITION: return &v->x;
+    case D9_PICA_VS_ATTR_BLENDWEIGHT: return v->weight;
+    case D9_PICA_VS_ATTR_TEXCOORD: return &v->u;
+    case D9_PICA_VS_ATTR_COLOR: return &v->r;
+    default: return NULL;
+    }
+}
+
+int d9_pica_vs_pack_vertex(const D9PicaVsDecl *decl, const D9SkinVertex *v,
+                           uint8_t *dst) {
+    if (!decl || !v || !dst) return -1;
+    unsigned offset = 0;
+    for (unsigned i = 0; i < decl->count; ++i) {
+        const D9PicaVsLoader *loader = &decl->loader[i];
+        unsigned n = loader->components;
+        if (!n || n > 4u) return -1;
+        if (loader->format == D9_PICA_VS_FMT_UBYTE_NORM) {
+            if (loader->attr == D9_PICA_VS_ATTR_BLENDINDICES) {
+                for (unsigned c = 0; c < n; ++c) dst[offset + c] = v->index[c];
+            } else {
+                const float *src = attr_source(loader, v);
+                if (!src) return -1;
+                for (unsigned c = 0; c < n; ++c) {
+                    float f = src[c];
+                    if (!(f >= 0.0f)) f = 0.0f; /* NaN and negatives clamp */
+                    if (f > 1.0f) f = 1.0f;
+                    dst[offset + c] = (uint8_t)(f * 255.0f + 0.5f);
+                }
+            }
+            offset += n;
+        } else if (loader->format == D9_PICA_VS_FMT_FLOAT) {
+            const float *src = attr_source(loader, v);
+            if (!src) return -1;
+            memcpy(dst + offset, src, n * sizeof(float));
+            offset += n * 4u;
+        } else {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+
 #ifdef __3DS__
 
 static GPU_FORMATS pica_format(uint8_t format) {
