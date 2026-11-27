@@ -3916,8 +3916,58 @@ static void capture_draw(unsigned type,unsigned start,unsigned primitives,int in
     (void)min_vertex;(void)vertex_count;(void)start_index;
 }
 #endif
+/* Observation-only draw trace (N3DS_SHADER_DRAW_TRACE=1).  It resolves the
+ * bound objects through the same catalog pointers the draw uses and prints
+ * one line per draw; it never changes the gate result. */
+static void shader_draw_trace(const char *method, int rc) {
+    char vs_hash[65] = "none", ps_hash[65] = "none";
+    char vs_program[192] = "none", ps_program[192] = "none";
+    const char *vs_plan = "none", *ps_plan = "none";
+    unsigned passes = 1;
+    if (!d9_shader_draw_trace_enabled()) return;
+    if (g.vs) {
+        if (g.vs->code && g.vs->words)
+            shader_plan_sha256_hex(g.vs->code, g.vs->words, vs_hash);
+        if (g.vs->pica_vs) {
+            unsigned index = d9_pica_vs_count();
+            for (unsigned i = 0; i < d9_pica_vs_count(); ++i)
+                if (d9_pica_vs_at(i) == g.vs->pica_vs) { index = i; break; }
+            snprintf(vs_program, sizeof vs_program, "%u:%s", index,
+                     g.vs->pica_vs->shbin_sha256);
+            vs_plan = g.vs->pica_vs->id;
+        } else if (g.vs->plan) {
+            vs_plan = g.vs->plan->id ? g.vs->plan->id : "unnamed";
+            snprintf(vs_program, sizeof vs_program, "plan:%s", vs_plan);
+            if (g.vs->plan->pass_count > 1) passes = g.vs->plan->pass_count;
+        } else if (g.vs->has_menu_vs) {
+            vs_plan = "menu";
+            snprintf(vs_program, sizeof vs_program, "cpu:menu");
+        }
+    }
+    if (g.ps) {
+        if (g.ps->code && g.ps->words)
+            shader_plan_sha256_hex(g.ps->code, g.ps->words, ps_hash);
+        if (g.ps->plan) {
+            ps_plan = g.ps->plan->id ? g.ps->plan->id : "unnamed";
+            snprintf(ps_program, sizeof ps_program, "tev:%s", ps_plan);
+            if (g.ps->plan->pass_count > passes)
+                passes = g.ps->plan->pass_count;
+        } else if (g.ps->has_tev) {
+            ps_plan = "inline-tev";
+            snprintf(ps_program, sizeof ps_program, "tev:inline");
+        } else if (g.ps->has_menu) {
+            ps_plan = "menu";
+            snprintf(ps_program, sizeof ps_program, "cpu:menu");
+        }
+    }
+    d9_shader_draw_trace(method, vs_hash, vs_plan, vs_program, ps_hash,
+                         ps_plan, ps_program, passes,
+                         rc ? g.last_diagnostic : NULL);
+}
+
 static uint32_t shader_gate(const char *method){
     int rc=shader_state();
+    if(rc)shader_draw_trace(method, rc);
     if(!rc)return OK;
     if(!g.last_diagnostic[0])
         snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s: shader state rejected",method);
@@ -3936,6 +3986,7 @@ static void draw_primitive(CPU *c){draw_probe(c,"DrawPrimitive");
                :d9_draw_primitive(g.device,A(1),A(2),A(3));
     if(rc==D9_OK)capture_draw(A(1),A(2),A(3),0,0,0,0,0);
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawPrimitive: %s",d9_last_draw_diagnostic(g.device));
+    shader_draw_trace("DrawPrimitive",rc);
     RET(hr(rc),4);}
 static void draw_indexed(CPU *c){draw_probe(c,"DrawIndexedPrimitive");
     if(!obj(A(0),DEVICE)||g.phase!=1||(!g.declaration&&!g.fvf)||!g.ib||g.ib->lock_guest||!A(4))RET(INVALID,7);
@@ -3945,6 +3996,7 @@ static void draw_indexed(CPU *c){draw_probe(c,"DrawIndexedPrimitive");
                :d9_draw_indexed_range(g.device,A(1),(int32_t)A(2),A(3),A(4),A(5),A(6));
     if(rc==D9_OK)capture_draw(A(1),A(5),A(6),1,(int32_t)A(2),A(3),A(4),A(5));
     else snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"DrawIndexedPrimitive: %s",d9_last_draw_diagnostic(g.device));
+    shader_draw_trace("DrawIndexedPrimitive",rc);
     RET(hr(rc),7);}
 /* Number of stream-zero vertices a D3D9 triangle primitive consumes. */
 static int up_geometry(unsigned type,unsigned primitives,unsigned *vertices){

@@ -168,14 +168,15 @@ runtime path:
 
 | Blocker | Programs | Exact cause |
 |---|---:|---|
-| `vs_input_not_loadable` | 9 | reads normal/tangent/binormal; `D9PicaVsAttr` has no enum for those |
-| `ps_reads_color1` | 4 | paired PS samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it |
-| `ps_not_runtime` | 2 | paired PS is refused or draw 0 (`bda33984`, `8fce433c`) |
+| `ps_reads_color1` | 6 | paired PS samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it |
+| `vs_attr_source_unsupported` | 4 | reads TANGENT/BINORMAL; `D9SkinVertex` has no source field for them |
+| `ps_not_runtime` | 3 | paired PS is refused or draw 0 (`bda33984`, `8fce433c`) |
+| `no_ps_partner` | 2 | no PS chunk shares the technique key |
 
-None of the 15 is draw-enabled; their notes/preconditions are unchanged apart
-from the new certification record. Unblocking them needs either a
-normal/tangent attribute enum (loader + table + declaration type) or a PS-side
-COLOR1 carrier, not a counter change.
+The normal/tangent/binormal enum now exists (`D9_PICA_VS_ATTR_NORMAL/TANGENT/
+BINORMAL`, usage indices 3/6/7, `MAX_ATTRS` 16), so the old
+`vs_input_not_loadable` blocker is gone; the remaining blockers are PS-side or
+the missing tangent/binormal vertex source. None of the 15 is draw-enabled.
 
 ## 2d. PS dependent read (`06aa117c`/`14db34d7`) design
 
@@ -220,6 +221,34 @@ device refusal). The real fix is a translator-level fold:
 Estimate **M** (half a day) in `d3d9_pica_tev.c` + `lighting_plans.py`; the
 five 10-chunk `lighting.approx.*` plans already carry the measured loss note,
 so once the fold exists the descriptor itself is ready.
+
+## 2f. Runtime draw trace (`N3DS_SHADER_DRAW_TRACE=1`)
+
+`d3d9_shader.c` formats one stderr line per draw:
+`draw=<method> vs_hash=… vs_plan=… vs_program=<index>:<pinned shbin SHA>
+ps_hash=… ps_plan=… ps_program=tev:<id>|cpu:menu passes=<n>
+refusal=<reason|null>`. `d3d9_com.c` resolves the bound objects at the draw
+gate and after the core call; it never changes the gate result. The pure
+formatter is covered by `tests/shader_draw_trace_smoke.c` (194 checks over the
+whole PICA catalog, including the five GFx menu programs).
+
+`docs/shader_draw_trace.json` is the synthetic resolution table for all 23
+committed draws (18 world + 5 menu). Every one resolves to a concrete program:
+17 exact-hash PICA VS, 1 TEV plan row, 5 menu CPU-safe helpers.
+
+The trace also exposes a real limit: `d3d9_core` submits every active PICA VS
+through `draw_skinned()` → `fetch_skin()`, which requires BLENDWEIGHT0 and
+BLENDINDICES0. Non-bone programs therefore resolve at the gate but the core
+refuses before submission (`"PICA VS skinned draw: the declaration lost
+BLENDWEIGHT0/BLENDINDICES0"`). The trace record marks those rows
+`complete: false`; 13 of the 17 world VS rows are in that class (6 blit, 6
+lighting reps, 2 wide identity-bank). Making them factual needs a non-skinned
+fetch/pack path in `d3d9_core.c`, which this change does not touch. The menu
+programs use the CPU-safe helper path and are complete; `menu.composite.ps` is
+the one complete TEV draw.
+
+A real slice was not run in this timebox; the resolution table plus the C
+formatter test are the committed evidence.
 
 ## 3. Top-30 world plans by frequency
 
@@ -328,6 +357,7 @@ python tests/world_shader_audit_test.py                # 21 checks, 0 failures
 python tests/blit_vs_runtime_test.py                   # 108 checks, 0 failures
 python tests/vs_wide_runtime_test.py                   # 33 checks, 0 failures
 python tests/wide_vs_certification_test.py             # 109 checks, 0 failures
+python tests/shader_draw_resolution_test.py            # 41 checks, 23 draws
 python tests/pica_runtime_audit_test.py                # 136/136, 38 VS programs
 python tests/tev_sched_test.py                         # 10 tests, OK
 python tools/shaders/plan_verify.py --data E:\SteamLibrary\steamapps\common\Skyrim\Data

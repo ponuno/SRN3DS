@@ -57,5 +57,18 @@ int d9_shader_version_name(const D9ShaderInfo *info,char *text,size_t size);
  * "ps_3_0: unsupported (stream valid, 4 instructions); first unsupported opcode 'add' at byte 28"
  * Returns characters written (excluding NUL), or -1 for a bad argument. */
 int d9_shader_diagnostic(const D9ShaderInfo *info,char *text,size_t size);
+/* N3DS_SHADER_DRAW_TRACE=1: one stderr line per draw with the resolved
+ * stage hash, plan id, PICA program (catalog index:pinned shbin SHA, "tev:"
+ * plan, or "cpu:" menu helper) and the refusal reason ("null" on success).
+ * Formatting is pure so a host test can assert the same text. */
+int d9_shader_draw_trace_enabled(void);
+int d9_shader_draw_trace_format(char *text,size_t size,const char *method,
+    const char *vs_hash,const char *vs_plan,const char *vs_program,
+    const char *ps_hash,const char *ps_plan,const char *ps_program,
+    unsigned passes,const char *refusal);
+void d9_shader_draw_trace(const char *method,const char *vs_hash,
+    const char *vs_plan,const char *vs_program,const char *ps_hash,
+    const char *ps_plan,const char *ps_program,unsigned passes,
+    const char *refusal);
 extern const uint32_t d9_demo_vs[],d9_demo_ps[];
 extern const size_t d9_demo_vs_words,d9_demo_ps_words;

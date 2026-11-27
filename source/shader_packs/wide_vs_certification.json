@@ -178,10 +178,10 @@
    },
    "pack": "lighting",
    "ps_partners": [],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "no PS chunk shares the technique key 672663",
    "sha256": "475db3a3596b83daa48e6771dd4c7cec243d463ebaf319dbb33e884940c63732",
    "technique_key": 672663,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "no_ps_partner"
   },
   {
    "draw_enabled": 0,
@@ -284,10 +284,10 @@
      "verdict": "ps_not_runtime"
     }
    ],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "paired PS 15c553db samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it",
    "sha256": "5102e34f155b4540a001f1217e0fac29216fdffcc8c3585cf757ae324677cd34",
    "technique_key": 3,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "ps_reads_color1"
   },
   {
    "draw_enabled": 0,
@@ -367,10 +367,10 @@
    },
    "pack": "lighting",
    "ps_partners": [],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "no PS chunk shares the technique key 148375",
    "sha256": "5c915b8ee721dcf43ead2e780e5a39322cd6fb5317931af710fed233d5ffe4f1",
    "technique_key": 148375,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "no_ps_partner"
   },
   {
    "draw_enabled": 0,
@@ -460,10 +460,10 @@
      "verdict": "ps_reads_color1"
     }
    ],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "paired PS c5d8f0a0 samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it",
    "sha256": "7bf75173b396edd8e825e81584d5f58ad44c6cee54ea013d777e4087881c658c",
    "technique_key": 19351,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "ps_reads_color1"
   },
   {
    "draw_enabled": 0,
@@ -644,10 +644,10 @@
      "verdict": "ps_not_runtime"
     }
    ],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "paired PS bda33984 has no draw-enabled runtime plan",
    "sha256": "91edbfd1097761d74b692a711eda5a21c9e7ee690917754a63de99ba8bf5c080",
    "technique_key": 543639,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "ps_not_runtime"
   },
   {
    "draw_enabled": 0,
@@ -1076,10 +1076,10 @@
    },
    "pack": "skinning",
    "ps_partners": [],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "reads TANGENT/BINORMAL; D9SkinVertex has no source for those attributes",
    "sha256": "7800effd008ab353ffe4bee51af11058afc6a87b7918bd3628b0e0c03ad77642",
    "technique_key": 33555459,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "vs_attr_source_unsupported"
   },
   {
    "draw_enabled": 0,
@@ -1105,10 +1105,10 @@
    },
    "pack": "skinning",
    "ps_partners": [],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "reads TANGENT/BINORMAL; D9SkinVertex has no source for those attributes",
    "sha256": "80c76b458db77586fbd494f1810316482ac97884ee8c5087f79aa3882642cfa9",
    "technique_key": 33555474,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "vs_attr_source_unsupported"
   },
   {
    "draw_enabled": 0,
@@ -1134,10 +1134,10 @@
    },
    "pack": "skinning",
    "ps_partners": [],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "reads TANGENT/BINORMAL; D9SkinVertex has no source for those attributes",
    "sha256": "8be5cabfad43263281ebc5d50d024b5e085926b540f9b9bc54411c0582ca6192",
    "technique_key": 33555475,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "vs_attr_source_unsupported"
   },
   {
    "draw_enabled": 0,
@@ -1163,10 +1163,10 @@
    },
    "pack": "skinning",
    "ps_partners": [],
-   "reason": "the program reads an input attribute the PICA runtime enum does not carry (normal/tangent/binormal)",
+   "reason": "reads TANGENT/BINORMAL; D9SkinVertex has no source for those attributes",
    "sha256": "e54c8f756f6f78d5bd4f48a76bc1e9cc409f4d2f161f2f0455ea704131a21946",
    "technique_key": 33555458,
-   "verdict": "vs_input_not_loadable"
+   "verdict": "vs_attr_source_unsupported"
   }
  ],
  "ok": 0,

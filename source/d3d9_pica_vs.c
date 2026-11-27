@@ -281,7 +281,7 @@ int d9_pica_vs_validate(const D9PicaVsProgram *program,
         const D9PicaVsAttr *attr = &program->attrs[a];
         if (attr->reg >= 16u || !attr->components || attr->components > 4u ||
             attr->decl_type == 0 || attr->format > D9_PICA_VS_FMT_UBYTE_NORM ||
-            attr->attr > D9_PICA_VS_ATTR_COLOR || (seen & (1u << attr->reg))) {
+            attr->attr > D9_PICA_VS_ATTR_BINORMAL || (seen & (1u << attr->reg))) {
             if (why && why_size)
                 snprintf(why, why_size,
                          "plan %s: attribute %u has an invalid register/format",
@@ -316,7 +316,9 @@ static int decl_type_components(unsigned type) {
     }
 }
 
-enum { D9_USAGE_BLENDWEIGHT_ = 1, D9_USAGE_BLENDINDICES_ = 2 };
+enum { D9_USAGE_BLENDWEIGHT_ = 1, D9_USAGE_BLENDINDICES_ = 2,
+       D9_USAGE_NORMAL_ = 3, D9_USAGE_TANGENT_ = 6,
+       D9_USAGE_BINORMAL_ = 7 };
 
 static unsigned attr_usage(const D9PicaVsAttr *attr) {
     switch (attr->attr) {
@@ -325,6 +327,9 @@ static unsigned attr_usage(const D9PicaVsAttr *attr) {
     case D9_PICA_VS_ATTR_BLENDINDICES: return D9_USAGE_BLENDINDICES_;
     case D9_PICA_VS_ATTR_TEXCOORD: return D9_USAGE_TEXCOORD;
     case D9_PICA_VS_ATTR_COLOR: return D9_USAGE_COLOR;
+    case D9_PICA_VS_ATTR_NORMAL: return D9_USAGE_NORMAL_;
+    case D9_PICA_VS_ATTR_TANGENT: return D9_USAGE_TANGENT_;
+    case D9_PICA_VS_ATTR_BINORMAL: return D9_USAGE_BINORMAL_;
     default: return 0xffffu;
     }
 }
@@ -336,6 +341,9 @@ static const char *attr_name(const D9PicaVsAttr *attr) {
     case D9_PICA_VS_ATTR_BLENDINDICES: return "blendindices";
     case D9_PICA_VS_ATTR_TEXCOORD: return "texcoord";
     case D9_PICA_VS_ATTR_COLOR: return "color";
+    case D9_PICA_VS_ATTR_NORMAL: return "normal";
+    case D9_PICA_VS_ATTR_TANGENT: return "tangent";
+    case D9_PICA_VS_ATTR_BINORMAL: return "binormal";
     default: return "attribute";
     }
 }
@@ -617,6 +625,7 @@ static const float *attr_source(const D9PicaVsLoader *loader,
     case D9_PICA_VS_ATTR_BLENDWEIGHT: return v->weight;
     case D9_PICA_VS_ATTR_TEXCOORD: return &v->u;
     case D9_PICA_VS_ATTR_COLOR: return &v->r;
+    case D9_PICA_VS_ATTR_NORMAL: return &v->nx;
     default: return NULL;
     }
 }

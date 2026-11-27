@@ -130,8 +130,10 @@ def main(argv=None) -> int:
                                         magnitude_limit=1e6)
             partners = []
             results = []
-            loadable = all(i.get("usage") in (0, 1, 2, 5, 10)
+            loadable = all(i.get("usage") in (0, 1, 2, 3, 5, 6, 7, 10)
                            for i in entry.get("inputs", []))
+            unsourced = any(i.get("usage") in (6, 7)
+                            for i in entry.get("inputs", []))
             for psha, pir in ps_by_meta.get(meta, {}).items():
                 ins = {(x.usage, x.usage_index)
                        for x in pir.program.declarations if x.reg_type == 1}
@@ -169,10 +171,14 @@ def main(argv=None) -> int:
                     "texcoord_reg": tcr, "verdict": kind,
                 })
                 results.append((kind, why))
-            if not loadable:
+            if unsourced:
+                verdict, reason = "vs_attr_source_unsupported", (
+                    "reads TANGENT/BINORMAL; D9SkinVertex has no source for "
+                    "those attributes")
+            elif not loadable:
                 verdict, reason = "vs_input_not_loadable", (
                     "the program reads an input attribute the PICA runtime "
-                    "enum does not carry (normal/tangent/binormal)")
+                    "enum does not carry")
             elif any(kind == "ok" for kind, _ in results):
                 verdict, reason = "ok", next(
                     why for kind, why in results if kind == "ok")

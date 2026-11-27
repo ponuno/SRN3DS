@@ -1,4 +1,6 @@
 #include "d3d9_shader.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Self-authored equivalent of:
@@ -266,4 +268,49 @@ int d9_shader_diagnostic(const D9ShaderInfo *info,char *text,size_t size){
         else tx_text(&t,"; no instructions");
     }
     return tx_done(&t);
+}
+
+/* ---- N3DS_SHADER_DRAW_TRACE -------------------------------------------- */
+/* Observation only: no state, no HRESULT and no draw decision depends on this
+ * path.  One line per draw, so a real slice can be joined against the plan
+ * catalog by exact D3D hash. */
+int d9_shader_draw_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("N3DS_SHADER_DRAW_TRACE");
+        enabled = (value && *value && strcmp(value, "0") != 0) ? 1 : 0;
+    }
+    return enabled;
+}
+
+int d9_shader_draw_trace_format(char *text, size_t size, const char *method,
+                                const char *vs_hash, const char *vs_plan,
+                                const char *vs_program, const char *ps_hash,
+                                const char *ps_plan, const char *ps_program,
+                                unsigned passes, const char *refusal) {
+    return snprintf(text, size,
+                    "[d3d9-shader-trace] draw=%s vs_hash=%s vs_plan=%s "
+                    "vs_program=%s ps_hash=%s ps_plan=%s ps_program=%s "
+                    "passes=%u refusal=%s\n",
+                    method && *method ? method : "unknown",
+                    vs_hash && *vs_hash ? vs_hash : "none",
+                    vs_plan && *vs_plan ? vs_plan : "none",
+                    vs_program && *vs_program ? vs_program : "none",
+                    ps_hash && *ps_hash ? ps_hash : "none",
+                    ps_plan && *ps_plan ? ps_plan : "none",
+                    ps_program && *ps_program ? ps_program : "none",
+                    passes, refusal && *refusal ? refusal : "null");
+}
+
+void d9_shader_draw_trace(const char *method, const char *vs_hash,
+                          const char *vs_plan, const char *vs_program,
+                          const char *ps_hash, const char *ps_plan,
+                          const char *ps_program, unsigned passes,
+                          const char *refusal) {
+    char line[1024];
+    if (!d9_shader_draw_trace_enabled()) return;
+    d9_shader_draw_trace_format(line, sizeof line, method, vs_hash, vs_plan,
+                                vs_program, ps_hash, ps_plan, ps_program,
+                                passes, refusal);
+    fputs(line, stderr);
 }

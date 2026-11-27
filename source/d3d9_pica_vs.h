@@ -29,7 +29,7 @@
 #include "d3d9_vertex.h"
 
 #define D9_PICA_VS_SHA256 65u
-#define D9_PICA_VS_MAX_ATTRS 5u
+#define D9_PICA_VS_MAX_ATTRS 16u
 #define D9_PICA_VS_MAX_ROWS 32u
 #define D9_PICA_VS_BONES 4u
 #define D9_PICA_VS_BONE_ROWS (D9_PICA_VS_BONES * 3u)
@@ -39,7 +39,10 @@ enum {
     D9_PICA_VS_ATTR_BLENDWEIGHT = 1,
     D9_PICA_VS_ATTR_BLENDINDICES = 2,
     D9_PICA_VS_ATTR_TEXCOORD = 3,
-    D9_PICA_VS_ATTR_COLOR = 4
+    D9_PICA_VS_ATTR_COLOR = 4,
+    D9_PICA_VS_ATTR_NORMAL = 5,
+    D9_PICA_VS_ATTR_TANGENT = 6,
+    D9_PICA_VS_ATTR_BINORMAL = 7
 };
 
 /* PICA loader component format, kept device-neutral for the host tests. */

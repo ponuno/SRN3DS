@@ -338,6 +338,7 @@ Add-Test "shader_plan_multipass" $common ($d3dFull + @("source/d3d9_shader_plan.
 # Verified emitted PICA VS: embedded .shbin SHA-256, declaration mapping and
 # the 4-bone palette/WVP uniform bank, without opening a device.
 Add-Test "pica_vs_runtime" $common @("source/d3d9_pica_vs.c", "tests/pica_vs_runtime_smoke.c") @()
+Add-Test "shader_draw_trace" $common @("source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_pica_vs.c", "tests/shader_draw_trace_smoke.c") @()
 # Verified PICA VS skinned draw: 256-row dirty-mask bank, declaration
 # BLENDWEIGHT/BLENDINDICES decode, packed loader stream and the backend
 # draw_pica_vs gate (missing program/declaration/bank/backend all refused).
@@ -753,7 +754,7 @@ foreach ($name in $tests.Keys) {
 }
 
 Write-Log "PYTHON tests"
-$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/menu_swf_probe_test.py", "tests/menu_swf_assets_test.py", "tests/shader_plan_merge_test.py", "tests/shader_plan_extensions_test.py", "tests/pica_runtime_audit_test.py", "tests/blit_vs_runtime_test.py", "tests/vs_wide_runtime_test.py", "tests/wide_vs_certification_test.py", "tests/world_shader_audit_test.py", "tests/deploy_device_test.py", "tests/stream_index_build_test.py", "tests/save_ess_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py", "tests/sm3_asm_gaps_test.py")
+$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/menu_swf_probe_test.py", "tests/menu_swf_assets_test.py", "tests/shader_plan_merge_test.py", "tests/shader_plan_extensions_test.py", "tests/pica_runtime_audit_test.py", "tests/blit_vs_runtime_test.py", "tests/vs_wide_runtime_test.py", "tests/wide_vs_certification_test.py", "tests/shader_draw_resolution_test.py", "tests/world_shader_audit_test.py", "tests/deploy_device_test.py", "tests/stream_index_build_test.py", "tests/save_ess_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py", "tests/sm3_asm_gaps_test.py")
 if ($SkipPython) {
     $pyTests = @()
 } else {
