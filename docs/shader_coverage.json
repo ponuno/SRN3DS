@@ -89,13 +89,13 @@
    "owner": "sm3-agent-skinning",
    "chunks": 2162,
    "unique_hashes": 1194,
-   "translated": 80,
+   "translated": 174,
    "draw_enabled": 3,
-   "refused": 1111,
+   "refused": 1017,
    "contract_only": 14,
    "refused_classes": {
-    "def_literal_out_of_range": 1044,
-    "unsupported_opcode": 42,
+    "def_literal_out_of_range": 962,
+    "unsupported_opcode": 30,
     "pica_vs": 14,
     "too_many_vs_varyings (8 > 7)": 9,
     "too_many_vs_varyings (9 > 7)": 2
@@ -134,21 +134,21 @@
   }
  ],
  "extra_plans": {
-  "plans": 19,
-  "draw_enabled": 6,
+  "plans": 43,
+  "draw_enabled": 40,
   "by_pack": {
    "ui": {
-    "plans": 19,
-    "draw_enabled": 6,
+    "plans": 43,
+    "draw_enabled": 40,
     "exact": 15,
-    "approx": 4
+    "approx": 28
    }
   }
  },
  "total": {
-  "translated": 293,
+  "translated": 387,
   "draw-enabled": 10,
-  "refused": 6356,
+  "refused": 6262,
   "chunks": 10475,
   "unique_hashes": 6659
  },
