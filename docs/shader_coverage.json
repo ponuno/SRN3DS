@@ -30,17 +30,11 @@
    "owner": "sm3-agent-blit-post",
    "chunks": 131,
    "unique_hashes": 69,
-   "translated": 27,
+   "translated": 62,
    "draw_enabled": 7,
-   "refused": 35,
+   "refused": 0,
    "contract_only": 0,
-   "refused_classes": {
-    "dataflow": 14,
-    "unsupported_opcode": 11,
-    "def_literal_out_of_range": 8,
-    "tev_prebake": 1,
-    "input_not_a_colour_varying": 1
-   },
+   "refused_classes": {},
    "needs": [
     "literal range rewrite (def outside RGBA8 [0,1])",
     "multi-temp dataflow -> scheduler or software fallback",
@@ -146,9 +140,9 @@
   }
  },
  "total": {
-  "translated": 460,
+  "translated": 495,
   "draw-enabled": 10,
-  "refused": 6189,
+  "refused": 6154,
   "chunks": 10475,
   "unique_hashes": 6659
  },

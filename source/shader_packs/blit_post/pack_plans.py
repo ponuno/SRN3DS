@@ -23,8 +23,10 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
+import re
 import struct
 import sys
 
@@ -156,6 +158,237 @@ def _pica_vs(sha, program, note):
         "preconditions": ["pica_vs_codegen", "exact_hash_descriptor_match",
                           "fullscreen_quad_semantics"],
     }
+
+
+# --- IR-driven plans for the former refusals ------------------------------
+# Every census hash in this pack now has a descriptor.  These plans are
+# deliberately approximate: they keep the dominant sample/op and record the
+# dropped work in ``approximation``.  ``constant_ops`` folds an out-of-range
+# def literal into a derived c0..c7 register; ``passes`` replays accumulators
+# that need more than one TEV pass.
+def _mod_stage(tex=SRC_TEX0, const_reg=255, literal=True, rgba=(1, 1, 1, 1)):
+    return {
+        "func_rgb": FUNC_MODULATE, "func_a": FUNC_MODULATE,
+        "src_rgb": [tex, SRC_CONST, SRC_PREV],
+        "src_a": [tex, SRC_CONST, SRC_PREV],
+        "op_rgb": [RGB_COLOR] * 3, "op_a": [A_ALPHA] * 3,
+        "scale_rgb": 0, "scale_a": 0,
+        "const_reg": const_reg, "const_is_literal": 1 if literal else 0,
+        "const_rgba8": _pack_rgba8(rgba) if literal else 0,
+    }
+
+
+def _lerp_stage(const_reg=255, literal=True, rgba=(.5, .5, .5, .5)):
+    return _lit_stage(
+        FUNC_INTERPOLATE, [SRC_TEX0, SRC_TEX1, SRC_CONST],
+        [RGB_COLOR, RGB_COLOR, RGB_ALPHA],
+        FUNC_INTERPOLATE, [SRC_TEX0, SRC_TEX1, SRC_CONST],
+        [A_ALPHA, A_ALPHA, A_ALPHA],
+        rgba if literal else (.5, .5, .5, .5)) | {
+            "const_reg": const_reg,
+            "const_is_literal": 1 if literal else 0,
+            "const_rgba8": _pack_rgba8(rgba) if literal else 0,
+        }
+
+
+def _luma_stage(const_reg=255, literal=True,
+                rgba=(.2125, .7154, .0721, 1)):
+    return _lit_stage(
+        FUNC_DOT3_RGB, [SRC_TEX0, SRC_CONST, SRC_PREV],
+        [RGB_COLOR] * 3, FUNC_REPLACE,
+        [SRC_TEX0, SRC_PREV, SRC_PREV], [A_ALPHA] * 3,
+        rgba if literal else (.2125, .7154, .0721, 1)) | {
+            "const_reg": const_reg,
+            "const_is_literal": 1 if literal else 0,
+            "const_rgba8": _pack_rgba8(rgba) if literal else 0,
+        }
+
+
+def _two_pass(entry):
+    """Mirror the main pass and accumulate the same tap with ADD blending."""
+    main = entry["stage_data"]
+    first = {
+        "stage_data": copy.deepcopy(main),
+        "textures": copy.deepcopy(entry["textures"]),
+        "constants": list(entry["constants"]),
+        "inputs": [],
+        "blend": {"enable": 0, "src": 2, "dst": 1, "op": 1},
+        "depth_write": 0,
+    }
+    second = {
+        "stage_data": copy.deepcopy(main),
+        "textures": copy.deepcopy(entry["textures"]),
+        "constants": list(entry["constants"]),
+        "inputs": [],
+        "blend": {"enable": 1, "src": 2, "dst": 2, "op": 1},
+        "depth_write": 1,
+    }
+    entry["passes"] = [first, second]
+    return entry
+
+
+_DEF_RE = re.compile(r"def\w* c(\d+) \{([^}]*)\}")
+
+
+def _out_of_range_def(program):
+    """First ``def`` lane outside RGBA8 [0,1], with its text and sign."""
+    for ins in program.instructions:
+        if ins.name not in ("def", "defi", "defb"):
+            continue
+        match = _DEF_RE.search(ins.text())
+        if not match:
+            continue
+        try:
+            values = [float(v) for v in match.group(2).split(",")]
+        except ValueError:
+            continue
+        for lane, value in enumerate(values):
+            if value < 0.0 or value > 1.0:
+                text = ins.text()
+                if text.startswith("def "):
+                    text = text[4:]
+                return "xyzw"[lane], value < 0.0, text
+    return "x", False, ""
+
+
+def _refusal_ps_plan(sha, row, program):
+    """Build one approximate descriptor for a census row without a plan."""
+    cls = row["class"] or "unclassified"
+    samples = program.texture_samples()
+    names = {ins.name for ins in program.instructions}
+    ntex = max(1, min(3, sum(1 for c in program.constants
+                             if c.register_set == 3)))
+    loops = program.loops()
+    entry = None
+
+    if cls == "def_literal_out_of_range":
+        lane, negate, literal = _out_of_range_def(program)
+        derived = [{
+            "dst_reg": 7, "op": "pack",
+            "src": [{"reg": 0, "swizzle": lane * 4, "negate": 1 if negate else 0}],
+        }]
+        if samples > 6 or loops or "ifc" in names:
+            stage = [_mod_stage(const_reg=7, literal=False)]
+            entry = _tev(sha, "derived/uniform constant plan (%d samples)"
+                         % samples, stage, _tex(1), "approx",
+                         "def %s leaves RGBA8 [0,1]; the offending lane is "
+                         "folded into derived c7 (constant_ops pack of c0, "
+                         "negate=%d) instead of a literal. %d samples/loops/"
+                         "branches collapse to one weighted centre tap replayed "
+                         "through two accumulating passes."
+                         % (literal or "literal", 1 if negate else 0, samples),
+                         0, len(program.instructions))
+            entry["constant_ops"] = derived
+            entry["constants"] = [0, 7]
+            entry.setdefault("preconditions", []).extend(
+                ["derived_constant_source_uploaded", "def_literal_uniform_fold"])
+            _two_pass(entry)
+        elif "dp3" in names:
+            entry = _tev(sha, "derived constant luma plan",
+                         [_luma_stage(const_reg=7, literal=False)], _tex(1),
+                         "approx", "def %s leaves RGBA8 [0,1] and is folded "
+                         "into derived c7 (constant_ops of c0); DOT3 luma is "
+                         "kept, the %d extra taps are dropped."
+                         % (literal or "literal", max(0, samples - 1)),
+                         0, len(program.instructions))
+            entry["constant_ops"] = derived
+            entry["constants"] = [0, 7]
+            entry.setdefault("preconditions", []).extend(
+                ["derived_constant_source_uploaded", "def_literal_uniform_fold"])
+        elif ntex >= 2 or "lrp" in names:
+            entry = _tev(sha, "derived constant two-texture lerp",
+                         [_lerp_stage(const_reg=7, literal=False)], _tex(2),
+                         "approx", "def %s leaves RGBA8 [0,1] and is folded "
+                         "into derived c7 (constant_ops of c0); cmp/lrp "
+                         "selects collapse to a fixed 0.5 two-texture "
+                         "INTERPOLATE, %d-tap chain reduced."
+                         % (literal or "literal", samples),
+                         0, len(program.instructions))
+            entry["constant_ops"] = derived
+            entry["constants"] = [0, 7]
+            entry.setdefault("preconditions", []).extend(
+                ["derived_constant_source_uploaded", "def_literal_uniform_fold"])
+        else:
+            entry = _tev(sha, "derived constant tint/copy plan",
+                         [_mod_stage(const_reg=7, literal=False)], _tex(1),
+                         "approx", "def %s leaves RGBA8 [0,1] and is folded "
+                         "into derived c7 (constant_ops of c0); the remaining "
+                         "arithmetic is approximated by a single tinted "
+                         "centre sample." % (literal or "literal"),
+                         0, len(program.instructions))
+            entry["constant_ops"] = derived
+            entry["constants"] = [0, 7]
+            entry.setdefault("preconditions", []).extend(
+                ["derived_constant_source_uploaded", "def_literal_uniform_fold"])
+
+    elif cls == "dataflow":
+        entry = _tev(sha, "two-pass accumulator for a %d-tap dataflow blur"
+                     % samples, [_mod_stage(literal=True,
+                                            rgba=(.5, .5, .5, .5))],
+                     _tex(1), "approx",
+                     "%d-tap separable blur accumulator replaced by one "
+                     "centred tap; the two passes each contribute 0.5 with "
+                     "ADD blending, so the sum stays 1.0. The per-tap offset "
+                     "constants c1..cN cannot be folded into TEV, so %d taps "
+                     "are dropped." % (samples, max(0, samples - 1)),
+                     0, len(program.instructions))
+        _two_pass(entry)
+
+    elif cls == "unsupported_opcode":
+        if "lrp" in names or ntex >= 2:
+            entry = _tev(sha, "cmp/lrp select collapsed to a two-texture lerp",
+                         [_lerp_stage()], _tex(2), "approx",
+                         "cmp/lrp select chain in a %d-texture imagespace "
+                         "shader collapsed to a fixed 0.5 INTERPOLATE of s0/"
+                         "s1; rcp/abs/derivative weights and %d taps are "
+                         "dropped%s." % (ntex, max(0, samples - 2),
+                                         "" if ntex <= 2 else ", s2 unbound"),
+                         0, len(program.instructions))
+        elif "dp3" in names:
+            entry = _tev(sha, "luma kept, cmp tone curve approximated",
+                         [_luma_stage()], _tex(1), "approx",
+                         "DOT3 luma kept; the cmp/lerp tone curve and %d "
+                         "extra taps collapse to a fixed exposure, so bloom/"
+                         "adaptation weighting is lost." % max(0, samples - 1),
+                         0, len(program.instructions))
+        else:
+            entry = _tev(sha, "single centred tap after opcode lowering",
+                         [_mod_stage()], _tex(1), "approx",
+                         "rcp/abs/cmp/texldd lowering approximated by one "
+                         "centred sample; %d taps and the select chain are "
+                         "dropped." % max(0, samples - 1),
+                         0, len(program.instructions))
+
+    elif cls == "tev_prebake":
+        entry = _tev(sha, "prebaked TEV state plus DOT3 luma",
+                     [_luma_stage()], _tex(1), "approx",
+                     "dp4 with the guest ColorSelect constant is collapsed "
+                     "to DOT3 luma and tex.w alpha; the tev_prebake selector "
+                     "state is a recorded precondition, not read back.",
+                     0, len(program.instructions))
+        entry["preconditions"] = ["tev_prebake_guest_state",
+                                  "colorselect_dp4_alpha_channel_kept"]
+
+    elif cls == "input_not_a_colour_varying":
+        entry = _tev(sha, "texcoord1 scalar rebound as TEV primary colour",
+                     [_mod_stage(tex=SRC_PRIMARY, literal=True,
+                                 rgba=(0, 1, 0, 0))], [],
+                     "approx", "the source input is texcoord1, not a colour "
+                     "varying; the scalar is bound as the TEV primary colour "
+                     "and multiplied by literal (0,1,0,0). This matches only "
+                     "when the varying carries 0/1.",
+                     0, len(program.instructions))
+        entry["uses_vertex_color"] = 1
+        entry["inputs"] = [{"usage": 1, "usage_index": 1, "reg_index": 0,
+                            "tev_source": SRC_PRIMARY}]
+        entry["preconditions"] = ["varying_semantic_rebind"]
+
+    else:  # defensive: a future census class still gets a named plan
+        entry = _tev(sha, "single centred tap (%s)" % cls,
+                     [_mod_stage()], _tex(1), "approx",
+                     "%s: arithmetic collapsed to one centred tinted sample."
+                     % cls, 0, len(program.instructions))
+    return entry
 
 
 # --- curated pixel plans -------------------------------------------------
@@ -324,6 +557,15 @@ def main(argv=None) -> int:
                     programs[sha] = asm.parse_program(blob)
 
     entries = _ps_plans()
+    planned_ps = {entry["sha256"] for entry in entries}
+    for sha, row in sorted(by_sha.items()):
+        if row["kind"] != "ps" or sha in runtime_certified or sha in planned_ps:
+            continue
+        program = programs.get(sha)
+        if program is None or program.error:
+            raise SystemExit("missing PS IR for %s" % sha)
+        entries.append(_refusal_ps_plan(
+            sha, {"class": hashes[sha][2]}, program))
     for sha, row in sorted(by_sha.items()):
         if row["kind"] != "vs" or sha in runtime_certified:
             continue

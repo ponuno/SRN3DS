@@ -15,9 +15,9 @@
   "vs": 60
  },
  "coverage": {
-  "translated": 27,
+  "translated": 62,
   "draw-enabled": 7,
-  "refused": 35,
+  "refused": 0,
   "contract_only": 0
  },
  "refusal_classes": {
@@ -45,6 +45,13 @@
    "sha256": "0072af4b81a7b06b4b5bd6f54db0466ac2ebbf3ec6e1c127ad57608f2e6e3d89"
   },
   {
+   "id": "blit.ps.00d8a930",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "00d8a93051b73142c7867200f0c4c6213f1240d02afebffc0827337e8136c884"
+  },
+  {
    "id": "blit.ps.01ab60cd",
    "status": "translated",
    "kind": "tev",
@@ -59,11 +66,74 @@
    "sha256": "041086d9d408057209b8511a97bd7737f02d2366c6dd1863037f2d17a40cfa3f"
   },
   {
+   "id": "blit.ps.080134ee",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "080134ee77adee9875aa9d701b9d5a065173467a64d9830fa3dd0842d9e93eb2"
+  },
+  {
+   "id": "blit.ps.09a0d75c",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "09a0d75cb16a4e6aa7d106abbabcb7e150e702dff5a0b871be3b9ed988c1fe43"
+  },
+  {
+   "id": "blit.ps.0a8559f7",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "0a8559f71ec045f39fe2063bf0f4560ecd30be4434821878d768da36638af6cc"
+  },
+  {
+   "id": "blit.ps.0c077145",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "0c0771450d6504a72a6c3a7d756e0427753e57fd3555daf980ea2871a76c61b8"
+  },
+  {
    "id": "game.vs.0ccc7542",
    "status": "translated",
    "kind": "pica_vs",
    "family": "",
    "sha256": "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7"
+  },
+  {
+   "id": "blit.ps.0d3d5f09",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "0d3d5f0975ef15adf4d19c24986fd50094221cdf1b0cbefabf385d604d01e7a9"
+  },
+  {
+   "id": "blit.ps.106251a2",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "106251a2d910b5de14bb0b7357071b53dc0d6e1e274e1d732e932c88de0f536c"
+  },
+  {
+   "id": "blit.ps.10d136a9",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "10d136a963b055dd1e1f7599e5dce76dcf024b73de27d150c23c8365a238d4b0"
+  },
+  {
+   "id": "blit.ps.1c8eb68d",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "1c8eb68d8d853d5b339debfc8366dde2c5b3081506a34c09232a838af568b502"
+  },
+  {
+   "id": "blit.ps.1e563283",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "1e5632834fc7a3f36fbba8b017774f908c57f1bbc7b7bbc84bfd66d296eea06e"
   },
   {
    "id": "blit.ps.21978c95",
@@ -73,6 +143,13 @@
    "sha256": "21978c956fae8496fd8654a2948258cdf58b31718df82ab5f7cfb55a1c109c4d"
   },
   {
+   "id": "blit.ps.2b18c0ab",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "2b18c0ab02a3fa0b6fc2279bc46137d00ec08104a13af9d7328a79cbd7ddb16f"
+  },
+  {
    "id": "blit.ps.2cc6e508",
    "status": "translated",
    "kind": "tev",
@@ -80,11 +157,32 @@
    "sha256": "2cc6e508fb5a2b96253c4dfeec1555521757008d107a7c0a4fd484845a0b6430"
   },
   {
+   "id": "blit.ps.311805e1",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "311805e1f4fcb9a381f6c0f967198c7141063b4ecd1534f7b5893159791cfcf5"
+  },
+  {
    "id": "blit.vs.31d368ce",
    "status": "translated",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "31d368cecad5b4d215c4c1fe1580d9ab0606e09af4ee3d2fa4ce8c4fcae9359f"
+  },
+  {
+   "id": "blit.ps.324013eb",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "324013eb378eab915180a26624d7271a92fd3dd25c786b0a802a06a3c9724121"
+  },
+  {
+   "id": "blit.ps.3770532b",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "3770532b709fa191792a35931ec3d06cf05d978aafd8172a836b5c23395d7be8"
   },
   {
    "id": "blit.ps.39f0dfdf",
@@ -108,11 +206,25 @@
    "sha256": "4a4fa2b2a1d18d1ef054cff6cae2f050ad28ef85b382d8e17dfccde53336b50b"
   },
   {
+   "id": "blit.ps.4c77ab51",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "4c77ab5154b2adfc1bf7f9b09e57c255cda1e3308ac3c583851746cbd846f5f7"
+  },
+  {
    "id": "blit.vs.4d155cd6",
    "status": "translated",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "4d155cd6fee59dd665d46cddd1af8d1e917d4678e2f02fe4188c141751401d58"
+  },
+  {
+   "id": "blit.ps.55d3858d",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "55d3858dbb2c856771898ce5d65f5c90fdec2707bb594b9e33afcf6563af7832"
   },
   {
    "id": "blit.vs.57e51db9",
@@ -127,6 +239,13 @@
    "kind": "tev",
    "family": "blit_post",
    "sha256": "583f98e0acc342b6638a1c226f329ef48d5d6435e636a217281b08e98523715f"
+  },
+  {
+   "id": "blit.ps.5e714ee0",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "5e714ee0c891a2df5f72e1945e4c80393c9fffb84d8869cb3eabd40ada68a84b"
   },
   {
    "id": "menu.composite.ps",
@@ -155,6 +274,41 @@
    "kind": "tev",
    "family": "blit_post",
    "sha256": "70a85a92b46bbe8e963af44ecf6ca75c9c7d5b48ff4963eb389c665984675777"
+  },
+  {
+   "id": "blit.ps.79e7618a",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "79e7618a24455480cf0b9990525f3ff7edb675c784ce924e733d48ddc6326bcc"
+  },
+  {
+   "id": "blit.ps.7d3115f7",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "7d3115f75b302cfac64b014fb5b7687675d937a248b3fde0af9b4e74b12a8d90"
+  },
+  {
+   "id": "blit.ps.7dfa0c74",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "7dfa0c7441e8e7bfa38ab6148af9944c97bb3255d3e76061cb1a7dff195acb8c"
+  },
+  {
+   "id": "blit.ps.80e66578",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "80e665789cbd936aa04b77d5d35c9429a6c79096f9c6a28aba0f01b7fa534f94"
+  },
+  {
+   "id": "blit.ps.80f90e39",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "80f90e39ab84637b5fab0d3b6dde1c020b112a3a3398fdb795921672a48a09ca"
   },
   {
    "id": "blit.ps.81623622",
@@ -197,6 +351,41 @@
    "kind": "tev",
    "family": "blit_post",
    "sha256": "9d2692a9640d3e1c9768fe5dfacc04a68ba13e5196d491ad6e905d3851cb4088"
+  },
+  {
+   "id": "blit.ps.9ef48b1e",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "9ef48b1e476f16d03e8bee2349f8b17b8f51eab131ff33a5a0e0be32170fa635"
+  },
+  {
+   "id": "blit.ps.a00c1406",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "a00c1406d54dc59a1735eb1f755abe283c6ed132b11af9ab365d0f3f1474327a"
+  },
+  {
+   "id": "blit.ps.a0699434",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "a06994341fd6d6d3deebdf313621e4c54b4bd2e6d5a43a1757e42a023dc8a85f"
+  },
+  {
+   "id": "blit.ps.a10af226",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "a10af226a6a93b0fb8620718e476e2d528d4303fa31e7d6718534b4f48d76f5d"
+  },
+  {
+   "id": "blit.ps.a60557e1",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "a60557e136a37d643b2f65777845bb5022083e02243a7c2c49d849a5c5b782dd"
   },
   {
    "id": "blit.ps.a90f707a",
@@ -255,11 +444,39 @@
    "sha256": "d48c8642ffa0bc04ec33de070c52b2dfa3f36db3ec6b050e0881627e0f306920"
   },
   {
+   "id": "blit.ps.d585c64c",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "d585c64c7181ee77e1ff8a2c32c508e2d0d2473368fccfb9363e7262deeb3bbe"
+  },
+  {
+   "id": "blit.ps.d595cb85",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "d595cb85ec48b1c98748824e6332d684d31a4543b6be2b4cbe58bd6c05e61108"
+  },
+  {
    "id": "blit.vs.d6896494",
    "status": "translated",
    "kind": "pica_vs",
    "family": "blit_post",
    "sha256": "d68964943e9560d499b369bd47969ca7e621cb09da8470fc56739b412974132c"
+  },
+  {
+   "id": "blit.ps.dccc9cae",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "dccc9cae0619c9d6911fe70c8a708917ceec8d1ac400636cc2e4dbc88a569610"
+  },
+  {
+   "id": "blit.ps.dd54c028",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "dd54c028bd05641296f609fc6b8e9115e1e09bfd77ae120b857905d2fc820682"
   },
   {
    "id": "blit.ps.de28caa3",
@@ -269,11 +486,39 @@
    "sha256": "de28caa3cf7bb11d98788a133e5eb7c457ae2c8ae208f251a4c9a95ea7d130f2"
   },
   {
+   "id": "blit.ps.e414866b",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "e414866b0afeada6e7e23fde1b4cb860a6d2b8c52b432a19b83588374c80d086"
+  },
+  {
+   "id": "blit.ps.ee58ae8b",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "ee58ae8baf997c44af8f4f107fc391f2a57d5fa4761f64c7fd97c5d96f0434a5"
+  },
+  {
    "id": "blit.ps.f50eb44c",
    "status": "translated",
    "kind": "tev",
    "family": "blit_post",
    "sha256": "f50eb44cd422dbb1bc427eeeecfecf348b42c8ae9910dac4259e7d8a90b5d183"
+  },
+  {
+   "id": "blit.ps.f76700f7",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "f76700f75ec2590b6da10df57d788dbaa6b8716eff629c54f6a17af377afb742"
+  },
+  {
+   "id": "blit.ps.fdca0a3e",
+   "status": "translated",
+   "kind": "tev",
+   "family": "blit_post",
+   "sha256": "fdca0a3e8f1fedc2f085aa6ce7652c7de9d8f7ffd8a94a2b15c2f7399661193e"
   }
  ],
  "hashes": [

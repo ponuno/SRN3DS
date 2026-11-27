@@ -36,11 +36,11 @@ RUNTIME_CERTIFIED = {
     "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7",
 }
 EXPECTED = {
-    "planned": 32,
+    "planned": 67,
     "exact_draw_enabled": 6,
-    "approx_translated": 18,
+    "approx_translated": 53,
     "contract_only_vs": 8,
-    "refused": 35,
+    "refused": 0,
 }
 
 
@@ -131,9 +131,9 @@ class BlitPostCatalogTest(unittest.TestCase):
     def test_coverage_arithmetic(self):
         translated = sum(1 for e in self.doc["entries"])
         refused = len(self.refusals["refusals"])
+        self.assertEqual(translated, 67)
         self.assertEqual(translated + refused + len(RUNTIME_CERTIFIED), 69)
-        self.assertLessEqual(20, translated)
-        self.assertLessEqual(translated, 35)
+        self.assertEqual(refused, 0)
 
     def test_draw_plans_are_full_material_contracts(self):
         draw = [e for e in self.doc["entries"] if e["draw_enabled"] == 1]
@@ -155,7 +155,7 @@ class BlitPostCatalogTest(unittest.TestCase):
     def test_approximations_are_named(self):
         approx = [e for e in self.doc["entries"]
                   if e.get("quality") == "approx"]
-        self.assertEqual(len(approx), 18)
+        self.assertEqual(len(approx), 53)
         for entry in approx:
             self.assertTrue(entry.get("approximation"))
             self.assertEqual(entry["draw_enabled"], 0)
@@ -172,6 +172,36 @@ class BlitPostCatalogTest(unittest.TestCase):
             self.assertLessEqual(entry["uniform_registers"], 96)
             varyings = [o for o in entry["outputs"] if o["usage"] != 0]
             self.assertLessEqual(len(varyings), 7)
+
+    def test_escape_hatches_cover_every_census_class(self):
+        classes = {row[0]: row[2] for row in self.manifest["hashes"]}
+        planned = {e["sha256"] for e in self.doc["entries"]}
+        self.assertEqual(set(classes) - RUNTIME_CERTIFIED - planned, set())
+
+        constant = [e for e in self.doc["entries"] if e.get("constant_ops")]
+        self.assertEqual(len(constant), 8)
+        for entry in constant:
+            self.assertEqual(classes[entry["sha256"]],
+                             "def_literal_out_of_range")
+            self.assertEqual(entry["quality"], "approx")
+
+        dataflow = [e for e in self.doc["entries"]
+                    if classes[e["sha256"]] == "dataflow"]
+        self.assertEqual(sum(1 for e in dataflow if e.get("passes")), 14)
+
+        for cls in ("unsupported_opcode", "def_literal_out_of_range",
+                    "dataflow"):
+            for entry in self.doc["entries"]:
+                if classes[entry["sha256"]] == cls and entry["kind"] == "tev":
+                    self.assertEqual(entry["quality"], "approx")
+                    self.assertTrue(entry.get("approximation"), entry["id"])
+
+        for entry in self.doc["entries"]:
+            if classes[entry["sha256"]] == "tev_prebake":
+                self.assertTrue(entry.get("preconditions"), entry["id"])
+            if classes[entry["sha256"]] == "input_not_a_colour_varying":
+                self.assertEqual(entry.get("uses_vertex_color"), 1)
+                self.assertTrue(entry.get("inputs"), entry["id"])
 
     def test_negative_draw_enabled_approximation_is_rejected(self):
         mutated = copy.deepcopy(self.doc)
