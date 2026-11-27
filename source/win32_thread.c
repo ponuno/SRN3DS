@@ -684,13 +684,20 @@ static int build_thread_memory(W32Thread *t, uint32_t stack_bytes) {
         if (!src || !dst) { guest_unmap(mem, base); t->region_base = 0; return -1; }
         memcpy(dst, src, tls_size);
     }
-    /* TEB fields used by the shims and by MSVC SEH/CRT code. */
-    M32(t->teb + 0x00) = t->id;
+    /* TEB fields used by the shims and by MSVC SEH/CRT code.  The field
+     * layout is the NT one, not a port convenience: +0x00 is ExceptionList
+     * (the head of the SEH chain), +0x18 Self, +0x24/+0x28 the ClientId.
+     * Writing the thread id at +0x00 (as this used to) left every new guest
+     * thread with a garbage SEH chain: the first `__try` prologue linked its
+     * registration to a small integer, and the unwinder then decoded garbage
+     * frame pointers (TESV died in __CxxFrameHandler with a bogus this). */
+    M32(t->teb + 0x00) = 0xffffffffu; /* ExceptionList terminator */
     M32(t->teb + 0x04) = t->stack_top;
     M32(t->teb + 0x08) = t->region_base;
     M32(t->teb + 0x18) = t->teb;
-    M32(t->teb + 0x20) = t->id;
-    M32(t->teb + 0x24) = 1;
+    M32(t->teb + 0x20) = 1;           /* EnvironmentPointer (unused) */
+    M32(t->teb + 0x24) = 1;           /* ClientId.UniqueProcess */
+    M32(t->teb + 0x28) = t->id;       /* ClientId.UniqueThread */
     if (!teb_ready) M32(t->teb + 0x30) = GP_PEB;
     M32(t->teb + 0x2c) = t->teb + 0x1000;
     M32(t->teb + 0x34) = 0; /* last error */

@@ -30,7 +30,8 @@ static void body_return(CPU *c) {
     M32(DATA) = win32_thread_current_id();
     M32(DATA + 4) = c->fs_base;
     M32(DATA + 8) = (M32(c->fs_base + 0x18) == c->fs_base &&
-                     M32(c->fs_base + 0x20) == win32_thread_current_id()) ? 1u : 0u;
+                     M32(c->fs_base + 0x28) == win32_thread_current_id() &&
+                     M32(c->fs_base + 0x00) == 0xffffffffu) ? 1u : 0u;
     ret_stdcall(c, param + 1);
 }
 static void body_exit(CPU *c) { (void)c; n3ds_lift_exit(42); }

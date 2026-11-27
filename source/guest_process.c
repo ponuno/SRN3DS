@@ -76,6 +76,7 @@ int guest_process_init(GuestProcess *p,GuestMemory *m,const PeModule *modules,si
     p->stack_top=GP_STACK_BASE+stack_bytes-64;p->teb=GP_TEB;p->peb=GP_PEB;
     w32(p,GP_TEB,UINT32_MAX);w32(p,GP_TEB+4,p->stack_top);w32(p,GP_TEB+8,GP_STACK_BASE);
     w32(p,GP_TEB+0x18,GP_TEB);w32(p,GP_TEB+0x20,1);w32(p,GP_TEB+0x24,1);
+    w32(p,GP_TEB+0x28,1); /* ClientId.UniqueThread for the main guest thread */
     w32(p,GP_TEB+0x2c,GP_TEB+0x1000);w32(p,GP_TEB+0x30,GP_PEB);
     w32(p,GP_TEB+0xf94,GP_TEB+0x1800); /* dynamic TLS expansion storage */
     w32(p,GP_PEB+8,modules[0].image->base);w32(p,GP_PEB+0xc,GP_PEB+0x100);

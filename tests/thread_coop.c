@@ -135,8 +135,11 @@ static void body_tls(CPU *c) {
     M32(st + S_TLSSEEN + 8 * (me - 2)) = tls;
     M32(st + S_TLSSEEN + 8 * (me - 2) + 4) = err;
     /* the TEB must still be this thread's: self pointer, own id, own stack */
-    int ok = M32(base + 0x18) == base && M32(base + 0x20) == me &&
-             M32(base + 0x00) == me;
+    /* NT TEB layout: +0x00 ExceptionList (SEH chain head), +0x18 Self,
+     * +0x24/+0x28 ClientId.  The thread id must NOT live at +0x00, or every
+     * newly created guest thread starts with a garbage SEH chain. */
+    int ok = M32(base + 0x18) == base && M32(base + 0x28) == me &&
+             M32(base + 0x00) == 0xffffffffu;
     ret4(c, ok ? 1u : 0u);
 }
 static void body_exit(CPU *c) { W1(c, "ExitThread", 9); ret4(c, 0); }
