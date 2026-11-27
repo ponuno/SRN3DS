@@ -17,10 +17,10 @@
    "chunks": 131,
    "unique_hashes": 69,
    "coverage": {
-    "translated": 1,
-    "draw-enabled": 1,
-    "refused": 67,
-    "contract_only": 8
+    "translated": 27,
+    "draw-enabled": 7,
+    "refused": 35,
+    "contract_only": 0
    }
   },
   "sky_water": {

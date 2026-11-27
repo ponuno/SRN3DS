@@ -30,17 +30,14 @@
    "owner": "sm3-agent-blit-post",
    "chunks": 131,
    "unique_hashes": 69,
-   "translated": 1,
-   "draw_enabled": 1,
-   "refused": 67,
-   "contract_only": 8,
+   "translated": 27,
+   "draw_enabled": 7,
+   "refused": 35,
+   "contract_only": 0,
    "refused_classes": {
-    "def_literal_out_of_range": 19,
-    "dataflow": 18,
-    "unsupported_opcode": 13,
-    "pica_vs": 8,
-    "tev_direct": 5,
-    "non_uniform_swizzle": 2,
+    "dataflow": 14,
+    "unsupported_opcode": 11,
+    "def_literal_out_of_range": 8,
     "tev_prebake": 1,
     "input_not_a_colour_varying": 1
    },
@@ -79,12 +76,12 @@
    "owner": "sm3-agent-terrain",
    "chunks": 327,
    "unique_hashes": 247,
-   "translated": 19,
+   "translated": 0,
    "draw_enabled": 0,
-   "refused": 228,
+   "refused": 247,
    "contract_only": 0,
    "refused_classes": {
-    "def_literal_out_of_range": 228
+    "def_literal_out_of_range": 247
    },
    "needs": [
     "literal range rewrite (def outside RGBA8 [0,1])"
@@ -118,12 +115,12 @@
    "owner": "sm3-agent-lighting",
    "chunks": 7459,
    "unique_hashes": 4991,
-   "translated": 34,
+   "translated": 4,
    "draw_enabled": 0,
-   "refused": 4957,
+   "refused": 4987,
    "contract_only": 130,
    "refused_classes": {
-    "def_literal_out_of_range": 4772,
+    "def_literal_out_of_range": 4802,
     "pica_vs": 130,
     "unsupported_opcode": 31,
     "too_many_vs_varyings (8 > 7)": 17,
@@ -139,22 +136,10 @@
    ]
   }
  ],
- "extra_plans": {
-  "plans": 19,
-  "draw_enabled": 3,
-  "by_pack": {
-   "ui": {
-    "plans": 19,
-    "draw_enabled": 3,
-    "exact": 15,
-    "approx": 4
-   }
-  }
- },
  "total": {
-  "translated": 137,
-  "draw-enabled": 1,
-  "refused": 6521,
+  "translated": 114,
+  "draw-enabled": 7,
+  "refused": 6538,
   "chunks": 10475,
   "unique_hashes": 6659
  },

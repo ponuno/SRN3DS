@@ -1,0 +1,1884 @@
+{
+ "archive": "Skyrim - Shaders.bsa",
+ "entries": [
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.31d368ce",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 9,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "f9b5de94593fe16e852eae7fb73e9ebd46d8e382",
+   "sha256": "31d368cecad5b4d215c4c1fe1580d9ab0606e09af4ee3d2fa4ce8c4fcae9359f",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 2,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.4d155cd6",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 12,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 2 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 2,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 1,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "b4ce32787d50f2cb6f484f8c80d6542306f2d768",
+   "sha256": "4d155cd6fee59dd665d46cddd1af8d1e917d4678e2f02fe4188c141751401d58",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 2,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.57e51db9",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 9,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "be6e171262f3edaf83529fdc8bc461e2ba4cb8f9",
+   "sha256": "57e51db9dfcc5ad7014b12d9d9b819a0ec1a98c064ed657b0a8f829631396dfb",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 4,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.c43418bb",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 17,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 5 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 2,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 1,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 3,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 2,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 4,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 3,
+     "usage_name": "texcoord"
+    },
+    {
+     "reg_index": 5,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 4,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "a0d07bf57217e25032b07a0965e54bd78e2dcac0",
+   "sha256": "c43418bb396c19888f0537f7ff8a3b3fc110ee09b6fbfdbcc9d9374342036c67",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 2,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.c7ef0cd4",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 9,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "9439c81e2c7de3b98ecc9537bf2ce792724257a7",
+   "sha256": "c7ef0cd44146251737cf27b21bf2909f74c54d7fbf297ca681d53dc02458485f",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 2,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.ce758c79",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 12,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "4b59dd10cb266d14a9b469c02b3609a9c70cb7d0",
+   "sha256": "ce758c790d9684dc42916fbdb343d7661a600210ff5c299697742f5b373b8e33",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 4,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.d48c8642",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 9,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "ffc3f0976a37ed543995f9bf1752fec1c58e680f",
+   "sha256": "d48c8642ffa0bc04ec33de070c52b2dfa3f36db3ec6b050e0881627e0f306920",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 6,
+   "version": "0xfffe0300"
+  },
+  {
+   "codegen": "pending",
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.vs.d6896494",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "instructions": 12,
+   "kind": "pica_vs",
+   "note": "fullscreen-quad PICA VS contract: 1 varying(s), codegen pending",
+   "outputs": [
+    {
+     "reg_index": 0,
+     "type": 6,
+     "usage": 0,
+     "usage_index": 0,
+     "usage_name": "position"
+    },
+    {
+     "reg_index": 1,
+     "type": 6,
+     "usage": 5,
+     "usage_index": 0,
+     "usage_name": "texcoord"
+    }
+   ],
+   "preconditions": [
+    "pica_vs_codegen",
+    "exact_hash_descriptor_match",
+    "fullscreen_quad_semantics"
+   ],
+   "quality": "contract",
+   "runtime": 0,
+   "sha1": "a6fde11149b4ca864abb5bd4ae34f431ffa717aa",
+   "sha256": "d68964943e9560d499b369bd47969ca7e621cb09da8470fc56739b412974132c",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "vs_3_0",
+   "uniform_registers": 3,
+   "version": "0xfffe0300"
+  },
+  {
+   "approximation": "8-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.0072af4b",
+   "instructions": 62,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "c15ea3f7acc2e528da990f19466fbbe48c51d975",
+   "sha256": "0072af4b81a7b06b4b5bd6f54db0466ac2ebbf3ec6e1c127ad57608f2e6e3d89",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "source writes oC0.xy only; declared spec fills alpha with 0 (undefined in the SM3 stream)",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.01ab60cd",
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "constant fill: (1,0.5,0) with alpha defaulted",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "f6c559b58f9ba9e4d7be65d3ea8a81d0abf9820a",
+   "sha256": "01ab60cd1153c81486daf6416fc0a5fce7eab3fe550c725fd4641e86223b1b3f",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 33023,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      14,
+      15,
+      15
+     ],
+     "src_rgb": [
+      14,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "14 taps collapsed to one centred tap; DOT3(luma) keeps the luminance semantics, Alpha stays tex.a",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.041086d9",
+   "instructions": 23,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "14-tap luminance blur reduced to one luma tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "88a754043833d0264af11bb98905df20a9298b6b",
+   "sha256": "041086d9d408057209b8511a97bd7737f02d2366c6dd1863037f2d17a40cfa3f",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 4279416374,
+     "func_a": 0,
+     "func_rgb": 6,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      14,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "3 textures and frame-adaptive blend weight collapsed to a fixed 0.5 lerp of s0/s1; s2 and the rcp/cmp adaptation term are dropped",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.21978c95",
+   "instructions": 27,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "two-texture 50/50 crossfade (3 textures collapsed to 2)",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "fcff91cac64a3a367b2cca97569d8c9266fc3276",
+   "sha256": "21978c956fae8496fd8654a2948258cdf58b31718df82ab5f7cfb55a1c109c4d",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 2155905152,
+     "func_a": 4,
+     "func_rgb": 4,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      4,
+      14
+     ],
+     "src_rgb": [
+      3,
+      4,
+      14
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "3-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.2cc6e508",
+   "instructions": 15,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "8bba0c2420a168bf353a75cb6c778372b01d4398",
+   "sha256": "2cc6e508fb5a2b96253c4dfeec1555521757008d107a7c0a4fd484845a0b6430",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "constants": [],
+   "draw_enabled": 1,
+   "family": "blit_post",
+   "id": "blit.ps.39f0dfdf",
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "certified one-stage copy (s0 -> oC0)",
+   "preconditions": [
+    "exact_hash_descriptor_match",
+    "one_stage_tev_contract",
+    "runtime_slot_promotion_pending"
+   ],
+   "quality": "exact",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "43cad96ae7e61ac3fa7a8e84939fed53ea87ce05",
+   "sha256": "39f0dfdfc574d3e7f4c4ee0578bcc265b75ac05f1e0b9eb17087e52c6cc35d5a",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "constants": [],
+   "draw_enabled": 1,
+   "family": "blit_post",
+   "id": "blit.ps.4813dba3",
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "constant fill: (0.5,0.5,0,0)",
+   "preconditions": [
+    "exact_hash_descriptor_match",
+    "one_stage_tev_contract",
+    "runtime_slot_promotion_pending"
+   ],
+   "quality": "exact",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "bc2026961d2fa3bb4d857f25361db862e1488408",
+   "sha256": "4813dba351f7114f15a15a1d9c5308823e7fcfcbed2fe0dc1960662a2feca520",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 32896,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      14,
+      15,
+      15
+     ],
+     "src_rgb": [
+      14,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "9-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.4a4fa2b2",
+   "instructions": 37,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "986daaaa5489cd71af4ce560fe7b18c84c60a11f",
+   "sha256": "4a4fa2b2a1d18d1ef054cff6cae2f050ad28ef85b382d8e17dfccde53336b50b",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "RGB = tex.rgb * (1,-1,0)+0 keeps the tint; source alpha is 1-tex.r, TEV alpha cannot read red, so alpha = tex.a",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.583f98e0",
+   "instructions": 2,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "tint pass, alpha channel simplified to texture alpha",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "c6748bbcf439643783d27632a84455a4d37fc4b8",
+   "sha256": "583f98e0acc342b6638a1c226f329ef48d5d6435e636a217281b08e98523715f",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "constants": [],
+   "draw_enabled": 1,
+   "family": "blit_post",
+   "id": "blit.ps.6628a644",
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "constant fill: black opaque",
+   "preconditions": [
+    "exact_hash_descriptor_match",
+    "one_stage_tev_contract",
+    "runtime_slot_promotion_pending"
+   ],
+   "quality": "exact",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "249ee0272bb4c64a5a9cb78cbdd82428a95b5452",
+   "sha256": "6628a644b06721d0e5538d63bed3299bee56749ddb33af7300293cf38f3bbc6b",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 4278190080,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      14,
+      15,
+      15
+     ],
+     "src_rgb": [
+      14,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "3-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.6ccbe759",
+   "instructions": 9,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "e2125424d1e4e32ee85d8ad15b52a8feabce1ca1",
+   "sha256": "6ccbe75901c78b7b02fa845f1aaaa8a003cd66d4abcb202bd1a909bd59c9ca48",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "49-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.70a85a92",
+   "instructions": 38,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "88ed68b96839f128bcbb54d6ec21a4093cae9d27",
+   "sha256": "70a85a92b46bbe8e963af44ecf6ca75c9c7d5b48ff4963eb389c665984675777",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "rsq/rcp radial weight and 2 extra taps replaced by a constant 0.5 lerp between the two source textures",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.81623622",
+   "instructions": 29,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "DOF/radial blend simplified to 50/50 lerp",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "1ed772cc5cff5734871eb8ca52321d68334c4950",
+   "sha256": "816236227d06b66f7fdfba5ad48c4d3977b086b04ee91c72ad37fd78ab471b72",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 2155905152,
+     "func_a": 4,
+     "func_rgb": 4,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      4,
+      14
+     ],
+     "src_rgb": [
+      3,
+      4,
+      14
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "constants": [],
+   "draw_enabled": 1,
+   "family": "blit_post",
+   "id": "blit.ps.817340bf",
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "constant clear: 0.5 grey, opaque",
+   "preconditions": [
+    "exact_hash_descriptor_match",
+    "one_stage_tev_contract",
+    "runtime_slot_promotion_pending"
+   ],
+   "quality": "exact",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "4d354cfbe35daa097518883ddcc1a4b39a7b67c7",
+   "sha256": "817340bfabd9a9b175aadbbdc0af49258dd38f2772985b1a40ba48d3eb1bf10e",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 2155905152,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      14,
+      15,
+      15
+     ],
+     "src_rgb": [
+      14,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "dp3 luma, cmp/lerp grade and negative def literals replaced by a single MODULATE with exposure 0.8; no LUT texture needed",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.83cc2df2",
+   "instructions": 33,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "tone map / grade approximated by a constant 0.8 exposure",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "0ba5bdc72d99d858e11e649a859b4ff18e95b9c8",
+   "sha256": "83cc2df28d907021cafd21aa9c4464df8644b043446a43b6056115f64d2d6860",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 4291611852,
+     "func_a": 0,
+     "func_rgb": 1,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      14,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "16 co-bound 2D LUT slices are blended by an lrp chain; DTEX has no indirect/second LUT unit, so the plan samples slice 0 only. A 256x16 packed LUT is the follow-up if grading is required.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.8fb14655",
+   "instructions": 70,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "16-slice colour-grade LUT collapsed to slice 0",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "98109c15dd2b5ec7028c4d865effca7b2c52b6ff",
+   "sha256": "8fb1465543ccf66d25463d76c34db65510923a4b407708a9b1ce208a6f1fa344",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "constants": [],
+   "draw_enabled": 1,
+   "family": "blit_post",
+   "id": "blit.ps.911297c9",
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "certified one-stage copy (s0 -> oC0)",
+   "preconditions": [
+    "exact_hash_descriptor_match",
+    "one_stage_tev_contract",
+    "runtime_slot_promotion_pending"
+   ],
+   "quality": "exact",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "ec892fafce3a8c9813a3bc938a0f62c7e1923a1a",
+   "sha256": "911297c9666e388aab307d72feaad9761379287276405a17732958d8ca6a1b26",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "constants": [],
+   "draw_enabled": 1,
+   "family": "blit_post",
+   "id": "blit.ps.9d2692a9",
+   "instructions": 1,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "constant fill: white opaque",
+   "preconditions": [
+    "exact_hash_descriptor_match",
+    "one_stage_tev_contract",
+    "runtime_slot_promotion_pending"
+   ],
+   "quality": "exact",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "e9ff76bc1ce079b52898d8900fc2b14179085f6d",
+   "sha256": "9d2692a9640d3e1c9768fe5dfacc04a68ba13e5196d491ad6e905d3851cb4088",
+   "source_package": "shadersfx\\shaders001.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 4294967295,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      14,
+      15,
+      15
+     ],
+     "src_rgb": [
+      14,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "eye-adaptation rcp/cmp chain replaced by a constant 0.5 weight; bloom texture s0 and scene s1 kept, s2 dropped",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.a90f707a",
+   "instructions": 30,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "adaptation+bloom composite simplified to 50/50 lerp",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "d29618e8f39c62cf386c4707eb3a194714194b94",
+   "sha256": "a90f707a78222ca9a908ffced740cced62e8eae0f8495893ff332aeb567532a9",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 1,
+     "const_reg": 255,
+     "const_rgba8": 2155905152,
+     "func_a": 4,
+     "func_rgb": 4,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      4,
+      14
+     ],
+     "src_rgb": [
+      3,
+      4,
+      14
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "6-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.b6484c80",
+   "instructions": 21,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "1fa6e17363b51b214c754bc439f001b40e4cf77d",
+   "sha256": "b6484c80285be8e185e4a55cd16526f135df4cf6f9e6b7d87bf6e2a268f89e34",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "9-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.c91e3328",
+   "instructions": 39,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "2297d8a2bc61960c1a8a80d16016990f2a356347",
+   "sha256": "c91e33289ed209ca45917ab1242afe582f78a47eeae3cc0fc4487b4477c5d791",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "5-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.d01c19fd",
+   "instructions": 37,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "408936415b1eb43a4e9aebc7bb53d11a00a739f9",
+   "sha256": "d01c19fd0740a519d671468df61b074e53deeb39b6cd98da93e4258be03cd963",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "16-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.de28caa3",
+   "instructions": 68,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "a60ca7986ac9b659c1c8388a733f2e38eae48207",
+   "sha256": "de28caa3cf7bb11d98788a133e5eb7c457ae2c8ae208f251a4c9a95ea7d130f2",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "5-tap kernel (loop/tap sum) replaced by a single bilinear centre sample; no loop, one texture unit. Expected loss: soft edges become a plain copy.",
+   "constants": [],
+   "draw_enabled": 0,
+   "family": "blit_post",
+   "id": "blit.ps.f50eb44c",
+   "instructions": 19,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "note": "separable full-screen tap pass reduced to one centred tap",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "5e1705aee3e894fd9eb9cd71c27075d01e9d9b06",
+   "sha256": "f50eb44cd422dbb1bc427eeeecfecf348b42c8ae9910dac4259e7d8a90b5d183",
+   "source_package": "shadersfx\\imagespace002.fxp",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ]
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  }
+ ],
+ "generated_for": "blit_post (copy/blit, post-process/imagespace)",
+ "note": "pack catalog; every entry has runtime=0. draw_enabled=1 only for an exact one-stage TEV contract. Approximations carry quality=approx and an approximation field.",
+ "schema": "d9-shader-plan-v1"
+}
