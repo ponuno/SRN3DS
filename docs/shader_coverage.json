@@ -48,13 +48,11 @@
    "owner": "sm3-agent-sky-water",
    "chunks": 82,
    "unique_hashes": 45,
-   "translated": 14,
-   "draw_enabled": 0,
-   "refused": 31,
+   "translated": 0,
+   "draw_enabled": 45,
+   "refused": 0,
    "contract_only": 0,
-   "refused_classes": {
-    "def_literal_out_of_range": 31
-   },
+   "refused_classes": {},
    "needs": [
     "literal range rewrite (def outside RGBA8 [0,1])",
     "opcode lowering (cmp/if/loop/rcp/derivatives)",
@@ -140,9 +138,9 @@
   }
  },
  "total": {
-  "translated": 495,
-  "draw-enabled": 10,
-  "refused": 6154,
+  "translated": 481,
+  "draw-enabled": 55,
+  "refused": 6123,
   "chunks": 10475,
   "unique_hashes": 6659
  },
