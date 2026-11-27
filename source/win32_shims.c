@@ -14,6 +14,8 @@
 #include "guest_heap.h"
 #include "guest_process.h"
 #include "n3ds_lift_runtime.h"
+#include "bsa_reader.h"
+#include "menu_bsa_runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -284,6 +286,7 @@ static uint32_t vtime_ms(void){
 static void va_shutdown(void);
 static void mappings_shutdown(void);
 static int mapping_close(uint32_t h);
+static void ov_shutdown(void);
 int win32_init(GuestMemory *m,uint32_t bytes,const char *game_root) {
     if(mem || !m || !game_root || !*game_root || strlen(game_root)>=sizeof root || !bytes)return -1;
     if(heap_create(&heap,m,0x20000000u,bytes))return -1;
@@ -337,6 +340,7 @@ void win32_shutdown(void) {
     win32_user_shutdown();
     win32_shell_shutdown();
     for(unsigned i=0;i<MAX_FILES;++i)if(files[i]){fclose(files[i]);files[i]=NULL;file_can_read[i]=0;file_can_write[i]=0;file_path[i][0]=0;}
+    ov_shutdown();
     for(unsigned i=0;i<MAX_FINDS;++i)if(finds[i].used){
 #ifdef _WIN32
         _findclose(finds[i].cookie);
@@ -1543,6 +1547,381 @@ static uint32_t errno_error(void){
 }
 static uint32_t attr_of(const struct stat *st){return S_ISDIR(st->st_mode)?ATTR_DIRECTORY:ATTR_NORMAL;}
 static uint64_t size_of(const struct stat *st){return S_ISDIR(st->st_mode)?0:(uint64_t)st->st_size;}
+
+/* ---- read-only BSA overlay for Data\... ----------------------------------------
+ * The cooked tree and the 2011 install do not always keep every asset loose,
+ * but the engine still asks for them through CreateFileA/GetFileAttributesExA.
+ * On a stat/open miss we resolve the same virtual path through the mounted BSA
+ * archives.  Loose files always win unless TESV_BSA_OVERLAY_FIRST=1; an archive
+ * is never written and an absent/corrupt archive is named and skipped.
+ *
+ * Opening an archive returns a memory-backed virtual file in the existing
+ * 0x100..0x100+MAX_FILES handle table.  Partial reads go through
+ * bsa_read_range(); a compressed entry (where range reads are refused) is
+ * materialized once with bsa_read() and cached for the handle's lifetime. */
+#define OV_MAX_ARCHIVES 64
+#define OV_ATTR_ARCHIVE 0x20u
+
+typedef struct {
+    char path[1024];
+    char name[128];
+    BsaArchive *archive;
+    int state; /* 0 = not opened, 1 = open, -1 = failed */
+    unsigned lookup_errors;
+} OvArchive;
+
+typedef struct {
+    int used;
+    BsaArchive *archive;
+    BsaEntry entry;
+    uint32_t size;
+    uint32_t archive_index;
+    uint64_t pos;
+    uint8_t *cache;
+    int cache_state; /* 0 = none, 1 = materialized, -1 = failed */
+} OvFile;
+
+typedef struct {
+    BsaArchive *archive;
+    BsaEntry entry;
+    uint32_t size;
+    int archive_index;
+} OvMatch;
+
+static OvArchive ov_archives[OV_MAX_ARCHIVES];
+static size_t ov_archive_count;
+static uint64_t ov_index_total;
+static OvFile vfiles[MAX_FILES];
+static int ov_ready;
+static int ov_enabled;
+static int ov_all;
+static int ov_first;
+static int ov_trace;
+static Win32BsaOverlayStats ov_stats;
+
+static int ov_env_on(const char *name, int fallback) {
+    const char *v = getenv(name);
+    if (!v || !*v) return fallback;
+    return !(v[0] == '0' && !v[1]);
+}
+static int ov_ci_contains(const char *hay, const char *needle) {
+    size_t n = strlen(needle);
+    if (!n) return 1;
+    for (; *hay; ++hay) {
+        size_t i = 0;
+        while (i < n && hay[i] &&
+               lower_ascii((unsigned char)hay[i]) ==
+                   lower_ascii((unsigned char)needle[i]))
+            ++i;
+        if (i == n) return 1;
+    }
+    return 0;
+}
+static const char *ov_basename(const char *path) {
+    const char *out = path;
+    for (const char *p = path; *p; ++p)
+        if (*p == '/' || *p == '\\') out = p + 1;
+    return out;
+}
+static int ov_add_source(const char *path, const char *name) {
+    if (!path || !*path) return 0;
+    for (size_t i = 0; i < ov_archive_count; ++i)
+        if (!icmp(ov_archives[i].path, path)) return 1;
+    if (ov_archive_count >= OV_MAX_ARCHIVES) {
+        static unsigned logged;
+        if (logged < 4u) {
+            ++logged;
+            fprintf(stderr,
+                    "[bsa-overlay] refusing more than %u sources (at '%s')\n",
+                    OV_MAX_ARCHIVES, path);
+        }
+        return 0;
+    }
+    OvArchive *a = &ov_archives[ov_archive_count++];
+    memset(a, 0, sizeof *a);
+    snprintf(a->path, sizeof a->path, "%s", path);
+    snprintf(a->name, sizeof a->name, "%s",
+             name && *name ? name : ov_basename(path));
+    a->state = 0;
+    ov_stats.archives = (uint32_t)ov_archive_count;
+    return 1;
+}
+static void ov_scan_data(const char *data_dir) {
+#ifdef _WIN32
+    char pattern[1024];
+    if (snprintf(pattern, sizeof pattern, "%s/*.bsa", data_dir) < 0) return;
+    struct _finddata_t fd;
+    intptr_t h = _findfirst(pattern, &fd);
+    if (h == -1) return;
+    do {
+        if (fd.attrib & _A_SUBDIR) continue;
+        if (!ov_all && !ov_ci_contains(fd.name, "cooked")) continue;
+        char full[1024];
+        int n = snprintf(full, sizeof full, "%s/%s", data_dir, fd.name);
+        if (n > 0 && (size_t)n < sizeof full) ov_add_source(full, fd.name);
+    } while (_findnext(h, &fd) == 0);
+    _findclose(h);
+#else
+    DIR *d = opendir(data_dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        if (!ov_all && !ov_ci_contains(e->d_name, "cooked")) continue;
+        char full[1024];
+        int n = snprintf(full, sizeof full, "%s/%s", data_dir, e->d_name);
+        if (n > 0 && (size_t)n < sizeof full) ov_add_source(full, e->d_name);
+    }
+    closedir(d);
+#endif
+}
+static void ov_ensure(void) {
+    if (ov_ready) return;
+    ov_ready = 1;
+    ov_enabled = ov_env_on("TESV_BSA_OVERLAY", 1);
+    ov_all = ov_env_on("TESV_BSA_OVERLAY_ALL", 0);
+    ov_first = ov_env_on("TESV_BSA_OVERLAY_FIRST", 0);
+    ov_trace = ov_env_on("TESV_BSA_OVERLAY_TRACE", 0);
+    if (!ov_enabled || !root[0]) return;
+
+    char data_dir[1024];
+    if (snprintf(data_dir, sizeof data_dir, "%s/Data", root) < 0) return;
+    char ini_a[1024], ini_b[1024], ini_path[1024] = "";
+    snprintf(ini_a, sizeof ini_a, "%s/Skyrim.ini", root);
+    snprintf(ini_b, sizeof ini_b, "%s/Data/Skyrim.ini", root);
+    for (unsigned i = 0; i < 2; ++i) {
+        const char *try = i ? ini_b : ini_a;
+        FILE *f = fopen(try, "rb");
+        if (!f) continue;
+        fclose(f);
+        snprintf(ini_path, sizeof ini_path, "%s", try);
+        break;
+    }
+
+    static MenuBsaSources set;
+    char reason[MENU_BSA_REASON_MAX] = "";
+    memset(&set, 0, sizeof set);
+    if (menu_bsa_sources_from_ini(&set, data_dir, ini_path, reason,
+                                  sizeof reason)) {
+        for (size_t i = 0; i < set.count; ++i)
+            ov_add_source(set.source[i].path, set.source[i].name);
+    } else {
+        fprintf(stderr, "[bsa-overlay] Skyrim.ini archive list refused: %s\n",
+                reason[0] ? reason : "unknown reason");
+    }
+    ov_scan_data(data_dir);
+
+    if (ov_trace) {
+        fprintf(stderr,
+                "[bsa-overlay] %u source(s) under '%s' (all=%d first=%d)\n",
+                (unsigned)ov_archive_count, data_dir, ov_all, ov_first);
+        for (size_t i = 0; i < ov_archive_count; ++i)
+            fprintf(stderr, "[bsa-overlay]   %u: %s\n", (unsigned)i,
+                    ov_archives[i].path);
+    }
+}
+static int ov_archive_open(OvArchive *a) {
+    if (a->state) return a->state > 0;
+    char reason[BSA_REASON_MAX] = "";
+    BsaStatus st = bsa_open_path(a->path, NULL, &a->archive, reason,
+                                 sizeof reason);
+    if (st != BSA_OK) {
+        a->state = -1;
+        ++ov_stats.archives_failed;
+        fprintf(stderr, "[bsa-overlay] skip archive '%s': %s: %s\n", a->name,
+                bsa_status_name(st), reason[0] ? reason : "no reason");
+        return 0;
+    }
+    uint64_t index = bsa_index_bytes(a->archive);
+    if (index > MENU_BSA_DEFAULT_TOTAL_INDEX_BYTES - ov_index_total) {
+        bsa_close(a->archive);
+        a->archive = NULL;
+        a->state = -1;
+        ++ov_stats.archives_failed;
+        fprintf(stderr,
+                "[bsa-overlay] skip archive '%s': index %llu bytes would exceed "
+                "the %llu-byte mounted total\n",
+                a->name, (unsigned long long)index,
+                (unsigned long long)MENU_BSA_DEFAULT_TOTAL_INDEX_BYTES);
+        return 0;
+    }
+    ov_index_total += index;
+    a->state = 1;
+    if (ov_trace)
+        fprintf(stderr, "[bsa-overlay] open '%s': %u file(s), index %lu bytes\n",
+                a->name, (unsigned)bsa_file_count(a->archive),
+                (unsigned long)bsa_index_bytes(a->archive));
+    return 1;
+}
+/* Host path -> BSA key ("Data\\Strings\\X.strings" -> "strings\\x.strings").
+ * BSA lookups are case-insensitive, so the copy keeps the guest spelling. */
+static int ov_key_from_host(const char *host, char *key, size_t cap) {
+    size_t rl = strlen(root);
+    if (!rl || strncmp(host, root, rl)) return 0;
+    const char *p = host + rl;
+    while (*p == '/' || *p == '\\') ++p;
+    if (strlen(p) < 5) return 0;
+    if (lower_ascii((unsigned char)p[0]) != 'd' ||
+        lower_ascii((unsigned char)p[1]) != 'a' ||
+        lower_ascii((unsigned char)p[2]) != 't' ||
+        lower_ascii((unsigned char)p[3]) != 'a' ||
+        (p[4] != '/' && p[4] != '\\'))
+        return 0;
+    p += 5;
+    size_t n = strlen(p);
+    if (!n || n >= cap) return 0;
+    for (size_t i = 0; i <= n; ++i)
+        key[i] = p[i] == '/' ? '\\' : p[i];
+    return 1;
+}
+static int ov_resolve(const char *host, OvMatch *out) {
+    ov_ensure();
+    if (!ov_enabled) return 0;
+    char key[BSA_PATH_MAX];
+    if (!ov_key_from_host(host, key, sizeof key)) return 0;
+    int winner = -1;
+    for (size_t i = 0; i < ov_archive_count; ++i) {
+        OvArchive *a = &ov_archives[i];
+        if (!ov_archive_open(a)) continue;
+        BsaMatch m;
+        memset(&m, 0, sizeof m);
+        BsaStatus st = bsa_find(a->archive, key, &m);
+        if (st == BSA_OK) {
+            uint32_t size = 0;
+            char reason[BSA_REASON_MAX] = "";
+            st = bsa_unpacked_size(a->archive, &m.entry, &size, reason,
+                                   sizeof reason);
+            if (st == BSA_OK) {
+                out->archive = a->archive;
+                out->entry = m.entry;
+                out->size = size;
+                out->archive_index = (int)i;
+                winner = (int)i;
+                continue;
+            }
+            fprintf(stderr,
+                    "[bsa-overlay] '%s' in '%s': size failed: %s: %s\n", key,
+                    a->name, bsa_status_name(st), reason);
+        } else if (st != BSA_ERR_NOT_FOUND && a->lookup_errors++ < 2u) {
+            fprintf(stderr, "[bsa-overlay] lookup '%s' in '%s': %s\n", key,
+                    a->name, bsa_status_name(st));
+        }
+    }
+    return winner >= 0;
+}
+static int ov_stat(const char *host, uint32_t *size) {
+    OvMatch m;
+    if (!ov_resolve(host, &m)) return 0;
+    *size = m.size;
+    ++ov_stats.stat_resolves;
+    return 1;
+}
+static int ov_open_slot(unsigned slot, const char *host) {
+    OvMatch m;
+    if (!ov_resolve(host, &m)) return 0;
+    OvFile *v = &vfiles[slot];
+    memset(v, 0, sizeof *v);
+    v->used = 1;
+    v->archive = m.archive;
+    v->entry = m.entry;
+    v->size = m.size;
+    v->archive_index = (uint32_t)m.archive_index;
+    v->pos = 0;
+    v->cache_state = 0;
+    ++ov_stats.open_resolves;
+    if (ov_trace)
+        fprintf(stderr, "[bsa-overlay] open '%s' from '%s': %u bytes\n", host,
+                ov_archives[m.archive_index].name, (unsigned)m.size);
+    return 1;
+}
+static OvFile *vfile_for(uint32_t h) {
+    return h >= 0x100 && h < 0x100 + MAX_FILES && vfiles[h - 0x100].used
+               ? &vfiles[h - 0x100]
+               : NULL;
+}
+static int ov_file_read(OvFile *v, void *dst, uint32_t n) {
+    if (!v || !v->used || !n) return 0;
+    if (v->pos >= v->size) return 0;
+    uint64_t left = (uint64_t)v->size - v->pos;
+    uint32_t want = n < left ? n : (uint32_t)left;
+    if (v->cache_state == 1) {
+        memcpy(dst, v->cache + v->pos, want);
+        v->pos += want;
+        ov_stats.bytes_read += want;
+        return (int)want;
+    }
+    if (v->cache_state == -1) return -1;
+    char reason[BSA_REASON_MAX] = "";
+    uint32_t got = 0;
+    BsaStatus st = bsa_read_range(v->archive, &v->entry, (uint32_t)v->pos, dst,
+                                  want, &got, reason, sizeof reason);
+    if (st == BSA_OK) {
+        ++ov_stats.range_reads;
+        v->pos += got;
+        ov_stats.bytes_read += got;
+        return (int)got;
+    }
+    if (st == BSA_ERR_UNSUPPORTED) {
+        /* Cooked streaming archives only hold plain payloads; retail archives
+         * compress every record.  Materialize this record once and serve the
+         * remaining reads from RAM. */
+        v->cache = (uint8_t *)malloc(v->size ? v->size : 1u);
+        if (!v->cache) {
+            v->cache_state = -1;
+            ++ov_stats.read_errors;
+            return -1;
+        }
+        size_t full = 0;
+        st = bsa_read(v->archive, &v->entry, v->cache, v->size, &full, reason,
+                      sizeof reason);
+        if (st != BSA_OK || full != v->size) {
+            free(v->cache);
+            v->cache = NULL;
+            v->cache_state = -1;
+            ++ov_stats.read_errors;
+            fprintf(stderr,
+                    "[bsa-overlay] read '%s': %s: %s\n",
+                    ov_archives[v->archive_index].name, bsa_status_name(st),
+                    reason[0] ? reason : "short payload");
+            return -1;
+        }
+        v->cache_state = 1;
+        ++ov_stats.full_reads;
+        memcpy(dst, v->cache + v->pos, want);
+        v->pos += want;
+        ov_stats.bytes_read += want;
+        return (int)want;
+    }
+    ++ov_stats.read_errors;
+    fprintf(stderr, "[bsa-overlay] range read failed: %s: %s\n",
+            bsa_status_name(st), reason[0] ? reason : "no reason");
+    return -1;
+}
+static void ov_close_slot(unsigned slot) {
+    OvFile *v = &vfiles[slot];
+    free(v->cache);
+    memset(v, 0, sizeof *v);
+}
+static void ov_shutdown(void) {
+    for (unsigned i = 0; i < MAX_FILES; ++i) {
+        free(vfiles[i].cache);
+        memset(&vfiles[i], 0, sizeof vfiles[i]);
+    }
+    for (size_t i = 0; i < ov_archive_count; ++i)
+        if (ov_archives[i].archive) bsa_close(ov_archives[i].archive);
+    memset(ov_archives, 0, sizeof ov_archives);
+    ov_archive_count = 0;
+    ov_index_total = 0;
+    ov_ready = 0;
+    ov_enabled = 0;
+    memset(&ov_stats, 0, sizeof ov_stats);
+}
+void win32_bsa_overlay_stats(Win32BsaOverlayStats *out) {
+    if (!out) return;
+    memset(out, 0, sizeof *out);
+    *out = ov_stats;
+}
+
 static int64_t file_tell(FILE *f){
 #ifdef _WIN32
     return _ftelli64(f);
@@ -1662,7 +2041,13 @@ static int find_entry_unix(FindState *s,char *name,size_t cap,uint32_t *attrib,u
 static void s_GetFileAttributesA(CPU *c){
     const char *name=guest_cstr(mem,A(0),1024);char path[1024];struct stat st;
     if(!name || path_for(name,path,sizeof path))FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,1);
-    if(stat(path,&st))FAIL(errno_error(),UINT32_MAX,1);
+    ov_ensure();
+    uint32_t bsa_size;
+    if(ov_first && ov_stat(path,&bsa_size)){set_error(c,0);RET(OV_ATTR_ARCHIVE,1);}
+    if(stat(path,&st)){
+        if(!ov_first && ov_stat(path,&bsa_size)){set_error(c,0);RET(OV_ATTR_ARCHIVE,1);}
+        FAIL(errno_error(),UINT32_MAX,1);
+    }
     set_error(c,0);RET(attr_of(&st),1);
 }
 static void s_GetFileAttributesExA(CPU *c){
@@ -1677,7 +2062,29 @@ static void s_GetFileAttributesExA(CPU *c){
     if(trace_control && attr_logged < 32u){++attr_logged;fprintf(stderr,"[attr] guest='%s' host='%s'\n",name,path);}
     errno=0;int rc=stat(path,&st);
     if(trace_control)fprintf(stderr,"[attr] stat rc=%d errno=%d\n",rc,errno);
-    if(rc)FAIL(errno_error(),0,3);
+    ov_ensure();
+    uint32_t bsa_size=0;
+    if(ov_first && ov_stat(path,&bsa_size)){
+        checked(c,out,36);
+        M32(out)=OV_ATTR_ARCHIVE;M64(out+4)=0;M64(out+12)=0;M64(out+20)=0;
+        M32(out+28)=0;M32(out+32)=bsa_size;
+        if(trace_control)
+            fprintf(stderr,"[attr] bsa hit '%s' size=%lu\n",name,
+                    (unsigned long)bsa_size);
+        set_error(c,0);RET(1,3);
+    }
+    if(rc){
+        if(!ov_first && ov_stat(path,&bsa_size)){
+            checked(c,out,36);
+            M32(out)=OV_ATTR_ARCHIVE;M64(out+4)=0;M64(out+12)=0;M64(out+20)=0;
+            M32(out+28)=0;M32(out+32)=bsa_size;
+            if(trace_control)
+                fprintf(stderr,"[attr] bsa hit '%s' size=%lu\n",name,
+                        (unsigned long)bsa_size);
+            set_error(c,0);RET(1,3);
+        }
+        FAIL(errno_error(),0,3);
+    }
     checked(c,out,36);
     uint64_t size=size_of(&st);
     M32(out)=attr_of(&st);M64(out+4)=unix_to_ft((int64_t)st.st_ctime);
@@ -1798,7 +2205,7 @@ static void create_file(CPU *c,const char *name){
     if(disp==5 && !wr)FAIL(ERR_ACCESS_DENIED,INVALID_HANDLE,7);
     char path[1024];
     if(!name || path_for(name,path,sizeof path))FAIL(ERR_INVALID_PARAMETER,INVALID_HANDLE,7);
-    unsigned i;for(i=0;i<MAX_FILES && files[i];++i){}if(i==MAX_FILES)FAIL(ERR_NO_MEMORY,INVALID_HANDLE,7);
+    unsigned i;for(i=0;i<MAX_FILES && (files[i]||vfiles[i].used);++i){}if(i==MAX_FILES)FAIL(ERR_NO_MEMORY,INVALID_HANDLE,7);
     const char *mode;
     switch(disp){
     case 1:mode="w+bx";break;             /* CREATE_NEW */
@@ -1807,8 +2214,26 @@ static void create_file(CPU *c,const char *name){
     case 4:mode=wr?"r+b":"rb";break;      /* OPEN_ALWAYS (create below) */
     default:mode="r+b";break;             /* TRUNCATE_EXISTING */
     }
+    ov_ensure();
+    int overlay_open=rd && !wr && (disp==3 || disp==4);
+    if(overlay_open && ov_first && ov_open_slot(i,path)){
+        file_can_read[i]=1;file_can_write[i]=0;
+        snprintf(file_path[i],sizeof file_path[i],"%s",path);
+        if(file_trace_on() && file_trace_path(name))
+            fprintf(stderr,"[filetrace] open bsa '%s' host='%s' handle=%03x size=%lu caller=%08x\n",
+                    name,path,0x100+i,(unsigned long)vfiles[i].size,file_caller(c));
+        set_error(c,0);RET(0x100+i,7);
+    }
     errno=0;FILE *f=fopen(path,mode);
     if(!f && disp==4 && wr && errno==ENOENT){errno=0;f=fopen(path,"w+b");}
+    if(!f && overlay_open && ov_open_slot(i,path)){
+        file_can_read[i]=1;file_can_write[i]=0;
+        snprintf(file_path[i],sizeof file_path[i],"%s",path);
+        if(file_trace_on() && file_trace_path(name))
+            fprintf(stderr,"[filetrace] open bsa '%s' host='%s' handle=%03x size=%lu caller=%08x\n",
+                    name,path,0x100+i,(unsigned long)vfiles[i].size,file_caller(c));
+        set_error(c,0);RET(0x100+i,7);
+    }
     if(!f){
         uint32_t e=errno_error();
         if(disp==1 && errno==EEXIST)e=ERR_FILE_EXISTS;
@@ -1836,11 +2261,27 @@ static void s_CreateFileA(CPU *c){
     create_file(c,name);
 }
 static void s_ReadFile(CPU *c){
-    FILE *f=file_for(A(0));uint32_t n=A(2),bytes=A(3);
-    if(!f)FAIL(ERR_INVALID_HANDLE,0,5);
-    if(!file_can_read[A(0)-0x100])FAIL(ERR_ACCESS_DENIED,0,5);
+    uint32_t h=A(0);FILE *f=file_for(h);OvFile *vf=vfile_for(h);uint32_t n=A(2),bytes=A(3);
+    if(!f && !vf)FAIL(ERR_INVALID_HANDLE,0,5);
+    if(!file_can_read[h-0x100])FAIL(ERR_ACCESS_DENIED,0,5);
     if(A(4) || !bytes || !guest_ptr(mem,bytes,4) || (n&&!guest_ptr(mem,A(1),n)))FAIL(ERR_INVALID_PARAMETER,0,5);
-    M32(bytes)=0;size_t read=n?fread(guest_ptr(mem,A(1),n),1,n,f):0;M32(bytes)=(uint32_t)read;
+    M32(bytes)=0;
+    if(vf){
+        int got=ov_file_read(vf,guest_ptr(mem,A(1),n),n);
+        if(got<0)FAIL(ERR_READ_FAULT,0,5);
+        M32(bytes)=(uint32_t)got;
+        if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] bsa read %lu bytes -> %d\n",(unsigned long)n,got);}}
+        if(file_trace_on() && file_trace_path(file_path[h-0x100])){
+            static unsigned logged;
+            if(logged<6000u){++logged;
+                fprintf(stderr,"[filetrace] bsa read h=%03x off=%llu n=%lu got=%d caller=%08x path=%s\n",
+                        (unsigned)h,(unsigned long long)(vf->pos-(uint64_t)got),(unsigned long)n,
+                        got,file_caller(c),file_path[h-0x100]);
+            }
+        }
+        set_error(c,0);RET(1,5);
+    }
+    size_t read=n?fread(guest_ptr(mem,A(1),n),1,n,f):0;M32(bytes)=(uint32_t)read;
     if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] read %lu bytes -> %lu\n",(unsigned long)n,(unsigned long)read);}}
     if(file_trace_on()){
         uint32_t hi=A(0)-0x100;
@@ -1880,29 +2321,50 @@ static void s_CloseHandle(CPU *c){
     if(win32_sync_close(h)){set_error(c,0);RET(1,1);}
     if(win32_thread_close(h)){set_error(c,0);RET(1,1);}
     if(mapping_close(h)){set_error(c,0);RET(1,1);}
+    if(vfile_for(h)){
+        unsigned i=h-0x100;
+        ov_close_slot(i);file_can_read[i]=0;file_can_write[i]=0;file_path[i][0]=0;
+        set_error(c,0);RET(1,1);
+    }
     FILE *f=file_for(h);if(!f)FAIL(ERR_INVALID_HANDLE,0,1);
     int rc=fclose(f);uint32_t i=h-0x100;files[i]=NULL;file_can_read[i]=0;file_can_write[i]=0;file_path[i][0]=0;
     set_error(c,0);RET(rc==0,1);
 }
 static void s_GetFileSize(CPU *c){
-    FILE *f=file_for(A(0));if(!f)FAIL(ERR_INVALID_HANDLE,UINT32_MAX,2);
+    OvFile *vf=vfile_for(A(0));FILE *f=file_for(A(0));
+    if(!f && !vf)FAIL(ERR_INVALID_HANDLE,UINT32_MAX,2);
     if(A(1)&&!guest_ptr(mem,A(1),4))FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,2);
+    if(vf){
+        if(A(1))M32(A(1))=0;
+        set_error(c,0);RET(vf->size,2);
+    }
     int64_t old=file_tell(f);if(old<0 || file_seek(f,0,SEEK_END))FAIL(ERR_READ_FAULT,UINT32_MAX,2);
     int64_t n=file_tell(f);if(file_seek(f,old,SEEK_SET) || n<0)FAIL(ERR_READ_FAULT,UINT32_MAX,2);
     if(A(1))M32(A(1))=(uint32_t)((uint64_t)n>>32);
     set_error(c,0);RET((uint32_t)n,2);
 }
 static void s_GetFileSizeEx(CPU *c){
-    FILE *f=file_for(A(0));if(!f)FAIL(ERR_INVALID_HANDLE,0,2);
+    OvFile *vf=vfile_for(A(0));FILE *f=file_for(A(0));
+    if(!f && !vf)FAIL(ERR_INVALID_HANDLE,0,2);
     if(!guest_ptr(mem,A(1),8))FAIL(ERR_INVALID_PARAMETER,0,2);
+    if(vf){M64(A(1))=(uint64_t)vf->size;set_error(c,0);RET(1,2);}
     int64_t old=file_tell(f);if(old<0 || file_seek(f,0,SEEK_END))FAIL(ERR_READ_FAULT,0,2);
     int64_t n=file_tell(f);if(file_seek(f,old,SEEK_SET) || n<0)FAIL(ERR_READ_FAULT,0,2);
     M64(A(1))=(uint64_t)n;set_error(c,0);RET(1,2);
 }
 static void s_SetFilePointer(CPU *c){
-    FILE *f=file_for(A(0));if(!f)FAIL(ERR_INVALID_HANDLE,UINT32_MAX,4);
+    OvFile *vf=vfile_for(A(0));FILE *f=file_for(A(0));
+    if(!f && !vf)FAIL(ERR_INVALID_HANDLE,UINT32_MAX,4);
     int32_t off=(int32_t)A(1);uint32_t hi=A(2),whence=A(3);
     if(whence>2 || (hi&&(!guest_ptr(mem,hi,4)||M32(hi)!=(off<0?UINT32_MAX:0))))FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,4);
+    if(vf){
+        int64_t base=whence==0?0:whence==1?(int64_t)vf->pos:(int64_t)vf->size;
+        int64_t p=base+off;
+        if(p<0)FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,4);
+        vf->pos=(uint64_t)p;
+        if(hi)M32(hi)=(uint32_t)((uint64_t)p>>32);
+        set_error(c,0);RET((uint32_t)p,4);
+    }
     const int origins[]={SEEK_SET,SEEK_CUR,SEEK_END};if(file_seek(f,off,origins[whence]))FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,4);
     int64_t p=file_tell(f);if(p<0)FAIL(ERR_INVALID_PARAMETER,UINT32_MAX,4);
     {static unsigned sw;if(sw<80u){++sw;fprintf(stderr,"[io] seek %ld whence %lu -> %lld\n",(long)off,(unsigned long)whence,(long long)p);}}
@@ -1910,10 +2372,19 @@ static void s_SetFilePointer(CPU *c){
     set_error(c,0);RET((uint32_t)p,4);
 }
 static void s_SetFilePointerEx(CPU *c){
-    FILE *f=file_for(A(0));if(!f)FAIL(ERR_INVALID_HANDLE,0,5);
+    OvFile *vf=vfile_for(A(0));FILE *f=file_for(A(0));
+    if(!f && !vf)FAIL(ERR_INVALID_HANDLE,0,5);
     if(A(3)&&!guest_ptr(mem,A(3),8))FAIL(ERR_INVALID_PARAMETER,0,5);
     int64_t dist=(int64_t)(((uint64_t)A(2)<<32)|A(1));
     uint32_t method=A(4);if(method>2)FAIL(ERR_INVALID_PARAMETER,0,5);
+    if(vf){
+        int64_t base=method==0?0:method==1?(int64_t)vf->pos:(int64_t)vf->size;
+        int64_t p=base+dist;
+        if(p<0)FAIL(ERR_INVALID_PARAMETER,0,5);
+        vf->pos=(uint64_t)p;
+        if(A(3))M64(A(3))=(uint64_t)p;
+        set_error(c,0);RET(1,5);
+    }
     const int origins[]={SEEK_SET,SEEK_CUR,SEEK_END};
     if(file_seek(f,dist,origins[method]))FAIL(ERR_INVALID_PARAMETER,0,5);
     int64_t p=file_tell(f);if(p<0)FAIL(ERR_INVALID_PARAMETER,0,5);

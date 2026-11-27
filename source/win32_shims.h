@@ -35,6 +35,21 @@ int win32_guest_path(const char *guest_name,char *out,size_t capacity);
  * capacity >= 1 MiB; `name` must be Skyrim.INI/Skyrim.ini for the merge to fire. */
 int win32_ini_overlay_merge_text(const char *spec,const char *name,char *buf,
                                  size_t capacity,size_t *inout_len);
+/* Read-only BSA overlay for Data\... files.  Sources come from Skyrim.ini
+ * [Archive] plus Data\*Cooked*.bsa (and, for the host harness, every Data\*.bsa
+ * when TESV_BSA_OVERLAY_ALL=1).  Loose files win unless
+ * TESV_BSA_OVERLAY_FIRST=1.  The overlay never writes an archive. */
+typedef struct {
+    uint64_t stat_resolves;   /* GetFileAttributes* answered from an archive */
+    uint64_t open_resolves;   /* CreateFileA answered from an archive */
+    uint64_t range_reads;     /* bsa_read_range() calls that succeeded */
+    uint64_t full_reads;      /* compressed entries materialized via bsa_read() */
+    uint64_t bytes_read;      /* bytes returned to ReadFile */
+    uint64_t read_errors;
+    uint32_t archives;        /* configured sources */
+    uint32_t archives_failed; /* sources skipped for access/format errors */
+} Win32BsaOverlayStats;
+void win32_bsa_overlay_stats(Win32BsaOverlayStats *out);
 /* Diagnostic mode: bind unknown imports to a trap that faults on call with the
  * exact dll!name. Never returns a fake success; unknown slots still fail. */
 void win32_set_unresolved_trap(int enabled);
