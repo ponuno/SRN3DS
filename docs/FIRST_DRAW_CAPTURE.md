@@ -14,7 +14,9 @@ formats, bounds and hook points.
 | --- | --- |
 | `source/d3d9_capture.h` | Snapshot schema, limits, options and public API. |
 | `source/d3d9_capture.c` | Validation, FNV-1a hashing, text/binary writers, no-overwrite naming. |
+| `tools/capture_raster.py` | Read-only, standard-library CPU rasterizer; writes RGBA PNG without a GPU. |
 | `tests/d3d9_capture_smoke.c` | Host test: first draw, bounds/truncation, bad guest pointer, no-overwrite, unique signatures. |
+| `tests/capture_raster_test.py` | Synthetic parser/raster/PNG tests for primitives, indices, colour, texture, blend and viewport. |
 | `docs/FIRST_DRAW_CAPTURE.md` | This document. |
 
 The module depends only on `guest.h` (page-safe guest reads) and
@@ -718,3 +720,151 @@ The smoke test covers:
 * Binary output is uncompressed. The texture budget caps the worst case at
   8 MiB + ~1.3 MiB of shaders/geometry + metadata. Present files are tiny
   (80-byte payload).
+
+## Host PNG rasterizer
+
+`tools/capture_raster.py` turns draw captures into a diagnostic RGBA8 PNG on the
+host. It uses only Python's standard library (`struct`, `array`, `zlib`,
+`concurrent.futures`); there is no GPU, Pillow, NumPy, emulator, or device step.
+Input files are opened read-only. An output path is always explicit, so the tool
+never writes beside a capture implicitly.
+
+### Usage
+
+From the repository root:
+
+```powershell
+# One draw. A .txt argument is also accepted and resolves to its .bin sibling.
+python tools/capture_raster.py E:\menu_capture\run_tesv_slice_8260\Skyrim_N3DS_firstdraw.bin `
+  --output "$env:TEMP\firstdraw.png"
+
+# Compose distinct draws in argument order. Clear is applied on the first draw
+# (and again only when frame.index changes), not once per draw.
+python tools/capture_raster.py `
+  E:\menu_capture\run_tesv_slice_8260\Skyrim_N3DS_firstdraw.bin `
+  E:\menu_capture\run_tesv_slice_8260\Skyrim_N3DS_firstdraw_2.bin `
+  E:\menu_capture\run_tesv_slice_8260\Skyrim_N3DS_firstdraw_3.bin `
+  E:\menu_capture\run_tesv_slice_8260\Skyrim_N3DS_firstdraw_4.bin `
+  --output "$env:TEMP\firstdraw_sequence.png" --jobs 4
+```
+
+`--jobs 1..16` parallelizes independent file parsing and FNV-1a validation.
+Rasterization remains ordered because later draws can blend into earlier ones.
+The default is up to 16 parsers, bounded by the number of inputs. The summary
+reports dimensions, covered fragments, non-zero pixels, signatures and wall
+time. `D9CAPPRE` Present files are rejected: they contain no framebuffer bytes.
+
+The binary file is authoritative; the sibling `.txt` is useful for inspection
+but is not needed for rendering. The reader checks `D9CAPBIN`, the 32-byte
+little-endian header, section bounds, required payload sizes and every stored
+shader/vertex/index/texture FNV-1a hash. It reads schema v3 and also accepts the
+v1/v2 section variants (missing target/sampler fields get documented defaults).
+
+### Geometry and position semantics
+
+Supported primitive types are the three D3D9 triangle types:
+`D3DPT_TRIANGLELIST=4`, `D3DPT_TRIANGLESTRIP=5`, and
+`D3DPT_TRIANGLEFAN=6`, both indexed and non-indexed. Strip winding alternates;
+the fan keeps vertex zero as its centre. Index buffers may be 16- or 32-bit.
+
+Vertex payloads are the capture hook's **decoded host structures**, not the raw
+guest declaration stream:
+
+* 20-byte `D9Vertex { x, y, z, u, v }` is the current COM output. It has no
+  COLOR0, so the rasterizer uses opaque white vertex colour and modulates that
+  with the sampled texture.
+* 40-byte `D9ColorVertex { x, y, z, u, v, r, g, b, a, w }` is also recognized.
+  Its normalized float RGBA is interpolated; the trailing TEXCOORD0.w is not
+  used by the 2D blit. The current COM capture hook does not emit this layout.
+* Other strides fail with a named error instead of guessing a raw FVF layout.
+
+`--position-space auto|screen|clip|object` controls positions:
+
+* `screen`: pretransformed D3D9 window pixels, offset by viewport x/y. This is
+  the POSITIONT/XYZRHW case.
+* `clip`: homogeneous D3D9 clip positions; x/y/w and z/w are mapped through the
+  viewport.
+* `object`: row-vector world × view × projection, then viewport mapping. This
+  is the fixed-function POSITION case.
+* `auto`: an active declaration's POSITIONT selects `screen`; POSITION selects
+  `object` when no VS bytecode is present. A POSITION+VS draw requires an
+  explicit choice because shader constants are absent. With an inactive
+  declaration and no VS, `auto` assumes `screen` and warns: the raw FVF value is
+  not captured, so XYZ versus XYZRHW cannot be recovered from v3 alone.
+
+The current COM hook stores `d->scratch`, which is already expanded into
+primitive order and already offset by `draw.start`. The rasterizer recognizes
+that layout and does not apply topology a second time. It also accepts a
+conventional compact non-indexed range. For indexed captures, raw indices are
+always parsed and hash-checked. When vertices are the expanded scratch stream,
+the indices are **not** applied again (doing so would index the expanded list a
+second time); compact vertex payloads use 16/32-bit indices plus `base_vertex`.
+The index payload is already sliced at `start_index` by the COM hook, so the
+rasterizer does not add `start_index` again.
+
+Rasterization uses pixel centres, viewport clipping, a top-left fill rule and
+D3D9 cull modes. Colour/UV use perspective-correct interpolation. A basic
+depth buffer and all eight D3DCMP depth functions are supported. Triangles with
+non-positive w or vertices outside the D3D9 near/far range are skipped; general
+polygon clipping is not implemented.
+
+### Textures, alpha and blending
+
+The first captured stage-0 texture is sampled. Supported raw formats are:
+
+| Format | Value | Decode |
+| --- | ---: | --- |
+| `A8R8G8B8` | 21 | little-endian B,G,R,A |
+| `X8R8G8B8` | 22 | little-endian B,G,R, opaque A |
+| `A8` | 28 | opaque RGB multiplied by A |
+
+`row_pitch` is honoured, including padding. Only the captured mip level is
+available. Point and bilinear filtering are implemented, with WRAP, MIRROR,
+CLAMP, BORDER and MIRRORONCE addressing. DXT1/3/5, ATI/BC, ETC1, cube and volume
+textures are named unsupported rather than decoded incorrectly. Additional
+stages are not combined because v3 does not contain the texture-stage/TEV
+operations needed to combine them.
+
+Alpha test supports all eight D3DCMP functions. Alpha blending supports ADD,
+SUB, REVSUB, MIN and MAX, with ZERO, ONE, SRC/DEST colour, SRC/DEST alpha,
+inverses and SRCALPHASAT. `color_write` preserves masked destination channels.
+Separate-alpha blend state and BLENDFACTOR are not in the capture and therefore
+fail by name if required.
+
+### Output and verification
+
+PNG output is non-interlaced RGBA8 with filter-zero scanlines, written directly
+as IHDR/IDAT/IEND chunks and zlib-compressed data. Dimensions come from the
+active target, falling back to the viewport when target dimensions are zero.
+The PNG is a diagnostic approximation, not a replay of guest shaders.
+
+Run the standard-library tests:
+
+```powershell
+python tests/capture_raster_test.py
+```
+
+They cover list/strip/fan, indexed 16/32 draws, colour interpolation, texture
+sampling, alpha blend/test, viewport offsets, fixed-function transforms, PNG
+chunks/dimensions, hash validation and named malformed-stride rejection.
+
+A real four-capture Bink sequence from
+`E:\menu_capture\run_tesv_slice_8260` was rendered at 512×1024. It produced
+27,880 fragments/non-clear pixels (the clear is opaque black), 8 triangles and
+no culled triangles; four-way parsing took 1.285 s wall time on the host. The
+early captures contain only the blue Bink placeholder geometry, not the menu.
+
+### Rasterizer limitations
+
+* Vertex/pixel shader bytecode and TEV programs are recorded but not executed.
+  Shader constants, texture-stage operations and the full vertex declaration
+  semantics are not in v3. The tool draws decoded positions/UV, white colour
+  for `D9Vertex`, and a simple stage-0 texture approximation.
+* Current 20-byte captures cannot reproduce menu vertex tint/COLOR0. Rendering
+  menu geometry later is possible, but exact menu colours require a future
+  capture schema/hook change to preserve `D9ColorVertex` or raw COLOR0.
+* No stencil, scissor rectangle, fog, lighting, mip selection, sRGB conversion,
+  multiple texture stages, cube/volume sampling or shader texkill.
+* A Present event has `pixels.captured=0`; it cannot be used as a screenshot.
+* Draws must target the same dimensions when composed. Clear colour is known,
+  but a non-default clear depth/stencil value is not captured.
