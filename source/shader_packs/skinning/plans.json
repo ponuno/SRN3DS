@@ -1221,7 +1221,7 @@
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
+   "codegen": "emitted-verified",
    "constants": [
     0,
     1,
@@ -1233,6 +1233,16 @@
     184
    ],
    "draw_enabled": 0,
+   "emitted_asm": "generated/skin.vs.20f4db07.v.pica",
+   "emitter": {
+    "bones": 4,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "tolerance": 0.0001,
+    "uniform_rows": 16
+   },
    "expandable": [],
    "family": "skinning",
    "id": "skin.vs.20f4db07",
@@ -1258,7 +1268,7 @@
    ],
    "instructions": 27,
    "kind": "pica_vs",
-   "note": "PICA VS contract: 2 varying(s), 8 uniform register(s); native codegen pending, draw disabled",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw still blocked by the shared pica_vs draw rule and upload path",
    "outputs": [
     {
      "reg_index": 0,
@@ -1277,8 +1287,9 @@
    ],
    "preconditions": [
     "blend_weight_blend_index_inputs",
+    "bone_palette_window_4",
     "exact_hash_descriptor_match",
-    "pica_vs_codegen"
+    "emitted_code_upload_path"
    ],
    "sha1": "55430f66f54885514f4d65f2eff2f79dac3145c9",
    "sha256": "20f4db07add12d807b5cdd81a8457b93ae913998f7d21ca09194ba177dd70275",
@@ -3315,7 +3326,7 @@
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
+   "codegen": "emitted-verified",
    "constants": [
     0,
     1,
@@ -3328,6 +3339,16 @@
     185
    ],
    "draw_enabled": 0,
+   "emitted_asm": "generated/skin.vs.60dbd11a.v.pica",
+   "emitter": {
+    "bones": 4,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "tolerance": 0.0001,
+    "uniform_rows": 17
+   },
    "expandable": [],
    "family": "skinning",
    "id": "skin.vs.60dbd11a",
@@ -3365,7 +3386,7 @@
    ],
    "instructions": 28,
    "kind": "pica_vs",
-   "note": "PICA VS contract: 3 varying(s), 9 uniform register(s); native codegen pending, draw disabled",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw still blocked by the shared pica_vs draw rule and upload path",
    "outputs": [
     {
      "reg_index": 0,
@@ -3391,8 +3412,9 @@
    ],
    "preconditions": [
     "blend_weight_blend_index_inputs",
+    "bone_palette_window_4",
     "exact_hash_descriptor_match",
-    "pica_vs_codegen"
+    "emitted_code_upload_path"
    ],
    "sha1": "2359bb75c1d7184c80c30d33257816ea7f2faf1b",
    "sha256": "60dbd11a23ffbf74517f1256edaadadb62441fe1ed120d413540b220b9833407",
@@ -7913,7 +7935,7 @@
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
+   "codegen": "emitted-verified",
    "constants": [
     0,
     1,
@@ -7925,6 +7947,16 @@
     184
    ],
    "draw_enabled": 0,
+   "emitted_asm": "generated/skin.vs.f8ffaecd.v.pica",
+   "emitter": {
+    "bones": 4,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "tolerance": 0.0001,
+    "uniform_rows": 16
+   },
    "expandable": [],
    "family": "skinning",
    "id": "skin.vs.f8ffaecd",
@@ -7950,7 +7982,7 @@
    ],
    "instructions": 25,
    "kind": "pica_vs",
-   "note": "PICA VS contract: 1 varying(s), 8 uniform register(s); native codegen pending, draw disabled",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw still blocked by the shared pica_vs draw rule and upload path",
    "outputs": [
     {
      "reg_index": 0,
@@ -7962,8 +7994,9 @@
    ],
    "preconditions": [
     "blend_weight_blend_index_inputs",
+    "bone_palette_window_4",
     "exact_hash_descriptor_match",
-    "pica_vs_codegen"
+    "emitted_code_upload_path"
    ],
    "sha1": "4296d17dff5ce6d158b677c668002a8da804d6bb",
    "sha256": "f8ffaecd431d4416a4503b2e8ca80b6dad57a128dc1782c941f97db346072efa",
@@ -8637,7 +8670,7 @@
    "version": "0xfffe0300"
   }
  ],
- "generated_for": "E:\\SteamLibrary\\steamapps\\common\\Skyrim\\Data",
+ "generated_for": "F:\\Skyrim\\Data",
  "pack": "skinning",
  "planner": "tools/shaders/compile.py plan_ps/plan_vs",
  "schema": "shader-pack-plan-catalog/1",

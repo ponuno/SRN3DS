@@ -56,6 +56,7 @@ ARCHIVE = "Skyrim - Shaders.bsa"
 MANIFEST = os.path.join(HERE, "manifest.json")
 PLANS = os.path.join(HERE, "plans.json")
 REFUSALS = os.path.join(HERE, "refusals.json")
+EMITTER_REPORT = os.path.join(HERE, "emitter_report.json")
 DEFAULT_DATA = [r"F:\Skyrim\Data",
                 r"E:\SteamLibrary\steamapps\common\Skyrim\Data"]
 MAX_ENTRIES = 16
@@ -109,6 +110,14 @@ def _offending_defs(ir) -> list:
     return out
 
 
+def _emitter_verified() -> dict:
+    if not os.path.exists(EMITTER_REPORT):
+        return {}
+    report = _load(EMITTER_REPORT)
+    return {entry["sha256"]: entry for entry in report.get("entries", [])
+            if entry.get("status") == "pass"}
+
+
 def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
     entry = dict(plan)
     entry["id"] = "skin.%s.%s" % ("vs" if plan["stage"] == "vs_3_0" else "ps",
@@ -128,6 +137,30 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
             "exact_hash_descriptor_match",
             "pica_vs_codegen",
         ]
+        emitted = _emitter_verified().get(plan["sha256"])
+        if emitted is not None:
+            entry["codegen"] = "emitted-verified"
+            entry["emitted_asm"] = "generated/%s.v.pica" % entry["id"]
+            entry["emitter"] = {
+                "samples": emitted["samples"],
+                "tolerance": emitted["tolerance"],
+                "max_abs_position": emitted["max_abs_position"],
+                "max_abs_varying": emitted["max_abs_varying"],
+                "picasso": emitted["picasso"],
+                "bones": emitted["bones"],
+                "uniform_rows": emitted["uniform_rows"],
+            }
+            entry["note"] = (
+                "PICA VS emitted and numerically verified against the vs_3_0 "
+                "IR (%d samples, max |dpos| %.1e, picasso pass); draw still "
+                "blocked by the shared pica_vs draw rule and upload path"
+                % (emitted["samples"], emitted["max_abs_position"]))
+            entry["preconditions"] = [
+                "blend_weight_blend_index_inputs",
+                "bone_palette_window_%d" % emitted["bones"],
+                "exact_hash_descriptor_match",
+                "emitted_code_upload_path",
+            ]
     else:
         entry["note"] = (
             "TEV plan reproduced offline; draw needs the material contract "
@@ -279,6 +312,13 @@ def verify_document(doc: dict, pack_hashes: dict) -> dict:
                 errors.append("%s: more than 96 uniform registers" % where)
         if entry.get("draw_enabled") == 1 and not entry.get("preconditions"):
             errors.append("%s: draw-enabled without a material contract" % where)
+        if entry.get("codegen") == "emitted-verified":
+            asm = entry.get("emitted_asm")
+            if not asm or not os.path.exists(os.path.join(HERE, asm)):
+                errors.append("%s: emitted-verified without an asm file" % where)
+            elif entry["sha256"] not in _emitter_verified():
+                errors.append("%s: emitted-verified but the report has no pass"
+                              % where)
 
     for refusal in refusals:
         where = "refusal %s" % str(refusal.get("sha256"))[:12]

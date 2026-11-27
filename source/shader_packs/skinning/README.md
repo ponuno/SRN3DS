@@ -49,6 +49,66 @@ The catalog is merged into coverage by `tools/fxp_compile.py manifest` /
 entries; the 83 contract-only descriptors exist for diagnostics and future
 codegen, not for a draw.
 
+## Emitted code (3 of 83)
+
+`pica_vs_emit.py` lowers the canonical vs_3_0 IR of three representatives to
+picasso `.v.pica` and verifies them three ways: outputs/inputs/uniform/opcode
+envelope, a D3D IR reference interpreter, and an interpreter over the emitted
+PICA text on 256 deterministic samples.
+
+| plan | varyings | palette | uniform rows | emitted ins | max abs pos | max abs varying | picasso |
+|---|---|---:|---:|---:|---:|---:|---|
+| `skin.vs.f8ffaecd` | position | 4 bones | 16 | 35 | 0 | 0 | pass |
+| `skin.vs.20f4db07` | position + UV1 | 4 bones | 16 | 37 | 0 | 0 | pass |
+| `skin.vs.60dbd11a` | position + UV0 + UV2 | 4 bones | 17 | 39 | 0 | 0 | pass |
+
+Tolerance is `1e-4`; all three measure `0.0` on 256 samples.  These entries
+carry `codegen: emitted-verified`, `emitted_asm`, and an `emitter` block with
+the measured error.  `emitter_report.json` is the machine-readable proof; the
+asm lives in `generated/`.
+
+Emitter policy found by compiling the real assembly:
+
+* the retail index idiom `mul x=v*c; frc f=frac(x); mad a=v*c-f` is exactly
+  `floor(v*c)`; PICA VS has `flr` but no `frc`, so the three-instruction idiom
+  folds to `mul` + `flr` (verified against the original IR);
+* PICA allows no indexed uniform in `mad`; a dynamic `mad` lowers to `mul`
+  through a second scratch plus `add`;
+* `mad` needs its first source in a register (the second may be a constant);
+* the uniform bank is `c0..c11` for 4 bones (`a0 = 3*bone`) and `c12..c15`
+  for D3D `c180..c183` (WVP), i.e. 16 rows.  A larger palette is a draw-time
+  window contract, not a maths approximation.
+
+### Why the other 80 stay `codegen: pending`
+
+The emitter is shape-specific on purpose: outputs must map to
+`position`/`texcoord0..2`/`color0`, relative constants to `c0..c2`, and the
+body to the six supported opcodes.  The other 80 contracts use texcoord3-5,
+colour-carry outputs, different constant groups or extra opcodes; each needs
+its own mapping and its own 256-sample proof.  No claim is made for them.
+The 22 eight/nine-varying hashes remain named refusals: no normal output
+exists in this pack to pack, and an octant/hemisphere encoding was not
+adopted without a measured error bound.
+
+### Draw gate (shared request)
+
+Three plans are *emitted and numerically verified*, but `draw_enabled` stays
+`0` because the shared contract forbids anything else:
+
+1. `docs/shader_plan_schema.json` (`d9-shader-plan-v1`) currently requires
+   `pica_vs.draw_enabled == 0` unconditionally.  Allow `1` only when
+   `codegen == "emitted-verified"` and the `emitter` block is present.
+2. `source/d3d9_shader_plan.c` / the citro3d vertex path need a PICA VS
+   upload/bind path (`.shbin` allocation, attribute declaration, uniform bank
+   `c0..c15`) before a draw can use the emitted code.  This pack does not edit
+   C.
+3. `tests/sm3_phase1_test.py` asserts exactly one draw-enabled plan across the
+   packs; that invariant must change when verified PICA VS entries are
+   allowed to set `draw_enabled: 1`.
+4. The runtime must bind a 4-bone palette window per draw (or stream a larger
+   palette into `c0..c11`); a vertex using bone index >3 is outside this
+   representative contract.
+
 ## Named refusals (`refusals.json`)
 
 | reason | hashes | blocking lever |

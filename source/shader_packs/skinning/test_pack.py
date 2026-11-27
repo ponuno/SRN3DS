@@ -58,7 +58,7 @@ class SkinningCatalogTest(unittest.TestCase):
             self.assertLessEqual(len(entry["inputs"]), 16)
             self.assertLessEqual(entry["uniform_registers"], 96)
             self.assertTrue(entry["skinning"], entry["id"])
-            self.assertEqual(entry["codegen"], "pending")
+            self.assertIn(entry["codegen"], ("pending", "emitted-verified"))
             self.assertFalse(plan_verify.derive_status(entry) == "draw-enabled")
         self.assertEqual(schema["$defs"]["entry"]["properties"]["kind"]
                          ["enum"], ["tev", "pica_vs"])
