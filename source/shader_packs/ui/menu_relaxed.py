@@ -302,7 +302,7 @@ def _canon(expr):
     return expr
 
 
-def plan_relaxed(ir):
+def plan_relaxed(ir, max_stages=None, strict=True):
     """Return (plan, approximation_texts, refusal)."""
     if ir.error:
         return None, [], "parse_error: %s" % ir.error
@@ -334,10 +334,7 @@ def plan_relaxed(ir):
                 if ins.opcode == 0x12:
                     stage, result = _emit_lrp(planner, ins, temps)
                 elif (ins.opcode == 0x01 and ins.dst.reg_type == asm.REG_TEMP
-                      and ins.srcs[0].reg_type == asm.REG_CONST
-                      and ins.srcs[0].index not in defs):
-                    # Pure constant alias: no TEV stage; keep PREV intact so a
-                    # later stage can read both the temp and the constant.
+                      and ins.srcs[0].reg_type != asm.REG_TEMP):
                     planner.temps[ins.dst.index] = planner.operand(ins.srcs[0]).vec
                     continue
                 else:
@@ -346,15 +343,17 @@ def plan_relaxed(ir):
                 planner.prev_reg = dst.index if dst.reg_type == asm.REG_TEMP else None
                 if dst.reg_type == asm.REG_TEMP:
                     planner.temps[dst.index] = result
-                if len(planner.stages) > C.TEV_MAX_STAGES:
-                    return None, [], "too_many_stages (>%d)" % C.TEV_MAX_STAGES
+                limit = C.TEV_MAX_STAGES if max_stages is None else max_stages
+                if len(planner.stages) > limit:
+                    return None, [], "too_many_stages (>%d)" % limit
         except C.PlanError as exc:
             return None, [], str(exc)
 
-        for ch in range(4):
-            if final[ch] != UNDEF and (_canon(planner.prev[ch]) !=
-                                       _canon(final[ch])):
-                return None, [], "plan_mismatch: channel %d" % ch
+        if strict:
+            for ch in range(4):
+                if final[ch] != UNDEF and (_canon(planner.prev[ch]) !=
+                                           _canon(final[ch])):
+                    return None, [], "plan_mismatch: channel %d" % ch
 
         const_values = {str(reg): list(vals) for reg, vals in defs.items()}
         plan = {

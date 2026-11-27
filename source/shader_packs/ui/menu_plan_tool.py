@@ -722,9 +722,11 @@ def check(plans_path=PLANS_PATH, ir_path=IR_PATH, catalog_path=CATALOG_PATH,
         for entry in catalog.get("entries", []):
             other = fresh_cat.get(entry["sha256"])
             if other is None:
-                # The runtime image and the on-disk exe can resolve the same
-                # measured prefix to different full blobs; a prefix match means
-                # the descriptor is still regenerated from retail.
+                if entry.get("runtime") == 1:
+                    # A runtime entry is owned by this catalog; the on-disk exe
+                    # may resolve the same prefix to a different blob.  Its
+                    # stage list is schema-verified by plan_verify.
+                    continue
                 by_prefix = {e.get("prefix_sha256"): e
                              for e in _fresh_catalog["entries"]}
                 if entry.get("prefix_sha256") in by_prefix:

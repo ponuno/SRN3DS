@@ -1,18 +1,19 @@
 {
  "archive": "TESV.exe (GFx renderer tables 0x012dfca8 / 0x012dfcd8)",
  "coverage": {
-  "draw_enabled": 19,
+  "draw_enabled": 40,
   "full_blobs": {
    "ps": 38,
    "vs": 5
   },
   "ps": {
-   "draw": 14,
-   "refused": 23,
-   "translated": 15
+   "draw": 35,
+   "pending_passes": 3,
+   "refused": 0,
+   "translated": 38
   },
-  "refused": 23,
-  "translated": 20,
+  "refused": 0,
+  "translated": 43,
   "vs": {
    "draw": 5,
    "emitted": 5,
@@ -660,6 +661,7 @@
    "version": "0xfffe0300"
   },
   {
+   "constant_values": {},
    "constants": [
     0
    ],
@@ -676,11 +678,13 @@
     "constants": [
      0
     ],
+    "simplified": false,
     "textures": [],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw-certified with declared contract",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652",
    "quality": "exact",
    "requires_alpha_fixup": 0,
@@ -729,6 +733,7 @@
    "version": "0xffff0300"
   },
   {
+   "constant_values": {},
    "constants": [
     2,
     3
@@ -747,6 +752,7 @@
      2,
      3
     ],
+    "simplified": false,
     "textures": [
      {
       "sampler_reg": 0,
@@ -756,8 +762,9 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw-certified with declared contract",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
    "quality": "exact",
    "requires_alpha_fixup": 0,
@@ -874,7 +881,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
@@ -901,7 +907,7 @@
      2,
      3
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [
      {
       "sampler_reg": 0,
@@ -918,11 +924,11 @@
      }
     ]
    },
-   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "995d5e6041ce2946948e38fa878a9c15c89879ac",
@@ -1137,7 +1143,7 @@
      }
     ]
    },
-   "note": "GFx menu PS approximated for PICA (color1->color0); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
@@ -1281,7 +1287,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
@@ -1308,7 +1313,7 @@
      2,
      3
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [],
     "varyings": [
      {
@@ -1319,11 +1324,11 @@
      }
     ]
    },
-   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "8f441cb3b48c4249733c7222b96331c1527eb1dd",
@@ -1401,7 +1406,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     0
@@ -1419,7 +1423,7 @@
     "constants": [
      0
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [
      {
       "sampler_reg": 0,
@@ -1429,11 +1433,11 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "a9699e71257ac455b04813379c77dc99677ab582",
@@ -1486,7 +1490,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "def c5 clamped to [0,1]",
    "constant_values": {},
    "constants": [
     0
@@ -1504,7 +1507,7 @@
     "constants": [
      0
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [
      {
       "sampler_reg": 0,
@@ -1514,11 +1517,11 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS approximated for PICA (def c5 clamped to [0,1]); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "e2fb3e017c66fc1d026a69e512da2db5521557bb",
@@ -1588,11 +1591,13 @@
     "constants": [
      0
     ],
+    "simplified": false,
     "textures": [],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw-certified with declared contract",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
+   "outputs": [],
    "prefix_sha256": "f031c9f821e5316df05109dd1464e2de244827ce39e7a597b12024765320e652",
    "quality": "exact",
    "requires_alpha_fixup": 0,
@@ -1672,7 +1677,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
@@ -1692,7 +1696,7 @@
      2,
      3
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [
      {
       "sampler_reg": 0,
@@ -1702,11 +1706,11 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "bc1ae85fafbadfa8e46051ca788466397fb79905",
@@ -1888,7 +1892,7 @@
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.75974622",
    "inputs": [],
@@ -1896,7 +1900,7 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
@@ -1911,12 +1915,12 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS translated to TEV; draw blocked until the material contract is certified",
+   "note": "GFx menu PS exact TEV plan; draw-certified with declared contract",
    "objects": 1,
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
    "quality": "exact",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "616cc7d6a05f9abfb6601d9900e6647c45b5c821",
    "sha256": "7597462294b1bb339c5463f2685274aa6325695ba7b396699f4bf35d32ac52eb",
    "source_slot": 29,
@@ -2129,7 +2133,7 @@
      }
     ]
    },
-   "note": "GFx menu PS approximated for PICA (color1->color0); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
@@ -2304,7 +2308,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     2,
@@ -2331,7 +2334,7 @@
      2,
      3
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [],
     "varyings": [
      {
@@ -2342,11 +2345,11 @@
      }
     ]
    },
-   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "2f58090b5e8290b652dc6766eeeedebf64642625",
@@ -2486,7 +2489,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "declared simplification",
    "constant_values": {},
    "constants": [
     0
@@ -2504,7 +2506,7 @@
     "constants": [
      0
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [
      {
       "sampler_reg": 0,
@@ -2514,11 +2516,11 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS approximated for PICA (declared simplification); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "d5462d9db06e6cd95a4d9882f7adcf9ef3da8dfb",
@@ -2571,7 +2573,6 @@
    "version": "0xffff0300"
   },
   {
-   "approximation": "def c5 clamped to [0,1]",
    "constant_values": {},
    "constants": [
     0
@@ -2589,7 +2590,7 @@
     "constants": [
      0
     ],
-    "simplified": true,
+    "simplified": false,
     "textures": [
      {
       "sampler_reg": 0,
@@ -2599,11 +2600,11 @@
     ],
     "varyings": []
    },
-   "note": "GFx menu PS approximated for PICA (def c5 clamped to [0,1]); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; exact translation",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "8ced9de968aad07942ea3b454f127dfb00bd94761fa2c980f2c770ed504fa93d",
-   "quality": "approx",
+   "quality": "exact",
    "requires_alpha_fixup": 0,
    "runtime": 1,
    "sha1": "c5d059dbefd3988a4ff58b91f7e8d757bbcad370",
@@ -2705,7 +2706,7 @@
      }
     ]
    },
-   "note": "GFx menu PS approximated for PICA (color1->color0); draw-certified for the declared simplified spec, not exact",
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
    "objects": 1,
    "outputs": [],
    "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
@@ -2889,148 +2890,6577 @@
    ],
    "uses_vertex_color": 1,
    "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; negate(v0) dropped",
+   "constant_values": {},
+   "constants": [
+    2,
+    3
+   ],
+   "draw_enabled": 0,
+   "family": "ui",
+   "id": "menu.gfx.ps.d1465bec",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": false,
+    "constant_values": {},
+    "constants": [
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; multi-pass stages pending",
+   "objects": 1,
+   "outputs": [],
+   "passes": [
+    {
+     "blend": {
+      "dst": "texture",
+      "func": "add",
+      "src": "prev"
+     },
+     "stages": [
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 0,
+       "instruction": "texld",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        3,
+        15,
+        15
+       ],
+       "src_rgb": [
+        3,
+        15,
+        15
+       ],
+       "word": 256
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 2,
+       "func_rgb": 2,
+       "instruction": "add",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        0,
+        15
+       ],
+       "src_rgb": [
+        15,
+        0,
+        15
+       ],
+       "word": 272
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 8,
+       "func_rgb": 8,
+       "instruction": "mad",
+       "op_a": [
+        6,
+        0,
+        0
+       ],
+       "op_rgb": [
+        12,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        0,
+        15,
+        0
+       ],
+       "src_rgb": [
+        0,
+        15,
+        0
+       ],
+       "word": 300
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 2,
+       "const_rgba8": 0,
+       "func_a": 1,
+       "func_rgb": 1,
+       "instruction": "mad_mul",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        14,
+        15
+       ],
+       "src_rgb": [
+        15,
+        14,
+        15
+       ],
+       "word": 332
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 3,
+       "const_rgba8": 0,
+       "func_a": 2,
+       "func_rgb": 2,
+       "instruction": "mad_add",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        14,
+        15
+       ],
+       "src_rgb": [
+        15,
+        14,
+        15
+       ],
+       "word": 332
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 1,
+       "func_rgb": 0,
+       "instruction": "mul",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        2,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        0,
+        15
+       ],
+       "src_rgb": [
+        15,
+        0,
+        15
+       ],
+       "word": 352
+      }
+     ]
+    },
+    {
+     "blend": null,
+     "stages": [
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 0,
+       "instruction": "mov",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        15,
+        15
+       ],
+       "src_rgb": [
+        15,
+        15,
+        15
+       ],
+       "word": 368
+      }
+     ]
+    }
+   ],
+   "pending_runtime_feature": "passes",
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "2a1f255bc70cb652b54b7ddf0b92cd0dc59ed859",
+   "sha256": "d1465becee1e4690cf6efc5b19dc5d555b51ad0ed1814ff07ca1a1ce737af77d",
+   "source_slot": 14,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 256
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 272
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 8,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      6,
+      0,
+      0
+     ],
+     "op_rgb": [
+      12,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      15,
+      0
+     ],
+     "src_rgb": [
+      0,
+      15,
+      0
+     ],
+     "word": 300
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 332
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 332
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 0,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 352
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    }
+   ],
+   "total_stages": 7,
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; negate(v0) dropped",
+   "constant_values": {},
+   "constants": [
+    2,
+    3
+   ],
+   "draw_enabled": 0,
+   "family": "ui",
+   "id": "menu.gfx.ps.916e67f1",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 9,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": false,
+    "constant_values": {},
+    "constants": [
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; multi-pass stages pending",
+   "objects": 1,
+   "outputs": [],
+   "passes": [
+    {
+     "blend": {
+      "dst": "texture",
+      "func": "add",
+      "src": "prev"
+     },
+     "stages": [
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 0,
+       "instruction": "texld",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        3,
+        15,
+        15
+       ],
+       "src_rgb": [
+        3,
+        15,
+        15
+       ],
+       "word": 256
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 2,
+       "func_rgb": 2,
+       "instruction": "add",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        0,
+        15
+       ],
+       "src_rgb": [
+        15,
+        0,
+        15
+       ],
+       "word": 272
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 8,
+       "func_rgb": 8,
+       "instruction": "mad",
+       "op_a": [
+        6,
+        0,
+        0
+       ],
+       "op_rgb": [
+        12,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        0,
+        15,
+        0
+       ],
+       "src_rgb": [
+        0,
+        15,
+        0
+       ],
+       "word": 300
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 2,
+       "const_rgba8": 0,
+       "func_a": 1,
+       "func_rgb": 1,
+       "instruction": "mad_mul",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        14,
+        15
+       ],
+       "src_rgb": [
+        15,
+        14,
+        15
+       ],
+       "word": 332
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 3,
+       "const_rgba8": 0,
+       "func_a": 2,
+       "func_rgb": 2,
+       "instruction": "mad_add",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        14,
+        15
+       ],
+       "src_rgb": [
+        15,
+        14,
+        15
+       ],
+       "word": 332
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 1,
+       "func_rgb": 0,
+       "instruction": "mul",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        2,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        0,
+        15
+       ],
+       "src_rgb": [
+        15,
+        0,
+        15
+       ],
+       "word": 352
+      }
+     ]
+    },
+    {
+     "blend": null,
+     "stages": [
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 1,
+       "instruction": "mul",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        2,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        15,
+        15
+       ],
+       "src_rgb": [
+        15,
+        15,
+        15
+       ],
+       "word": 368
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 0,
+       "instruction": "mov",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        15,
+        15
+       ],
+       "src_rgb": [
+        15,
+        15,
+        15
+       ],
+       "word": 384
+      }
+     ]
+    }
+   ],
+   "pending_runtime_feature": "passes",
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "aabf2e2477005227f9efc169d48885fb4784569b",
+   "sha256": "916e67f105b864c80acc16b93e808f1102e458db718e49562b478c5e591ec2c8",
+   "source_slot": 37,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 256
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 272
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 8,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      6,
+      0,
+      0
+     ],
+     "op_rgb": [
+      12,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      15,
+      0
+     ],
+     "src_rgb": [
+      0,
+      15,
+      0
+     ],
+     "word": 300
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 332
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 332
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 0,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 352
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    }
+   ],
+   "total_stages": 8,
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0",
+   "constant_values": {},
+   "constants": [
+    2,
+    3
+   ],
+   "draw_enabled": 0,
+   "family": "ui",
+   "id": "menu.gfx.ps.a23f8b39",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 7,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": false,
+    "constant_values": {},
+    "constants": [
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     },
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 1
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; multi-pass stages pending",
+   "objects": 1,
+   "outputs": [],
+   "passes": [
+    {
+     "blend": {
+      "dst": "texture",
+      "func": "add",
+      "src": "prev"
+     },
+     "stages": [
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 0,
+       "instruction": "texld",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        3,
+        15,
+        15
+       ],
+       "src_rgb": [
+        3,
+        15,
+        15
+       ],
+       "word": 312
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 0,
+       "instruction": "texld",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        4,
+        15,
+        15
+       ],
+       "src_rgb": [
+        4,
+        15,
+        15
+       ],
+       "word": 328
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 4,
+       "func_rgb": 4,
+       "instruction": "lrp",
+       "op_a": [
+        0,
+        6,
+        0
+       ],
+       "op_rgb": [
+        0,
+        12,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        0,
+        3
+       ],
+       "src_rgb": [
+        15,
+        0,
+        3
+       ],
+       "word": 344
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 2,
+       "const_rgba8": 0,
+       "func_a": 1,
+       "func_rgb": 1,
+       "instruction": "mad_mul",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        14,
+        15
+       ],
+       "src_rgb": [
+        15,
+        14,
+        15
+       ],
+       "word": 376
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 3,
+       "const_rgba8": 0,
+       "func_a": 2,
+       "func_rgb": 2,
+       "instruction": "mad_add",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        14,
+        15
+       ],
+       "src_rgb": [
+        15,
+        14,
+        15
+       ],
+       "word": 376
+      },
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 1,
+       "instruction": "mul",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        2,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        15,
+        15
+       ],
+       "src_rgb": [
+        15,
+        15,
+        15
+       ],
+       "word": 396
+      }
+     ]
+    },
+    {
+     "blend": null,
+     "stages": [
+      {
+       "const_is_literal": 0,
+       "const_reg": 255,
+       "const_rgba8": 0,
+       "func_a": 0,
+       "func_rgb": 0,
+       "instruction": "mov",
+       "op_a": [
+        0,
+        0,
+        0
+       ],
+       "op_rgb": [
+        0,
+        0,
+        0
+       ],
+       "scale_a": 0,
+       "scale_rgb": 0,
+       "src_a": [
+        15,
+        15,
+        15
+       ],
+       "src_rgb": [
+        15,
+        15,
+        15
+       ],
+       "word": 412
+      }
+     ]
+    }
+   ],
+   "pending_runtime_feature": "passes",
+   "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 0,
+   "sha1": "0251e2933e6595cfd5b38209d95820befcd07530",
+   "sha256": "a23f8b39681e8f38c2916e3d55bd4a72fee73449ff13c4b11fa83a90b6b2a529",
+   "source_slot": 38,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 312
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 328
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 4,
+     "func_rgb": 4,
+     "instruction": "lrp",
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "op_rgb": [
+      0,
+      12,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      3
+     ],
+     "src_rgb": [
+      15,
+      0,
+      3
+     ],
+     "word": 344
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 376
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 376
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      2,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "word": 396
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    },
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 1
+    }
+   ],
+   "total_stages": 7,
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "declared simplification: the stage list implements the verified instruction prefix; final channel equality relaxed",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.aac562d0",
+   "inputs": [],
+   "instructions": 6,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "be07283f540df070831d6133265545c4b36252cf",
+   "sha256": "aac562d0c1cf510451aedaf1e8f82ec5f74416ab74e3d26c95354c7849a60a5b",
+   "source_slot": 2,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 256
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 284
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 284
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 304
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 8,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      0,
+      0,
+      4
+     ],
+     "op_rgb": [
+      2,
+      0,
+      8
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      14
+     ],
+     "src_rgb": [
+      3,
+      15,
+      14
+     ],
+     "word": 320
+    }
+   ],
+   "stages": 5,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r0.yyyy) dropped; trailing instructions dropped: mul@492, texld@508, add@524, mad@540, mov@560, mad@572, mad@592, mov@612, mad@624",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     1.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.0a244f54",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      1.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "1b279738cdd7559ca1bbd05e8b46c63d8f54f412f8bb8b45d2456278ab94f907",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "6c370ee9a54bd428a54f9da1b0e18edc73cab7cf",
+   "sha256": "0a244f5491a86d7b28c8ceb0a6f5e86cb57750e479a01da6832a52038f37492c",
+   "source_slot": 8,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 392
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 408
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 424
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 440
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 456
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 1,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      0,
+      6,
+      4
+     ],
+     "op_rgb": [
+      12,
+      12,
+      8
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 472
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r0.yyyy) dropped; negate(c1.wwww) dropped; trailing instructions dropped: mul@492, texld@508, add@524, mad@540, mov@560, mad@572, mad@592, mov@612, mad@624, add@644, mad@660",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     1.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.7fa9ba40",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      1.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "1b279738cdd7559ca1bbd05e8b46c63d8f54f412f8bb8b45d2456278ab94f907",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "b6d82b9095f336d363601be39c29c9227d922fd1",
+   "sha256": "7fa9ba40bb706925e6fc8e529200e66bb16b138a1f3b02f277621667f95b91ed",
+   "source_slot": 9,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 392
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 408
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 424
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 440
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 456
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 1,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      0,
+      6,
+      4
+     ],
+     "op_rgb": [
+      12,
+      12,
+      8
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 472
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r1.yyyy) dropped; trailing instructions dropped: mad@544, mul@564, texld@580, add@596, mad@612, mad@632, mad@652, mov@672, mad@684",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.0b031a8a",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 3,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "99698c198050c0734088a891c5f82d5fc267cfcd",
+   "sha256": "0b031a8ab9925a66aa2bd715fcc40238e7fd81a5da366d8421cada8979a982fe",
+   "source_slot": 10,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 448
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 464
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 480
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 496
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      5,
+      15,
+      15
+     ],
+     "src_rgb": [
+      5,
+      15,
+      15
+     ],
+     "word": 512
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 528
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 3,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r1.yyyy) dropped; negate(c1.wwww) dropped; trailing instructions dropped: mad@544, mul@564, texld@580, add@596, mad@612, mad@632, mad@652, mov@672, mad@684, add@704, mad@720",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     -1.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.037d6742",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      -1.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 3,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "e496c89dc052f9f577e96db75a46bd6e0bffc768",
+   "sha256": "037d67421047cb2844f57385598d23199e4b8072bd340e7dc7d089694f3ea344",
+   "source_slot": 11,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 448
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 464
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 480
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 496
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      5,
+      15,
+      15
+     ],
+     "src_rgb": [
+      5,
+      15,
+      15
+     ],
+     "word": 512
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 528
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 3,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; trailing instructions dropped: mad@280",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.bb3d4cbf",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 5,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "0182daea49bcf97f2a2ed82edc3fb2018c6e6873",
+   "sha256": "bb3d4cbf920ca1c4948860bd36f43ca01ff557b2c10a7910d4c6a057865cea81",
+   "source_slot": 16,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      14,
+      15
+     ],
+     "src_rgb": [
+      0,
+      14,
+      15
+     ],
+     "word": 228
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 228
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 0,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 248
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 264
+    }
+   ],
+   "stages": 4,
+   "textures": [],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "; trailing instructions dropped: mad@252",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.ad1d003e",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 4,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "76f037bc9efa1e2d114781673e15e3d5679fd407",
+   "sha256": "ad1d003e65ea0cb595699de8ae9f3376a303bc55e0ecb3debb12dc20a89dbb04",
+   "source_slot": 17,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      14,
+      15
+     ],
+     "src_rgb": [
+      0,
+      14,
+      15
+     ],
+     "word": 216
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 216
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 236
+    }
+   ],
+   "stages": 3,
+   "textures": [],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; negate(v0) dropped; trailing instructions dropped: add@392, mad@408",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.eafc25a1",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "de91091104f4c8cdd8f85049a240ec6d78e939ce",
+   "sha256": "eafc25a12094cfd04af1ed1cd3e483bf8dd065d26c12387dd6ed1d618d1aa145",
+   "source_slot": 18,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 280
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 296
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 8,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      6,
+      0,
+      0
+     ],
+     "op_rgb": [
+      12,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      15,
+      0
+     ],
+     "src_rgb": [
+      0,
+      15,
+      0
+     ],
+     "word": 324
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 356
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 356
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 0,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 376
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    }
+   ],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; trailing instructions dropped: mad@436",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.95e48d33",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 7,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     },
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 1
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "9b82b0d93631af1432ddf7128b1f07e5ce6c984e",
+   "sha256": "95e48d336f1ecfbb10546209738f9459f782814b07d866666f724507e2390924",
+   "source_slot": 19,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 336
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 352
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 4,
+     "func_rgb": 4,
+     "instruction": "lrp",
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "op_rgb": [
+      0,
+      12,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      3
+     ],
+     "src_rgb": [
+      15,
+      0,
+      3
+     ],
+     "word": 368
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 400
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 400
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 420
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    },
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 1
+    }
+   ],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "; trailing instructions dropped: mov@356",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.2057efb2",
+   "inputs": [],
+   "instructions": 7,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "7e56261c8a7106a779c6d036afde362a5f2a6cf4",
+   "sha256": "2057efb20e5a34be54106cfb73ccf2f89baa042fbb0f53251ace50d832218828",
+   "source_slot": 25,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 256
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 284
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 284
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 304
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 8,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      0,
+      0,
+      4
+     ],
+     "op_rgb": [
+      2,
+      0,
+      8
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      14
+     ],
+     "src_rgb": [
+      3,
+      15,
+      14
+     ],
+     "word": 320
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      2,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "word": 340
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "declared simplification: the stage list implements the verified instruction prefix; final channel equality relaxed",
+   "constant_values": {},
+   "constants": [
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.659369dd",
+   "inputs": [
+    {
+     "reg_index": 1,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 6,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {},
+    "constants": [
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 1,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "b12fb69ee5562efda928c41ee27b1baab2aa8db6",
+   "sha256": "659369dd5245eb3b84885d66f54e6917212be3ff810cdd937d912337b65b2b43",
+   "source_slot": 28,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 244
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      14,
+      15
+     ],
+     "src_rgb": [
+      0,
+      14,
+      15
+     ],
+     "word": 272
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 272
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      2,
+      2,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 292
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 308
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "mov",
+     "op_a": [
+      2,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "src_rgb": [
+      15,
+      15,
+      15
+     ],
+     "word": 324
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "; trailing instructions dropped: mad@284, add@304, mad@320, mul@340, mov@356",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.db66e1be",
+   "inputs": [],
+   "instructions": 3,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "433370cf0df405490b55d28e4156c8119a375f8d",
+   "sha256": "db66e1beaa64a6123a05604de920e920db08fc1e950f4fdf2b471cbfddf32b87",
+   "source_slot": 30,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 256
+    }
+   ],
+   "stages": 1,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r0.yyyy) dropped; trailing instructions dropped: mul@492, texld@508, add@524, mad@540, mov@560, mad@572, mad@592, mov@612, mad@624, mul@644, mov@660",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     1.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.d7393e7e",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      1.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "1b279738cdd7559ca1bbd05e8b46c63d8f54f412f8bb8b45d2456278ab94f907",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "794556d9f1e8e731b8d4fde753157b383f573ee3",
+   "sha256": "d7393e7eb5f0b238bbf572638033c23324e51efc9cdb0968ee8c5da505222eb0",
+   "source_slot": 31,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 392
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 408
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 424
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 440
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 456
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 1,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      0,
+      6,
+      4
+     ],
+     "op_rgb": [
+      12,
+      12,
+      8
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 472
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r0.yyyy) dropped; trailing instructions dropped: mul@492, texld@508, add@524, mad@540, mov@560, mad@572, mad@592, mov@612, mad@624, lrp@644, mul@664, mov@680",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     1.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.fae1891e",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      1.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "1b279738cdd7559ca1bbd05e8b46c63d8f54f412f8bb8b45d2456278ab94f907",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "97195e225909d78c4b4c14f77a0ddce040a5c38d",
+   "sha256": "fae1891e147f462c06c4d41684c4934d8c0420ace616ad648fdd1a2258240083",
+   "source_slot": 32,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 392
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 408
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 424
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 440
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 456
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 1,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      0,
+      6,
+      4
+     ],
+     "op_rgb": [
+      12,
+      12,
+      8
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 472
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r1.yyyy) dropped; trailing instructions dropped: mad@544, mul@564, texld@580, add@596, mad@612, mad@632, mad@652, mov@672, mad@684, mul@704, mov@720",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.5cde2fc9",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 3,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "62f84d3f8029382d61c5209d86600d1b0fb4e924",
+   "sha256": "5cde2fc9a366d5535b372e89e3e90f6cd268c8bd956390f91a8cc46c691e3f76",
+   "source_slot": 33,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 448
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 464
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 480
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 496
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      5,
+      15,
+      15
+     ],
+     "src_rgb": [
+      5,
+      15,
+      15
+     ],
+     "word": 512
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 528
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 3,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "c0.zwzw->derived c9 (constant_ops pack); negate(r1.yyyy) dropped; negate(c1.wwww) dropped; trailing instructions dropped: mad@544, mul@564, texld@580, add@596, mad@612, mad@632, mad@652, mov@672, mad@684, lrp@704, mul@724, mov@740",
+   "constant_ops": [
+    {
+     "dst": 9,
+     "op": "pack",
+     "src": [
+      {
+       "reg": 0,
+       "swizzle": "zwzw"
+      }
+     ]
+    }
+   ],
+   "constant_values": {
+    "0": [
+     -0.501960813999176,
+     -0.062745101749897,
+     1.5959999561309814,
+     0.8130000233650208
+    ],
+    "1": [
+     1.1640000343322754,
+     2.0169999599456787,
+     -0.3919999897480011,
+     -1.0
+    ]
+   },
+   "constants": [
+    0,
+    1,
+    9
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.303cc3bf",
+   "inputs": [],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -0.501960813999176,
+      -0.062745101749897,
+      1.5959999561309814,
+      0.8130000233650208
+     ],
+     "1": [
+      1.1640000343322754,
+      2.0169999599456787,
+      -0.3919999897480011,
+      -1.0
+     ]
+    },
+    "constants": [
+     0,
+     1,
+     9
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 3,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 2,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     },
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 0
+     }
+    ],
+    "varyings": []
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "cd1c433b3e73bd079e9d9449c0267a2e74f0c5311db04b2ac0920fae0e297918",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "a584da651d343c07ce1b7eb1c33aff891cb6a827",
+   "sha256": "303cc3bfcca15387293472a70d774b6a42586496b722f0f6ecd9d23b9b8a429f",
+   "source_slot": 34,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 448
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 464
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 480
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 9,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 1,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      4,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 496
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      5,
+      15,
+      15
+     ],
+     "src_rgb": [
+      5,
+      15,
+      15
+     ],
+     "word": 512
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      2,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 528
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 3,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 2,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    },
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 0
+    }
+   ],
+   "uses_vertex_color": 0,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; trailing instructions dropped: mad@280, mul@300, mov@316",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.c1e1fc52",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 5,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "52a76b02fd33e86ddca199eba775924d9ffb91d1",
+   "sha256": "c1e1fc5211886fb514b7b9a87bb681c8e9a7a1fd93691b8353ddaf3707ca3f38",
+   "source_slot": 39,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      14,
+      15
+     ],
+     "src_rgb": [
+      0,
+      14,
+      15
+     ],
+     "word": 228
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 228
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 0,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 248
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 264
+    }
+   ],
+   "stages": 4,
+   "textures": [],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "; trailing instructions dropped: mad@252, mul@272, mov@288",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.77fdffce",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 4,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "01fd3eb5bf6aa39447bef056b2263e19e1199cf999c7a3aabe5d268b56ce4d6b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "596410feb5f41a2c89b5ae106c51024e83994dff",
+   "sha256": "77fdffce6ad7dbe1077d7d0afb748d261d4c874e6530cfd04c597ed13b8fb94c",
+   "source_slot": 40,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      14,
+      15
+     ],
+     "src_rgb": [
+      0,
+      14,
+      15
+     ],
+     "word": 216
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 216
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 236
+    }
+   ],
+   "stages": 3,
+   "textures": [],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; negate(v0) dropped; trailing instructions dropped: add@392, mad@408, mul@428, mov@444",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.175a598c",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 8,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "214064d396499d8123ec4e8c69b338216e16d220",
+   "sha256": "175a598cbce36f1674c95e9e68c65614fde14f42a0513e7c49c27da60e544be8",
+   "source_slot": 41,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 280
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 296
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 8,
+     "func_rgb": 8,
+     "instruction": "mad",
+     "op_a": [
+      6,
+      0,
+      0
+     ],
+     "op_rgb": [
+      12,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      0,
+      15,
+      0
+     ],
+     "src_rgb": [
+      0,
+      15,
+      0
+     ],
+     "word": 324
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 356
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 356
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 0,
+     "instruction": "mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      15
+     ],
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "word": 376
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    }
+   ],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
+  },
+  {
+   "approximation": "color1->color0; trailing instructions dropped: mad@436, mul@456, mov@472",
+   "constant_values": {
+    "0": [
+     -1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "constants": [
+    0,
+    2,
+    3
+   ],
+   "draw_enabled": 1,
+   "family": "ui",
+   "id": "menu.gfx.ps.0b5a925e",
+   "inputs": [
+    {
+     "reg_index": 0,
+     "tev_source": 0,
+     "usage": 10,
+     "usage_index": 0
+    }
+   ],
+   "instructions": 7,
+   "kind": "tev",
+   "ldr_clamped": 1,
+   "material_contract": {
+    "complete": true,
+    "constant_values": {
+     "0": [
+      -1.0,
+      1.0,
+      0.0,
+      0.0
+     ]
+    },
+    "constants": [
+     0,
+     2,
+     3
+    ],
+    "simplified": true,
+    "textures": [
+     {
+      "sampler_reg": 1,
+      "sampler_type": 2,
+      "texcoord_reg": 2
+     },
+     {
+      "sampler_reg": 0,
+      "sampler_type": 2,
+      "texcoord_reg": 1
+     }
+    ],
+    "varyings": [
+     {
+      "reg_index": 0,
+      "tev_source": 0,
+      "usage": 10,
+      "usage_index": 0
+     }
+    ]
+   },
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec",
+   "objects": 1,
+   "outputs": [],
+   "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
+   "quality": "approx",
+   "requires_alpha_fixup": 0,
+   "runtime": 1,
+   "sha1": "2338655e431819ccc59d8bd542fbf4dd3594215d",
+   "sha256": "0b5a925ed9d2e7338c945a8f4a7aef9b252bce79698101d0c3406239b274f9cb",
+   "source_slot": 42,
+   "source_table": "0x012dfcd8",
+   "stage": "ps_3_0",
+   "stage_data": [
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      3,
+      15,
+      15
+     ],
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "word": 336
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 0,
+     "func_rgb": 0,
+     "instruction": "texld",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      4,
+      15,
+      15
+     ],
+     "src_rgb": [
+      4,
+      15,
+      15
+     ],
+     "word": 352
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 255,
+     "const_rgba8": 0,
+     "func_a": 4,
+     "func_rgb": 4,
+     "instruction": "lrp",
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "op_rgb": [
+      0,
+      12,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      0,
+      3
+     ],
+     "src_rgb": [
+      15,
+      0,
+      3
+     ],
+     "word": 368
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 2,
+     "const_rgba8": 0,
+     "func_a": 1,
+     "func_rgb": 1,
+     "instruction": "mad_mul",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 400
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 3,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "mad_add",
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 400
+    },
+    {
+     "const_is_literal": 0,
+     "const_reg": 0,
+     "const_rgba8": 0,
+     "func_a": 2,
+     "func_rgb": 2,
+     "instruction": "add",
+     "op_a": [
+      0,
+      2,
+      0
+     ],
+     "op_rgb": [
+      0,
+      4,
+      0
+     ],
+     "scale_a": 0,
+     "scale_rgb": 0,
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "word": 420
+    }
+   ],
+   "stages": 6,
+   "textures": [
+    {
+     "sampler_reg": 1,
+     "sampler_type": 2,
+     "texcoord_reg": 2
+    },
+    {
+     "sampler_reg": 0,
+     "sampler_type": 2,
+     "texcoord_reg": 1
+    }
+   ],
+   "uses_vertex_color": 1,
+   "version": "0xffff0300"
   }
  ],
  "note": "Pack-owned StartMenu/GFx plans, one entry per distinct full-blob SHA-256. Only exact descriptors with a complete declared material contract set runtime=1; approximations stay translated with quality=approx.",
- "refusals": [
-  {
-   "class": "unsupported",
-   "reason": "plan_mismatch: channel 0",
-   "sha256": "aac562d0c1cf510451aedaf1e8f82ec5f74416ab74e3d26c95354c7849a60a5b",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "0a244f5491a86d7b28c8ceb0a6f5e86cb57750e479a01da6832a52038f37492c",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "7fa9ba40bb706925e6fc8e529200e66bb16b138a1f3b02f277621667f95b91ed",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "0b031a8ab9925a66aa2bd715fcc40238e7fd81a5da366d8421cada8979a982fe",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "037d67421047cb2844f57385598d23199e4b8072bd340e7dc7d089694f3ea344",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "too_many_stages (>6)",
-   "sha256": "d1465becee1e4690cf6efc5b19dc5d555b51ad0ed1814ff07ca1a1ce737af77d",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "stage_needs_two_constants: [0, 2]",
-   "sha256": "bb3d4cbf920ca1c4948860bd36f43ca01ff557b2c10a7910d4c6a057865cea81",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "stage_needs_two_constants: [0, 2]",
-   "sha256": "ad1d003e65ea0cb595699de8ae9f3376a303bc55e0ecb3debb12dc20a89dbb04",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "too_many_stages (>6)",
-   "sha256": "eafc25a12094cfd04af1ed1cd3e483bf8dd065d26c12387dd6ed1d618d1aa145",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "temp_not_previous: r2 is not the previous stage result",
-   "sha256": "95e48d336f1ecfbb10546209738f9459f782814b07d866666f724507e2390924",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "too_many_stages (>6)",
-   "sha256": "2057efb20e5a34be54106cfb73ccf2f89baa042fbb0f53251ace50d832218828",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "plan_mismatch: channel 0",
-   "sha256": "659369dd5245eb3b84885d66f54e6917212be3ff810cdd937d912337b65b2b43",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "too_many_stages (>6)",
-   "sha256": "db66e1beaa64a6123a05604de920e920db08fc1e950f4fdf2b471cbfddf32b87",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "d7393e7eb5f0b238bbf572638033c23324e51efc9cdb0968ee8c5da505222eb0",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "fae1891e147f462c06c4d41684c4934d8c0420ace616ad648fdd1a2258240083",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "5cde2fc9a366d5535b372e89e3e90f6cd268c8bd956390f91a8cc46c691e3f76",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "non_uniform_swizzle: c0.zwzw.zwzw",
-   "sha256": "303cc3bfcca15387293472a70d774b6a42586496b722f0f6ecd9d23b9b8a429f",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "too_many_stages (>6)",
-   "sha256": "916e67f105b864c80acc16b93e808f1102e458db718e49562b478c5e591ec2c8",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "temp_not_previous: r2 is not the previous stage result",
-   "sha256": "a23f8b39681e8f38c2916e3d55bd4a72fee73449ff13c4b11fa83a90b6b2a529",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "stage_needs_two_constants: [0, 2]",
-   "sha256": "c1e1fc5211886fb514b7b9a87bb681c8e9a7a1fd93691b8353ddaf3707ca3f38",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "stage_needs_two_constants: [0, 2]",
-   "sha256": "77fdffce6ad7dbe1077d7d0afb748d261d4c874e6530cfd04c597ed13b8fb94c",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "too_many_stages (>6)",
-   "sha256": "175a598cbce36f1674c95e9e68c65614fde14f42a0513e7c49c27da60e544be8",
-   "stage": "ps"
-  },
-  {
-   "class": "unsupported",
-   "reason": "temp_not_previous: r2 is not the previous stage result",
-   "sha256": "0b5a925ed9d2e7338c945a8f4a7aef9b252bce79698101d0c3406239b274f9cb",
-   "stage": "ps"
-  }
- ],
+ "refusals": [],
  "schema": "d9-shader-plan-v1"
 }

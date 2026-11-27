@@ -302,14 +302,13 @@ change takes (a): `CreatePixelShader` returns `S_OK` with a real
 `has_tev=1` object for every translated plan, but `runtime`/`draw_enabled`
 stay 0 unless the whole stage contract can be produced.
 
-Measured result after this change: **15 of 38 PS have native TEV descriptors and
-14 are draw-enabled/runtime** (11 of those are declared approximations with an
-`approximation` string: `color1`→`color0`, non-uniform swizzle→`xyzw`, `def`
-clamp, or two-constant collapse). 23 PS remain named refusals (8 need a
-per-channel swizzle TEV cannot express, 6 exceed six stages, 4 need two
-constants in one non-mad stage, 3 have a dataflow shape the planner cannot
-serialise, 2 are structural plan mismatches). Nothing is labelled exact unless
-the unchanged IR is reproduced.
+Measured result: **all 38 PS have a pack-side TEV plan; 35 are
+draw-enabled/runtime**, 3 are `passes[]` plans pending the multi-pass runtime
+feature. 8 of the plans carry `constant_ops` derived constants for
+`c0.zwzw`-style swizzles; 26 are declared approximations (`color1`→`color0`,
+dropped source negation, two-constant collapse, derived pack, or a named
+dropped trailing instruction). No plan is labelled exact unless the unchanged
+IR is reproduced.
 
 ## 6. Status matrix
 

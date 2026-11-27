@@ -42,11 +42,11 @@ def main(argv=None):
     runtime = [e for e in entries if e.get("runtime") == 1]
 
     check(catalog.get("schema") == "d9-shader-plan-v1", "catalog schema")
-    check(len(ps) == 15, "fifteen PS full blobs translated")
+    check(len(ps) == 38, "all 38 PS full blobs translated")
     check(len(vs) == 5, "five VS full blobs translated")
     check(len(entries) + len(refusals) == 43, "43 full blobs partition")
-    check(len(refusals) == 23, "23 named PS refusals")
-    check(3 <= len(runtime) <= 20, "3-20 runtime entries")
+    check(len(refusals) == 0, "no PS refusals remain")
+    check(3 <= len(runtime) <= 50, "3-50 runtime entries")
     check(all(e["draw_enabled"] == 1
               and (e["quality"] == "exact" or e.get("approximation"))
               and (e["kind"] == "pica_vs"
