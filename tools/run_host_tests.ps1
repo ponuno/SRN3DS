@@ -92,7 +92,7 @@ try {
 }
 
 $defaultOut = -not $OutDir
-$outDir = if ($OutDir) { $OutDir } else { Join-Path $env:TEMP "srn3ds_host" }
+$outDir = if ($OutDir) { $OutDir } else { Join-Path $env:TEMP ("srn3ds_host_" + $PID) }
 # TEMP/TMP must be absolute: relative paths break the CRT's tmpfile_s in the
 # steam/registry smokes. Resolve a relative -OutDir against the caller's cwd.
 if (-not [System.IO.Path]::IsPathRooted($outDir)) {
@@ -101,7 +101,7 @@ if (-not [System.IO.Path]::IsPathRooted($outDir)) {
 $outDir = [System.IO.Path]::GetFullPath($outDir)
 # A single reusable run directory keeps the tree clean; explicit -OutDir is
 # never wiped unless -CleanOutDir is passed.
-if (($defaultOut -or $CleanOutDir) -and (Test-Path $outDir)) {
+if ($CleanOutDir -and (Test-Path $outDir)) {
     Remove-Item -Recurse -Force $outDir -ErrorAction SilentlyContinue
 }
 $logDir = Join-Path $outDir "logs"
