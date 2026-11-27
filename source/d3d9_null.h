@@ -18,6 +18,9 @@ typedef struct {
     unsigned depth_clears;
     uint32_t last_depth_clear,last_depth_flags;
     unsigned viewport_calls,viewport_w,viewport_h;
+    /* Scissor pushes: the last rectangle in logical surface pixels, whether the
+     * core enabled clipping, and how many times the backend was told. */
+    unsigned scissor_calls,scissor_enable,scissor_rect[4],scissor_surface[2];
     unsigned blits,blit_stretched,blit_linear;
     unsigned long long blit_pixels;
     uint32_t last_blit_filter;

@@ -97,6 +97,14 @@ struct D9Citro {
     double sr_frame_ms;
     uint64_t sr_tick;
     SrVertex *sr_quad;
+    /* PICA scissor.  The GPU rectangle is stored already mapped to window
+     * pixels; scissor_set==0 means GPU_SCISSOR_DISABLE.  C3D_SetViewport (and
+     * therefore C3D_FrameDrawOn) resets PICA scissor to DISABLE, so the state is
+     * re-issued before every draw. */
+    unsigned vp_w, vp_h;          /* last programmed PICA viewport */
+    unsigned fb_w, fb_h;          /* current framebuffer storage dimensions */
+    int scissor_set;
+    unsigned sc_rect[4];          /* left, top, right, bottom in window pixels */
 };
 /* ------------------------------------------------------------------------- */
 /* PICA-SR: internal-resolution rendering + upscale on present               */
@@ -627,12 +635,13 @@ static void sr_present(D9Citro *c){
 static int begin(void *ctx,uint32_t argb){
     D9Citro *c=ctx;if(c->scene||!C3D_FrameBegin(C3D_FRAME_SYNCDRAW))return -1;
     c->scene=1;c->cursor=0;c->cursor_color=0;c->cursor_cube=0;c->cursor_index=0;c->cursor_skin=0;c->active_target=NULL;
-    /* SR: the guest frame is rendered into the scaled target unless a scene
+    c->scissor_set=0;c->vp_w=SR_STORE_W;c->vp_h=SR_STORE_H;c->fb_w=SR_STORE_W;c->fb_h=SR_STORE_H;    /* SR: the guest frame is rendered into the scaled target unless a scene
      * later binds an explicit/retained target.  With SR off this is exactly
      * the old direct path. */
     c->sr_redirect=c->sr_ready?1:0;
     c->sr_draws=0;
     C3D_RenderTarget *screen=screen_rt(c);
+    if(screen){c->fb_w=screen->frameBuf.width;c->fb_h=screen->frameBuf.height;}
     uint32_t rgba=(argb<<8)|(argb>>24);
     C3D_RenderTargetClear(screen,C3D_CLEAR_ALL,rgba,0);
     if(!C3D_FrameDrawOn(screen)){C3D_FrameEnd(0);c->scene=0;return -1;}
@@ -671,7 +680,39 @@ static void orient_clip(D9Citro *c,D9Matrix *m){
     for(unsigned i=0;i<4;++i){r0[i]=-m->m[1][i];r1[i]=-m->m[0][i];}
     for(unsigned i=0;i<4;++i){m->m[0][i]=r0[i];m->m[1][i]=r1[i];}
 }
-static void apply_state(const D9DrawState *s,int has_depth){
+static void apply_state(D9Citro *c,const D9DrawState *s,int has_depth);
+/* Map the core's logical scissor rectangle into PICA window pixels.  The
+ * mapping is the inverse of the exact clip permutation used for this target
+ * (orient_clip for offscreen/retained targets, the rotated screen mapping
+ * otherwise), so it clips precisely the D3D pixels the guest asked to keep. */
+static int set_scissor(void *ctx,int enable,int left,int top,int right,int bottom,
+                       unsigned surface_w,unsigned surface_h){
+    D9Citro *c=ctx;
+    if(!c||!c->scene)return -1;
+    if(!enable){c->scissor_set=0;return 0;}
+    unsigned vw=c->vp_w,vh=c->vp_h;
+    if(!vw||!vh)return -1;
+    unsigned l,t,r,b;
+    if(d9_scissor_window_rect(c->active_target!=NULL,left,top,right,bottom,
+                              vw,vh,surface_w,surface_h,&l,&t,&r,&b))return -1;
+    if(c->fb_w&&r>c->fb_w)r=c->fb_w;
+    if(c->fb_h&&b>c->fb_h)b=c->fb_h;
+    if(r<=l||b<=t){c->scissor_set=0;return -1;}
+    c->sc_rect[0]=l;c->sc_rect[1]=t;c->sc_rect[2]=r;c->sc_rect[3]=b;
+    c->scissor_set=1;
+    return 0;
+}
+/* Re-issue the cached scissor.  Every C3D_SetViewport (including the implicit
+ * one inside C3D_FrameDrawOn) sets PICA scissor to DISABLE, so draw paths call
+ * this immediately before submitting geometry. */
+static void apply_scissor(D9Citro *c){
+    if(!c)return;
+    if(c->scissor_set)
+        C3D_SetScissor(GPU_SCISSOR_NORMAL,c->sc_rect[0],c->sc_rect[1],c->sc_rect[2],c->sc_rect[3]);
+    else
+        C3D_SetScissor(GPU_SCISSOR_DISABLE,0,0,0,0);
+}
+static void apply_state(D9Citro *c,const D9DrawState *s,int has_depth){
     /* Every colour target (screen and retained offscreen) carries the single
      * PICA DEPTH24_STENCIL8 attachment, so depth test/write state always has a
      * real attachment behind it. */
@@ -679,9 +720,11 @@ static void apply_state(const D9DrawState *s,int has_depth){
     C3D_DepthTest(has_depth&&s->z_enable,compare(s->z_func,1),mask);
     C3D_CullFace(s->cull==2?GPU_CULL_BACK_CCW:s->cull==3?GPU_CULL_FRONT_CCW:GPU_CULL_NONE);
     C3D_AlphaTest(s->alpha_test,compare(s->alpha_func,0),s->alpha_ref);
-    GPU_BLENDFACTOR src=s->blend?factor(s->src_blend):GPU_ONE,dst=s->blend?factor(s->dst_blend):GPU_ZERO;
-    GPU_BLENDEQUATION eq=s->blend?(GPU_BLENDEQUATION)(s->blend_op-1):GPU_BLEND_ADD;
-    C3D_AlphaBlend(eq,eq,src,dst,src,dst);
+    unsigned op_rgb,src_rgb,dst_rgb,op_a,src_a,dst_a;
+    d9_resolve_blend(s,&op_rgb,&src_rgb,&dst_rgb,&op_a,&src_a,&dst_a);
+    C3D_AlphaBlend((GPU_BLENDEQUATION)(op_rgb-1),(GPU_BLENDEQUATION)(op_a-1),
+                   factor(src_rgb),factor(dst_rgb),factor(src_a),factor(dst_a));
+    apply_scissor(c);
 }
 static int apply_shader_alpha_test(const D9DrawState *s) {
     if (!s->pixel_shader || !s->pixel_shader->requires_alpha_test) return 0;
@@ -700,7 +743,7 @@ static int draw(void *ctx,const D9Vertex *v,size_t n,const D9Matrix *clip,void *
     D9Matrix mtx=*clip;orient_clip(c,&mtx);
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform,&m);
-    apply_state(state,1);
+    apply_state(c,state,1);
     if(apply_shader_alpha_test(state))return -1;
     if(texture)configure_native_texture(texture,state);
     if(state->pixel_shader){
@@ -772,7 +815,7 @@ static int draw_color_stages(void *ctx,const D9ColorVertex *v,size_t n,const D9M
     D9Matrix mtx=*clip;orient_clip(c,&mtx);
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_color,&m);
-    apply_state(state,1);
+    apply_state(c,state,1);
     if(apply_shader_alpha_test(state))return -1;
     if(texture)configure_native_texture(texture,state);
     d9_pica_citro3d_restore_tev();
@@ -880,7 +923,7 @@ static int draw_cube(void *ctx,const D9ColorVertex *vertices,size_t count,
     D9Matrix mtx=*clip;orient_clip(c,&mtx);
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_cube,&m);
-    apply_state(state,1);
+    apply_state(c,state,1);
     configure_native_cube(native,state);
     d9_pica_citro3d_restore_tev();
     C3D_TexBind(0,&native->tex);
@@ -940,7 +983,7 @@ static int draw_menu_ex(void *ctx,const D9ColorVertex *vertices,size_t count,
     D9Matrix mtx=*clip;orient_clip(c,&mtx);
     C3D_Mtx m;for(unsigned i=0;i<4;++i)m.r[i]=FVec4_New(mtx.m[i][0],mtx.m[i][1],mtx.m[i][2],mtx.m[i][3]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER,c->uniform_color,&m);
-    apply_state(&draw_state,1);
+    apply_state(c,&draw_state,1);
     if(apply_shader_alpha_test(&draw_state))return -1;
     if(texture0)configure_native_texture(texture0,&draw_state);
     if(texture1)configure_native_texture(texture1,&draw_state);
@@ -1156,7 +1199,10 @@ static int target_bind(void *ctx,void *native){
     c->sr_redirect=(!native&&c->sr_ready)?1:0;
     C3D_RenderTarget *target=native?h->target:screen_rt(c);
     if(!target||!C3D_FrameDrawOn(target))return -1;
-    c->active_target=native;return 0;
+    c->active_target=native;
+    c->fb_w=target->frameBuf.width;c->fb_h=target->frameBuf.height;
+    c->scissor_set=0; /* C3D_FrameDrawOn -> C3D_SetViewport disables scissor */
+    return 0;
 }
 static int target_clear(void *ctx,void *native,uint32_t argb){
     D9Citro *c=ctx;NativeTargetHead *t=native;if(!c||!c->scene||!t)return -1;
@@ -1272,9 +1318,11 @@ static int target_viewport(void *ctx,unsigned w,unsigned h){
     if(c->sr_redirect&&c->sr_ready&&!c->active_target){
         sr_active_dims(c);
         C3D_SetViewport(0,0,n3ds_sr_scaled(w,c->sr_pct),n3ds_sr_scaled(h,c->sr_pct));
+        c->vp_w=n3ds_sr_scaled(w,c->sr_pct);c->vp_h=n3ds_sr_scaled(h,c->sr_pct);
         return 0;
     }
     C3D_SetViewport(0,0,w,h);
+    c->vp_w=w;c->vp_h=h;
     return 0;
 }
 /* Bounded native target: the D3D surface stays 1024x1024, but the colour
@@ -1289,6 +1337,7 @@ static int target_viewport_scaled(void *ctx,unsigned logical_w,unsigned logical_
     NativeTargetHead *t=c->active_target;
     if(!t||native_w>t->w||native_h>t->h)return -1;
     C3D_SetViewport(0,0,native_w,native_h);
+    c->vp_w=native_w;c->vp_h=native_h;
     return 0;
 }
 /* StretchRect-class blit.  Only explicit render-target textures can be
@@ -1402,4 +1451,4 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
      * PROJECTION and SHADOW_CUBE only; there is no 3D texture mode, so volume
      * sampling is refused by name and the PICA backend also has no
      * texture_create_volume callback. */
-    NULL,NULL,target_has_depth,target_depth_attach,draw_pica_vs,frame_sync};return &ops;}
+    NULL,NULL,target_has_depth,target_depth_attach,draw_pica_vs,frame_sync,set_scissor};return &ops;}

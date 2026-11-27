@@ -1461,3 +1461,41 @@ synthetic SWF/BSA path (35 checks, no game bytes) and, with
 `SKYRIM_N3DS_REAL_DATA=1`, the real closure above (10 more checks). Both are
 registered in `tools/run_host_tests.ps1`.
 
+
+## 23. Alpha-0 gate, scissor and blend-state parity (2026-11-27)
+
+This pass closed the "menu drew but nothing is visible" state classes that were
+left open by `d084c470`.
+
+**The alpha-0 gate is guest code, not the port.** The early-out at `0xf87d3e`
+(`cmp byte [esp+0xbb],0 ; jbe 0xf87e55`) lives in TESV's 2D rectangle wrapper
+and skips its own `SetRenderState(ALPHABLENDENABLE)`/`DrawPrimitive` when the
+ARGB argument is transparent. No host `Draw*` path looks at a colour alpha:
+`tests/alpha_scissor_smoke.c` submits a `COLOR0` quad whose first vertex alpha
+is 0 and asserts the backend still receives the draw. The two skipped quads per
+frame are the fade/overlay wrapper, so the gate does not explain the missing
+StartMenu mesh; that remains a GFx submission/closure issue.
+
+**Scissor is now real.** `SetScissorRect` + `D3DRS_SCISSORTESTENABLE` program
+`C3D_SetScissor(GPU_SCISSOR_NORMAL,...)` before every PICA draw. The rectangle
+is mapped with `d9_scissor_window_rect()` — the inverse of the same clip
+permutation the vertices use — so it behaves for both the rotated screen target
+and `orient_clip()`-permuted explicit/retained targets, and for the SR scaled
+target. Because every `C3D_SetViewport`/`C3D_FrameDrawOn` resets PICA scissor to
+`DISABLE`, the state is re-issued per draw. A full-surface rectangle pushes
+`DISABLE`; a backend without the stage still records the rectangle and logs one
+named diagnostic. PICA has one axis-aligned window rectangle, so multi-mask GFx
+clip-depth cases stay on the `menu_swf_clip` CPU path.
+
+**Blend/alpha-test state reaches PICA.** Added
+`D3DRS_SEPARATEALPHABLENDENABLE` (206), `SRCBLENDALPHA` (207),
+`DESTBLENDALPHA` (208) and `BLENDOPALPHA` (209), captured in state blocks and
+resolved with D3D9's "replicate RGB for alpha when separate is off" rule
+(`d9_resolve_blend()`). `ALPHATESTENABLE`/`ALPHAFUNC`/`ALPHAREF` map to
+`C3D_AlphaTest` on the final TEV alpha and `COLORWRITEENABLE` maps 1:1 to the
+PICA colour/depth write mask. `tests/alpha_scissor_smoke.c` and the extended
+`tests/state_block_smoke.c` pin the round-trip.
+
+Still open: the actual pixel proof for scissor clipping needs a PICA/Azahar
+frame; the host test proves the window rectangle and containment, not rasterised
+pixels. The StartMenu mesh itself is still not submitted by GFx.

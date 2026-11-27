@@ -162,6 +162,8 @@ static int state_ok(const D9DrawState *st){
         st->alpha_func>=1&&st->alpha_func<=8&&st->alpha_ref<=255&&
         st->src_blend>=1&&st->src_blend<=11&&st->dst_blend>=1&&st->dst_blend<=11&&
         st->blend_op>=1&&st->blend_op<=5&&st->color_write<=15&&
+        st->separate_alpha_blend<=1&&st->src_blend_alpha<=11&&
+        st->dst_blend_alpha<=11&&st->blend_op_alpha<=5&&
         st->address_u>=1&&st->address_u<=3&&st->address_v>=1&&st->address_v<=3&&
         st->address_w<=3&&st->max_anisotropy<=D9_SAMP_MAX_ANISO&&st->srgb==0&&
         st->mag_filter>=1&&st->mag_filter<=2&&st->min_filter>=1&&st->min_filter<=2&&
@@ -533,6 +535,22 @@ static int null_target_viewport_scaled(void *ctx,unsigned logical_w,unsigned log
         return -1;
     return null_target_viewport(ctx,native_w,native_h);
 }
+/* Scissor state is recorded, not rasterised: the host backend has no pixels.
+ * The core has already validated the half-open rectangle; this proves the exact
+ * logical rectangle and surface size reached the backend. */
+static int null_set_scissor(void *ctx,int enable,int left,int top,int right,int bottom,
+                            unsigned surface_w,unsigned surface_h){
+    D9NullStats *s=stats(ctx);
+    if(!surface_w||!surface_h||left<0||top<0||right<=left||bottom<=top||
+       (unsigned)right>surface_w||(unsigned)bottom>surface_h){
+        null_log("SetScissorRect","scissor rectangle is outside the logical surface");return -1;
+    }
+    s->scissor_enable=enable?1u:0u;
+    s->scissor_rect[0]=(unsigned)left;s->scissor_rect[1]=(unsigned)top;
+    s->scissor_rect[2]=(unsigned)right;s->scissor_rect[3]=(unsigned)bottom;
+    s->scissor_surface[0]=surface_w;s->scissor_surface[1]=surface_h;
+    ++s->scissor_calls;return 0;
+}
 static int null_draw_two(void *ctx,const D9ColorVertex *vertices,size_t count,
                          const D9Matrix *clip,void *tex0,const D9DrawState *stage0,
                          void *tex1,const D9DrawState *stage1){
@@ -620,7 +638,7 @@ static const D9Backend backend={null_texture_create,null_texture_upload,null_tex
     null_volume_create,null_volume_upload,null_draw_cube,null_cube_delete,
     null_cube_face_create,null_cube_face_delete,
     null_texture_create_format,null_texture_upload_format,null_draw_menu_indexed,
-    null_draw_volume,NULL,NULL,NULL,null_draw_pica_vs};
+    null_draw_volume,NULL,NULL,NULL,null_draw_pica_vs,NULL,null_set_scissor};
 const D9Backend *d9_null_backend(void){return &backend;}
 void *d9_null_context(void){return &g;}
 const D9NullStats *d9_null_stats(void){return &g;}

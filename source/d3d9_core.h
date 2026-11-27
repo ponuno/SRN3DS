@@ -74,14 +74,19 @@ static inline float d9_sampler_lod_bias(uint32_t bits){
 typedef struct {int left,top,right,bottom;} D9Rect;
 typedef struct {
     unsigned z_enable,z_write,z_func,cull,alpha_test,alpha_func,alpha_ref,blend,src_blend,dst_blend,blend_op,color_write;
+    /* D3DRS_SEPARATEALPHABLENDENABLE(206) and the alpha-specific factors/op
+     * (SRCBLENDALPHA=207, DESTBLENDALPHA=208, BLENDOPALPHA=209).  When
+     * separate_alpha_blend is 0 the RGB factors/op are replicated for alpha,
+     * exactly like D3D9.  Defaults are ONE/ZERO/ADD. */
+    unsigned separate_alpha_blend,src_blend_alpha,dst_blend_alpha,blend_op_alpha;
     /* GFx's standard state block.  These are real D3DSAMPLERSTATETYPE-style
      * ids that used to be D3DERR_INVALIDCALL: FOGENABLE(28),
      * SPECULARENABLE(29), DITHERENABLE(26), CLIPPING(136), LIGHTING(137),
      * the stencil block (52..59) and SCISSORTESTENABLE(174).  The PICA
-     * fixed-function path has no fog/specular/clip-plane stage and the menu
-     * backend has no scissor stage, so the values are stored (GetRenderState
-     * and state blocks round-trip) and a one-shot diagnostic names the
-     * unimplemented effect.  Stencil enable/ops are stored for the depth
+     * fixed-function path has no fog/specular/clip-plane stage.  The scissor
+     * test is pushed to a backend exposing set_scissor; a backend without it
+     * stores the value and names the missing stage once.  Stencil enable/ops
+     * are stored for the depth
      * attachment; the backend's Draw uses them only where PICA exposes the
      * depth test. */
     unsigned fog_enable,specular_enable,dither_enable,clipping,lighting,scissor_test;
@@ -415,6 +420,16 @@ typedef struct {
      * core treats ops.end as the synchronous frame boundary, which is the
      * documented contract of the host/null backend. */
     int (*frame_sync)(void *ctx);
+    /* Optional pixel scissor, appended after frame_sync so every existing
+     * positional initializer keeps its meaning.  enable != 0 clips rasterised
+     * fragments to the half-open rectangle [left,right) x [top,bottom) given in
+     * logical D3D surface pixels (surface_w x surface_h).  The backend maps that
+     * rectangle into its own window space and must re-apply it after any
+     * viewport/framebuffer change.  Return 0, or -1 when the rectangle is empty
+     * or the backend cannot represent it; NULL means this backend has no scissor
+     * stage, and the core records a named diagnostic instead of pretending. */
+    int (*set_scissor)(void *ctx,int enable,int left,int top,int right,int bottom,
+                       unsigned surface_w,unsigned surface_h);
 } D9Backend;
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
@@ -887,5 +902,29 @@ const char *d9_last_draw_diagnostic(const D9Device *d);
 void d9_matrix_identity(D9Matrix *m);
 void d9_matrix_multiply(D9Matrix *out,const D9Matrix *a,const D9Matrix *b);
 void d9_pica_transform(D9Matrix *out,const D9Matrix *world,const D9Matrix *view,const D9Matrix *projection);
+/* Scissor state.  D3D9 keeps the rectangle and the SCISSORTESTENABLE switch
+ * separately; both are pushed to the backend only when the switch is on and
+ * the rectangle does not already cover the whole surface.  Returns D9_OK or a
+ * named D9_UNSUPPORTED when the backend has no scissor stage. */
+int d9_set_scissor(D9Device *d,int left,int top,int right,int bottom);
+int d9_set_scissor_enable(D9Device *d,unsigned enable);
+int d9_scissor_supported(const D9Device *d);
+/* Pure mapping used by PICA backends and the host test.  D3D9 window pixels map
+ * through the same clip permutation the geometry uses: offscreen=1 applies the
+ * orient_clip() permutation used for explicit/retained targets, offscreen=0 the
+ * rotated screen permutation.  vp_w/vp_h are the programmed PICA viewport and
+ * surface_w/h the logical D3D surface.  Outputs are half-open window pixels and
+ * are clamped to the viewport.  Returns 0, or -1 for an empty viewport/rect. */
+int d9_scissor_window_rect(int offscreen,int left,int top,int right,int bottom,
+                           unsigned vp_w,unsigned vp_h,
+                           unsigned surface_w,unsigned surface_h,
+                           unsigned *out_left,unsigned *out_top,
+                           unsigned *out_right,unsigned *out_bottom);
+/* Resolve colour vs alpha blend state, applying D3D9's "replicate RGB when
+ * separate alpha blend is disabled" rule.  Values are D3DBLEND/D3DBLENDOP
+ * enumerants (1..11 and 1..5). */
+void d9_resolve_blend(const D9DrawState *s,unsigned *op_rgb,unsigned *src_rgb,
+                      unsigned *dst_rgb,unsigned *op_alpha,unsigned *src_alpha,
+                      unsigned *dst_alpha);
 /* Convert linear little-endian D3D BGRA into PICA RGBA8 tile order. */
 int d9_swizzle_rgba8(void *dst,size_t dst_bytes,const void *src,size_t pitch,unsigned w,unsigned h,unsigned format);

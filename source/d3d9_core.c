@@ -159,11 +159,17 @@ struct D9Device {
     D9SkinVertex skin_scratch[MAX_DRAW_VERTICES];unsigned skin_scratch_count;
     unsigned cube_faces[MAX_DRAW_VERTICES]; /* per-output-vertex D3D cube face */
     unsigned view_w,view_h;
+    /* D3DRS scissor rectangle in logical surface pixels plus the enable switch
+     * (state.scissor_test, id 174).  Pushed to the backend through
+     * set_scissor whenever either value changes. */
+    int scissor[4];
     char diagnosis[224];
 };
 static int rehydrate_texture(D9Device *d,Texture *t);
 static int rehydrate_cube(D9Device *d,CubeTexture *c);
 static int rehydrate_volume(D9Device *d,VolumeTexture *v);
+static void scissor_surface(const D9Device *d,unsigned *w,unsigned *h);
+static int push_scissor(D9Device *d);
 static int cache_release_guest(void *ctx,void *guest,size_t bytes){(void)ctx;(void)bytes;free(guest);return 0;}
 static int cache_release_gpu(void *ctx,void *gpu,size_t bytes){
     D9Device *d=ctx;(void)bytes;
@@ -278,6 +284,58 @@ void d9_pica_transform(D9Matrix *out,const D9Matrix *w,const D9Matrix *v,const D
     D9Matrix a,b;d9_matrix_multiply(&a,w,v);d9_matrix_multiply(&b,&a,p);
     /* D3D row-vector -> GPU column-vector, rotated top LCD, clip z [0,w] -> [-w,0]. */
     for(unsigned i=0;i<4;++i){out->m[0][i]=b.m[i][1];out->m[1][i]=-b.m[i][0];out->m[2][i]=b.m[i][2]-b.m[i][3];out->m[3][i]=b.m[i][3];}
+}
+/* Map a D3D9 scissor rectangle into PICA window pixels.  This is the inverse of
+ * the same permutation the clip matrices use, so a scissor always clips exactly
+ * the window region the corresponding D3D pixels rasterise to:
+ *   screen (rotated): window_x = vp_w*(1 - y/H), window_y = vp_h*(1 - x/W)
+ *   offscreen:        window_x = vp_w*y/H,       window_y = vp_h*x/W
+ * The rectangle is half-open; the top/left edge is inclusive and the mapped
+ * bottom/right edge is rounded up so no pixel is lost. */
+int d9_scissor_window_rect(int offscreen,int left,int top,int right,int bottom,
+                           unsigned vp_w,unsigned vp_h,
+                           unsigned surface_w,unsigned surface_h,
+                           unsigned *out_left,unsigned *out_top,
+                           unsigned *out_right,unsigned *out_bottom){
+    if(!out_left||!out_top||!out_right||!out_bottom)return -1;
+    if(!vp_w||!vp_h||!surface_w||!surface_h)return -1;
+    if(left<0||top<0||right<=left||bottom<=top)return -1;
+    if((unsigned)right>surface_w||(unsigned)bottom>surface_h)return -1;
+    double x0,x1,y0,y1;
+    if(offscreen){
+        x0=(double)vp_w*(double)top/(double)surface_h;
+        x1=(double)vp_w*(double)bottom/(double)surface_h;
+        y0=(double)vp_h*(double)left/(double)surface_w;
+        y1=(double)vp_h*(double)right/(double)surface_w;
+    }else{
+        x0=(double)vp_w*(1.0-(double)bottom/(double)surface_h);
+        x1=(double)vp_w*(1.0-(double)top/(double)surface_h);
+        y0=(double)vp_h*(1.0-(double)right/(double)surface_w);
+        y1=(double)vp_h*(1.0-(double)left/(double)surface_w);
+    }
+    long l=(long)(x0+0.5),t=(long)(y0+0.5);
+    long r=(long)(x1+0.5),b=(long)(y1+0.5);
+    if(l<0)l=0;if(t<0)t=0;
+    if(r>(long)vp_w)r=(long)vp_w;if(b>(long)vp_h)b=(long)vp_h;
+    if(r<=l||b<=t)return -1;
+    *out_left=(unsigned)l;*out_top=(unsigned)t;
+    *out_right=(unsigned)r;*out_bottom=(unsigned)b;
+    return 0;
+}
+void d9_resolve_blend(const D9DrawState *s,unsigned *op_rgb,unsigned *src_rgb,
+                      unsigned *dst_rgb,unsigned *op_alpha,unsigned *src_alpha,
+                      unsigned *dst_alpha){
+    unsigned op=1,src=2,dst=1; /* D3DBLENDOP_ADD / ONE / ZERO when blending is off */
+    if(s&&s->blend){op=s->blend_op;src=s->src_blend;dst=s->dst_blend;}
+    if(op_rgb)*op_rgb=op;if(src_rgb)*src_rgb=src;if(dst_rgb)*dst_rgb=dst;
+    unsigned aop=op,asrc=src,adst=dst;
+    if(s&&s->blend&&s->separate_alpha_blend&&
+       s->blend_op_alpha>=1&&s->blend_op_alpha<=5&&
+       s->src_blend_alpha>=1&&s->src_blend_alpha<=11&&
+       s->dst_blend_alpha>=1&&s->dst_blend_alpha<=11){
+        aop=s->blend_op_alpha;asrc=s->src_blend_alpha;adst=s->dst_blend_alpha;
+    }
+    if(op_alpha)*op_alpha=aop;if(src_alpha)*src_alpha=asrc;if(dst_alpha)*dst_alpha=adst;
 }
 static void set_diagnosis(D9Device *d,const char *why){if(!d)return;if(!why)why="";snprintf(d->diagnosis,sizeof d->diagnosis,"%s",why);}
 /* --- frame-scoped texture pins -------------------------------------------- */
@@ -407,6 +465,7 @@ int d9_unswizzle_rgba8(void *dst,size_t dst_pitch,const void *src,
 }
 static D9DrawState draw_state_defaults(void){
     return (D9DrawState){.z_enable=1,.z_write=1,.z_func=4,.cull=2,.alpha_func=2,.src_blend=2,.dst_blend=1,.blend_op=1,.color_write=15,
+        .separate_alpha_blend=0,.src_blend_alpha=2,.dst_blend_alpha=1,.blend_op_alpha=1,
         .clipping=1,.lighting=1,
         .stencil_fail=1,.stencil_zfail=1,.stencil_pass=1,.stencil_func=8,
         .stencil_mask=0xffffffffu,.stencil_write_mask=0xffffffffu,
@@ -1930,6 +1989,13 @@ int d9_set_render_target(D9Device *d,D9Handle h){
         if(vrc)return vrc;
     }
     d->target=h;
+    /* D3D9 resets the scissor rectangle to the whole render target when the
+     * device or bound target changes; the enable switch is preserved. */
+    {
+        unsigned sw,sh;scissor_surface(d,&sw,&sh);
+        if(sw&&sh){d->scissor[0]=d->scissor[1]=0;d->scissor[2]=(int)sw;d->scissor[3]=(int)sh;
+            (void)push_scissor(d);}
+    }
     if(t&&t->is_cube_face)cube_face_mark_ready(d,t->cube,t->cube_face,t->cube_level);
     return D9_OK;
 }
@@ -2819,6 +2885,11 @@ static unsigned *render_slot(D9DrawState *s,unsigned id,unsigned *min,unsigned *
     case 22:*min=1;*max=3;return &s->cull;case 23:*min=1;*max=8;return &s->z_func;
     case 24:*max=255;return &s->alpha_ref;case 25:*min=1;*max=8;return &s->alpha_func;
     case 168:*max=15;return &s->color_write;case 171:*min=1;*max=5;return &s->blend_op;
+    /* D3DRS_SEPARATEALPHABLENDENABLE..BLENDOPALPHA. */
+    case 206:return &s->separate_alpha_blend;
+    case 207:case 208:*min=1;*max=11;
+        return id==207?&s->src_blend_alpha:&s->dst_blend_alpha;
+    case 209:*min=1;*max=5;return &s->blend_op_alpha;
     /* Stored-but-inert effect switches from the GFx state block. */
     case 26:return &s->dither_enable;
     case 28:return &s->fog_enable;case 29:return &s->specular_enable;
@@ -3029,6 +3100,7 @@ static int tnl_get_state(const D9Device *d,unsigned id,unsigned *v){
 }
 int d9_set_render_state(D9Device *d,unsigned id,unsigned v){
     if(!d)return D9_INVALID;
+    if(id==174)return d9_set_scissor_enable(d,v);
     if(id==D9_RS_CLIPPLANEENABLE){
         if(v&~0x3Fu){set_diagnosis(d,"only clip planes 0..5 exist");return D9_INVALID;}
         d->clip_plane_enable=v;return D9_OK;
@@ -3049,6 +3121,39 @@ int d9_get_render_state(D9Device *d,unsigned id,unsigned *v){
     }
     unsigned lo,hi,*p=render_slot(&d->state,id,&lo,&hi);
     if(!p)return D9_INVALID;*v=*p;return D9_OK;
+}
+/* Current logical colour surface.  A bound explicit target defines it; the
+ * implicit screen uses the back-buffer dimensions. */
+static void scissor_surface(const D9Device *d,unsigned *w,unsigned *h){
+    *w=*h=0;
+    if(!d)return;
+    Target *t=target((D9Device *)d,d->target);
+    if(t){*w=t->w;*h=t->h;return;}
+    if(d->back_valid){*w=d->back_w;*h=d->back_h;}
+}
+int d9_scissor_supported(const D9Device *d){return d&&d->ops.set_scissor?1:0;}
+static int push_scissor(D9Device *d){
+    if(!d)return D9_INVALID;
+    if(!d->ops.set_scissor)return D9_OK;
+    unsigned sw,sh;scissor_surface(d,&sw,&sh);
+    if(!sw||!sh)return D9_OK;
+    int l=d->scissor[0],t=d->scissor[1],r=d->scissor[2],b=d->scissor[3];
+    /* An unset or stale rectangle is a no-op: COM validates SetScissorRect and
+     * every target change rewrites it to the full surface. */
+    if(l<0||t<0||r<=l||b<=t||(unsigned)r>sw||(unsigned)b>sh)return D9_OK;
+    int enable=d->state.scissor_test&&(l>0||t>0||(unsigned)r<sw||(unsigned)b<sh);
+    return d->ops.set_scissor(d->ctx,enable,l,t,r,b,sw,sh);
+}
+int d9_set_scissor(D9Device *d,int left,int top,int right,int bottom){
+    if(!d)return D9_INVALID;
+    if(left<0||top<0||right<=left||bottom<=top)return D9_INVALID;
+    d->scissor[0]=left;d->scissor[1]=top;d->scissor[2]=right;d->scissor[3]=bottom;
+    return push_scissor(d);
+}
+int d9_set_scissor_enable(D9Device *d,unsigned enable){
+    if(!d||enable>1)return D9_INVALID;
+    d->state.scissor_test=enable;
+    return push_scissor(d);
 }
 int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
     if(!d||d->teardown||d->scene)return D9_INVALID;
@@ -3081,6 +3186,7 @@ int d9_begin_scene_ex(D9Device *d,uint32_t argb,int clear_target){
     {
         int vrc=apply_target_viewport(d,t);
         if(vrc){d->ops.end(d->ctx);d->scene=0;return vrc;}
+        (void)push_scissor(d); /* re-apply the cached rect after the viewport reset */
     }
     if(t&&want_clear&&d->ops.target_clear(d->ctx,t->native,color)){
         d->ops.end(d->ctx);d->scene=0;return D9_BACKEND;

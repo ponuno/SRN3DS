@@ -157,6 +157,66 @@ matters for visibility is issued **after** the alpha gate at `0xf87d3e`
 it ever asks us to blend. That gate is the reason there are zero menu draws
 today (`docs/PORT_LOG.md`, `d084c470`), and it is **not** a host refusal.
 
+### 3.2 Alpha-0 gate: guest-side, no host heuristic
+
+The port never inspects a colour alpha to decide whether to submit a draw. Every
+`Draw*` entry point goes straight from `shader_gate()`/declaration checks to
+`d9_draw_*`; there is no `if (alpha == 0) return` anywhere on the path. The gate
+in `0xf87d3e` above is **TESV's own rectangle wrapper**, which returns before
+calling `SetRenderState(0x1b,..)`/`DrawPrimitive` when its ARGB argument is
+transparent. Disabling that behaviour would mean rewriting guest code, and it
+would not create menu geometry: the two skipped quads per frame are the
+fade/overlay wrapper, not GFx. `tests/alpha_scissor_smoke.c` pins the host
+contract — a `COLOR0` vertex with alpha `0.0` still reaches the backend and the
+draw counter increments.
+
+Consequences that remain: the missing StartMenu mesh is a **GFx submission /
+closure** problem (no `DrawPrimitiveUP`, no menu stream source, `menu_closure`
+unarmed), not a host draw filter.
+
+### 3.3 Scissor (implemented 2026-11-27)
+
+`SetScissorRect` is no longer state-only. `D3DRS_SCISSORTESTENABLE` (174) now
+pushes the rectangle to the backend, and the PICA backend programs
+`C3D_SetScissor(GPU_SCISSOR_NORMAL,...)` before every draw:
+
+* the rectangle is stored in logical D3D surface pixels and mapped with the
+  inverse of the exact clip permutation the geometry uses
+  (`d9_scissor_window_rect()`): rotated-screen mapping for the implicit LCD
+  target, `orient_clip()` mapping for explicit/retained targets;
+* the programmed PICA viewport is the map extent, so the SR scaled target and
+  bounded 512x512 native targets keep the same framing;
+* `C3D_SetViewport`/`C3D_FrameDrawOn` reset PICA scissor to `DISABLE`, so the
+  state is re-issued per draw instead of once per state change;
+* `SetRenderTarget`/device reset restore the D3D9 full-surface rectangle, and a
+  full-surface rectangle is pushed as `DISABLE` (no cost when GFx leaves the
+  scissor test off);
+* a backend without `set_scissor` still records the rectangle and logs one named
+  diagnostic (`this backend has no scissor stage`) instead of claiming clipping.
+
+Limits: PICA scissor is a single axis-aligned window rectangle. GFx clip-depth
+masks that need two or more simultaneous rectangles still go through the
+`menu_swf_clip` CPU path; nested rotated masks remain the named refusal. D3D9
+scissor is undefined outside `[0,surface]`, and so is the implementation.
+
+### 3.4 Blend, alpha test and colour write (PICA mapping)
+
+| D3D9 state | id | PICA |
+|---|---:|---|
+| `ALPHABLENDENABLE` | 27 | `C3D_AlphaBlend` enabled factors |
+| `SRCBLEND`/`DESTBLEND` | 19/20 | `GPU_BLENDFACTOR` 1..11 exactly (ZERO/ONE/SRCCOLOR/INVSRCCOLOR/SRCALPHA/INVSRCALPHA/DSTALPHA/INVDSTALPHA/DSTCOLOR/INVDSTCOLOR/SRCALPHASAT) |
+| `BLENDOP` | 171 | ADD/SUBTRACT/REVSUBTRACT/MIN/MAX (1..5) |
+| `SEPARATEALPHABLENDENABLE` | 206 | selects independent alpha factors |
+| `SRCBLENDALPHA`/`DESTBLENDALPHA` | 207/208 | alpha-side factors; replicated from RGB when 206=0 |
+| `BLENDOPALPHA` | 209 | alpha-side equation |
+| `ALPHATESTENABLE`/`ALPHAFUNC`/`ALPHAREF` | 15/25/24 | `C3D_AlphaTest(enable, GPU_TESTFUNC, ref)` on the final TEV alpha |
+| `COLORWRITEENABLE` | 168 | the 4-bit mask maps 1:1 to `GPU_WRITE_RED|GREEN|BLUE|ALPHA` |
+
+`d9_resolve_blend()` owns the D3D9 replication rule and is host-tested; the
+`texkill` shader alpha test is handled separately by `apply_shader_alpha_test()`
+and refuses a conflicting draw-state alpha test by name.
+
+
 ## 4. Textures GFx asks for
 
 `CreateTexture` is called with the standard 7 arguments; the format immediate

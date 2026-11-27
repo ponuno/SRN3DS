@@ -647,6 +647,7 @@ static void default_viewport(void){
     /* D3D9 resets the scissor rectangle to the whole render target whenever the
      * device or the bound target changes.  The scissor test stays off. */
     g.scissor[0]=g.scissor[1]=0;g.scissor[2]=width;g.scissor[3]=height;
+    if(g.device)(void)d9_set_scissor(g.device,0,0,(int)width,(int)height);
 }
 /* Diagnostic texture-cache caps.  Both default to 0 (unlimited) so eviction
  * stays disabled unless the device route opts in explicitly. */
@@ -1219,11 +1220,14 @@ static void set_scissor_rect(CPU *c){uint32_t p=A(1);
     if(r[0]>=r[2]||r[1]>=r[3]||r[2]>width||r[3]>height){
         d3d_log("SetScissorRect","rectangle must satisfy left < right <= width and top < bottom <= height");
         RET(INVALID,2);}
-    if((r[0]||r[1]||r[2]!=width||r[3]!=height)&&!g.scissor_warned){
+    int want=!(r[0]==0&&r[1]==0&&r[2]==width&&r[3]==height);
+    if(want&&!d9_scissor_supported(g.device)&&!g.scissor_warned){
         g.scissor_warned=1;
-        d3d_log("SetScissorRect","rectangle recorded; the renderer has no scissor stage, so draws are not clipped to it");
+        d3d_log("SetScissorRect","rectangle recorded, but this backend has no scissor stage; "
+                "draws are not clipped to it");
     }
     memcpy(g.scissor,r,sizeof g.scissor);
+    (void)d9_set_scissor(g.device,(int)r[0],(int)r[1],(int)r[2],(int)r[3]);
     trace_detail("left=%lu top=%lu right=%lu bottom=%lu",(unsigned long)r[0],(unsigned long)r[1],
         (unsigned long)r[2],(unsigned long)r[3]);
     RET(OK,2);
@@ -2563,7 +2567,7 @@ static uint32_t state_block_capture(Obj *block){
     unsigned mask=state_block_mask(tmp.type);
     if(!mask)return UNAVAILABLE;
     if(mask&SB_PIXEL){
-        static const unsigned ids[]={7,14,15,27,19,20,22,23,24,25,168,171};
+        static const unsigned ids[]={7,14,15,27,19,20,22,23,24,25,168,171,206,207,208,209};
         for(unsigned i=0;i<sizeof ids/sizeof *ids;++i){
             unsigned v;
             if(d9_get_render_state(g.device,ids[i],&v)){
@@ -2768,6 +2772,8 @@ static uint32_t state_block_apply(Obj *block){
             d3d_fail("Apply","fixed-function state restore failed",INVALID);return INVALID;
         }
         memcpy(g.scissor,sb->scissor,sizeof g.scissor);
+        (void)d9_set_scissor(g.device,(int)sb->scissor[0],(int)sb->scissor[1],
+                             (int)sb->scissor[2],(int)sb->scissor[3]);
     }
     g.last_diagnostic[0]=0;return OK;
 }

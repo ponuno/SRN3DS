@@ -253,6 +253,8 @@ int main(void) {
     const uint32_t full_view[6] = {0,0,400,240,0,0x3f800000u};
 
     set_rs(&demo, 7, 0); set_rs(&demo, 14, 0);
+    /* Separate-alpha blend state is captured and restored like the RGB pair. */
+    set_rs(&demo, 206, 1); set_rs(&demo, 207, 5); set_rs(&demo, 208, 6); set_rs(&demo, 209, 2);
     set_sampler(&demo, 0, 1, 2); set_sampler(&demo, 0, 6, 2);
     set_sampler(&demo, 1, 1, 3); set_sampler(&demo, 1, 6, 2);
     set_tss(&demo, 0, D9_TSS_COLOROP, D9_TOP_MODULATE);
@@ -286,6 +288,7 @@ int main(void) {
     assert(call(&demo, demo.device, 2, NULL, 0) != 0);
 
     set_rs(&demo, 7, 1); set_sampler(&demo, 0, 1, 1);
+    set_rs(&demo, 206, 0); set_rs(&demo, 207, 2); set_rs(&demo, 208, 1); set_rs(&demo, 209, 1);
     set_sampler(&demo, 1, 1, 1);
     set_tss(&demo, 0, D9_TSS_COLOROP, D9_TOP_SELECTARG1);
     set_tss(&demo, 1, D9_TSS_COLOROP, D9_TOP_SELECTARG1);
@@ -298,6 +301,8 @@ int main(void) {
 
     assert(call(&demo, block, 5, NULL, 0) == 0);
     assert(get_rs(&demo, 7) == 0 && get_rs(&demo, 14) == 0);
+    assert(get_rs(&demo, 206) == 1 && get_rs(&demo, 207) == 5 &&
+           get_rs(&demo, 208) == 6 && get_rs(&demo, 209) == 2);
     assert(get_sampler(&demo, 0, 1) == 2 && get_sampler(&demo, 0, 6) == 2);
     assert(get_sampler(&demo, 1, 1) == 3 && get_sampler(&demo, 1, 6) == 2);
     assert(get_tss(&demo, 0, D9_TSS_COLOROP) == D9_TOP_MODULATE);
