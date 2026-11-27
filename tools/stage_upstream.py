@@ -28,6 +28,21 @@ def stage(upstream, out):
                  'void n3ds_movs16(uint32_t dst, uint32_t src);\n'
                  'void n3ds_movs32(uint32_t dst, uint32_t src);\n'
                  'static inline Xmm n3ds_xmm_read(uint32_t addr) { Xmm x; memcpy(&x, n3ds_guest_ptr(addr,16),16); return x; }', 1)
+    # MMX uses an explicit eight-register file in CPU. EMMS empties the modeled
+    # MMX state and x87 tag word; unlike upstream it must not reset x87 TOP.
+    # AOT and IR call this same helper.
+    x86 = change(x86, '/* ---- MMX (64-bit lanes) ---- */',
+                 '/* ---- MMX (64-bit lanes) ---- */\n'
+                 'static inline void mmx_reset(CPU *c) {\n'
+                 '    memset(c->mm, 0, sizeof c->mm);\n'
+                 '    c->fpu_tag = 0;\n'
+                 '}', 1)
+    x86 = change(x86, 'MMX_B(mmx_pavgb, uint8_t, 8, (x + y + 1) >> 1)',
+                 'MMX_B(mmx_pavgb, uint8_t, 8, (x + y + 1) >> 1)\n'
+                 'MMX_B(mmx_pcmpeqd, uint32_t, 2, x == y ? 0xFFFFFFFFu : 0)\n'
+                 'MMX_B(mmx_pcmpgtd, int32_t, 2, x > y ? -1 : 0)\n'
+                 'static inline uint64_t mmx_paddq(uint64_t a, uint64_t b) { return a + b; }\n'
+                 'static inline uint64_t mmx_psubq(uint64_t a, uint64_t b) { return a - b; }', 1)
     pre = (runtime / 'lift_prelude.h').read_text(encoding='utf-8')
     pre = change(pre, '''    if (dst <= src || dst >= src + n * 4) memmove(MEM + dst, MEM + src, (size_t)n * 4);
     else for (uint32_t k = 0; k < n; k++) M32(dst + 4 * k) = M32(src + 4 * k);''',
@@ -68,6 +83,9 @@ def stage(upstream, out):
     # pointer: a lazy commit for the destination can move/free the source page.
     lift = change(lift, 'body = "%s(edi) = %s(esi); esi += %s; edi += %s;" % (M, M, step, step)',
                  'body = "n3ds_movs%d(edi, esi); esi += %s; edi += %s;" % (8 * size, step, step)', 1)
+    # Share MMX state reset and the missing 64-bit integer helpers with IR.
+    lift = change(lift, 'return ["c->top = 0;"]', 'return ["mmx_reset(c);"]', 1)
+    lift = change(lift, '"pmaddwd", "packssdw"):', '"pmaddwd", "packssdw", "paddq", "psubq", "pcmpeqd", "pcmpgtd"):', 1)
     # Only guest-memory atomics, not the native indirect-call pointer cache.
     for old, new, count in [
         ('__atomic_exchange_n(', 'N3DS_EXCHANGE(', 1),

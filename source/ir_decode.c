@@ -349,6 +349,37 @@ static int sse_supported(unsigned op2, unsigned pfx) {
     }
 }
 
+/* MMX shares 0f 60..0f 7f and several integer opcodes with SSE.  The absence
+ * of 66/f2/f3 is architectural, not just a naming detail: those prefixes select
+ * XMM operands and are handled by sse_supported() above. */
+static int mmx_supported(unsigned op2, unsigned modrm) {
+    unsigned mod = modrm >> 6, reg = (modrm >> 3) & 7;
+    switch (op2) {
+    case 0x6e: case 0x6f: case 0x7e: case 0x7f: /* movd/movq */
+    case 0xdb: case 0xdf: case 0xeb: case 0xef: /* pand/pandn/por/pxor */
+    case 0x60: case 0x61: case 0x62: case 0x68: case 0x69: case 0x6a:
+    case 0x63: case 0x67: case 0x6b:             /* unpack/pack */
+    case 0x65: case 0x66: case 0x74: case 0x75: case 0x76:  /* compares */
+    case 0xfc: case 0xfd: case 0xfe: case 0xd4:  /* paddb/w/d/q */
+    case 0xf8: case 0xf9: case 0xfa: case 0xfb:  /* psubb/w/d/q */
+    case 0xed: case 0xd8: case 0xd9:             /* signed/unsigned sub sat */
+    case 0xdc: case 0xdd: case 0xe0: case 0xf5:  /* unsigned add/avg/madd */
+    case 0xd5: case 0xe5:                         /* pmullw/pmulhw */
+    case 0xe7:                                   /* movntq */
+        return 1;
+    case 0x71: case 0x72:
+        return mod == 3 && (reg == 2 || reg == 4 || reg == 6);
+    case 0x73:
+        return mod == 3 && (reg == 2 || reg == 6);
+    case 0xd1: case 0xd2: case 0xd3:
+    case 0xe1: case 0xe2:
+    case 0xf1: case 0xf2: case 0xf3:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* Returns 1 when the instruction is a block terminator. */
 static int decode_one(Dec *d) {
     uint32_t p = d->pos;
@@ -737,6 +768,33 @@ static int decode_one(Dec *d) {
             d->count++;
             return 0;
         }
+        if (pfx == 0 && op2 == 0x77) {           /* emms: no ModRM */
+            in.op = IR_OP_MMX;
+            in.immk = IR_IMM_32;
+            in.imm = (uint32_t)op2 << 24;
+            emit(d, &in);
+            d->pos = p;
+            d->count++;
+            return 0;
+        }
+        if (pfx == 0 && ((op2 >= 0x60 && op2 <= 0x7f) ||
+                         (op2 >= 0xd1 && op2 <= 0xff))) {
+            unsigned modrm = fetch(d, p);
+            if (mmx_supported(op2, modrm)) {
+                ModRM m = read_modrm(d, &p);
+                unsigned imm8 = (op2 == 0x71 || op2 == 0x72 || op2 == 0x73) ?
+                                fetch(d, p++) : 0;
+                in.op = IR_OP_MMX;
+                in.immk = IR_IMM_32;
+                in.size = IR_SIZE_32;
+                in.imm = ((uint32_t)op2 << 24) | ((uint32_t)m.raw << 8) | imm8;
+                if (m.mem) { in.srcm = 1; ins_mem(&in, &m); }
+                emit(d, &in);
+                d->pos = p;
+                d->count++;
+                return 0;
+            }
+        }
         unsigned opsz2 = opsz;
         if (op2 >= 0x40 && op2 <= 0x4f) {
             ModRM m = read_modrm(d, &p);
@@ -755,7 +813,7 @@ static int decode_one(Dec *d) {
             if (m.mem) ins_mem(&in, &m);
             in.op = IR_OP_SETCC_BASE + (op2 & 0xf);
             in.size = IR_SIZE_8; in.dst = m.rm; in.dstm = m.mem;
-        } else if (op2 == 0x1f || op2 == 0x18 || op2 == 0x0d || op2 == 0x77) {
+        } else if (op2 == 0x1f || op2 == 0x18 || op2 == 0x0d) {
             (void)read_modrm(d, &p);
             in.op = IR_OP_NOP;
         } else if (op2 == 0x31) {

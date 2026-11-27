@@ -29,6 +29,12 @@
  *   disp32 word (after the address word, when displacement kind is 2)
  *   imm32 word  (after the address/disp words, when immediate kind is 2)
  *
+ * x87/SSE/MMX use the imm32 word as a descriptor after the address words:
+ *   x87: (primary_op << 8) | modrm           primary_op = 0xd8..0xdf
+ *   SSE: (op2 << 24) | (prefix << 22) | (modrm << 8) | imm8
+ *        prefix: 0 none, 1 0x66, 2 0xf2, 3 0xf3
+ *   MMX: (op2 << 24) | (modrm << 8) | imm8   prefix must be none
+ *
  * A basic block is a header followed by its instruction stream:
  *   struct IrBlockHeader { start, x86_len, ir_bytes, insn_count }
  * The terminator is always the last instruction in the block; branch
@@ -73,6 +79,8 @@ typedef enum {
     IR_OP_STRING = IR_OP_CMOVCC_BASE + 16,
     IR_OP_X87, IR_OP_SSE,
     IR_OP_CPUID, IR_OP_RDTSC, IR_OP_INT3, IR_OP_INT, IR_OP_XLATB,
+    /* Appended: existing predecoded containers keep their opcode numbers. */
+    IR_OP_MMX,
     IR_OP_COUNT
 } IrOp;
 

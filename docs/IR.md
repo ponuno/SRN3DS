@@ -1,9 +1,9 @@
 # IR — compact decoded x86 for the cold tier
 
-Status: **implemented, measured and differentially tested** (2026-11-24).
-This supersedes the design note in `docs/CODEGEN.md` §10 and the sketch in
-`docs/HYBRID_EXECUTION.md` §5. Every number below was produced in this
-workspace by the tools named next to it.
+Status: **implemented, measured and differentially tested** (2026-11-24;
+MMX addendum 2026-11-27). This supersedes the design note in `docs/CODEGEN.md`
+§10 and the sketch in `docs/HYBRID_EXECUTION.md` §5. Every number below was
+produced in this workspace by the tools named next to it.
 
 v2 adds x87 and the high-impact SSE/SSE2 subset; the previous integer-only
 version left 4,555 functions (3.89 M x86 bytes) without an interpreter tier.
@@ -13,13 +13,14 @@ version left 4,555 functions (3.89 M x86 bytes) without an interpreter tier.
 | `source/ir_core.h` | format definition, opcode list, public API |
 | `source/ir_core.c` | exact-entry function table (`n3ds_ir_bind/has/end`) |
 | `source/ir_decode.c` | x86-32 decoder → IR, bounded decode cache |
-| `source/ir_exec.c` | interpreter (integer, x87, SSE/SSE2, MMX rejected) |
+| `source/ir_exec.c` | interpreter (integer, x87, SSE/SSE2, MMX) |
 | `source/n3ds_lift_runtime.c/h` | tier dispatch, invoke, weak IR-table binding |
 | `source/ir_bench_main.c` | ARM11/Azahar AOT-vs-IR microbenchmark |
 | `tools/ir_select.py` | profile → AOT list + manifest + IR table |
 | `tools/ir_measure.py` | real decoder measurement, histograms, ARM size |
 | `tools/ir_validate.py` | partition/manifest validator |
 | `tools/ir_make_fixture.py` | builds the equivalence corpus and AOT fixture |
+| `tools/mmx_audit.py` | discovery-boundary MMX inventory + invalid cross-check |
 | `tests/ir_equiv.c` | differential AOT/IR test |
 | `tests/ir_corpus.h`, `tests/ir_aot_fixture.c` | generated corpus / AOT tier |
 | `tests/ir_partition_test.py` | emitted-table/manifest validation test |
@@ -198,7 +199,12 @@ The interpreter uses the same machine state as AOT:
   lowering (`movss/movsd` upper-half rules, `unpck*`, `shuf*`, scalar vs
   packed arithmetic, `min/max` second-operand-on-NaN, `cmp*` predicate masks,
   `movmsk*`, `cvtt*`/`cvt*`, `ps*` packed integer ops).
-- **Memory** is only `M8/M16/M32`/`n3ds_xmm_read` → `n3ds_guest_ptr`
+- **MMX** uses the explicit `c->mm[0..7]` file and the same `mmx_*` helpers as
+  AOT. `movd` zero-extends 32-bit loads into MMX and truncates stores;
+  `movq` handles register/memory 64-bit moves. `emms` calls the shared
+  `mmx_reset()` (clears modeled MMX state/tag, leaves x87 TOP unchanged).
+  MMX instructions never touch EFLAGS.
+- **Memory** is only `M8/M16/M32/M64`/`n3ds_xmm_read` → `n3ds_guest_ptr`
   (checked). An unmapped access produces exactly
   `Guest fault at XXXXXXXX: unmapped guest memory`.
 - **String ops** reproduce the AOT lowering, including the `rep movsd`
@@ -292,7 +298,7 @@ subset**. The real unsupported-opcode histogram drove the order:
 |---|---:|---:|
 | x87 (`d8–df`) | 4,341 functions / 150,638 insns | implemented |
 | SSE/SSE2 | 714 functions / 61,887 insns | implemented subset |
-| MMX | 0 | still rejected |
+| MMX | 0 | implemented subset; image audit below |
 | "block has no terminator" | 0 | 10 functions (shared cold-block edges) |
 
 The v1 histogram's top x87 forms were `d9/0 fld m32` (44,342), `d9/3 fstp m32`
@@ -314,9 +320,71 @@ Everything else still traps explicitly, never silently:
 Guest fault at 00501637: IR: unsupported opcode push es at 00501637
 ```
 
-Not implemented: MMX (`mm0..mm7`), SSE3/SSSE3/SSE4 beyond the listed ops,
+Not implemented: the remaining MMX forms (`pshufw`, byte signed-saturating
+arithmetic, min/max, `maskmovq`, etc.), SSE3/SSSE3/SSE4 beyond the listed ops,
 AVX, `in/out`, `hlt`, `cli/sti`, far calls/jumps, `iretd`, `enter`, `bound`,
 `arpl`, `daa/das/aaa/aas/aam/aad`, 16-bit addressing, `gs`, `mov to sreg`.
+
+### MMX image audit and implementation (2026-11-27)
+
+`tools/mmx_audit.py` replays discovery block boundaries rather than scanning raw
+bytes, so pointer tables, strings and immediates are not counted as opcodes.
+On the current `functions.json` it decoded 4,098,073 instructions from 626,970
+distinct ranges and found **82 MMX instruction sites: 81 in the Havok region
+`0xd0c5e0..0xfc0c5f`, one outside**.
+
+| Form | Opcode | Havok | Outside | Owning functions |
+|---|---|---:|---:|---|
+| `movq mm,mm` | `0f 7f /r` | 23 | 0 | `de8500`, `de8610`, `de86e0` |
+| `movq mm,m64` | `0f 6f /r` | 22 | 0 | same three |
+| `pcmpgtw mm,mm` | `0f 65 /r` | 10 | 0 | same three |
+| `movq m64,mm` | `0f 7f /r` | 8 | 0 | same three |
+| `paddw mm,mm` | `0f fd /r` | 8 | 0 | same three |
+| `pand mm,mm` | `0f db /r` | 4 | 0 | same three |
+| `emms` | `0f 77` | 3 | 0 | same three |
+| `psubw mm,mm` | `0f f9 /r` | 2 | 0 | `de8500` |
+| `pavgb mm,mm` | `0f e0 /r` | 1 | 0 | `f7e184` |
+| `psrlq mm,mm` | `0f d3 /r` | 0 | 1 | `737569`, `73756e`, `73756f` |
+
+The IR gained one appended `IR_OP_MMX` opcode (existing opcode numbers are
+unchanged) with an `op2/modrm/imm8` descriptor. Decode accepts only the
+no-prefix MMX forms; `66/f2/f3` continue through the SSE paths. Execution uses
+`CPU.mm[]` and the generated AOT's `mmx_*` helpers. Implemented forms are:
+
+- `movd`, `movq`, `movntq`;
+- `pand`, `pandn`, `por`, `pxor`;
+- packed byte/word/dword/qword add/sub, the existing signed/unsigned saturating
+  subset, `pmullw`, `pmulhw`, `pmaddwd`, `pavgb`;
+- low/high unpack, `packsswb`, `packuswb`, `packssdw`, word/dword compares and
+  byte/word/dword equality;
+- immediate and register/memory-count `psll/psrl/psra` for word/dword/qword;
+- `emms`.
+
+Still explicit traps: `pshufw`, signed byte saturating arithmetic, packed
+min/max, `maskmovq` and other unlisted MMX opcodes. MMX↔x87 physical-register
+aliasing/tag faults are not modeled; `emms` deterministically clears the
+modeled MMX file/tag and leaves the modeled x87 TOP/data untouched.
+
+Reproduce the inventory with:
+
+```powershell
+python tools/mmx_audit.py --json build_host/mmx_audit.json \
+  --invalid-csv E:\Skyrim_N3DS_build\ir_container_mmx\tesv_invalid.csv
+```
+
+Differential coverage is the `mmxops` corpus function: four seeded random
+variants in `ir_equiv`, plus the always-on `ir_havok_ext` smoke. It exercises
+all newly requested move/logic/64-bit arithmetic/multiply/pack/shift forms and
+checks complete CPU state (including `mm[]`) and guest writes.
+
+The full container was rebuilt from the current 90,903-function
+`functions.json` at `E:\Skyrim_N3DS_build\ir_container_mmx\tesv.irc`
+(65,688,624 bytes, SHA-256
+`4dd060a502d59716142ecbd9ccb1fc4ef7c0ede67d6a023972a3a3cf61cf0c12`).
+It has 90,110 decoded records and 793 invalid non-MMX records. `0xde8500` is
+`ok` (4 blocks, 101 instructions); all seven MMX-owning functions are decoded,
+and the audit's invalid cross-check is empty. `havok_world` passes with its
+scalar AABB override removed.
 
 **Fallback:** the selection workflow asks the real decoder which profile
 functions v2 cannot decode, then forces exactly those AOT:
@@ -462,9 +530,9 @@ function), then validates the real `hybrid_select_v2` selection. It is part of
 Output (current fixture):
 
 ```
-equiv: 22 AOT functions, IR helper 00501850..00501860
+equiv: 23 AOT functions, IR helper 00501980..00501990
   ok arith / logic / shifts / muldiv / byteops / memops / strings / flags
-  ok loopback / direct / indirect / pilotcall / x87ops / sseops
+  ok loopback / direct / indirect / pilotcall / x87ops / sseops / mmxops
   ok bench / bench87 / bench128          4 inputs each
   ok cmc: clc;stc;cmc agrees (lift.py FLAG_EFFECT["cmc"] fixed)
   ok trap: both tiers: Guest fault at deadbe00: unmapped guest memory
@@ -631,9 +699,9 @@ counters.
 - **Coverage is 25,350/25,360 functions and 99.63 % of the union x86 bytes.**
   The 10 remaining functions fail on a shared-cold-block terminator, not on an
   unimplemented instruction; they are forced AOT at 0.24 MiB.
-- MMX and SSE3/SSSE3/SSE4 operations beyond the listed set still trap
-  explicitly. The histogram showed no MMX use in this slice, but other game
-  code may use it.
+- MMX is implemented for the forms above and for every MMX boundary found by
+  the current full-image discovery audit. Remaining MMX and SSE3/SSSE3/SSE4
+  operations still trap explicitly. The older growth12 slice had no MMX use.
 - Instruction-level throughput is measured on **Azahar**, not hardware. The
   5.24× warm ratio is the useful number until someone runs `ir_bench` on a New
   3DS.

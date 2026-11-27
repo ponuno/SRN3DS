@@ -7,7 +7,8 @@
  * jump tables); all writable Havok globals, TLS, the memory router and the
  * allocator below are synthetic.  No game process, renderer or Win32 shim is
  * started.  The current container has no solver/job-queue harness, so the step
- * diagnostic requires the translation to remain unchanged.
+ * diagnostic requires the translation to remain unchanged.  The retail MMX
+ * AABB helper `0xde8500` runs from the container; no scalar override is used.
  */
 #include "n3ds_lift_runtime.h"
 #include "guest.h"
@@ -152,41 +153,6 @@ static void stub_compact_array(CPU *c) {
     }
     if (guest_write32(&mem, obj + 0x9c, count)) rt_unimpl(c, obj, "compact array count");
     c->r[4] += 4;
-}
-static void stub_clip_aabb(CPU *c) {
-    uint32_t p = arg32(c, 0), count = arg32(c, 1), bounds = arg32(c, 2);
-    uint8_t b[12];
-    if (guest_read(&mem, bounds, b, sizeof b)) rt_unimpl(c, bounds, "AABB bounds");
-    int16_t lo[4] = {(int16_t)(b[0] | (b[1] << 8)) - 1,
-                     (int16_t)(b[2] | (b[3] << 8)) - 1,
-                     (int16_t)(b[0] | (b[1] << 8)) - 1,
-                     (int16_t)(b[2] | (b[3] << 8)) - 1};
-    int16_t hi[4] = {(int16_t)(b[4] | (b[5] << 8)) - 2,
-                     (int16_t)(b[4] | (b[5] << 8)) - 2,
-                     (int16_t)(b[6] | (b[7] << 8)) - 2,
-                     (int16_t)(b[6] | (b[7] << 8)) - 2};
-    int16_t lo2[4] = {(int16_t)(b[0] | (b[1] << 8)) - 1,
-                      (int16_t)(b[2] | (b[3] << 8)) - 1,
-                      (int16_t)(b[0] | (b[1] << 8)) - 1,
-                      (int16_t)(b[2] | (b[3] << 8)) - 1};
-    int16_t hi2[4] = {(int16_t)(b[4] | (b[5] << 8)) - 2,
-                      (int16_t)(b[4] | (b[5] << 8)) - 2,
-                      (int16_t)(b[6] | (b[7] << 8)) - 2,
-                      (int16_t)(b[6] | (b[7] << 8)) - 2};
-    for (uint32_t i = 0; i < count; ++i) {
-        uint8_t a[16];
-        if (guest_read(&mem, p + i * 16u, a, sizeof a)) rt_unimpl(c, p + i * 16u, "AABB entry");
-        for (unsigned k = 0; k < 8; ++k) {
-            int16_t v = (int16_t)(a[2*k] | (a[2*k+1] << 8));
-            int16_t l = k < 4 ? lo[k] : lo2[k-4];
-            int16_t h = k < 4 ? hi[k] : hi2[k-4];
-            v = (int16_t)(v - (v > l) - (v > h));
-            a[2*k] = (uint8_t)v;
-            a[2*k+1] = (uint8_t)((uint16_t)v >> 8);
-        }
-        if (guest_write(&mem, p + i * 16u, a, sizeof a)) rt_unimpl(c, p + i * 16u, "AABB write");
-    }
-    c->r[4] += 16; /* __stdcall(ptr,count,bounds) */
 }
 static void stub_null_indirect(CPU *c) {
     uint32_t caller = 0;
@@ -360,6 +326,43 @@ static float read_float(uint32_t a) {
     return v;
 }
 
+static void put_i16(uint8_t *p, unsigned index, int16_t v) {
+    p[2 * index] = (uint8_t)v;
+    p[2 * index + 1] = (uint8_t)((uint16_t)v >> 8);
+}
+
+/* Execute the retail MMX helper directly before the world objects reuse this
+ * scratch page.  PCMPGTW produces -1 masks, so PADDW/PSUBW adds one per true
+ * comparison; the second qword's final PAND limits adjustment to lanes 0..1. */
+static int test_mmx_aabb(void) {
+    enum { ENTRIES = WORLD + 0x1c00u, BOUNDS = WORLD + 0x1e00u };
+    static const int16_t input[16] = {
+        8, 9, 10, 18, 19, 20, 100, -1,
+        8, 9, 10, 18, 19, 20, 100, -1,
+    };
+    static const int16_t expect[16] = {
+        8, 9, 11, 19, 20, 22, 100, -1,
+        8, 9, 11, 19, 20, 22, 100, -1,
+    };
+    uint8_t bytes[32];
+    for (unsigned k = 0; k < 16; ++k) put_i16(bytes, k, input[k]);
+    if (guest_write(&mem, ENTRIES, bytes, sizeof bytes)) return 1;
+    for (unsigned k = 0; k < 6; ++k) put_i16(bytes, k, (int16_t)(k < 2 ? 10 : 20));
+    if (guest_write(&mem, BOUNDS, bytes, 12)) return 1;
+    uint32_t args[3] = {ENTRIES, 2, BOUNDS}, result = 0;
+    if (call_this(0x00de8500u, 0, args, 3, &result, "mmx aabb clip")) return 1;
+    if (guest_read(&mem, ENTRIES, bytes, sizeof bytes)) return 1;
+    for (unsigned k = 0; k < 16; ++k) {
+        int16_t got = (int16_t)(bytes[2 * k] | (bytes[2 * k + 1] << 8));
+        if (got != expect[k]) {
+            printf("mmx aabb clip: lane %u = %d, expected %d\n", k, got, expect[k]);
+            return 1;
+        }
+    }
+    printf("mmx aabb clip: retail 0xde8500 PASS (2 entries / 16 lanes)\n");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 2 || argc > 3) {
@@ -375,7 +378,6 @@ int main(int argc, char **argv) {
         {0x00d90560u, stub_return_this_1}, /* Havok version diagnostic only */
         {0x00dc97a0u, stub_compact_array}, /* unindexed internal vtable entry */
         {0x00de0340u, stub_ret_zero_3}, /* no collision pairs in this one-body smoke */
-        {0x00de8500u, stub_clip_aabb}, /* container's one reachable MMX gap */
         {0x00f588afu, stub_ret_zero}, /* avoid the CRT's 60-second module wait */
         {0x00f5d79fu, stub_ret_zero}, /* no CRT thread-locale initialization */
         {TLS_GET, stub_tls_get}, {TLS_SET, stub_tls_set},
@@ -390,13 +392,14 @@ int main(int argc, char **argv) {
                 setup_stage, mem.used, mem.count);
         return 2;
     }
-    if (n3ds_lift_set_container_path(argv[1]) || n3ds_lift_bind(&mem, table, 22)) {
+    if (n3ds_lift_set_container_path(argv[1]) || n3ds_lift_bind(&mem, table, 21)) {
         fprintf(stderr, "havok_world_smoke: runtime bind failed: %s\n", n3ds_lift_fault());
         return 2;
     }
     const uint32_t required[] = {
         HK_WORLD_CINFO_CTOR, HK_WORLD_CTOR, HK_SPHERE_CTOR, HK_BODY_CTOR,
         HK_WORLD_ADD, HK_WORLD_STEP_INTERNAL, HK_BODY_GET_XFORM,
+        0x00de8500u, /* retail MMX AABB clipping helper */
     };
     for (unsigned i = 0; i < sizeof required / sizeof required[0]; ++i) {
         if (!n3ds_lift_has_function(required[i])) {
@@ -404,6 +407,7 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
+    if (test_mmx_aabb()) return 1;
 
     uint32_t result = 0;
     if (call_this(HK_WORLD_CINFO_CTOR, HK_DEFAULT_CINFO, NULL, 0, &result,

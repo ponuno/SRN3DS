@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-WORK = Path(r"E:\Skyrim_N3DS_build\irfix")
+WORK = Path(os.environ.get("N3DS_IR_FIXTURE_WORK", r"E:\Skyrim_N3DS_build\irfix"))
 CLANG = Path(r"C:\Program Files\LLVM\bin\clang.exe")
 OBJCOPY = Path(r"c:\devkitPro\msys2\usr\bin\objcopy.exe")
 NM = Path(r"c:\devkitPro\msys2\usr\bin\nm.exe")
@@ -345,6 +345,64 @@ FUNCS = [
     paddusw xmm0, xmm1
     movntps [ecx+112], xmm0
 """),
+    # Every newly wired MMX form, with random register/memory inputs supplied by
+    # ir_equiv's four seeded variants. EMMS follows FLD1 so the differential also
+    # proves it clears modeled MMX state without resetting the x87 TOP pointer.
+    ("mmxops", """
+    mov eax, [edi+0]
+    mov ecx, [edi+16]
+    movq mm0, [ecx]
+    movq mm1, [ecx+8]
+    movq mm2, mm0
+    movq [ecx+32], mm2
+    movq mm3, [ecx+16]
+    movq mm5, [ecx+24]
+    movd mm4, eax
+    movd mm6, [ecx+8]
+    movd edx, mm4
+    movd [ecx+96], mm4
+    movd [ecx+108], mm6
+    paddq mm0, mm3
+    psubq mm1, mm3
+    pmullw mm0, mm1
+    pmulhw mm1, mm0
+    packssdw mm0, mm1
+    pand mm0, mm3
+    por mm1, mm3
+    pxor mm2, mm3
+    pcmpeqd mm0, mm3
+    pcmpgtd mm1, mm3
+    pcmpgtw mm0, mm3
+    paddw mm1, mm3
+    psubw mm2, mm3
+    pavgb mm0, mm1
+    psllw mm0, 3
+    psrlw mm1, 2
+    psraw mm2, 1
+    pslld mm0, 4
+    psrld mm1, 5
+    psrad mm2, 6
+    psllq mm0, 7
+    psrlq mm1, 8
+    psllw mm0, mm5
+    psrlw mm1, mm5
+    psraw mm2, mm5
+    pslld mm0, mm5
+    psrld mm1, mm5
+    psrad mm2, mm5
+    psllq mm0, mm5
+    psrlq mm1, mm5
+    movq [ecx+32], mm0
+    movq [ecx+40], mm1
+    movq [ecx+48], mm2
+    movq [ecx+56], mm3
+    movq [ecx+64], mm4
+    movq [ecx+72], mm5
+    movq [ecx+80], mm6
+    movd [ecx+100], mm0
+    fld1
+    emms
+    """),
     # Long deterministic loops: the ARM benchmark uses these so per-call setup
     # does not hide the tier's throughput.
     ("bench", """

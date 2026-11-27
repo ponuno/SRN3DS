@@ -9,6 +9,8 @@ renderer, or a Win32 process, and it does not modify the IR container.
 `tests/havok_world_smoke.c` successfully executes retail Havok code through the
 predecoded IR container:
 
+0. directly executes the retail MMX AABB clipping helper `0xde8500` on two
+   synthetic entries and checks all 16 result lanes;
 1. constructs the retail static `hkpWorldCinfo` at `0x132b468`;
 2. constructs an `hkpWorld`;
 3. constructs a unit-radius `hkpSphereShape`;
@@ -20,6 +22,8 @@ predecoded IR container:
 Observed output:
 
 ```text
+mmx aabb clip      rc=0 result=02003c20 ip=00000000 last=00de8500 allocs=0
+mmx aabb clip: retail 0xde8500 PASS (2 entries / 16 lanes)
 world cinfo ctor   rc=0 result=0132b468
 world ctor         rc=0 result=02002000
 sphere ctor        rc=0 result=02003100
@@ -39,16 +43,16 @@ present in this harness. The test therefore asserts the exact current result
 
 Inputs used:
 
-- container: `E:\census_ir2\ir_container\tesv.irc`, 64,445,696 bytes,
-  SHA-256 `5f2144412dc63d7e15ba198b76637cf98126e40b9c980361eb99e7afcab40b1c`;
+- container: `E:\Skyrim_N3DS_build\ir_container_mmx\tesv.irc`, 65,688,624 bytes,
+  SHA-256 `4dd060a502d59716142ecbd9ccb1fc4ef7c0ede67d6a023972a3a3cf61cf0c12`;
 - matching PE: `E:\skyr\TESV.exe`, SHA-256
   `d97eb0cc0ceef0923d2234d42b382c0d033853356528b271bc043542b1f5e605`;
 - final host diagnostic binary SHA-256
-  `bc614a06bb67066438b2ffdd8bce995bc7d8000c5df626c772a384cbbcfa0122`;
+  `bd05522184b05098216bfd229e7aa1f0452c96cfaff679ad446ba107bfc7567b`;
 - PE `.text` virtual bytes (`0xc6931a` bytes) SHA-256
   `16b1da4f1b28f96191f8904735d15c32766ff1e40e7881204c0f1b1b139411f1`.
 
-The container has 90,900 indexed functions and 90,027 decoded records. It does
+The container has 90,903 indexed functions and 90,110 decoded records. It does
 not contain `.rdata`/`.data`; code also reads absolute jump tables from `.text`.
 The harness consequently maps the matching PE's `.text`, `.rdata`, and `.data`
 read-only into guest memory. A mismatched PE is not supported.
@@ -116,18 +120,20 @@ function with one stack argument advances guest `ESP` by 8 bytes (return
 address + argument); a cdecl `ret 0` stub advances it by 4. Getting this wrong
 produces convincing but invalid pointer faults deep inside Havok.
 
-## Exact remaining gaps
+## Remaining gaps and resolved MMX item
 
 1. **No solver/job queue.** `0xd52fe0` is only the internal step machinery. The
    integrate/solver/callback pipeline is dispatched through `0xe8d8f0`; relevant
    jobs include integrate motions `0xef7800`, solver `0xef9240`, and callback
    processing `0xef6b80`. A minimal completion needs a real or synthetic
    `hkpJobQueue` and a `hkpPhysicsContext`, not the current no-op context method.
-2. **Reachable MMX record is absent.** Container entry `0xde8500` is invalid:
-   `IR: unsupported opcode mmx/sse at 00de858a` (`0f 6e`, `movq mm0,m64`).
-   The harness supplies a scalar host equivalent for the AABB clipping helper.
-   Adding MMX decode/lift support or indexing an AOT equivalent removes this
-   override.
+2. **MMX record resolved (2026-11-27).** The rebuilt container decodes
+   `0xde8500` as four blocks / 101 IR instructions (index status `ok`), including
+   `0f 6f` at `0xde858a`. `0xde8610`, `0xde86e0`, `0xf7e184`, and the three CRT
+   owners of the outside-Havok `psrlq` site are decoded too. The full-image MMX
+   audit reports zero invalid MMX-owning functions. The scalar `0xde8500`
+   override has been removed; `havok_world` passes against this container with
+   the retail MMX helper in the execution path.
 3. **Unindexed internal vtable entry.** `0xdc97a0` exists in `.text` but has no
    exact container index entry. The harness supplies its null-compaction logic.
    Container discovery must include internal vtable targets or this needs a
@@ -149,7 +155,7 @@ them):
 
 ```powershell
 powershell tools/run_host_tests.ps1 -Only havok_world -SkipPython `
-  -TesvIrc E:\census_ir2\ir_container\tesv.irc `
+  -TesvIrc E:\Skyrim_N3DS_build\ir_container_mmx\tesv.irc `
   -TesvExe E:\skyr\TESV.exe
 ```
 

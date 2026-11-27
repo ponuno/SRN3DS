@@ -170,7 +170,8 @@ def compile_packer(work):
         clang = str(CLANG)
     exe = Path(work) / "ir_container_pack.exe"
     srcs = [str(ROOT / "tests" / "ir_container_pack.c"),
-            str(ROOT / "source" / "ir_decode.c")]
+            str(ROOT / "source" / "ir_decode.c"),
+            str(ROOT / "source" / "ir_core.c")]
     cmd = [clang, "-std=gnu11", "-O2", "-g",
            f"-I{ROOT / 'staged'}", f"-I{ROOT / 'source'}",
            "-fwrapv", "-fno-strict-aliasing",

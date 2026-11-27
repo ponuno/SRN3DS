@@ -6,6 +6,8 @@
  *
  *   x87ops: D9 D8..DF (fstp st(i), capstone's "fstpnce") and DF /6 (fbstp)
  *   sseops: cvtdq2ps, punpckl/hwd, punpckl/hdq, packssdw, paddusw, movntps
+ *   mmxops: movq/movd, paddq/psubq, pmullw/pmulhw, packssdw, logic,
+ *           immediate/variable packed shifts, and emms
  *
  * A decoder gap raises rt_unimpl (non-zero exit); a semantic mismatch prints
  * the differing field.  This test does not need the D3DX pilot fixture.
@@ -62,6 +64,7 @@ static void init_state(CPU *c) {
 static int same_state(const CPU *a, const CPU *b) {
     if (a->r[0] != b->r[0]) { printf("  eax %08x != %08x\n", a->r[0], b->r[0]); return 0; }
     if (memcmp(a->xmm, b->xmm, sizeof a->xmm)) { printf("  xmm differs\n"); return 0; }
+    if (memcmp(a->mm, b->mm, sizeof a->mm)) { printf("  mm differs\n"); return 0; }
     if (memcmp(a->st, b->st, sizeof a->st)) { printf("  x87 stack differs\n"); return 0; }
     if (a->top != b->top) { printf("  x87 top %u != %u\n", a->top, b->top); return 0; }
     if (a->fpu_cw != b->fpu_cw || a->mxcsr != b->mxcsr) { printf("  control words differ\n"); return 0; }
@@ -87,7 +90,7 @@ int main(void) {
     if (n3ds_ir_cache_init(1u << 20)) { printf("cache init failed\n"); return 1; }
 
     int rc = 0;
-    static const char *names[] = {"x87ops", "sseops"};
+    static const char *names[] = {"x87ops", "sseops", "mmxops"};
     for (unsigned n = 0; n < sizeof names / sizeof names[0]; ++n) {
         const IrCorpusFn *fn = find_fn(names[n]);
         const FnEntry *e = fn ? find_aot(fn->addr) : NULL;

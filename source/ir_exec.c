@@ -918,6 +918,115 @@ static void sse_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
 #undef LDM64
 }
 
+/* ---------------------------------------------------------------- MMX */
+
+static void mmx_exec(CPU *c, Flags *f, uint32_t desc, uint32_t ea, int has_mem,
+                     uint32_t block_start) {
+    (void)f;
+    unsigned op2 = (desc >> 24) & 0xffu;
+    unsigned modrm = (desc >> 8) & 0xffu;
+    unsigned imm8 = desc & 0xffu;
+    unsigned reg = (modrm >> 3) & 7, rm = modrm & 7;
+
+    if (op2 == 0x77) { mmx_reset(c); return; }
+    if (op2 == 0x6e) {                         /* movd mm, r/m32 */
+        c->mm[reg] = has_mem ? (uint32_t)M32(ea) : getr(c, rm, IR_SIZE_32);
+        return;
+    }
+    if (op2 == 0x7e) {                         /* movd r/m32, mm */
+        uint32_t v = (uint32_t)c->mm[reg];
+        if (has_mem) { M32(ea) = v; IR_WATCH("ir-mmx-store"); }
+        else setr(c, rm, IR_SIZE_32, v);
+        return;
+    }
+    if (op2 == 0x6f) {                         /* movq mm, mm/m64 */
+        c->mm[reg] = has_mem ? M64(ea) : c->mm[rm];
+        return;
+    }
+    if (op2 == 0x7f || op2 == 0xe7) {          /* movq/movntq m64, mm */
+        if (has_mem) { M64(ea) = c->mm[reg]; IR_WATCH("ir-mmx-store"); }
+        else c->mm[rm] = c->mm[reg];
+        return;
+    }
+
+    if (op2 == 0x71 || op2 == 0x72 || op2 == 0x73) {
+        uint64_t a = c->mm[rm];
+        switch (op2) {
+        case 0x71:
+            c->mm[rm] = reg == 2 ? mmx_psrlw(a, imm8) :
+                        reg == 4 ? mmx_psraw(a, imm8) : mmx_psllw(a, imm8);
+            break;
+        case 0x72:
+            c->mm[rm] = reg == 2 ? mmx_psrld(a, imm8) :
+                        reg == 4 ? mmx_psrad(a, imm8) : mmx_pslld(a, imm8);
+            break;
+        default:
+            c->mm[rm] = reg == 2 ? mmx_psrlq(a, imm8) : mmx_psllq(a, imm8);
+            break;
+        }
+        return;
+    }
+    if (op2 == 0xd1 || op2 == 0xd2 || op2 == 0xd3 ||
+        op2 == 0xe1 || op2 == 0xe2 ||
+        op2 == 0xf1 || op2 == 0xf2 || op2 == 0xf3) {
+        uint64_t a = c->mm[reg];
+        uint64_t n = has_mem ? M64(ea) : c->mm[rm];
+        switch (op2) {
+        case 0xd1: c->mm[reg] = mmx_psrlw(a, n); break;
+        case 0xd2: c->mm[reg] = mmx_psrld(a, n); break;
+        case 0xd3: c->mm[reg] = mmx_psrlq(a, n); break;
+        case 0xe1: c->mm[reg] = mmx_psraw(a, n); break;
+        case 0xe2: c->mm[reg] = mmx_psrad(a, n); break;
+        case 0xf1: c->mm[reg] = mmx_psllw(a, n); break;
+        case 0xf2: c->mm[reg] = mmx_pslld(a, n); break;
+        default:  c->mm[reg] = mmx_psllq(a, n); break;
+        }
+        return;
+    }
+
+    uint64_t a = c->mm[reg];
+    uint64_t b = has_mem ? M64(ea) : c->mm[rm];
+    switch (op2) {
+    case 0xdb: c->mm[reg] = a & b; break;
+    case 0xdf: c->mm[reg] = ~a & b; break;
+    case 0xeb: c->mm[reg] = a | b; break;
+    case 0xef: c->mm[reg] = a ^ b; break;
+    case 0x60: c->mm[reg] = mmx_punpcklbw(a, b); break;
+    case 0x61: c->mm[reg] = mmx_punpcklwd(a, b); break;
+    case 0x62: c->mm[reg] = mmx_punpckldq(a, b); break;
+    case 0x68: c->mm[reg] = mmx_punpckhbw(a, b); break;
+    case 0x69: c->mm[reg] = mmx_punpckhwd(a, b); break;
+    case 0x6a: c->mm[reg] = mmx_punpckhdq(a, b); break;
+    case 0x63: c->mm[reg] = mmx_packsswb(a, b); break;
+    case 0x67: c->mm[reg] = mmx_packuswb(a, b); break;
+    case 0x6b: c->mm[reg] = mmx_packssdw(a, b); break;
+    case 0x65: c->mm[reg] = mmx_pcmpgtw(a, b); break;
+    case 0x66: c->mm[reg] = mmx_pcmpgtd(a, b); break;
+    case 0x74: c->mm[reg] = mmx_pcmpeqb(a, b); break;
+    case 0x75: c->mm[reg] = mmx_pcmpeqw(a, b); break;
+    case 0x76: c->mm[reg] = mmx_pcmpeqd(a, b); break;
+    case 0xfc: c->mm[reg] = mmx_paddb(a, b); break;
+    case 0xfd: c->mm[reg] = mmx_paddw(a, b); break;
+    case 0xfe: c->mm[reg] = mmx_paddd(a, b); break;
+    case 0xd4: c->mm[reg] = mmx_paddq(a, b); break;
+    case 0xf8: c->mm[reg] = mmx_psubb(a, b); break;
+    case 0xf9: c->mm[reg] = mmx_psubw(a, b); break;
+    case 0xfa: c->mm[reg] = mmx_psubd(a, b); break;
+    case 0xfb: c->mm[reg] = mmx_psubq(a, b); break;
+    case 0xed: c->mm[reg] = mmx_paddsw(a, b); break;
+    case 0xd8: c->mm[reg] = mmx_psubusb(a, b); break;
+    case 0xd9: c->mm[reg] = mmx_psubusw(a, b); break;
+    case 0xdc: c->mm[reg] = mmx_paddusb(a, b); break;
+    case 0xdd: c->mm[reg] = mmx_paddusw(a, b); break;
+    case 0xe0: c->mm[reg] = mmx_pavgb(a, b); break;
+    case 0xf5: c->mm[reg] = mmx_pmaddwd(a, b); break;
+    case 0xd5: c->mm[reg] = mmx_pmullw(a, b); break;
+    case 0xe5: c->mm[reg] = mmx_pmulhw(a, b); break;
+    default:
+        rt_unimpl(c, block_start, "IR: unsupported MMX form");
+    }
+}
+
 /* ---------------------------------------------------------------- block */
 
 /* Returns 1 when the guest function returned, 0 when *nextp is the next block
@@ -1446,6 +1555,9 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
             break;
         case IR_OP_SSE:
             sse_exec(c, f, (uint32_t)imm, memea, (int)IR_SRCM(w), b->start);
+            break;
+        case IR_OP_MMX:
+            mmx_exec(c, f, (uint32_t)imm, memea, (int)IR_SRCM(w), b->start);
             break;
         case IR_OP_X87:
             x87_exec(c, f, (uint32_t)imm, memea, (int)IR_SRCM(w), b->start);

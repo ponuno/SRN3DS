@@ -1,7 +1,8 @@
 # Legacy x86 ops — TESV `junk aas` / `junk daa`
 
-Status: **read-only analysis; no implementation change**. Written 2026-11-24
-while the fault-driven TESV slice growth was still running.
+Status: **AAS/DAA analysis is read-only; no AAS/DAA implementation**. The
+2026-11-27 MMX addendum is in §11. Written 2026-11-24 while the fault-driven
+TESV slice growth was still running.
 
 ## 1. Conclusion
 
@@ -408,3 +409,32 @@ Practical impact:
   https://intel.github.io/SDM/sdm.html
 - Independent readable cross-check (unofficial mirror):
   https://www.felixcloutier.com/x86/aas and https://www.felixcloutier.com/x86/daa
+
+## 11. MMX addendum (2026-11-27)
+
+The legacy-opcode conclusions above are unchanged: no valid-boundary AAS/DAA
+was found, and this MMX work does not implement them. The separate Havok AABB
+blocker was MMX, not a legacy decimal instruction.
+
+`tools/mmx_audit.py` replays `functions.json` block boundaries with Capstone.
+The current full image has 82 distinct MMX sites (81 in
+`0xd0c5e0..0xfc0c5f`, one outside). Havok's three clipping helpers
+(`0xde8500`, `0xde8610`, `0xde86e0`) use `movq` load/store/register copies,
+`pcmpgtw`, `paddw`, `psubw`, `pand`, and `emms`; `0xf7e184` adds `pavgb`, and
+one shared CRT site uses `psrlq`. The exact count table and reproduction
+command are in `docs/IR.md` §5.
+
+The IR and staged AOT lifter now share `CPU.mm[]` plus `mmx_*` helpers for MMX
+moves, logic, packed integer arithmetic/multiply/pack/compare and packed
+shifts. `emms` uses `mmx_reset()` in both tiers; it clears modeled MMX state
+and the tag word without resetting x87 TOP. `mmxops` in the self-authored
+fixture differentially tests these forms over four random seeds and through
+`tests/ir_havok_ext_smoke.c`. The rebuilt full container decodes `0xde8500`
+(4 blocks / 101 instructions), all seven MMX-owning functions are `ok`, and the
+invalid-MMX cross-check is empty; `havok_world` passes without the scalar AABB
+override.
+
+Remaining explicit MMX traps include `pshufw`, signed byte saturating
+arithmetic, packed min/max and `maskmovq`. SSE3/SSSE3/SSE4/AVX and the legacy
+AAS/DAA family also remain unsupported. No excluded renderer/BSA/DevCaps/F:
+code was changed.
