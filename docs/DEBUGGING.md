@@ -54,6 +54,16 @@ Other tests keep the single-command clang path. Parallel output is deterministic
 measure wall time for throughput changes rather than assuming single-core is the
 CPU limit.
 
+`tools/scan_unregistered_tests.py` reports test files that `run_host_tests.ps1`
+never registers (`tests/*.c`, `tests/*.py`, `source/shader_packs/*/test_*.py`).
+The table shows both whether the runner mentions a file and, for Python, whether
+it is invoked from `$pyTests` (including conditional `+=` entries). The scan is
+read-only; add `--strict` to exit 1 when anything is unregistered:
+
+```powershell
+.venv\Scripts\python.exe tools/scan_unregistered_tests.py --strict
+```
+
 ## 2. Azahar environment facts
 
 - Installed: `C:\Program Files\Azahar\azahar.exe`, version 2126.2.
