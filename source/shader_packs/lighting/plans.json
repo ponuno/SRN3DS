@@ -38507,7 +38507,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -38749,7 +38749,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -38974,7 +38974,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -39403,7 +39403,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.1e-09, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.1e-09, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -39629,7 +39629,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -39974,7 +39974,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -40265,7 +40265,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -40605,7 +40605,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -40828,7 +40828,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -41123,7 +41123,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -41360,7 +41360,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -41588,7 +41588,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 3.7e-06, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 3.7e-06, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -41841,7 +41841,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -42174,7 +42174,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -42563,7 +42563,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -42944,7 +42944,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.7e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.7e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -43259,7 +43259,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -43573,7 +43573,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -43852,7 +43852,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -44224,7 +44224,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -44620,7 +44620,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -44944,7 +44944,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -45275,7 +45275,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.1e-09, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.1e-09, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -45637,7 +45637,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.4e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.4e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -45810,7 +45810,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -45994,7 +45994,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 3.8e-07, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 3.8e-07, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -46354,7 +46354,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -46701,7 +46701,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -47040,7 +47040,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -47354,7 +47354,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -47721,7 +47721,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -48050,7 +48050,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -48359,7 +48359,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -48606,7 +48606,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -48866,7 +48866,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -49043,7 +49043,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 5.1e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 5.1e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -49350,7 +49350,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -49751,7 +49751,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -50151,7 +50151,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -50518,7 +50518,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -50898,7 +50898,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -51264,7 +51264,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -51616,7 +51616,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -51903,7 +51903,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.0e-08, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.0e-08, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -52096,7 +52096,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.0e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.0e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -52444,7 +52444,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -52813,7 +52813,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -53224,7 +53224,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.1e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.1e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -53509,7 +53509,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -53896,7 +53896,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -54139,7 +54139,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -54607,7 +54607,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -54900,7 +54900,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -55296,7 +55296,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.3e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.3e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -55576,7 +55576,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -55782,7 +55782,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -56098,7 +56098,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -56311,7 +56311,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -56566,7 +56566,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -56771,7 +56771,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -57117,7 +57117,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -57395,7 +57395,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -57633,7 +57633,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -57994,7 +57994,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -58318,7 +58318,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -58573,7 +58573,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -58765,7 +58765,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.8e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.8e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -59075,7 +59075,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -59354,7 +59354,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -59604,7 +59604,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -59992,7 +59992,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -60336,7 +60336,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -60630,7 +60630,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -60992,7 +60992,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -61339,7 +61339,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -61574,7 +61574,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -61845,7 +61845,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -61995,7 +61995,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -62232,7 +62232,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -62588,7 +62588,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -62932,7 +62932,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -63266,7 +63266,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -63508,7 +63508,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -63773,7 +63773,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -64000,7 +64000,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -64306,7 +64306,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -64490,7 +64490,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.3e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.3e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -64713,7 +64713,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -65101,7 +65101,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -65458,7 +65458,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -65854,7 +65854,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.0e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.0e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -66021,7 +66021,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -66333,7 +66333,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -66732,7 +66732,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -67084,7 +67084,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -67474,7 +67474,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -67785,7 +67785,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -67969,7 +67969,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -68225,7 +68225,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.6e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.6e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -68467,7 +68467,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.2e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.2e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -68659,7 +68659,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.3e-09, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.3e-09, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -68900,7 +68900,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.4e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.4e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -69177,7 +69177,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -69473,7 +69473,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -69695,7 +69695,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.3e-09, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.3e-09, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -70131,7 +70131,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -70491,7 +70491,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.6e-10, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.6e-10, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -70754,7 +70754,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -71050,7 +71050,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -71334,7 +71334,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -71957,7 +71957,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -72144,7 +72144,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -72423,7 +72423,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -72750,7 +72750,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -73064,7 +73064,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -73411,7 +73411,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -73649,7 +73649,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -73965,7 +73965,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -74229,7 +74229,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -74385,7 +74385,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -74753,7 +74753,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -75154,7 +75154,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -75319,7 +75319,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.4e-09, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.4e-09, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",
@@ -75686,7 +75686,7 @@
      }
     ]
    },
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: the runtime upload/bind contract only carries skinning and GFx menu programs",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw disabled: only the six runtime-certified lighting representatives are in the PICA VS catalog",
    "preconditions": [
     "exact_hash_descriptor_match",
     "pica_vs_catalog",

@@ -116,9 +116,18 @@ def _tev(sha, note, stage_data, textures, quality="exact",
     if approximation:
         entry["approximation"] = approximation
     if draw:
+        # The curated exact plans are *catalog-only*: no shared runtime slot is
+        # claimed, so draw stays 0 and the note says why.  Keeping this in the
+        # generator prevents a regeneration from resurrecting a draw-enabled
+        # row that has no runtime path.
         entry["preconditions"] = ["exact_hash_descriptor_match",
                                   "one_stage_tev_contract",
                                   "runtime_slot_promotion_pending"]
+        entry["draw_enabled"] = 0
+        entry["runtime"] = 0
+        entry["note"] += (" Catalog-only: draw_enabled=0 because no shared "
+                          "runtime slot is claimed (runtime=0); promotion "
+                          "needs a measured runtime plan.")
     return entry
 
 

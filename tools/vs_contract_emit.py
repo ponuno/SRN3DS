@@ -343,9 +343,9 @@ def emit_contract(pack: str, sha: str, ir: C.IR, package: str,
         },
         "note": (
             "PICA VS emitted and numerically verified against the vs_3_0 IR "
-            "(%d samples, max |dpos| %.1e, picasso pass); draw disabled: the "
-            "runtime upload/bind contract only carries skinning and GFx menu "
-            "programs" % (entry["samples"], entry["max_abs_position"])),
+            "(%d samples, max |dpos| %.1e, picasso pass); draw disabled: only "
+            "the six runtime-certified lighting representatives are in the "
+            "PICA VS catalog" % (entry["samples"], entry["max_abs_position"])),
         "preconditions": ["exact_hash_descriptor_match", "pica_vs_catalog",
                           "runtime_upload_path_pending"],
     })

@@ -860,7 +860,7 @@
    ],
    "instructions": 40,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -1269,7 +1269,7 @@
    ],
    "instructions": 60,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -1765,7 +1765,7 @@
    ],
    "instructions": 64,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -2231,7 +2231,7 @@
    ],
    "instructions": 40,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -2596,7 +2596,7 @@
    ],
    "instructions": 76,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -3032,7 +3032,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -3743,7 +3743,7 @@
    ],
    "instructions": 42,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -4315,7 +4315,7 @@
    ],
    "instructions": 58,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -5299,7 +5299,7 @@
    ],
    "instructions": 55,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -5647,7 +5647,7 @@
    ],
    "instructions": 28,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 6 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 6 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -6334,7 +6334,7 @@
    ],
    "instructions": 59,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -6921,7 +6921,7 @@
    ],
    "instructions": 29,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -7253,7 +7253,7 @@
    ],
    "instructions": 38,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -7622,7 +7622,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -8048,7 +8048,7 @@
    ],
    "instructions": 37,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 14 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 14 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -8833,7 +8833,7 @@
    ],
    "instructions": 57,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -9331,7 +9331,7 @@
    ],
    "instructions": 78,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -10002,7 +10002,7 @@
    ],
    "instructions": 59,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -10468,7 +10468,7 @@
    ],
    "instructions": 38,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -10856,7 +10856,7 @@
    ],
    "instructions": 51,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -11713,7 +11713,7 @@
    ],
    "instructions": 58,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -12392,7 +12392,7 @@
    ],
    "instructions": 65,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -12995,7 +12995,7 @@
    ],
    "instructions": 50,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -13447,7 +13447,7 @@
    ],
    "instructions": 50,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -13968,7 +13968,7 @@
    ],
    "instructions": 76,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.3e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.3e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -15197,7 +15197,7 @@
    ],
    "instructions": 54,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -15590,7 +15590,7 @@
    ],
    "instructions": 44,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.0e-09, max |dvary| 6.3e-09, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.0e-09, max |dvary| 6.3e-09, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -16072,7 +16072,7 @@
    ],
    "instructions": 55,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -16480,7 +16480,7 @@
    ],
    "instructions": 58,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.4e-07, max |dvary| 2.8e-08, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 11 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.4e-07, max |dvary| 2.8e-08, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 11 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -17036,7 +17036,7 @@
    ],
    "instructions": 50,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -17621,7 +17621,7 @@
    ],
    "instructions": 38,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -18200,7 +18200,7 @@
    ],
    "instructions": 55,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -18750,7 +18750,7 @@
    ],
    "instructions": 53,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -19550,7 +19550,7 @@
    ],
    "instructions": 30,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -20050,7 +20050,7 @@
    ],
    "instructions": 89,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -21116,7 +21116,7 @@
    ],
    "instructions": 56,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -21598,7 +21598,7 @@
    ],
    "instructions": 59,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -22142,7 +22142,7 @@
    ],
    "instructions": 75,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.9e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.9e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -22742,7 +22742,7 @@
    ],
    "instructions": 77,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -23223,7 +23223,7 @@
    ],
    "instructions": 65,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -24178,7 +24178,7 @@
    ],
    "instructions": 58,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -24824,7 +24824,7 @@
    ],
    "instructions": 76,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -25218,7 +25218,7 @@
    ],
    "instructions": 27,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -25869,7 +25869,7 @@
    ],
    "instructions": 30,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 10 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 10 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -26731,7 +26731,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -27248,7 +27248,7 @@
    ],
    "instructions": 39,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.4e-17, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.4e-17, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -27860,7 +27860,7 @@
    ],
    "instructions": 61,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -28366,7 +28366,7 @@
    ],
    "instructions": 51,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -28828,7 +28828,7 @@
    ],
    "instructions": 38,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -29281,7 +29281,7 @@
    ],
    "instructions": 71,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -30133,7 +30133,7 @@
    ],
    "instructions": 60,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -30852,7 +30852,7 @@
    ],
    "instructions": 72,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -31364,7 +31364,7 @@
    ],
    "instructions": 55,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.2e-09, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 6.2e-09, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -31728,7 +31728,7 @@
    ],
    "instructions": 38,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -32211,7 +32211,7 @@
    ],
    "instructions": 34,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -32843,7 +32843,7 @@
    ],
    "instructions": 42,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.4e-09, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.4e-09, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -33266,7 +33266,7 @@
    ],
    "instructions": 72,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -33803,7 +33803,7 @@
    ],
    "instructions": 77,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -34512,7 +34512,7 @@
    ],
    "instructions": 60,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -35107,7 +35107,7 @@
    ],
    "instructions": 40,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -35671,7 +35671,7 @@
    ],
    "instructions": 42,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -36032,7 +36032,7 @@
    ],
    "instructions": 44,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -36431,7 +36431,7 @@
    ],
    "instructions": 64,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -36914,7 +36914,7 @@
    ],
    "instructions": 53,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.2e-08, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.2e-08, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -37286,7 +37286,7 @@
    ],
    "instructions": 39,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -38166,7 +38166,7 @@
    ],
    "instructions": 53,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -38726,7 +38726,7 @@
    ],
    "instructions": 36,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -39119,7 +39119,7 @@
    ],
    "instructions": 77,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -39875,7 +39875,7 @@
    ],
    "instructions": 52,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -40650,7 +40650,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -41041,7 +41041,7 @@
    ],
    "instructions": 62,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -41487,7 +41487,7 @@
    ],
    "instructions": 52,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.4e-09, max |dvary| 3.3e-09, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 14 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 9.4e-09, max |dvary| 3.3e-09, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 14 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -42044,7 +42044,7 @@
    ],
    "instructions": 75,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.3e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.3e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -42817,7 +42817,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -43388,7 +43388,7 @@
    ],
    "instructions": 61,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -44131,7 +44131,7 @@
    ],
    "instructions": 28,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -44439,7 +44439,7 @@
    ],
    "instructions": 39,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -44818,7 +44818,7 @@
    ],
    "instructions": 43,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 11 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 11 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -45318,7 +45318,7 @@
    ],
    "instructions": 57,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 2.8e-17, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -45792,7 +45792,7 @@
    ],
    "instructions": 54,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-16, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -46169,7 +46169,7 @@
    ],
    "instructions": 42,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 5 physical output(s), 17 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -46524,7 +46524,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 7 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 7 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -46833,7 +46833,7 @@
    ],
    "instructions": 40,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -47605,7 +47605,7 @@
    ],
    "instructions": 29,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -48498,7 +48498,7 @@
    ],
    "instructions": 60,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -49218,7 +49218,7 @@
    ],
    "instructions": 29,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -49726,7 +49726,7 @@
    ],
    "instructions": 56,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.8e-09, max |dvary| 1.0e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 8.8e-09, max |dvary| 1.0e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -50445,7 +50445,7 @@
    ],
    "instructions": 49,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -50929,7 +50929,7 @@
    ],
    "instructions": 59,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -51434,7 +51434,7 @@
    ],
    "instructions": 58,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 18 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -52029,7 +52029,7 @@
    ],
    "instructions": 39,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -52939,7 +52939,7 @@
    ],
    "instructions": 49,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 5.6e-17, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 5.6e-17, picasso pass, .shbin SHA-256 pinned); 6 physical output(s), 20 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -53742,7 +53742,7 @@
    ],
    "instructions": 71,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 21 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -54346,7 +54346,7 @@
    ],
    "instructions": 44,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.2e-09, max |dvary| 4.1e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 4.2e-09, max |dvary| 4.1e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 9 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -54997,7 +54997,7 @@
    ],
    "instructions": 63,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 22 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 22 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -55538,7 +55538,7 @@
    ],
    "instructions": 74,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.0e-09, max |dvary| 1.4e-12, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 7.0e-09, max |dvary| 1.4e-12, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 23 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -56191,7 +56191,7 @@
    ],
    "instructions": 90,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 22 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 22 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -56850,7 +56850,7 @@
    ],
    "instructions": 53,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -57358,7 +57358,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -57959,7 +57959,7 @@
    ],
    "instructions": 50,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 0.0e+00, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -58418,7 +58418,7 @@
    ],
    "instructions": 43,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.3e-08, max |dvary| 1.2e-08, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 1.3e-08, max |dvary| 1.2e-08, picasso pass, .shbin SHA-256 pinned); 2 physical output(s), 8 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -58765,7 +58765,7 @@
    ],
    "instructions": 77,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.1e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -59281,7 +59281,7 @@
    ],
    "instructions": 78,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 1.2e-09, picasso pass, .shbin SHA-256 pinned); 7 physical output(s), 24 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -59743,7 +59743,7 @@
    ],
    "instructions": 40,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 3 physical output(s), 12 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",
@@ -60104,7 +60104,7 @@
    ],
    "instructions": 41,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, max |dvary| 4.9e-10, picasso pass, .shbin SHA-256 pinned); 4 physical output(s), 13 component(s) packed; draw disabled: not one of the three runtime-certified representatives (f8ffaecd, 20f4db07, 60dbd11a) in d3d9_pica_vs_table.inc",
    "outputs": [
     {
      "physical": "outpos",

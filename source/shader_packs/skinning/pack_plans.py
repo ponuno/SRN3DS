@@ -208,6 +208,11 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
                 % (emitted["samples"], emitted["max_abs_position"],
                    emitted["max_abs_varying"], len(plan["outputs"]),
                    len(packing.get("components", []))))
+            if entry["draw_enabled"] != 1:
+                entry["note"] += (
+                    "; draw disabled: not one of the three runtime-certified "
+                    "representatives (f8ffaecd, 20f4db07, 60dbd11a) in "
+                    "d3d9_pica_vs_table.inc")
             entry["preconditions"] = [
                 "blend_weight_blend_index_inputs",
                 "bone_palette_window_%d" % emitted["bones"],

@@ -1,0 +1,207 @@
+{
+  "schema": "world-runtime-audit/1",
+  "packs": [
+    {
+      "pack": "terrain",
+      "pack_plans": 138,
+      "joined_plans": 138,
+      "cross_pack_plans": [],
+      "census_hashes": 247,
+      "draw_enabled": 0,
+      "runtime_paths": 0,
+      "catalog_only": 0,
+      "unmatched": [],
+      "by_kind": {
+        "tev": 138
+      }
+    },
+    {
+      "pack": "lighting",
+      "pack_plans": 235,
+      "joined_plans": 237,
+      "cross_pack_plans": [
+        {
+          "id": "game.ps.f5239354",
+          "sha256": "f5239354171a6bc8166e1bfc59a0f46b90a3f0bc37b936f0b33ff6b91e9cc9ce",
+          "draw_enabled": 0
+        },
+        {
+          "id": "menu.logo.ps",
+          "sha256": "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9",
+          "draw_enabled": 0
+        }
+      ],
+      "census_hashes": 4991,
+      "draw_enabled": 6,
+      "runtime_paths": 6,
+      "catalog_only": 0,
+      "unmatched": [],
+      "by_kind": {
+        "tev": 107,
+        "pica_vs": 130
+      }
+    },
+    {
+      "pack": "skinning",
+      "pack_plans": 202,
+      "joined_plans": 202,
+      "cross_pack_plans": [],
+      "census_hashes": 1194,
+      "draw_enabled": 3,
+      "runtime_paths": 3,
+      "catalog_only": 0,
+      "unmatched": [],
+      "by_kind": {
+        "tev": 94,
+        "pica_vs": 108
+      }
+    },
+    {
+      "pack": "sky_water",
+      "pack_plans": 45,
+      "joined_plans": 45,
+      "cross_pack_plans": [],
+      "census_hashes": 45,
+      "draw_enabled": 0,
+      "runtime_paths": 0,
+      "catalog_only": 0,
+      "unmatched": [],
+      "by_kind": {
+        "tev": 45
+      }
+    },
+    {
+      "pack": "blit_post",
+      "pack_plans": 67,
+      "joined_plans": 69,
+      "cross_pack_plans": [
+        {
+          "id": "game.vs.0ccc7542",
+          "sha256": "0ccc7542aa06b2e20a41283acc2d5473602fc03f5495cc95166ec3b01820d2f7",
+          "draw_enabled": 0
+        },
+        {
+          "id": "menu.composite.ps",
+          "sha256": "6022044ef19e4b1c241482207acca5a6be484081e629b6d72cdefdd9568a45de",
+          "draw_enabled": 1
+        }
+      ],
+      "census_hashes": 69,
+      "draw_enabled": 1,
+      "runtime_paths": 1,
+      "catalog_only": 0,
+      "unmatched": [],
+      "by_kind": {
+        "pica_vs": 9,
+        "tev": 60
+      }
+    }
+  ],
+  "totals": {
+    "plans": 691,
+    "draw_enabled": 10,
+    "runtime_paths": 10,
+    "catalog_only": 0,
+    "unmatched": 0,
+    "invalid": 0,
+    "silent_off": 0
+  },
+  "top_world_shaders": [
+    {
+      "sha256": "c7ef0cd44146251737cf27b21bf2909f74c54d7fbf297ca681d53dc02458485f",
+      "pack": "blit_post",
+      "kind": "vs",
+      "chunks": 38,
+      "class": "pica_vs",
+      "status": "catalog-only",
+      "plan": "blit.vs.c7ef0cd4"
+    },
+    {
+      "sha256": "b3a9babe7949ac6f984060bae6edb5eb0898e6bc40474e60d1555d5d420852d6",
+      "pack": "lighting",
+      "kind": "vs",
+      "chunks": 16,
+      "class": "pica_vs",
+      "status": "catalog-only",
+      "plan": "lit.vs.b3a9babe"
+    },
+    {
+      "sha256": "06aa117c677959b69519e7586a272899ad635850cd1b2295c79d7c65dad44afc",
+      "pack": "skinning",
+      "kind": "ps",
+      "chunks": 16,
+      "class": "unsupported_opcode",
+      "status": "refused:unsupported_opcode",
+      "plan": null
+    },
+    {
+      "sha256": "14db34d71a4bc63f648f332d2975af354e273b403d60eb7a6d1091b23ab80887",
+      "pack": "skinning",
+      "kind": "ps",
+      "chunks": 16,
+      "class": "unsupported_opcode",
+      "status": "refused:unsupported_opcode",
+      "plan": null
+    },
+    {
+      "sha256": "8513aaac88efadcd52639d9b1b87692f1242e6d21d7f4383f7133762e104d3a6",
+      "pack": "skinning",
+      "kind": "vs",
+      "chunks": 16,
+      "class": "pica_vs",
+      "status": "catalog-only",
+      "plan": "skin.vs.8513aaac"
+    },
+    {
+      "sha256": "31d368cecad5b4d215c4c1fe1580d9ab0606e09af4ee3d2fa4ce8c4fcae9359f",
+      "pack": "blit_post",
+      "kind": "vs",
+      "chunks": 10,
+      "class": "pica_vs",
+      "status": "catalog-only",
+      "plan": "blit.vs.31d368ce"
+    },
+    {
+      "sha256": "53fe44bbf0df41698bfa5c6b56a4143cbe4e26dfdb8403d24ce6456370d110d9",
+      "pack": "lighting",
+      "kind": "ps",
+      "chunks": 10,
+      "class": "def_literal_out_of_range",
+      "status": "refused:def_literal_out_of_range",
+      "plan": null
+    },
+    {
+      "sha256": "5c6bfb974a97c77c6f4d94be27e1e1063ca68340fc38ecd4bdc522bca94d4a51",
+      "pack": "lighting",
+      "kind": "ps",
+      "chunks": 10,
+      "class": "def_literal_out_of_range",
+      "status": "catalog-only",
+      "plan": "lighting.approx.5c6bfb97"
+    },
+    {
+      "sha256": "6b95db62925cd2db98afcffee95d6e5157a0121e47c30ced38d7bfe332237a07",
+      "pack": "lighting",
+      "kind": "ps",
+      "chunks": 10,
+      "class": "def_literal_out_of_range",
+      "status": "refused:def_literal_out_of_range",
+      "plan": null
+    },
+    {
+      "sha256": "997083d1e3f0e092ef0f6af7ff8ea3c4791092e8097730e20b84d98ce99e6755",
+      "pack": "lighting",
+      "kind": "ps",
+      "chunks": 10,
+      "class": "def_literal_out_of_range",
+      "status": "refused:def_literal_out_of_range",
+      "plan": null
+    }
+  ],
+  "unmatched": [],
+  "invalid": [],
+  "silent_off": [],
+  "manifest_mismatches": [],
+  "coverage_mismatches": [],
+  "ok": true
+}
