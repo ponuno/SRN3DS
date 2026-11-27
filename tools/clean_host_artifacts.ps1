@@ -12,10 +12,14 @@ param(
 
 $freed = 0
 $removed = 0
+# Never touch directories that hold regenerated inputs rather than run output.
+$keep = @('host_sm3')
 foreach ($root in $Roots) {
     if (-not (Test-Path $root)) { continue }
     Get-ChildItem $root -Directory -Filter 'host_*' -ErrorAction SilentlyContinue |
         ForEach-Object {
+            if ($keep -contains $_.Name) { return }
+            if (Test-Path (Join-Path $_.FullName '.keep')) { return }
             $bytes = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
                       Measure-Object Length -Sum).Sum
             if ($WhatIfOnly) {
