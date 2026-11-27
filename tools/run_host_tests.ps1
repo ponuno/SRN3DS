@@ -481,6 +481,16 @@ Add-Test "renderer_requirements" $common @("source/d3d9_renderer_requirements.c"
 Add-Test "menu_bsa" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/guest.c", "source/guest_heap.c", "tests/menu_bsa_smoke.c") @()
 Add-Test "stream_range" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_range_smoke.c") @()
 Add-Test "stream_queue" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_queue_smoke.c") @()
+# Cell trigger: synthetic guest tuple + 2-cell index (P0, latch, trim, demand).
+Add-Test "stream_cell" $common @("source/bsa_reader.c", "source/asset_stream.c", "source/stream_cell.c", "source/guest.c", "tests/stream_cell_smoke.c") @()
+# Optional real-index Riverwood check; skips at run time unless STREAM_INDEX_REAL
+# is set.  It links the generated stage headers like win32_bsa_overlay, so a
+# source-only worktree simply does not register it.
+if (Test-Path (Join-Path $root "staged/rt_table.h")) {
+    Add-Test "stream_cell_real" $liftCommon ($legacySources + @("source/asset_stream.c", "source/stream_cell.c", "tests/stream_cell_real_smoke.c")) @()
+} else {
+    Write-Log "stream_cell_real: staged/rt_table.h is absent; real-index overlay test not registered"
+}
 Add-Test "menu_swf" $common @("source/bsa_reader.c", "source/menu_swf.c", "tests/menu_swf_smoke.c") @()
 Add-Test "menu_swf_avm" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_avm.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "tests/menu_swf_avm_smoke.c") @()
 Add-Test "menu_swf_display" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "tests/menu_swf_display_smoke.c") @()
@@ -710,7 +720,7 @@ foreach ($name in $tests.Keys) {
 }
 
 Write-Log "PYTHON tests"
-$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/menu_swf_probe_test.py", "tests/shader_plan_merge_test.py", "tests/shader_plan_extensions_test.py", "tests/deploy_device_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py", "tests/sm3_asm_gaps_test.py")
+$pyTests = @("tools/check_shim_bases.py", "tests/hotpatch_resolver_test.py", "tests/import_bindings_test.py", "tests/slice_pe_test.py", "tests/skyrim_assets_test.py", "tests/texture_pipeline_test.py", "tests/ir_partition_test.py", "tests/ir_select_rank_test.py", "tests/ir_container_test.py", "tests/menu_harness_test.py", "tests/menu_shader_usage_test.py", "tests/menu_swf_probe_test.py", "tests/shader_plan_merge_test.py", "tests/shader_plan_extensions_test.py", "tests/deploy_device_test.py", "tests/stream_index_build_test.py", "source/shader_packs/skinning/test_pack.py", "source/shader_packs/terrain/test_terrain_classes.py", "source/shader_packs/lighting/test_lighting_plans.py", "tests/sm3_phase1_test.py", "tests/sm3_asm_gaps_test.py")
 if ($SkipPython) {
     $pyTests = @()
 } else {

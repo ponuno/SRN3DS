@@ -22,6 +22,15 @@ static void capture_present_event(void);
 #include <string.h>
 /* Host-only hang watchdog (win32_thread.c); no-op unless enabled by env. */
 void n3ds_hang_watchdog_arm(void);
+/* Optional cell-prefetch trigger (stream_cell.c).  Present is the only host
+ * call the guest makes exactly once per gameplay frame, so it runs the cell
+ * poll here; the symbol is weak so tests that do not link stream_cell.c and
+ * builds with N3DS_STREAM unset keep the old behaviour. */
+#if defined(__GNUC__)
+__attribute__((weak)) void stream_host_frame_tick(GuestMemory *mem);
+#else
+void stream_host_frame_tick(GuestMemory *mem);
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -2075,6 +2084,9 @@ static uint32_t present_common(CPU *c){
     }
 #endif
     collect();
+    /* The guest frame pump (0x69cbd0) runs entirely lifted code; Present is the
+     * last host call of that frame, so poll the cell tuple here. */
+    if(stream_host_frame_tick)stream_host_frame_tick(g.mem);
     return hr(rc);
 }
 static void present(CPU *c){if(!obj(A(0),DEVICE))RET(INVALID,5);RET(present_common(c),5);}

@@ -2261,6 +2261,14 @@ static void s_CreateFileA(CPU *c){
     { static unsigned n; if(n<60u){++n;fprintf(stderr,"[file] A %s\n",name);} }
     create_file(c,name);
 }
+/* asset_stream demand hook (stream_cell.c): serve an already-staged range from
+ * RAM and keep the overlay read from issuing the same bytes twice.  Weak so
+ * host tests that link only win32_shims.c keep their old behaviour. */
+#if defined(__GNUC__)
+__attribute__((weak)) int stream_host_note_read(const char *host_path,uint32_t rel,void *dst,uint32_t n,uint32_t *out_len);
+#else
+int stream_host_note_read(const char *host_path,uint32_t rel,void *dst,uint32_t n,uint32_t *out_len);
+#endif
 static void s_ReadFile(CPU *c){
     uint32_t h=A(0);FILE *f=file_for(h);OvFile *vf=vfile_for(h);uint32_t n=A(2),bytes=A(3);
     if(!f && !vf)FAIL(ERR_INVALID_HANDLE,0,5);
@@ -2268,7 +2276,14 @@ static void s_ReadFile(CPU *c){
     if(A(4) || !bytes || !guest_ptr(mem,bytes,4) || (n&&!guest_ptr(mem,A(1),n)))FAIL(ERR_INVALID_PARAMETER,0,5);
     M32(bytes)=0;
     if(vf){
-        int got=ov_file_read(vf,guest_ptr(mem,A(1),n),n);
+        void *dst=guest_ptr(mem,A(1),n);uint32_t staged=0;
+        if(stream_host_note_read && vf->pos<0x100000000ull &&
+           stream_host_note_read(file_path[h-0x100],(uint32_t)vf->pos,dst,n,&staged)){
+            vf->pos+=staged;M32(bytes)=staged;
+            if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] stream read %lu bytes -> %u\n",(unsigned long)n,staged);}}
+            set_error(c,0);RET(1,5);
+        }
+        int got=ov_file_read(vf,dst,n);
         if(got<0)FAIL(ERR_READ_FAULT,0,5);
         M32(bytes)=(uint32_t)got;
         if(n>=65536u){static unsigned io;if(io<80u){++io;fprintf(stderr,"[io] bsa read %lu bytes -> %d\n",(unsigned long)n,got);}}

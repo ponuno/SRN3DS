@@ -256,6 +256,40 @@ static StreamStatus fill_resource(const StreamIndex *index, uint32_t i,
     return STREAM_OK;
 }
 
+static StreamCellKey cell_key_read(const uint8_t *p) {
+    StreamCellKey key;
+    key.kind = le32(p + 0);
+    key.form_id = le32(p + 4);
+    key.grid_x = (int32_t)le32(p + 8);
+    key.grid_y = (int32_t)le32(p + 12);
+    key.worldspace_form_id = le32(p + 16);
+    key.reserved = le32(p + 20);
+    return key;
+}
+
+static int cell_key_compare(const StreamCellKey *a, const StreamCellKey *b) {
+    if (a->kind != b->kind) return a->kind < b->kind ? -1 : 1;
+    if (a->form_id != b->form_id) return a->form_id < b->form_id ? -1 : 1;
+    if (a->grid_x != b->grid_x) return a->grid_x < b->grid_x ? -1 : 1;
+    if (a->grid_y != b->grid_y) return a->grid_y < b->grid_y ? -1 : 1;
+    if (a->worldspace_form_id != b->worldspace_form_id)
+        return a->worldspace_form_id < b->worldspace_form_id ? -1 : 1;
+    return 0;
+}
+
+static StreamStatus fill_cell_row(const StreamIndex *index, uint32_t i,
+                                  StreamCellRow *out) {
+    const uint8_t *p = index->blob + index->cell_off +
+                       (size_t)i * STREAM_INDEX_CELL_ENTRY_SIZE;
+    memset(out, 0, sizeof *out);
+    out->key = cell_key_read(p);
+    out->resource_count = le32(p + 24);
+    out->flags = le32(p + 28);
+    for (uint32_t k = 0; k < STREAM_CELL_IDS; ++k)
+        out->resource_id[k] = le32(p + 32 + 4 * k);
+    return STREAM_OK;
+}
+
 static StreamStatus index_validate(StreamIndex *index, char *reason,
                                     size_t cap) {
     const uint8_t *b = index->blob;
@@ -316,9 +350,10 @@ static StreamStatus index_validate(StreamIndex *index, char *reason,
         return STREAM_ERR_BOUNDS;
     }
     if (archive_count > STREAM_MAX_ARCHIVES ||
-        resource_count > STREAM_MAX_RESOURCES) {
-        set_reason(reason, cap, "implausible index counts %u/%u",
-                   archive_count, resource_count);
+        resource_count > STREAM_MAX_RESOURCES ||
+        cell_count > STREAM_MAX_CELLS) {
+        set_reason(reason, cap, "implausible index counts %u/%u/%u",
+                   archive_count, resource_count, cell_count);
         return STREAM_ERR_BOUNDS;
     }
     uint64_t want_archive = STREAM_INDEX_HEADER_SIZE;
@@ -415,6 +450,38 @@ static StreamStatus index_validate(StreamIndex *index, char *reason,
                        i, rec.files, counts[i]);
             return STREAM_ERR_FORMAT;
         }
+    }
+    int have_last = 0;
+    StreamCellKey last_key;
+    for (uint32_t i = 0; i < cell_count; ++i) {
+        const uint8_t *p = b + cell_off +
+                           (size_t)i * STREAM_INDEX_CELL_ENTRY_SIZE;
+        StreamCellKey key = cell_key_read(p);
+        uint32_t ids = le32(p + 24);
+        uint32_t cell_flags = le32(p + 28);
+        if (key.kind > 1 || key.reserved != 0) {
+            set_reason(reason, cap, "cell %u key kind/reserved is invalid", i);
+            return STREAM_ERR_FORMAT;
+        }
+        if (ids > STREAM_CELL_IDS || cell_flags != 0) {
+            set_reason(reason, cap, "cell %u has %u ids / flags 0x%x", i, ids,
+                       cell_flags);
+            return STREAM_ERR_FORMAT;
+        }
+        if (have_last && cell_key_compare(&last_key, &key) >= 0) {
+            set_reason(reason, cap, "cell keys are not strictly sorted at %u", i);
+            return STREAM_ERR_FORMAT;
+        }
+        for (uint32_t k = 0; k < ids; ++k) {
+            uint32_t id = le32(p + 32 + 4 * k);
+            if (id >= resource_count) {
+                set_reason(reason, cap, "cell %u id %u is outside the table",
+                           i, id);
+                return STREAM_ERR_BOUNDS;
+            }
+        }
+        last_key = key;
+        have_last = 1;
     }
     return STREAM_OK;
 }
@@ -589,6 +656,31 @@ StreamStatus stream_index_find_id(const StreamIndex *index, uint32_t id,
         return STREAM_ERR_NOT_FOUND;
     }
     return fill_resource(index, id, out);
+}
+
+StreamStatus stream_index_find_cell(const StreamIndex *index,
+                                    const StreamCellKey *key,
+                                    StreamCellRow *out, char *reason,
+                                    size_t reason_cap) {
+    if (!index || !key || !out) return STREAM_ERR_ARGUMENT;
+    if (reason && reason_cap) reason[0] = 0;
+    uint32_t lo = 0, hi = index->info.cell_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        const uint8_t *p = index->blob + index->cell_off +
+                           (size_t)mid * STREAM_INDEX_CELL_ENTRY_SIZE;
+        StreamCellKey have = cell_key_read(p);
+        int order = cell_key_compare(&have, key);
+        if (order < 0) {
+            lo = mid + 1;
+        } else if (order > 0) {
+            hi = mid;
+        } else {
+            return fill_cell_row(index, mid, out);
+        }
+    }
+    set_reason(reason, reason_cap, "no cell row for this key");
+    return STREAM_ERR_NOT_FOUND;
 }
 
 void stream_index_negative_reset(StreamIndex *index) {
@@ -1442,6 +1534,10 @@ StreamStatus stream_mount_read(StreamMount *mount, const StreamResource *res,
         mount->metrics.bytes_returned += n;
         mount->metrics.cache_hits++;
         mount->metrics.cache_hit_bytes += n;
+        mount->metrics.demand_hits++;
+        mount->metrics.demand_hit_bytes += n;
+        if (req->requested_priority != STREAM_PRIO_DEMAND)
+            mount->metrics.prefetch_demand_hits++;
         return STREAM_OK;
     }
     BsaArchive *archive = NULL;
@@ -1486,6 +1582,57 @@ StreamStatus stream_mount_read(StreamMount *mount, const StreamResource *res,
     mount->metrics.bytes_returned += got;
     ++mount->metrics.physical_reads;
     return STREAM_OK;
+}
+
+StreamStatus stream_mount_demand_path(StreamMount *mount, const char *path,
+                                      uint32_t rel, void *dst, uint32_t n,
+                                      uint32_t *out_len, int *served,
+                                      char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!mount || !path || (!dst && n) || !out_len || !served)
+        return STREAM_ERR_ARGUMENT;
+    *out_len = 0;
+    *served = 0;
+    StreamResource res;
+    char why[STREAM_REASON_MAX];
+    StreamStatus st = index_find_path_impl((StreamIndex *)mount->index, path,
+                                           &res, NULL, why, sizeof why);
+    if (st != STREAM_OK) return st;
+    int live = 0;
+    for (uint32_t i = 0; i < STREAM_MAX_REQUESTS; ++i) {
+        StreamRequest *req = &mount->requests[i];
+        if (!req->used) continue;
+        if (req->state > STREAM_REQ_READY) continue;
+        if (req->key.generation != mount->index->info.generation ||
+            req->key.source != res.archive_index || req->key.id != res.id)
+            continue;
+        live = 1;
+        if (req->state == STREAM_REQ_READY && rel <= req->fetched &&
+            n <= req->fetched - rel) {
+            if (n) memcpy(dst, req->data + rel, n);
+            *out_len = n;
+            *served = 1;
+            req->last_touch_ms = mount_now_ms(mount);
+            ++mount->metrics.demand_hits;
+            mount->metrics.demand_hit_bytes += n;
+            if (req->requested_priority != STREAM_PRIO_DEMAND)
+                ++mount->metrics.prefetch_demand_hits;
+            return STREAM_OK;
+        }
+        /* The caller is reading this range itself.  Keeping a prefetch of the
+         * same bytes alive would duplicate physical I/O; drop unowned work. */
+        if (!req->consumers && (req->state == STREAM_REQ_QUEUED ||
+                                req->state == STREAM_REQ_READING)) {
+            request_drop_data(mount, req);
+            req->state = STREAM_REQ_CANCELLED;
+            ++mount->metrics.cancelled;
+            ++mount->metrics.demand_cancelled_prefetch;
+        }
+    }
+    set_reason(reason, reason_cap,
+               live ? "'%s' is not staged for %u+%u" : "'%s' has no stage",
+               path, rel, n);
+    return live ? STREAM_ERR_UNSUPPORTED : STREAM_ERR_NOT_FOUND;
 }
 
 void stream_mount_metrics(const StreamMount *mount, StreamMetrics *out) {

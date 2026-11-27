@@ -34,6 +34,10 @@
 #define STREAM_NEGATIVE_SLOTS 64u
 #define STREAM_MAX_ARCHIVES 64u
 #define STREAM_MAX_RESOURCES 1000000u
+#define STREAM_MAX_CELLS 1000000u
+#define STREAM_CELL_KEY_BYTES 24u
+#define STREAM_CELL_IDS 8u
+#define STREAM_RESOURCE_FLAG_COMPRESSED 0x0001u
 
 /* Phase 2 queue limits.  A request is a bounded prefix window, never the whole
  * record: the executor stages at most `window_max_bytes` per descriptor. */
@@ -85,6 +89,32 @@ typedef struct {
     uint32_t cell_count;
 } StreamIndexInfo;
 
+/* Cell table row key, 24 bytes on disk:
+ *   kind u32 (0 = interior, 1 = exterior) | form_id u32 |
+ *   grid_x i32 | grid_y i32 | worldspace_form_id u32 | reserved u32
+ * Interior rows use form_id and leave the grid/worldspace zero; exterior rows
+ * use the grid and the worldspace form id.  The writer sorts rows by
+ * (kind, form_id, grid_x, grid_y, worldspace_form_id). */
+typedef struct {
+    uint32_t kind;
+    uint32_t form_id;
+    int32_t grid_x;
+    int32_t grid_y;
+    uint32_t worldspace_form_id;
+    uint32_t reserved;
+} StreamCellKey;
+
+/* Cell table row, 64 bytes on disk:
+ *   key[24] | resource_count u32 | flags u32 | resource_id[8] u32
+ * `resource_count` is 0..8; only the first `resource_count` ids are valid.
+ * Schema 1 has no room for more than 8 ids per cell. */
+typedef struct {
+    StreamCellKey key;
+    uint32_t resource_count;
+    uint32_t flags;
+    uint32_t resource_id[STREAM_CELL_IDS];
+} StreamCellRow;
+
 typedef struct StreamIndex StreamIndex;
 
 /* Parse an index held in caller memory.  The blob must outlive the index. */
@@ -106,6 +136,12 @@ StreamStatus stream_index_find_path(const StreamIndex *index, const char *path,
 StreamStatus stream_index_find_id(const StreamIndex *index, uint32_t id,
                                   StreamResource *out, char *reason,
                                   size_t reason_cap);
+/* Binary search over the cell table.  A missing key returns
+ * STREAM_ERR_NOT_FOUND; malformed rows are rejected at parse. */
+StreamStatus stream_index_find_cell(const StreamIndex *index,
+                                    const StreamCellKey *key,
+                                    StreamCellRow *out, char *reason,
+                                    size_t reason_cap);
 
 /* Miss cache valid for exactly one index generation.  Resets clear every
  * entry; a reloaded index is a new StreamIndex with a new generation. */
@@ -140,6 +176,11 @@ typedef struct {
     uint64_t frees;
     uint64_t bytes_allocated;
     uint64_t bytes_freed;
+    /* Demand integration (`stream_mount_demand_path`). */
+    uint64_t demand_hits;          /* reads served from a READY window */
+    uint64_t demand_hit_bytes;
+    uint64_t prefetch_demand_hits; /* demand hits whose window was prefetched */
+    uint64_t demand_cancelled_prefetch; /* staged work dropped for a demand read */
     uint32_t descriptors;       /* live descriptors, including terminal ones */
     uint32_t cache_bytes;       /* live READY/QUEUED window bytes */
     uint32_t peak_cache_bytes;
@@ -282,6 +323,17 @@ StreamStatus stream_mount_read(StreamMount *mount, const StreamResource *res,
                                uint32_t rel, void *dst, uint32_t n,
                                uint32_t *out_len, char *reason,
                                size_t reason_cap);
+
+/* Demand-read a canonical path from the staged queue without archive I/O.
+ *   *served = 1  -> [rel, rel+n) was copied from a READY prefetch window;
+ *   *served = 0  -> nothing was copied (miss, or the window is too small).
+ * A live prefetch request for the same resource is cancelled when it cannot
+ * serve the read, so the caller's own I/O is not duplicated.  This never
+ * enqueues or allocates a request. */
+StreamStatus stream_mount_demand_path(StreamMount *mount, const char *path,
+                                      uint32_t rel, void *dst, uint32_t n,
+                                      uint32_t *out_len, int *served,
+                                      char *reason, size_t reason_cap);
 
 void stream_mount_metrics(const StreamMount *mount, StreamMetrics *out);
 

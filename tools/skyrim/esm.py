@@ -65,6 +65,7 @@ class RefEntry:
     base_form_id: int
     position: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     mesh: Optional[str] = None
+    texture: Optional[str] = None
 
 
 @dataclass
@@ -72,6 +73,7 @@ class CellFiles:
     summary: CellSummary
     refs: List[RefEntry]
     mesh_paths: List[str]
+    texture_paths: List[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -79,6 +81,8 @@ class CellFiles:
             "ref_count": len(self.refs),
             "mesh_count": len(self.mesh_paths),
             "meshes": self.mesh_paths,
+            "texture_count": len(self.texture_paths),
+            "textures": self.texture_paths,
         }
 
 
@@ -88,6 +92,7 @@ class PluginScan:
     base_meshes: Dict[int, str]
     record_counts: Dict[str, int]
     file_size: int
+    base_textures: Dict[int, str] = field(default_factory=dict)
 
     def find_cells(
         self,
@@ -155,6 +160,21 @@ def _decode_modl(payload: bytes) -> Optional[str]:
         if kind == b"MODL":
             text = sub.split(b"\x00", 1)[0].decode("cp1252", "replace")
             return text.strip()
+    return None
+
+
+def _decode_tx00(payload: bytes) -> Optional[str]:
+    """TXST stores its diffuse path in TX00 ("textures\\...dds")."""
+    for kind, sub in _subrecords(payload):
+        if kind == b"TX00":
+            text = sub.split(b"\x00", 1)[0].decode("cp1252", "replace")
+            text = text.strip()
+            if not text:
+                return None
+            text = text.replace("/", "\\").lstrip("\\")
+            if not text.lower().startswith("textures\\"):
+                text = "textures\\" + text
+            return text
     return None
 
 
@@ -243,6 +263,7 @@ def _walk(
                         mesh=_archive_mesh_path(state.base_meshes[base])
                         if base in state.base_meshes
                         else None,
+                        texture=state.base_textures.get(base),
                     )
                 )
         elif kind in PLACEABLE_TYPES:
@@ -250,6 +271,10 @@ def _walk(
             modl = _decode_modl(payload)
             if modl:
                 state.base_meshes[form_id] = modl
+            if kind == b"TXST":
+                texture = _decode_tx00(payload)
+                if texture:
+                    state.base_textures[form_id] = texture
         pos = rec_end
 
 
@@ -257,6 +282,7 @@ def _walk(
 class _ScanState:
     cells: List[CellSummary] = field(default_factory=list)
     base_meshes: Dict[int, str] = field(default_factory=dict)
+    base_textures: Dict[int, str] = field(default_factory=dict)
     record_counts: Dict[str, int] = field(default_factory=dict)
     refs: List[RefEntry] = field(default_factory=list)
     records: int = 0
@@ -285,6 +311,7 @@ def scan_plugin(path: str) -> PluginScan:
             base_meshes=state.base_meshes,
             record_counts=state.record_counts,
             file_size=len(mm),
+            base_textures=state.base_textures,
         )
     finally:
         mm.close()
@@ -322,6 +349,7 @@ def extract_cell(
     target = candidates[0]
     state = _ScanState()
     state.base_meshes = dict(scan.base_meshes)
+    state.base_textures = dict(scan.base_textures)
     state.watch_form_id = target.form_id
     handle, mm = _open_mmap(path)
     try:
@@ -332,6 +360,7 @@ def extract_cell(
     if state.watched_cell is None:
         raise EsmError("cell 0x%08x was not seen on the second pass" % target.form_id)
     meshes = []
+    textures = []
     seen = set()
     for ref in state.refs:
         if ref.mesh:
@@ -343,4 +372,11 @@ def extract_cell(
             if key not in seen:
                 seen.add(key)
                 meshes.append(archive_path)
-    return CellFiles(summary=state.watched_cell, refs=state.refs, mesh_paths=sorted(meshes))
+        if ref.texture:
+            key = ref.texture.lower()
+            if key not in seen:
+                seen.add(key)
+                textures.append(ref.texture)
+    return CellFiles(summary=state.watched_cell, refs=state.refs,
+                    mesh_paths=sorted(meshes),
+                    texture_paths=sorted(textures))
