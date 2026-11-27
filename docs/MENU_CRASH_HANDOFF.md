@@ -348,3 +348,31 @@ on thread 13 (start `0x00a4b4a0`). `0x00b7f450` is a real function prologue
 `functions.json`** (neighbours `0x00b7f3e0` and `0x00b7f530`) and not in
 `tesv.irc`, so it is a discovery/closure gap, not a decoder gap.
 
+
+## `Guest fault at 0802fa80: unknown indirect function` (2026-11-27, branch `indirect-802f`)
+
+`0x0802fa80` is **not** a TESV address and not garbage. The slice maps the
+staged `d3dx9_42.dll` at `0x08000000` (`tesv_slice_main.c:add_dll`); the loader
+hotpatch-resolves the export `D3DXMatrixMultiply` (entry `0x0802fa75`) to its
+real body `0x0802fa80` (entry+11). The guest thunk is the container record
+`0x00f79dc2` (`ff 25 24 b4 06 01`, `jmp [0x106b424]`), called from
+`0x00cd360e` in TESV function `0x00cd30c0`; `N3DS_INDIRECT_TRACE=1` prints
+`target=0802fa80 block=00f79dc2 ret=00cd3613` and
+`thunk-slot=0106b424 value=0802fa80`.
+
+So it is a dispatch gap, not a discovery gap: `functions.json` (TESV only,
+`0x401000..0x106a310`) and the `b7c` container (`image_lo 0x401000`,
+`image_hi 0x106a31a`) cannot contain the address, and adding a leader /
+repacking `b7d` would be wrong. The missing piece is the local, git-ignored
+lifted D3DX body table `pilot_out_mult/` (see `docs/D3DX_PILOT_TABLE.md`). A
+tree without it builds a slice that logs `no generated D3DX table; hotpatch
+bodies will fail explicitly`, and the first guest matrix call faults here.
+
+Evidence for determinism: `E:\menu_draw\last_run.log` came from the
+`menu-draw` worktree, which **has** `pilot_out_mult`; the failing run came from
+`gfx-vs-remainder`, which does **not** (`Test-Path .../pilot_table.c` is
+False). With the table copied into this worktree the rebuild logs
+`d3dx: 12 lifted function(s) registered` and the fault disappears; the run
+continues to the same pre-Present Bink wait as the `menu_draw` baseline.
+`fast_slice.ps1` now warns when the table is absent, and the slice prints the
+same warning into its own log instead of leaving only a bare address.
