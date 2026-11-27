@@ -15,9 +15,9 @@
   "vs": 385
  },
  "coverage": {
-  "translated": 4,
+  "translated": 34,
   "draw-enabled": 0,
-  "refused": 4987,
+  "refused": 4957,
   "contract_only": 130
  },
  "refusal_classes": {
@@ -38,6 +38,111 @@
  ],
  "plans": [
   {
+   "id": "lighting.approx.019d1b0f",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "019d1b0f1034ea768ae70d1a41ceb19babd74fcb5a54f538bfa091ea1acf5901"
+  },
+  {
+   "id": "lighting.approx.1102cb40",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "1102cb40c8701f83149826b33ede31f809beb685991518d3fe8525ab4583c7e1"
+  },
+  {
+   "id": "lighting.approx.11cd6422",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "11cd6422be6787ac225e8f851008aef78d3c61ca10c0a65a1f572e26a30317e8"
+  },
+  {
+   "id": "lighting.approx.1cdbc1ca",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "1cdbc1ca72464ce4dcf46b022ce913dc3ad4c8c767f0b95049247e6cec6e7ca2"
+  },
+  {
+   "id": "lighting.approx.1de75c62",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "1de75c62c529ae21cfa441fe982b6b3c983635e1ca549b93f622e38435eaa9a2"
+  },
+  {
+   "id": "lighting.approx.2b41353a",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "2b41353a1892e782016b8da3ba16681c08ab08b206c091b5eee273a32c174f31"
+  },
+  {
+   "id": "lighting.approx.2caf2498",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "2caf249826f86e61d795b0f71562728c57f4e45397ef41332457f1b4753427f7"
+  },
+  {
+   "id": "lighting.approx.3e4c0d42",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "3e4c0d42f924c79d03415163de80aa99b9224f08076799ccf773e3d492a61b0e"
+  },
+  {
+   "id": "lighting.approx.4ab4a951",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "4ab4a951d706b01e8c0dc52a70b6959ed8791e67eef7988fdadcce67afa59eb0"
+  },
+  {
+   "id": "lighting.approx.50311f08",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "50311f0818af2c32f38017ef4bfd22a66e216e1cf1fe0aa842a10b45b14cc3ed"
+  },
+  {
+   "id": "lighting.approx.55631781",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "55631781d6428670a574688709922c2243c802623e1616c18967c568c3c7e8b5"
+  },
+  {
+   "id": "lighting.approx.56422b09",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "56422b09bf6708ab2514a8b73cf1831fde3a14fdce131b89e09f3d5ba39c888b"
+  },
+  {
+   "id": "lighting.approx.6627502d",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "6627502d07df9711e8e9b62e9daa5f5005f6c4c51ae308d0c1eb198c4eda690c"
+  },
+  {
+   "id": "lighting.approx.6f4e7c18",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "6f4e7c189a335c7d52feae6e47a6d0730b05858da0d1657bdc72b5912d9be009"
+  },
+  {
+   "id": "lighting.approx.82a26d3d",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "82a26d3d974e3bf608b8e5b74a1b3042444ad3bf6e1c9834845c92704130e978"
+  },
+  {
    "id": "lighting.base_lit.ps",
    "status": "translated",
    "kind": "tev",
@@ -52,11 +157,116 @@
    "sha256": "8725393bf3ed950789e50501893ab141efdfd0377309271f6ef7493239be5ff9"
   },
   {
+   "id": "lighting.approx.88482a47",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "88482a475ab92147b3619e11758b5e23be60d6ae49fa8906f3a7244c17344bd4"
+  },
+  {
+   "id": "lighting.approx.a0576208",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "a05762086e77d7f61fe09a66979c71d35ebc2b94f27d424cd9b0bf256da81fba"
+  },
+  {
+   "id": "lighting.approx.a28c1351",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "a28c1351f73253138ed7bd40754b28efb990d0b8eac2d59681842d94c4997ee7"
+  },
+  {
+   "id": "lighting.approx.a775c697",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "a775c69786b9580377a3768b9f0e324a579cae0b9f0cf33e998e7f91ca23a5d8"
+  },
+  {
+   "id": "lighting.approx.a929c771",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "a929c7710941097c0fa94f0de6e271294a01005a2c015f454ddeee2d414ead6b"
+  },
+  {
    "id": "lighting.base_lit_shadow.ps",
    "status": "translated",
    "kind": "tev",
    "family": "lighting",
    "sha256": "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642"
+  },
+  {
+   "id": "lighting.approx.b206e66f",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "b206e66f232a0eaf44dd764213f93b046eaf7e806c07862ca1442690a2fc39b2"
+  },
+  {
+   "id": "lighting.approx.ba407ad6",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "ba407ad633e900b1cae19babc2292349ff979a16e91d77c24f13f51fed1d1cb7"
+  },
+  {
+   "id": "lighting.approx.bcb91352",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "bcb91352f8502b0e80a53311078fb632dd12f845f5bba5d3059ef4a67f0dade4"
+  },
+  {
+   "id": "lighting.approx.ca372f0e",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "ca372f0ec7c67c30af7ed428c797b58765f4e64f80c625c70c993f3f8cce773d"
+  },
+  {
+   "id": "lighting.approx.cb401910",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "cb4019103c40c2a05eca18104f719b115cb6532ae542f423a7391f1ec767dbbb"
+  },
+  {
+   "id": "lighting.approx.d223dc06",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "d223dc0698a3038a340cff16bbcfab00fe2672c53aaa76bb2102cd3f49d01c84"
+  },
+  {
+   "id": "lighting.approx.d4c0a896",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "d4c0a89628120881628bceaac4fa3345916e601e1cca9f7e6e09d06ab8afd47a"
+  },
+  {
+   "id": "lighting.approx.da0d02c6",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "da0d02c636e50d2538d30d5d27186bcacf499e17381023a6ab81fb15d969e3b7"
+  },
+  {
+   "id": "lighting.approx.e1bb7c56",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "e1bb7c562b6c5b346ad663952f29b4518a10abdd8d2a51e2fbec32423aeddc4a"
+  },
+  {
+   "id": "lighting.approx.f435f2dc",
+   "status": "translated",
+   "kind": "tev",
+   "family": "lighting",
+   "sha256": "f435f2dc047814ab65259c02d3928e2c276f119bb010f485888b574ae470c1fc"
   },
   {
    "id": "game.ps.f5239354",

@@ -1,11 +1,9 @@
-"""Host test: lighting pack recipes against the retail IR.
+"""Host test: lighting pack exact + approximate recipes against the retail IR.
 
 Run: ``python source/shader_packs/lighting/test_lighting_plans.py``
 
 The test needs the host corpus (``E:\\host_sm3``) for the IR half.  Without it
-the bytecode checks are skipped and the committed JSON/coverage checks still
-run.  It is intentionally pack-local: the shared host suite enumerates its own
-test list and this agent does not edit that list.
+the committed JSON/coverage checks still run.
 """
 
 from __future__ import annotations
@@ -39,17 +37,42 @@ class CommittedPlansTest(unittest.TestCase):
             cls.doc = json.load(handle)
         with open(COVERAGE, encoding="utf-8") as handle:
             cls.coverage = json.load(handle)
+        cls.exact = [e for e in cls.doc["entries"]
+                     if e.get("quality") == "exact"]
+        cls.approx = [e for e in cls.doc["entries"]
+                      if e.get("quality") == "approx"]
 
-    def test_two_recipes_and_ten_chunks(self):
-        self.assertEqual(len(self.doc["entries"]), 2)
-        self.assertEqual(self.doc["summary"]["hashes"], 2)
-        self.assertEqual(self.doc["summary"]["chunks"], 10)
-        self.assertEqual({e["recipe"] for e in self.doc["entries"]},
+    def test_exact_recipes_and_ten_chunks(self):
+        self.assertEqual(len(self.exact), 2)
+        self.assertEqual({e["recipe"] for e in self.exact},
                          {"base_lit", "base_lit_shadow"})
+        chunks = {r["sha256"]: r["chunks"] for r in self.doc["report"]}
+        self.assertEqual(sum(chunks[e["sha256"]] for e in self.exact), 10)
 
-    def test_no_draw_claim(self):
+    def test_approx_budget_and_classes(self):
+        self.assertGreaterEqual(len(self.approx), 20)
+        self.assertLessEqual(len(self.approx), 34)
+        self.assertGreaterEqual(len(self.exact) + len(self.approx), 20)
+        self.assertLessEqual(len(self.exact) + len(self.approx), 40)
+        classes = {e["approx_class"] for e in self.approx}
+        for want in ("point", "specular", "envmap", "subsurface", "backlight"):
+            self.assertIn(want, classes)
+
+    def test_approx_rows_declare_loss_and_error(self):
+        for entry in self.approx:
+            self.assertEqual(entry["quality"], "approx")
+            self.assertIsInstance(entry["approximation"], dict)
+            self.assertTrue(entry["approximation"]["lost_terms"])
+            self.assertTrue(entry["approximation"]["reason"])
+            err = entry["approx_error"]
+            self.assertEqual(err["samples"], 32)
+            self.assertLess(err["mean_abs_error"], 0.2, entry["id"])
+            self.assertLessEqual(err["max_abs_error"], 1.0, entry["id"])
+
+    def test_no_draw_or_runtime_claim(self):
         for entry in self.doc["entries"]:
             self.assertEqual(entry["draw_enabled"], 0, entry["id"])
+            self.assertNotEqual(entry.get("runtime"), 1, entry["id"])
             self.assertEqual(plan_verify.derive_status(entry), "translated")
             self.assertTrue(entry["preconditions"])
 
@@ -59,11 +82,10 @@ class CommittedPlansTest(unittest.TestCase):
         for entry in self.doc["entries"]:
             plan_verify.validate_entry(entry, errors, entry["id"])
             self.assertLessEqual(entry["stages"], plan_verify.MAX_STAGES)
-            self.assertLessEqual(len(entry["textures"]),
-                                 C.TEV_MAX_TEXTURES)
-            self.assertLessEqual(len(entry["constants"]),
-                                 C.TEV_MAX_CONSTANTS)
+            self.assertLessEqual(len(entry["textures"]), C.TEV_MAX_TEXTURES)
+            self.assertLessEqual(len(entry["constants"]), C.TEV_MAX_CONSTANTS)
         self.assertEqual(errors, [])
+        self.assertTrue(schema)
 
     def test_coverage_sums_and_base_lit_is_small(self):
         self.assertEqual(self.coverage["unique_hashes"], 4991)
@@ -77,14 +99,11 @@ class CommittedPlansTest(unittest.TestCase):
         self.assertEqual(forms["base_lit"]["chunks"], 6)
         self.assertEqual(forms["base_lit_shadow"]["hashes"], 1)
         self.assertEqual(forms["base_lit_shadow"]["chunks"], 5)
-        # The pack is procedural: loops/optional maps dominate.
         self.assertGreater(forms["lit_subsurface"]["hashes"], 1000)
 
     @unittest.skipUnless(os.path.isdir(CORPUS), "host corpus absent")
-    def test_recipes_reproduce_and_verify(self):
-        with open(os.path.join(CORPUS, "corpus.json"),
-                  encoding="utf-8") as handle:
-            corpus = json.load(handle)
+    def test_exact_recipes_reproduce_and_verify(self):
+        corpus = json.load(open(os.path.join(CORPUS, "corpus.json")))
         chunks = LP.load_chunks(os.path.join(CORPUS, "ps_chunks.bin"))
         first = {}
         counts = {}
@@ -94,7 +113,7 @@ class CommittedPlansTest(unittest.TestCase):
                 continue
             first.setdefault(row["sha256"], row)
             counts[row["sha256"]] = counts.get(row["sha256"], 0) + 1
-        want = {e["sha256"]: e for e in self.doc["entries"]}
+        want = {e["sha256"]: e for e in self.exact}
         chunks_by_sha = {r["sha256"]: r["chunks"] for r in self.doc["report"]}
         for sha, row in first.items():
             if sha not in want:
@@ -111,16 +130,13 @@ class CommittedPlansTest(unittest.TestCase):
 
     @unittest.skipUnless(os.path.isdir(CORPUS), "host corpus absent")
     def test_contract_violation_is_not_accepted(self):
-        with open(os.path.join(CORPUS, "corpus.json"),
-                  encoding="utf-8") as handle:
-            corpus = json.load(handle)
+        corpus = json.load(open(os.path.join(CORPUS, "corpus.json")))
         chunks = LP.load_chunks(os.path.join(CORPUS, "ps_chunks.bin"))
         row = next(r for r in corpus["rows"]
                    if r["sha256"].startswith("8699c020"))
         ir = C.build_ir(chunks[row["index"]])
         plan, shadow = LP.recognise(ir)
         bad = copy.deepcopy(plan)
-        # Drop the ambient/emissive contract: the plan's addend is no longer v2.
         bad["stage_data"][1]["src_rgb"][2] = C.SRC_TEX0
         self.assertFalse(LP.verify(ir, bad, shadow)["ok"])
 

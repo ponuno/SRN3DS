@@ -2,8 +2,12 @@
 
 Status: **host-only. No `DevCaps` change, no new draw slot, no rendered frame
 is claimed.** `DevCaps` is still `0x00082000`, VS/PS 2.0, no SM3 slots. The
-pack now has two verified TEV recipes in `plans.json`; both are `translated`
-(`draw_enabled == 0`, no `runtime` flag, no entry in the 16-slot runtime table).
+pack now has 32 catalog plans in `plans.json`: **2 exact** under the material
+contract and **30 measured approximations**. With the two shared entries
+(`menu.logo.ps`, `game.ps`) lighting is **34 translated hashes / 137 chunks,
+0 draw-enabled, 0 runtime slots**. Every approximation carries
+`"quality": "approx"`, `"approximation"` (lost terms + reason) and a numeric
+`approx_error`.
 
 Reproduce:
 
@@ -47,19 +51,60 @@ present in **2,808 PS hashes / 3,300 chunks**; `rcp`+`rsq`+`cmp` in 2,808 /
 3,300. The corpus is a procedural light loop, not a pile of base-lit shaders.
 `coverage.json` carries the full per-form hash examples.
 
-## 2. Translated subset (10 chunks, 2 hashes)
+## 2. Translated subset: 2 exact + 30 approximations
+
+Exact rows (`quality: "exact"`, full material contract, 10 chunks):
 
 | hash | chunks | recipe | stages | constants |
 |---|---:|---|---:|---|
 | `8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1` | 5 | `lighting.base_lit.ps` | 6 | c3,c4,c5,c7 |
 | `a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642` | 5 | `lighting.base_lit_shadow.ps` | 5 | c3,c4,c5 |
 
-Both are `source/shader_packs/lighting/plans.json`; `draw_enabled` is 0 and
-`runtime` is omitted, so `fxp_compile manifest` does **not** copy them into the
-shared 16-slot table. `shader_packs` coverage does count them:
-lighting is now 4 translated / 0 draw-enabled / 4,987 refused (was 2 / 0 /
-4,989). The two new hashes are `p5.fxp`; `p5` also has 58 other PS permutations
-that use point lights/shadow/specular and are *not* accepted.
+Approximate rows (`quality: "approx"`, 30 hashes / 121 chunks, each with a
+measured `approx_error`):
+
+| class | hashes | chunks | mean abs error | max mean error | approximation |
+|---|---:|---:|---:|---:|---|
+| `point` | 10 | 11 | 0.0236 | 0.0273 | point-light sum dropped; `rcp`/`rsq` attenuation has no TEV op |
+| `specular` | 8 | 40 | 0.0384 | 0.0451 | specular colour/sampler lobe dropped |
+| `envmap` | 6 | 35 | 0.0585 | 0.0714 | env reflection dropped |
+| `subsurface` | 3 | 20 | 0.0350 | 0.0375 | SSS transmission dropped |
+| `backlight` | 3 | 15 | 0.0545 | 0.0619 | back-light mask dropped |
+| **total** | **30** | **121** | **0.0388** | **0.0714** | base_lit tail kept |
+
+`max mean error` is the largest per-hash mean over RGBA. The worst single
+sample is 0.999 because a dropped term can be near 1 at an unlucky sample;
+that is recorded, not hidden. Error is measured offline on 32 deterministic
+samples of LDR textures/colours, random unit directions and point-light
+constants. The approximation domain is exactly `quality: "approx"`: the plan
+is **not** claimed equal to the full bytecode, only to its declared reduced
+specification (base lit directional + normal + ambient, plus shadow when the
+source has a shadow mask).
+
+All rows are in `source/shader_packs/lighting/plans.json`; `draw_enabled` is 0
+and `runtime` is omitted, so `fxp_compile manifest` does **not** copy them into
+the shared 16-slot table. `shader_packs` coverage counts the whole catalog:
+lighting is now **34 translated / 0 draw-enabled / 4,957 refused** (was 2 / 0 /
+4,989). Three descriptors have a full contract for a future runtime:
+`menu.logo.ps`, `lighting.base_lit.ps`, `lighting.base_lit_shadow.ps`.
+
+### 2.1 Why dropping, and where the LUT trick stops
+
+`rcp`/`rsq` are the natural LUT targets: bake `1/|x|` and `1/sqrt(x)` into a
+256×1 texture. PICA TEV however has **no dependent texture read**: a texture
+unit samples its fixed texcoord register, so the LUT coordinate has to come
+from the vertex shader/varying. That is a VS contract this pack cannot add
+(the shared VS emitter is outside the pack and `MaxVertexShaderConst` is still
+4). The quantization bound itself is small (8-bit LUT, linear interpolation:
+about `1/255²/8 ≈ 2e-6` for a smooth 1/|x| over a fixed range), but without the
+coordinate it cannot replace the per-pixel term. The applied approximation is
+therefore the measured drop of the point-light sum, not a secretly clamped
+`rcp`.
+
+Loops are not truncated in this pass: `approx_plan` only accepts straight-line
+shaders, and `approximation.loop_truncated_to` is `0`. The remaining 2,808
+control-flow hashes still need the loop unroll/scheduler described in section
+5. `lit_shadow` (3 hashes) is left untouched, as instructed.
 
 `base_lit` recipe (six stages, exact under the contract below):
 
@@ -91,8 +136,10 @@ silently accepted.
 
 ## 3. Material contract
 
-Both plans are equivalent only under these preconditions (also stored in the
-plan entries):
+The two **exact** plans are equivalent only under these preconditions (also
+stored in the plan entries); the approximate plans reuse the same contract for
+the base_lit tail but only claim equality under their declared reduced
+specification:
 
 * `normal_prebaked` — `NormalSampler` stores the decoded tangent normal; the
   retail `2*n-1` (p5) or `(n-0.5)*2` (p1200005) decode is folded into the asset.
@@ -119,8 +166,8 @@ real work.
 
 | Test | Result |
 |---|---|
-| `source/shader_packs/lighting/test_lighting_plans.py` (6) | PASS |
-| `tools/shaders/plan_verify.py` | PASS, 4 runtime + 2 pack plans, 0 schema errors |
+| `source/shader_packs/lighting/test_lighting_plans.py` (8) | PASS |
+| `tools/shaders/plan_verify.py` | PASS, 4 runtime + 32 pack plans, 0 schema errors |
 | `tools/shaders/plan_verify.py --data E:\SteamLibrary\...\Data` | PASS, symbolic `pass`, 0 problems |
 | `tools/shader_packs.py check` | PASS, 10,475 chunks / 6,659 hashes |
 | `shader_plan_table` | PASS, 85 checks |
@@ -160,13 +207,18 @@ runtime is wired to it (section 5).
    `rcp`/`rsq` attenuation + `cmp` shadow. TEV has no reciprocal, and PICA has
    one accumulator, so this needs the expression-DAG scheduler
    (`docs/PICA_RESEARCH.md` §8.3) plus a canonical loop-unroll/binding contract.
-   This is the real blocker for the remaining 4,987 lighting hashes.
+   This is the real blocker for the remaining 4,957 lighting hashes.
 4. **VS emitter.** 130 VS hashes fit the PICA envelope but have no emitter; 22
    declare 8–9 varyings against the 7 limit and need packing/multi-pass.
-5. **Literal range.** The two accepted hashes were rejected first by
+5. **Literal range.** The two exact hashes were rejected first by
    `def_literal_out_of_range` (c8/c9 = `{2,-1,1,0}`). The recipes fold that
    decode into the normal asset. A generic literal-range rewrite is *not* the
    lever for the rest: every remaining class also hits control flow or
    `rcp`/`rsq`/`cmp`.
+
+This pass opened 30 hashes with measured approximations (34 translated total,
+including the two shared entries) and left 4,957 named refusals. The
+approximation error is not a draw claim; it is an offline measurement of the
+declared reduced specification.
 
 No core/TEV file, `docs/shader_plans.json` entry or runtime slot was changed.

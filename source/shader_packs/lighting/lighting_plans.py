@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import struct
@@ -94,6 +95,73 @@ def _alpha3(op=A_ALPHA):
     return [op, op, op]
 
 
+def _base_stages(c_dir, c_light, c_alpha, c_fog):
+    return [
+        # 0: NdotL = dot3(prebaked tangent normal, c_dir), LDR-clamped.
+        _stage(F_DOT3_RGBA, F_DOT3_RGBA,
+               [SRC_TEX1, SRC_CONST, SRC_CONST],
+               [SRC_TEX1, SRC_CONST, SRC_CONST],
+               _color3(), _alpha3(), const_reg=c_dir),
+        # 1: light = c_light * NdotL + (basis*normal + c6) -> v2 by contract.
+        _stage(F_MULTIPLY_ADD, F_MULTIPLY_ADD,
+               [SRC_PREV, SRC_CONST, SRC_FRAG_PRIMARY],
+               [SRC_PREV, SRC_CONST, SRC_FRAG_PRIMARY],
+               _color3(), _alpha3(), const_reg=c_light),
+        # 2: rgb = diffuse * light; alpha = diffuse.a * vertex.a.
+        _stage(F_MODULATE, F_MODULATE,
+               [SRC_TEX0, SRC_PREV, SRC_PREV],
+               [SRC_TEX0, SRC_PRIMARY, SRC_PREV],
+               _color3(), _alpha3()),
+        # 3: rgb *= vertex.rgb; alpha *= material alpha c_alpha.z.
+        _stage(F_MODULATE, F_MODULATE,
+               [SRC_PREV, SRC_PRIMARY, SRC_PREV],
+               [SRC_PREV, SRC_CONST, SRC_PREV],
+               _color3(), [A_ALPHA, A_B, A_ALPHA], const_reg=c_alpha),
+        # 4: rgb = lerp(rgb, v2, v2.a); alpha passes through.
+        _stage(F_INTERPOLATE, F_REPLACE,
+               [SRC_PREV, SRC_FRAG_PRIMARY, SRC_FRAG_PRIMARY],
+               [SRC_PREV, SRC_PREV, SRC_PREV],
+               [RGB_COLOR, RGB_COLOR, RGB_ALPHA], _alpha3()),
+        # 5: rgb *= c_fog.a; alpha passes through.
+        _stage(F_MODULATE, F_REPLACE,
+               [SRC_PREV, SRC_CONST, SRC_PREV],
+               [SRC_PREV, SRC_PREV, SRC_PREV],
+               [RGB_COLOR, RGB_ALPHA, RGB_COLOR], _alpha3(),
+               const_reg=c_fog),
+    ]
+
+
+def _shadow_stages(c_dir, c_light, c_alpha):
+    return [
+        # 0: NdotL = dot3(prebaked tangent normal, c_dir); alpha carries it.
+        _stage(F_DOT3_RGBA, F_DOT3_RGBA,
+               [SRC_TEX1, SRC_CONST, SRC_CONST],
+               [SRC_TEX1, SRC_CONST, SRC_CONST],
+               _color3(), _alpha3(), const_reg=c_dir),
+        # 1: rgb = shadow.x * c_light; alpha keeps NdotL.
+        _stage(F_MODULATE, F_REPLACE,
+               [SRC_TEX2, SRC_CONST, SRC_PREV],
+               [SRC_PREV, SRC_PREV, SRC_PREV],
+               [RGB_R, RGB_COLOR, RGB_COLOR], _alpha3(),
+               const_reg=c_light),
+        # 2: rgb = (shadow*c_light) * NdotL + v2; alpha passes.
+        _stage(F_MULTIPLY_ADD, F_REPLACE,
+               [SRC_PREV, SRC_PREV, SRC_FRAG_PRIMARY],
+               [SRC_PREV, SRC_PREV, SRC_PREV],
+               [RGB_COLOR, RGB_ALPHA, RGB_COLOR], _alpha3()),
+        # 3: rgb = diffuse * light; alpha = diffuse.a * vertex.a.
+        _stage(F_MODULATE, F_MODULATE,
+               [SRC_TEX0, SRC_PREV, SRC_PREV],
+               [SRC_TEX0, SRC_PRIMARY, SRC_PREV],
+               _color3(), _alpha3()),
+        # 4: rgb *= vertex.rgb; alpha *= c_alpha.z.
+        _stage(F_MODULATE, F_MODULATE,
+               [SRC_PREV, SRC_PRIMARY, SRC_PREV],
+               [SRC_PREV, SRC_CONST, SRC_PREV],
+               _color3(), [A_ALPHA, A_B, A_ALPHA], const_reg=c_alpha),
+    ]
+
+
 def base_lit_plan(ir: C.IR) -> Optional[dict]:
     """Six-stage exact-under-contract plan for the p5 base-lit hash."""
     body = [i.opcode for i in ir.body]
@@ -108,38 +176,7 @@ def base_lit_plan(ir: C.IR) -> Optional[dict]:
     if {r: (d["usage"], d["usage_index"]) for r, d in ir.inputs.items()} != {
             0: (5, 0), 1: (10, 0), 2: (10, 1)}:
         return None
-    stages = [
-        # 0: NdotL = dot3(prebaked tangent normal, c3), clamped by the LDR model.
-        _stage(F_DOT3_RGBA, F_DOT3_RGBA,
-               [SRC_TEX1, SRC_CONST, SRC_CONST],
-               [SRC_TEX1, SRC_CONST, SRC_CONST],
-               _color3(), _alpha3(), const_reg=3),
-        # 1: light = c4 * NdotL + (basis*normal + c6) -> v2 by contract.
-        _stage(F_MULTIPLY_ADD, F_MULTIPLY_ADD,
-               [SRC_PREV, SRC_CONST, SRC_FRAG_PRIMARY],
-               [SRC_PREV, SRC_CONST, SRC_FRAG_PRIMARY],
-               _color3(), _alpha3(), const_reg=4),
-        # 2: rgb = diffuse * light; alpha = diffuse.a * vertex.a.
-        _stage(F_MODULATE, F_MODULATE,
-               [SRC_TEX0, SRC_PREV, SRC_PREV],
-               [SRC_TEX0, SRC_PRIMARY, SRC_PREV],
-               _color3(), _alpha3()),
-        # 3: rgb *= vertex.rgb; alpha *= material alpha c5.z.
-        _stage(F_MODULATE, F_MODULATE,
-               [SRC_PREV, SRC_PRIMARY, SRC_PREV],
-               [SRC_PREV, SRC_CONST, SRC_PREV],
-               _color3(), [A_ALPHA, A_B, A_ALPHA], const_reg=5),
-        # 4: rgb = lerp(rgb, v2, v2.a); alpha passes through.
-        _stage(F_INTERPOLATE, F_REPLACE,
-               [SRC_PREV, SRC_FRAG_PRIMARY, SRC_FRAG_PRIMARY],
-               [SRC_PREV, SRC_PREV, SRC_PREV],
-               [RGB_COLOR, RGB_COLOR, RGB_ALPHA], _alpha3()),
-        # 5: rgb *= c7.a; alpha passes through.
-        _stage(F_MODULATE, F_REPLACE,
-               [SRC_PREV, SRC_CONST, SRC_PREV],
-               [SRC_PREV, SRC_PREV, SRC_PREV],
-               [RGB_COLOR, RGB_ALPHA, RGB_COLOR], _alpha3(), const_reg=7),
-    ]
+    stages = _base_stages(3, 4, 5, 7)
     return _plan_doc(ir, "lighting.base_lit.ps", "base_lit", stages,
                      textures=[(0, 0), (0, 1)],
                      constants=[3, 4, 5, 7], inputs=[(1, 0), (2, 1)],
@@ -167,33 +204,7 @@ def base_lit_shadow_plan(ir: C.IR) -> Optional[dict]:
     if {r: (d["usage"], d["usage_index"]) for r, d in ir.inputs.items()} != {
             0: (5, 0), 1: (10, 0), 2: (10, 1)}:
         return None
-    stages = [
-        # 0: NdotL = dot3(prebaked tangent normal, c3); alpha carries it too.
-        _stage(F_DOT3_RGBA, F_DOT3_RGBA,
-               [SRC_TEX1, SRC_CONST, SRC_CONST],
-               [SRC_TEX1, SRC_CONST, SRC_CONST],
-               _color3(), _alpha3(), const_reg=3),
-        # 1: rgb = shadow.x * c4; alpha keeps NdotL.
-        _stage(F_MODULATE, F_REPLACE,
-               [SRC_TEX2, SRC_CONST, SRC_PREV],
-               [SRC_PREV, SRC_PREV, SRC_PREV],
-               [RGB_R, RGB_COLOR, RGB_COLOR], _alpha3(), const_reg=4),
-        # 2: rgb = (shadow*c4) * NdotL + v2; alpha passes.
-        _stage(F_MULTIPLY_ADD, F_REPLACE,
-               [SRC_PREV, SRC_PREV, SRC_FRAG_PRIMARY],
-               [SRC_PREV, SRC_PREV, SRC_PREV],
-               [RGB_COLOR, RGB_ALPHA, RGB_COLOR], _alpha3()),
-        # 3: rgb = diffuse * light; alpha = diffuse.a * vertex.a.
-        _stage(F_MODULATE, F_MODULATE,
-               [SRC_TEX0, SRC_PREV, SRC_PREV],
-               [SRC_TEX0, SRC_PRIMARY, SRC_PREV],
-               _color3(), _alpha3()),
-        # 4: rgb *= vertex.rgb; alpha *= c5.z.
-        _stage(F_MODULATE, F_MODULATE,
-               [SRC_PREV, SRC_PRIMARY, SRC_PREV],
-               [SRC_PREV, SRC_CONST, SRC_PREV],
-               _color3(), [A_ALPHA, A_B, A_ALPHA], const_reg=5),
-    ]
+    stages = _shadow_stages(3, 4, 5)
     return _plan_doc(ir, "lighting.base_lit_shadow.ps", "base_lit_shadow", stages,
                      textures=[(0, 0), (0, 1), (4, 2)],
                      constants=[3, 4, 5], inputs=[(1, 0), (2, 1)],
@@ -215,6 +226,7 @@ def _plan_doc(ir, ident, family, stages, textures, constants, inputs,
         "kind": "tev",
         "family": "lighting",
         "recipe": family,
+        "quality": "exact",
         "stage": "ps_3_0",
         "sha256": ir.sha256,
         "sha1": ir.sha1,
@@ -492,6 +504,365 @@ def verify(ir: C.IR, plan: dict, shadow: bool, samples: int = 256) -> dict:
             "model": "ldr_quality; no intermediate clamp divergence"}
 
 
+CONTROL_OPS = {0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x26, 0x27, 0x28,
+               0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x60}
+APPROX_OPS = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+              0x0A, 0x0B, 0x0C, 0x0D, 0x12, 0x20, 0x23, 0x24, 0x30, 0x42,
+              0x51, 0x58}
+TAIL_CONSTS = ("DirLightColor", "DirLightDirection", "MaterialData",
+               "FogColor")
+TAIL_SAMPLERS = ("DiffuseSampler", "NormalSampler")
+
+
+def _safe_recip(x):
+    if abs(x) < 1e-6:
+        return 1e6 if x >= 0.0 else -1e6
+    return 1.0 / x
+
+
+def _safe_rsq(x):
+    v = math.sqrt(abs(x))
+    return 1e6 if v < 1e-6 else 1.0 / v
+
+
+def _f(v):
+    if v != v or v in (float("inf"), float("-inf")):
+        return 0.0
+    return max(-1e4, min(1e4, v))
+
+
+def eval_ir_numeric(ir: C.IR, tex, consts, inputs, samples: int = 32):
+    """Evaluate a straight-line lighting IR numerically (no control flow)."""
+    temps = {}
+    out = [0.0, 0.0, 0.0, 1.0]
+
+    def value(src):
+        if src.reg_type == asm.REG_TEMP:
+            vec = list(temps.get(src.index, [0.0] * 4))
+        elif src.reg_type == asm.REG_INPUT:
+            vec = list(inputs.get(src.index, [0.0] * 4))
+        elif src.reg_type == asm.REG_CONST:
+            vec = list(consts.get(src.index, [0.0] * 4))
+        else:
+            raise AssertionError("source type %r" % src.reg_type)
+        comps = [("xyzw".index(src.swizzle[c])) for c in range(4)]
+        vec = [vec[c] for c in comps]
+        if src.modifier == 1:
+            vec = [-v for v in vec]
+        elif src.modifier == 2:
+            vec = [v - 0.5 for v in vec]
+        elif src.modifier == 3:
+            vec = [-(v - 0.5) for v in vec]
+        elif src.modifier == 4:
+            vec = [2.0 * v - 1.0 for v in vec]
+        elif src.modifier == 5:
+            vec = [-(2.0 * v - 1.0) for v in vec]
+        elif src.modifier == 6:
+            vec = [1.0 - v for v in vec]
+        elif src.modifier == 7:
+            vec = [2.0 * v for v in vec]
+        elif src.modifier == 8:
+            vec = [abs(v) for v in vec]
+        elif src.modifier == 9:
+            vec = [-abs(v) for v in vec]
+        elif src.modifier == 10:
+            vec = [1.0 if v == 0.0 else 0.0 for v in vec]
+        elif src.modifier != 0:
+            raise AssertionError("source modifier %r" % src.modifier)
+        return vec
+
+    for ins in ir.body:
+        if ins.opcode in (0x51, 0x30, 0x00):
+            continue
+        if ins.opcode != 0x42 and any(
+                s.reg_type not in (asm.REG_TEMP, asm.REG_INPUT,
+                                   asm.REG_CONST) for s in ins.srcs):
+            # vPos/projected UV or another non-TEV source: the sampler value is
+            # supplied directly, so the coordinate computation is ignored.
+            continue
+        if ins.opcode == 0x42:
+            vec = list(tex[ins.srcs[1].index])
+        elif ins.opcode == 0x01:
+            vec = value(ins.srcs[0])
+        elif ins.opcode in (0x02, 0x03, 0x05):
+            a, b = value(ins.srcs[0]), value(ins.srcs[1])
+            if ins.opcode == 0x02:
+                vec = [a[i] + b[i] for i in range(4)]
+            elif ins.opcode == 0x03:
+                vec = [a[i] - b[i] for i in range(4)]
+            else:
+                vec = [a[i] * b[i] for i in range(4)]
+        elif ins.opcode == 0x04:
+            a = value(ins.srcs[0])
+            b = value(ins.srcs[1])
+            c = value(ins.srcs[2])
+            vec = [a[i] * b[i] + c[i] for i in range(4)]
+        elif ins.opcode == 0x08:
+            a, b = value(ins.srcs[0]), value(ins.srcs[1])
+            d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+            vec = [d, d, d, d]
+        elif ins.opcode == 0x09:
+            a, b = value(ins.srcs[0]), value(ins.srcs[1])
+            d = sum(a[i] * b[i] for i in range(4))
+            vec = [d, d, d, d]
+        elif ins.opcode in (0x0A, 0x0B):
+            a, b = value(ins.srcs[0]), value(ins.srcs[1])
+            f = min if ins.opcode == 0x0A else max
+            vec = [f(a[i], b[i]) for i in range(4)]
+        elif ins.opcode == 0x12:
+            a = value(ins.srcs[0])
+            b = value(ins.srcs[1])
+            c = value(ins.srcs[2])
+            vec = [a[i] * b[i] + (1.0 - a[i]) * c[i] for i in range(4)]
+        elif ins.opcode == 0x06:
+            a = value(ins.srcs[0])
+            vec = [_safe_recip(v) for v in a]
+        elif ins.opcode == 0x07:
+            a = value(ins.srcs[0])
+            vec = [_safe_rsq(v) for v in a]
+        elif ins.opcode == 0x58:
+            a = value(ins.srcs[0])
+            b = value(ins.srcs[1])
+            c = value(ins.srcs[2])
+            vec = [b[i] if a[i] >= 0.0 else c[i] for i in range(4)]
+        elif ins.opcode in (0x0C, 0x0D):
+            a, b = value(ins.srcs[0]), value(ins.srcs[1])
+            less = ins.opcode == 0x0C
+            vec = [1.0 if ((a[i] < b[i]) if less else (a[i] >= b[i]))
+                   else 0.0 for i in range(4)]
+        elif ins.opcode == 0x23:
+            vec = [abs(v) for v in value(ins.srcs[0])]
+        elif ins.opcode == 0x24:
+            a = value(ins.srcs[0])
+            n = _safe_rsq(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+            vec = [a[0] * n, a[1] * n, a[2] * n, 1.0]
+        elif ins.opcode == 0x20:
+            a = value(ins.srcs[0])
+            b = value(ins.srcs[1])
+            vec = [math.pow(abs(a[i]), max(0.0, min(8.0, b[i])))
+                   for i in range(4)]
+        else:
+            raise AssertionError("opcode %s" % ins.name)
+
+        if ins.dst is None:
+            continue
+        if ins.dst.modifier & 1:
+            vec = [_clamp01(v) for v in vec]
+        vec = [_f(v) for v in vec]
+        if ins.dst.reg_type == asm.REG_COLOROUT:
+            for ch in range(4):
+                if ins.dst.mask & (1 << ch):
+                    out[ch] = _clamp01(vec[ch])
+        elif ins.dst.reg_type == asm.REG_TEMP:
+            previous = temps.get(ins.dst.index, [0.0] * 4)
+            merged = list(previous)
+            for ch in range(4):
+                if ins.dst.mask & (1 << ch):
+                    merged[ch] = vec[ch]
+            temps[ins.dst.index] = merged
+    return out
+
+
+def _name_regs(ir: C.IR, register_set: int):
+    return {c.name: c.register_index for c in ir.program.constants
+            if c.register_set == register_set}
+
+
+def _sample_value(rng, name):
+    if "Position" in name or "VPOSOffset" in name:
+        return rng.uniform(-2.0, 2.0)
+    if "Direction" in name:
+        return rng.uniform(-1.0, 1.0)
+    if any(k in name for k in ("Color", "Emit", "Fog", "Ambient",
+                               "MaterialData", "LightingEffectParams")):
+        return rng.uniform(0.0, 1.0)
+    return rng.uniform(0.0, 1.0)
+
+
+def _approx_error(ir: C.IR, plan: dict, shadow: bool, rng, samples=32):
+    cnames = _name_regs(ir, 2)
+    reg_name = {v: k for k, v in cnames.items()}
+    max_err = 0.0
+    total = 0.0
+    count = 0
+    for _ in range(samples):
+        consts = {}
+        for reg in range(32):
+            name = reg_name.get(reg, "")
+            consts[reg] = [_sample_value(rng, name) for _ in range(4)]
+        for name, reg in cnames.items():
+            if "Direction" in name:
+                vec = [rng.uniform(-1.0, 1.0) for _ in range(4)]
+                n = math.sqrt(sum(v * v for v in vec[:3])) or 1.0
+                consts[reg] = [v / n for v in vec[:3]] + [0.0]
+        tex = [[rng.random() for _ in range(4)] for _ in range(8)]
+        inputs = {}
+        primary = [rng.random() for _ in range(3)] + [rng.random()]
+        frag = [rng.random() for _ in range(3)] + [
+            (0.0 if shadow else rng.random())]
+        for reg, decl in ir.inputs.items():
+            usage = decl["usage"]
+            if usage == 10 and decl["usage_index"] == 0:
+                inputs[reg] = list(primary)
+            elif usage == 10 and decl["usage_index"] == 1:
+                inputs[reg] = list(frag)
+            elif usage == 5:
+                inputs[reg] = [rng.random(), rng.random(), 0.0, 1.0]
+            else:
+                inputs[reg] = [rng.uniform(-1.0, 1.0) for _ in range(4)]
+        want = eval_ir_numeric(ir, tex, consts, inputs)
+        got = eval_plan(plan, tex, consts, primary,
+                        [frag[0], frag[1], frag[2],
+                         0.0 if shadow else frag[3]])
+        for a, b in zip(want, got):
+            err = abs(a - b)
+            max_err = max(max_err, err)
+            total += err
+            count += 1
+    return {"samples": samples, "max_abs_error": max_err,
+            "mean_abs_error": total / max(count, 1),
+            "domain": ("LDR textures/colours, random unit direction and "
+                       "point-light constants; dropped terms are the error")}
+
+
+def _tex_coord(ir: C.IR, sampler: int) -> int:
+    for ins in ir.body:
+        if ins.opcode == 0x42 and len(ins.srcs) >= 2:
+            if ins.srcs[1].index == sampler:
+                coord = ins.srcs[0]
+                if coord.reg_type == asm.REG_INPUT:
+                    return coord.index
+                return 0
+    return 0
+
+
+def approx_plan(ir: C.IR, rng) -> Optional[dict]:
+    """Base-lit plan for a p5-family shader with optional terms dropped."""
+    if ir.kind != "ps" or ir.error:
+        return None
+    ops = {i.opcode for i in ir.body}
+    if ops - APPROX_OPS or ops & CONTROL_OPS:
+        return None
+    for ins in ir.body:
+        if any(s.modifier not in range(11) for s in ins.srcs):
+            return None
+        if ins.dst is not None and ins.dst.modifier not in (0, 1, 2):
+            return None
+    cnames = _name_regs(ir, 2)
+    snames = _name_regs(ir, 3)
+    if not all(name in cnames for name in TAIL_CONSTS):
+        return None
+    if not all(name in snames for name in TAIL_SAMPLERS):
+        return None
+    color = {d.usage_index: d.reg_index for d in ir.program.declarations
+             if d.reg_type == asm.REG_INPUT and d.usage == 10}
+    if 0 not in color or 1 not in color:
+        return None
+    c_dir = cnames["DirLightDirection"]
+    c_light = cnames["DirLightColor"]
+    c_alpha = cnames["MaterialData"]
+    c_fog = cnames["FogColor"]
+    shadow = "ShadowMaskSampler" in snames
+    stages = (_shadow_stages(c_dir, c_light, c_alpha) if shadow
+              else _base_stages(c_dir, c_light, c_alpha, c_fog))
+    textures = [
+        {"texcoord_reg": _tex_coord(ir, snames["DiffuseSampler"]),
+         "sampler_reg": snames["DiffuseSampler"], "sampler_type": 2},
+        {"texcoord_reg": _tex_coord(ir, snames["NormalSampler"]),
+         "sampler_reg": snames["NormalSampler"], "sampler_type": 2},
+    ]
+    if shadow:
+        textures.append({"texcoord_reg": 4,
+                         "sampler_reg": snames["ShadowMaskSampler"],
+                         "sampler_type": 2})
+    constants = sorted({c_dir, c_light, c_alpha} |
+                       (set() if shadow else {c_fog}))
+    lost = []
+    approx_class = "other"
+    if "PointLightPosition" in cnames:
+        approx_class = "point"
+        lost.append("point_light_term_dropped: per-pixel rcp/rsq attenuation "
+                    "has no TEV operation; the 256x1 LUT route needs a "
+                    "VS-provided attenuation coordinate, which this pack "
+                    "cannot add")
+    if "SpecularColor" in cnames or "SpecularSampler" in snames:
+        approx_class = "specular" if approx_class == "other" else approx_class
+        lost.append("specular_term_dropped: specular colour/sampler lobe "
+                    "omitted from the additive result")
+    if "EnvSampler" in snames or "EnvmapData" in cnames:
+        approx_class = "envmap" if approx_class == "other" else approx_class
+        lost.append("envmap_term_dropped: environment reflection omitted")
+    if "SubSurfaceSampler" in snames:
+        approx_class = "subsurface" if approx_class == "other" else approx_class
+        lost.append("subsurface_sss_dropped: SubSurfaceSampler/SSS "
+                    "transmission omitted")
+    if "BackLightMaskSampler" in snames:
+        approx_class = ("backlight" if approx_class == "other"
+                        else approx_class)
+        lost.append("backlight_mask_dropped: back-light mask omitted")
+    if "ProjectedNoiseSampler" in snames or "ProjectedUVParams" in cnames:
+        lost.append("projected_noise_dropped: projected UV/noise term omitted")
+    if "GlowSampler" in snames or "SparkleSampler" in snames:
+        lost.append("glow_sparkle_dropped: glow/sparkle emission omitted")
+    if "ShadowMaskSampler" in snames and not shadow:
+        lost.append("shadow_mask_dropped: shadow mask sampler present but the "
+                    "plan path is the non-shadow recipe")
+    if 0x06 in ops or 0x07 in ops:
+        lost.append("rcp_rsq_lowered_to_absent: reciprocal/square-root "
+                    "attenuation is not representable in TEV")
+    if 0x20 in ops:
+        lost.append("pow_lobe_dropped: pow() specular lobe omitted")
+    if 0x58 in ops:
+        lost.append("cmp_select_dropped: bytecode cmp() folded away")
+    plan = {
+        "id": "lighting.approx.%s" % ir.sha256[:8],
+        "kind": "tev",
+        "family": "lighting",
+        "recipe": "approx_base_lit_shadow" if shadow else "approx_base_lit",
+        "quality": "approx",
+        "approx_class": approx_class,
+        "stage": "ps_3_0",
+        "sha256": ir.sha256,
+        "sha1": ir.sha1,
+        "version": "0x%08x" % ir.version,
+        "instructions": len(ir.body) + len(ir.program.declarations),
+        "draw_enabled": 0,
+        "stages": len(stages),
+        "stage_data": stages,
+        "textures": textures,
+        "inputs": [
+            {"usage": 10, "usage_index": 0, "reg_index": color[0],
+             "tev_source": SRC_PRIMARY},
+            {"usage": 10, "usage_index": 1, "reg_index": color[1],
+             "tev_source": SRC_FRAG_PRIMARY},
+        ],
+        "constants": constants,
+        "uses_vertex_color": 1,
+        "requires_alpha_fixup": 0,
+        "ldr_clamped": 1,
+        "preconditions": [
+            "normal_prebaked", "tangent_basis_prebaked",
+            "ambient_emissive_varying", "material_constants_c0_c7",
+            "ldr_quality", "texture0_2d", "texture1_2d", "vertex_color",
+        ] + (["shadow_uv_projected", "shadow_mask_2d",
+              "fog_off_secondary_zero"] if shadow else []),
+        "approximation": {
+            "lost_terms": lost or ["optional_lobe_dropped"],
+            "kept": ("base_lit directional diffuse+normal+ambient"
+                     + (", shadow mask" if shadow else ", fog lerp")),
+            "reason": ("PICA TEV has six stages, one accumulator and no "
+                       "per-pixel rcp/rsq/dependent texture read; the p5 "
+                       "family is reduced to its base_lit tail."),
+            "loop_truncated_to": 0,
+        },
+        "note": ("approximate base-lit TEV recipe; quality=approx, "
+                 "draw_enabled=0, error measured offline"),
+    }
+    err = _approx_error(ir, plan, shadow, rng)
+    plan["approx_error"] = err
+    return plan
+
+
 def recognise(ir: C.IR):
     plan = base_lit_plan(ir)
     if plan is not None:
@@ -534,32 +905,82 @@ def main(argv=None) -> int:
             continue
         by_hash.setdefault(row["sha256"], row)
         counts[row["sha256"]] = counts.get(row["sha256"], 0) + 1
-    entries, report = [], []
+    exact, report = [], []
+    approx_by_class = {}
+    rng = random.Random(0xA11CE)
     for sha, row in sorted(by_hash.items()):
         ir = C.build_ir(chunks[row["index"]])
         plan, shadow = recognise(ir)
-        if plan is None:
+        if plan is not None:
+            check = verify(ir, plan, shadow)
+            if not check["ok"]:
+                raise SystemExit("%s: plan mismatch %.3g"
+                                 % (sha, check["max_abs_error"]))
+            plan["approx_error"] = dict(check, domain="exact contract")
+            plan["approx_class"] = "exact"
+            exact.append(plan)
+            report.append({"sha256": sha, "chunks": counts[sha],
+                           "recipe": plan["recipe"], "quality": "exact",
+                           "stages": plan["stages"], "error": check})
             continue
-        check = verify(ir, plan, shadow)
-        if not check["ok"]:
-            raise SystemExit("%s: plan mismatch %.3g" % (sha, check["max_abs_error"]))
-        entries.append(plan)
+        if plan is None:
+            approx = approx_plan(ir, rng)
+            if approx is not None:
+                approx_by_class.setdefault(approx["approx_class"],
+                                           []).append(approx)
+    quotas = {"point": 10, "specular": 8, "envmap": 6,
+              "subsurface": 3, "backlight": 3}
+    selected = []
+    for cls, quota in quotas.items():
+        rows = sorted(approx_by_class.get(cls, []),
+                      key=lambda p: (p["approx_error"]["mean_abs_error"],
+                                     p["sha256"]))
+        selected.extend(rows[:quota])
+    if len(selected) < 30:
+        rest = [p for rows in approx_by_class.values() for p in rows
+                if p not in selected]
+        rest.sort(key=lambda p: (p["approx_error"]["mean_abs_error"],
+                                 p["sha256"]))
+        selected.extend(rest[:30 - len(selected)])
+    selected = sorted(selected, key=lambda p: (p["approx_class"],
+                                               p["approx_error"]["mean_abs_error"],
+                                               p["sha256"]))[:34]
+    for plan in selected:
+        sha = plan["sha256"]
         report.append({"sha256": sha, "chunks": counts[sha],
-                       "recipe": plan["recipe"], "stages": plan["stages"],
-                       "verify": check})
+                       "recipe": plan["recipe"], "quality": "approx",
+                       "class": plan["approx_class"],
+                       "stages": plan["stages"],
+                       "error": plan["approx_error"]})
+    entries = exact + selected
+    classes = {}
+    for plan in selected:
+        row = classes.setdefault(plan["approx_class"], {"hashes": 0,
+                                                        "chunks": 0})
+        row["hashes"] += 1
+        row["chunks"] += counts[plan["sha256"]]
+    mean_err = ([p["approx_error"]["mean_abs_error"] for p in selected]
+                or [0.0])
     doc = {
         "schema": "d9-shader-plan-v1",
         "archive": "Skyrim - Shaders.bsa",
         "pack": "lighting",
         "note": ("Pack-owned TEV recipes, merged by tools/fxp_compile.py.  "
-                 "None is draw-certified: draw_enabled is 0, no runtime slot "
-                 "is claimed, and every row lists its material contract."),
+                 "Exact rows are quality=exact; approximate rows are "
+                 "quality=approx with a measured approx_error.  None is "
+                 "draw-certified: draw_enabled is 0 and no runtime slot is "
+                 "claimed."),
         "entries": entries,
         "summary": {
             "recipes": len(entries),
+            "exact": len(exact),
+            "approx": len(selected),
             "chunks": sum(row["chunks"] for row in report),
             "hashes": len(entries),
             "runtime": 0,
+            "approx_classes": classes,
+            "approx_mean_abs_error": sum(mean_err) / len(mean_err),
+            "approx_max_abs_error": max(mean_err),
         },
         "report": report,
     }

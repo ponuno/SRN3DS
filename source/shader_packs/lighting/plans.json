@@ -2,13 +2,14 @@
  "schema": "d9-shader-plan-v1",
  "archive": "Skyrim - Shaders.bsa",
  "pack": "lighting",
- "note": "Pack-owned TEV recipes, merged by tools/fxp_compile.py.  None is draw-certified: draw_enabled is 0, no runtime slot is claimed, and every row lists its material contract.",
+ "note": "Pack-owned TEV recipes, merged by tools/fxp_compile.py.  Exact rows are quality=exact; approximate rows are quality=approx with a measured approx_error.  None is draw-certified: draw_enabled is 0 and no runtime slot is claimed.",
  "entries": [
   {
    "id": "lighting.base_lit.ps",
    "kind": "tev",
    "family": "lighting",
    "recipe": "base_lit",
+   "quality": "exact",
    "stage": "ps_3_0",
    "sha256": "8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1",
    "sha1": "585feb16c65cdfe470cca31fa26c14a8d7eefe58",
@@ -237,13 +238,22 @@
     "texture1_2d",
     "vertex_color"
    ],
-   "note": "six-stage base-lit TEV recipe; draw needs prebaked normal/basis and ambient+emissive in v2"
+   "note": "six-stage base-lit TEV recipe; draw needs prebaked normal/basis and ambient+emissive in v2",
+   "approx_error": {
+    "samples": 256,
+    "max_abs_error": 1.1102230246251565e-16,
+    "ok": true,
+    "model": "ldr_quality; no intermediate clamp divergence",
+    "domain": "exact contract"
+   },
+   "approx_class": "exact"
   },
   {
    "id": "lighting.base_lit_shadow.ps",
    "kind": "tev",
    "family": "lighting",
    "recipe": "base_lit_shadow",
+   "quality": "exact",
    "stage": "ps_3_0",
    "sha256": "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642",
    "sha1": "d3277ba0730c3e63e89aa9b161824e0aff1e16f4",
@@ -450,22 +460,7659 @@
     "texture1_2d",
     "vertex_color"
    ],
-   "note": "five-stage base-lit+shadow recipe under a fog-off contract; exact shadow+fog needs 7 TEV stages"
+   "note": "five-stage base-lit+shadow recipe under a fog-off contract; exact shadow+fog needs 7 TEV stages",
+   "approx_error": {
+    "samples": 256,
+    "max_abs_error": 1.1102230246251565e-16,
+    "ok": true,
+    "model": "ldr_quality; no intermediate clamp divergence",
+    "domain": "exact contract"
+   },
+   "approx_class": "exact"
+  },
+  {
+   "id": "lighting.approx.1102cb40",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "backlight",
+   "stage": "ps_3_0",
+   "sha256": "1102cb40c8701f83149826b33ede31f809beb685991518d3fe8525ab4583c7e1",
+   "sha1": "b0b06972736c79ca1821e8a7666c2a73d7e86436",
+   "version": "0xffff0300",
+   "instructions": 40,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 7,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 4,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 5,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    7
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "backlight_mask_dropped: back-light mask omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.38509094492081325,
+    "mean_abs_error": 0.042030600905113506,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.a929c771",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "backlight",
+   "stage": "ps_3_0",
+   "sha256": "a929c7710941097c0fa94f0de6e271294a01005a2c015f454ddeee2d414ead6b",
+   "sha1": "f2603a2a9168f16c488beefd67bbdd7310be1bf1",
+   "version": "0xffff0300",
+   "instructions": 47,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "backlight_mask_dropped: back-light mask omitted",
+     "projected_noise_dropped: projected UV/noise term omitted",
+     "cmp_select_dropped: bytecode cmp() folded away"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.9423781130974073,
+    "mean_abs_error": 0.05954124782075278,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.d4c0a896",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "backlight",
+   "stage": "ps_3_0",
+   "sha256": "d4c0a89628120881628bceaac4fa3345916e601e1cca9f7e6e09d06ab8afd47a",
+   "sha1": "a2648e94104be9dfba33ba7f049138b83159d56c",
+   "version": "0xffff0300",
+   "instructions": 38,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 7,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 4,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 5,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    7
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "backlight_mask_dropped: back-light mask omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.7042099221979691,
+    "mean_abs_error": 0.061868005821370614,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.d223dc06",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "envmap",
+   "stage": "ps_3_0",
+   "sha256": "d223dc0698a3038a340cff16bbcfab00fe2672c53aaa76bb2102cd3f49d01c84",
+   "sha1": "d0b6c44d0e275e8038054a27cf72d546fcf3db4b",
+   "version": "0xffff0300",
+   "instructions": 44,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    8
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "envmap_term_dropped: environment reflection omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.9053092117012669,
+    "mean_abs_error": 0.044152684270125725,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.88482a47",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "envmap",
+   "stage": "ps_3_0",
+   "sha256": "88482a475ab92147b3619e11758b5e23be60d6ae49fa8906f3a7244c17344bd4",
+   "sha1": "8b2abcea864282bdbda9afaf70f83af01d7a1fb8",
+   "version": "0xffff0300",
+   "instructions": 54,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "envmap_term_dropped: environment reflection omitted",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.9990973004474779,
+    "mean_abs_error": 0.05248033703767563,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.a28c1351",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "envmap",
+   "stage": "ps_3_0",
+   "sha256": "a28c1351f73253138ed7bd40754b28efb990d0b8eac2d59681842d94c4997ee7",
+   "sha1": "e70ec7b01341e1af952fa86a70d6d72a51768ed4",
+   "version": "0xffff0300",
+   "instructions": 45,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 6,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 7,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    8
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "envmap_term_dropped: environment reflection omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.8227970956761015,
+    "mean_abs_error": 0.05708977946832404,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.f435f2dc",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "envmap",
+   "stage": "ps_3_0",
+   "sha256": "f435f2dc047814ab65259c02d3928e2c276f119bb010f485888b574ae470c1fc",
+   "sha1": "e232fc2887fc80d245c21951e6dbdda095a2309a",
+   "version": "0xffff0300",
+   "instructions": 61,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "envmap_term_dropped: environment reflection omitted",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.4992059210348529,
+    "mean_abs_error": 0.05752350741335646,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.da0d02c6",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "envmap",
+   "stage": "ps_3_0",
+   "sha256": "da0d02c636e50d2538d30d5d27186bcacf499e17381023a6ab81fb15d969e3b7",
+   "sha1": "b026017064939e1123a63070815dc080a65f5ee6",
+   "version": "0xffff0300",
+   "instructions": 68,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "envmap_term_dropped: environment reflection omitted",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.5581212996861593,
+    "mean_abs_error": 0.06865064366772075,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.6f4e7c18",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "envmap",
+   "stage": "ps_3_0",
+   "sha256": "6f4e7c189a335c7d52feae6e47a6d0730b05858da0d1657bdc72b5912d9be009",
+   "sha1": "dcf67b6a53e61f81fb3fee56a46e1695c7b461f0",
+   "version": "0xffff0300",
+   "instructions": 51,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    8
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "envmap_term_dropped: environment reflection omitted",
+     "backlight_mask_dropped: back-light mask omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.6740455021830162,
+    "mean_abs_error": 0.07138312170686643,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.3e4c0d42",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "3e4c0d42f924c79d03415163de80aa99b9224f08076799ccf773e3d492a61b0e",
+   "sha1": "2f65ef1daeee960542942c1a22beebe4926efa40",
+   "version": "0xffff0300",
+   "instructions": 116,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 13,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 14,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 15,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 17,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    13,
+    14,
+    15,
+    17
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "backlight_mask_dropped: back-light mask omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.13805512142452503,
+    "mean_abs_error": 0.015669653670943157,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.2b41353a",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "2b41353a1892e782016b8da3ba16681c08ab08b206c091b5eee273a32c174f31",
+   "sha1": "298d0a43a880c6f4574580c4f758f2e823091161",
+   "version": "0xffff0300",
+   "instructions": 131,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 15,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 16,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 17,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 19,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    15,
+    16,
+    17,
+    19
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "backlight_mask_dropped: back-light mask omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.31907391765666715,
+    "mean_abs_error": 0.018555058346310868,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.4ab4a951",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "4ab4a951d706b01e8c0dc52a70b6959ed8791e67eef7988fdadcce67afa59eb0",
+   "sha1": "376c009955e6b8a32d88c04f65bf4c64fd7ebbc3",
+   "version": "0xffff0300",
+   "instructions": 99,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 15,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 16,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 17,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 19,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    15,
+    16,
+    17,
+    19
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.2474519487695094,
+    "mean_abs_error": 0.02192843935830599,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.b206e66f",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "b206e66f232a0eaf44dd764213f93b046eaf7e806c07862ca1442690a2fc39b2",
+   "sha1": "02c73a9065b56a7d02bea188e02d6e21131771b4",
+   "version": "0xffff0300",
+   "instructions": 110,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 17,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 18,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 19,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 21,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    17,
+    18,
+    19,
+    21
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.35321680489911234,
+    "mean_abs_error": 0.021995780767331476,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.1de75c62",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "1de75c62c529ae21cfa441fe982b6b3c983635e1ca549b93f622e38435eaa9a2",
+   "sha1": "03b2ba30fe953b8fb00a4b261f9a746e774f83a2",
+   "version": "0xffff0300",
+   "instructions": 97,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 7,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 12,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    7,
+    8,
+    9,
+    12
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.4791624451235332,
+    "mean_abs_error": 0.024432051451836585,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.11cd6422",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "11cd6422be6787ac225e8f851008aef78d3c61ca10c0a65a1f572e26a30317e8",
+   "sha1": "83185e3109e6ab91826d3251f5757683f908ea93",
+   "version": "0xffff0300",
+   "instructions": 61,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 6,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 7,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 10,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 6,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 7,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    5,
+    6,
+    7,
+    10
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.6066687198580508,
+    "mean_abs_error": 0.02574015395220227,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.bcb91352",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "bcb91352f8502b0e80a53311078fb632dd12f845f5bba5d3059ef4a67f0dade4",
+   "sha1": "962961765d0be1e112dba807e7453066814541ca",
+   "version": "0xffff0300",
+   "instructions": 74,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 6,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 7,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 10,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    5,
+    6,
+    7,
+    10
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.6344138102207353,
+    "mean_abs_error": 0.02655584819315733,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.56422b09",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "56422b09bf6708ab2514a8b73cf1831fde3a14fdce131b89e09f3d5ba39c888b",
+   "sha1": "3f3c43e5f1d7def17a5b77a57382a56f267e4d08",
+   "version": "0xffff0300",
+   "instructions": 112,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 17,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 18,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 19,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 21,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    17,
+    18,
+    19,
+    21
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.29382036281486007,
+    "mean_abs_error": 0.02676737092721691,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.e1bb7c56",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "e1bb7c562b6c5b346ad663952f29b4518a10abdd8d2a51e2fbec32423aeddc4a",
+   "sha1": "60aec115ea3d9e40271d24ad72d67e36d0f4aef4",
+   "version": "0xffff0300",
+   "instructions": 110,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 15,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 16,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 17,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 21,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 6,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 7,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    15,
+    16,
+    17,
+    21
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "projected_noise_dropped: projected UV/noise term omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "cmp_select_dropped: bytecode cmp() folded away"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.7736846904771433,
+    "mean_abs_error": 0.026886379817589384,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.55631781",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "point",
+   "stage": "ps_3_0",
+   "sha256": "55631781d6428670a574688709922c2243c802623e1616c18967c568c3c7e8b5",
+   "sha1": "1a3034720a56beb2146b9279aa911d2694276af5",
+   "version": "0xffff0300",
+   "instructions": 99,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 13,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 14,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 15,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 19,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 6,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 7,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    13,
+    14,
+    15,
+    19
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "point_light_term_dropped: per-pixel rcp/rsq attenuation has no TEV operation; the 256x1 LUT route needs a VS-provided attenuation coordinate, which this pack cannot add",
+     "projected_noise_dropped: projected UV/noise term omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "cmp_select_dropped: bytecode cmp() folded away"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.3422774797317006,
+    "mean_abs_error": 0.027284483407162035,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.6627502d",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "6627502d07df9711e8e9b62e9daa5f5005f6c4c51ae308d0c1eb198c4eda690c",
+   "sha1": "5e00bcf7a53943192e9d688054a6ad29373cec37",
+   "version": "0xffff0300",
+   "instructions": 71,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.4267519497701536,
+    "mean_abs_error": 0.02923925735876903,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.2caf2498",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "2caf249826f86e61d795b0f71562728c57f4e45397ef41332457f1b4753427f7",
+   "sha1": "1c54666e5d29acf2ea865362cee89bfe3237aab0",
+   "version": "0xffff0300",
+   "instructions": 70,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "backlight_mask_dropped: back-light mask omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.3687268631414412,
+    "mean_abs_error": 0.03273648489352824,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.82a26d3d",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "82a26d3d974e3bf608b8e5b74a1b3042444ad3bf6e1c9834845c92704130e978",
+   "sha1": "d2a3dc2dd461da07184e8af01182c8a2e5b42a40",
+   "version": "0xffff0300",
+   "instructions": 59,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.3313490261489973,
+    "mean_abs_error": 0.03451778032489251,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.50311f08",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "50311f0818af2c32f38017ef4bfd22a66e216e1cf1fe0aa842a10b45b14cc3ed",
+   "sha1": "627877fe53502560349a8a79c833fde09c3fe4f4",
+   "version": "0xffff0300",
+   "instructions": 42,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    8
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.5188926751871232,
+    "mean_abs_error": 0.0384311767520056,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.a775c697",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "a775c69786b9580377a3768b9f0e324a579cae0b9f0cf33e998e7f91ca23a5d8",
+   "sha1": "e05c82261d89c257da78407a4c751d90588c6d06",
+   "version": "0xffff0300",
+   "instructions": 53,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.45047637089356035,
+    "mean_abs_error": 0.04018371725149015,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.019d1b0f",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "019d1b0f1034ea768ae70d1a41ceb19babd74fcb5a54f538bfa091ea1acf5901",
+   "sha1": "bf160eea1c593d024b3a7d5290f982a83a827b39",
+   "version": "0xffff0300",
+   "instructions": 79,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.6401431617671014,
+    "mean_abs_error": 0.04253129313236464,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.1cdbc1ca",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "1cdbc1ca72464ce4dcf46b022ce913dc3ad4c8c767f0b95049247e6cec6e7ca2",
+   "sha1": "420a6998140936eed33b4b33cfc308d0e7c82bbd",
+   "version": "0xffff0300",
+   "instructions": 68,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 9,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    9
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "envmap_term_dropped: environment reflection omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.7069391092654556,
+    "mean_abs_error": 0.04465684397823165,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.a0576208",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "specular",
+   "stage": "ps_3_0",
+   "sha256": "a05762086e77d7f61fe09a66979c71d35ebc2b94f27d424cd9b0bf256da81fba",
+   "sha1": "4660e42e8eaf9084da9f08def0d4598ecf1aed1d",
+   "version": "0xffff0300",
+   "instructions": 40,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    8
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "specular_term_dropped: specular colour/sampler lobe omitted from the additive result",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.5901814191402004,
+    "mean_abs_error": 0.04507971452032038,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.ca372f0e",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "subsurface",
+   "stage": "ps_3_0",
+   "sha256": "ca372f0ec7c67c30af7ed428c797b58765f4e64f80c625c70c993f3f8cce773d",
+   "sha1": "b773d0e9ffbe712cac3edf22782813274b64a41b",
+   "version": "0xffff0300",
+   "instructions": 45,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    8
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "pow_lobe_dropped: pow() specular lobe omitted"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.313271392342485,
+    "mean_abs_error": 0.030762701390003828,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.cb401910",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "subsurface",
+   "stage": "ps_3_0",
+   "sha256": "cb4019103c40c2a05eca18104f719b115cb6532ae542f423a7391f1ec767dbbb",
+   "sha1": "282d3a8deb9327fb8c2a3702f43b3ba6891f52cc",
+   "version": "0xffff0300",
+   "instructions": 57,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 10,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 5,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 6,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    10
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "projected_noise_dropped: projected UV/noise term omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV",
+     "cmp_select_dropped: bytecode cmp() folded away"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.3888743007073968,
+    "mean_abs_error": 0.036825897081612234,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "id": "lighting.approx.ba407ad6",
+   "kind": "tev",
+   "family": "lighting",
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "approx_class": "subsurface",
+   "stage": "ps_3_0",
+   "sha256": "ba407ad633e900b1cae19babc2292349ff979a16e91d77c24f13f51fed1d1cb7",
+   "sha1": "5676010ee58a976f26dbffff3d401c0a07b38644",
+   "version": "0xffff0300",
+   "instructions": 50,
+   "draw_enabled": 0,
+   "stages": 6,
+   "stage_data": [
+    {
+     "func_rgb": 7,
+     "func_a": 7,
+     "src_rgb": [
+      4,
+      14,
+      14
+     ],
+     "src_a": [
+      4,
+      14,
+      14
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 3,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 8,
+     "func_a": 8,
+     "src_rgb": [
+      15,
+      14,
+      2
+     ],
+     "src_a": [
+      15,
+      14,
+      2
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 4,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      3,
+      15,
+      15
+     ],
+     "src_a": [
+      3,
+      0,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 1,
+     "src_rgb": [
+      15,
+      0,
+      15
+     ],
+     "src_a": [
+      15,
+      14,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      0
+     ],
+     "op_a": [
+      0,
+      6,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 5,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 4,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      2,
+      2
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      0,
+      2
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 255,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    },
+    {
+     "func_rgb": 1,
+     "func_a": 0,
+     "src_rgb": [
+      15,
+      14,
+      15
+     ],
+     "src_a": [
+      15,
+      15,
+      15
+     ],
+     "op_rgb": [
+      0,
+      2,
+      0
+     ],
+     "op_a": [
+      0,
+      0,
+      0
+     ],
+     "scale_rgb": 0,
+     "scale_a": 0,
+     "const_reg": 8,
+     "const_is_literal": 0,
+     "const_rgba8": 0
+    }
+   ],
+   "textures": [
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 0,
+     "sampler_type": 2
+    },
+    {
+     "texcoord_reg": 0,
+     "sampler_reg": 1,
+     "sampler_type": 2
+    }
+   ],
+   "inputs": [
+    {
+     "usage": 10,
+     "usage_index": 0,
+     "reg_index": 4,
+     "tev_source": 0
+    },
+    {
+     "usage": 10,
+     "usage_index": 1,
+     "reg_index": 5,
+     "tev_source": 2
+    }
+   ],
+   "constants": [
+    3,
+    4,
+    5,
+    8
+   ],
+   "uses_vertex_color": 1,
+   "requires_alpha_fixup": 0,
+   "ldr_clamped": 1,
+   "preconditions": [
+    "normal_prebaked",
+    "tangent_basis_prebaked",
+    "ambient_emissive_varying",
+    "material_constants_c0_c7",
+    "ldr_quality",
+    "texture0_2d",
+    "texture1_2d",
+    "vertex_color"
+   ],
+   "approximation": {
+    "lost_terms": [
+     "subsurface_sss_dropped: SubSurfaceSampler/SSS transmission omitted",
+     "glow_sparkle_dropped: glow/sparkle emission omitted",
+     "rcp_rsq_lowered_to_absent: reciprocal/square-root attenuation is not representable in TEV"
+    ],
+    "kept": "base_lit directional diffuse+normal+ambient, fog lerp",
+    "reason": "PICA TEV has six stages, one accumulator and no per-pixel rcp/rsq/dependent texture read; the p5 family is reduced to its base_lit tail.",
+    "loop_truncated_to": 0
+   },
+   "note": "approximate base-lit TEV recipe; quality=approx, draw_enabled=0, error measured offline",
+   "approx_error": {
+    "samples": 32,
+    "max_abs_error": 0.5248044384720001,
+    "mean_abs_error": 0.03748723050406083,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
   }
  ],
  "summary": {
-  "recipes": 2,
-  "chunks": 10,
-  "hashes": 2,
-  "runtime": 0
+  "recipes": 32,
+  "exact": 2,
+  "approx": 30,
+  "chunks": 131,
+  "hashes": 32,
+  "runtime": 0,
+  "approx_classes": {
+   "backlight": {
+    "hashes": 3,
+    "chunks": 15
+   },
+   "envmap": {
+    "hashes": 6,
+    "chunks": 35
+   },
+   "point": {
+    "hashes": 10,
+    "chunks": 11
+   },
+   "specular": {
+    "hashes": 8,
+    "chunks": 40
+   },
+   "subsurface": {
+    "hashes": 3,
+    "chunks": 20
+   }
+  },
+  "approx_mean_abs_error": 0.0387662415063547,
+  "approx_max_abs_error": 0.07138312170686643
  },
  "report": [
   {
    "sha256": "8699c0204453a1dd2189a7252766f2a9591b296370467869b106e049576ea9f1",
    "chunks": 5,
    "recipe": "base_lit",
+   "quality": "exact",
    "stages": 6,
-   "verify": {
+   "error": {
     "samples": 256,
     "max_abs_error": 1.1102230246251565e-16,
     "ok": true,
@@ -476,12 +8123,433 @@
    "sha256": "a9942b49966b60249d8a9aeb4e049d1976086fe7b9293168f70c25aeb8477642",
    "chunks": 5,
    "recipe": "base_lit_shadow",
+   "quality": "exact",
    "stages": 5,
-   "verify": {
+   "error": {
     "samples": 256,
     "max_abs_error": 1.1102230246251565e-16,
     "ok": true,
     "model": "ldr_quality; no intermediate clamp divergence"
+   }
+  },
+  {
+   "sha256": "1102cb40c8701f83149826b33ede31f809beb685991518d3fe8525ab4583c7e1",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "backlight",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.38509094492081325,
+    "mean_abs_error": 0.042030600905113506,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "a929c7710941097c0fa94f0de6e271294a01005a2c015f454ddeee2d414ead6b",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "backlight",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.9423781130974073,
+    "mean_abs_error": 0.05954124782075278,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "d4c0a89628120881628bceaac4fa3345916e601e1cca9f7e6e09d06ab8afd47a",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "backlight",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.7042099221979691,
+    "mean_abs_error": 0.061868005821370614,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "d223dc0698a3038a340cff16bbcfab00fe2672c53aaa76bb2102cd3f49d01c84",
+   "chunks": 10,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "envmap",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.9053092117012669,
+    "mean_abs_error": 0.044152684270125725,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "88482a475ab92147b3619e11758b5e23be60d6ae49fa8906f3a7244c17344bd4",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "envmap",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.9990973004474779,
+    "mean_abs_error": 0.05248033703767563,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "a28c1351f73253138ed7bd40754b28efb990d0b8eac2d59681842d94c4997ee7",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "envmap",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.8227970956761015,
+    "mean_abs_error": 0.05708977946832404,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "f435f2dc047814ab65259c02d3928e2c276f119bb010f485888b574ae470c1fc",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "envmap",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.4992059210348529,
+    "mean_abs_error": 0.05752350741335646,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "da0d02c636e50d2538d30d5d27186bcacf499e17381023a6ab81fb15d969e3b7",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "envmap",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.5581212996861593,
+    "mean_abs_error": 0.06865064366772075,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "6f4e7c189a335c7d52feae6e47a6d0730b05858da0d1657bdc72b5912d9be009",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "envmap",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.6740455021830162,
+    "mean_abs_error": 0.07138312170686643,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "3e4c0d42f924c79d03415163de80aa99b9224f08076799ccf773e3d492a61b0e",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.13805512142452503,
+    "mean_abs_error": 0.015669653670943157,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "2b41353a1892e782016b8da3ba16681c08ab08b206c091b5eee273a32c174f31",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.31907391765666715,
+    "mean_abs_error": 0.018555058346310868,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "4ab4a951d706b01e8c0dc52a70b6959ed8791e67eef7988fdadcce67afa59eb0",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.2474519487695094,
+    "mean_abs_error": 0.02192843935830599,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "b206e66f232a0eaf44dd764213f93b046eaf7e806c07862ca1442690a2fc39b2",
+   "chunks": 2,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.35321680489911234,
+    "mean_abs_error": 0.021995780767331476,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "1de75c62c529ae21cfa441fe982b6b3c983635e1ca549b93f622e38435eaa9a2",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.4791624451235332,
+    "mean_abs_error": 0.024432051451836585,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "11cd6422be6787ac225e8f851008aef78d3c61ca10c0a65a1f572e26a30317e8",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.6066687198580508,
+    "mean_abs_error": 0.02574015395220227,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "bcb91352f8502b0e80a53311078fb632dd12f845f5bba5d3059ef4a67f0dade4",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.6344138102207353,
+    "mean_abs_error": 0.02655584819315733,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "56422b09bf6708ab2514a8b73cf1831fde3a14fdce131b89e09f3d5ba39c888b",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.29382036281486007,
+    "mean_abs_error": 0.02676737092721691,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "e1bb7c562b6c5b346ad663952f29b4518a10abdd8d2a51e2fbec32423aeddc4a",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.7736846904771433,
+    "mean_abs_error": 0.026886379817589384,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "55631781d6428670a574688709922c2243c802623e1616c18967c568c3c7e8b5",
+   "chunks": 1,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "point",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.3422774797317006,
+    "mean_abs_error": 0.027284483407162035,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "6627502d07df9711e8e9b62e9daa5f5005f6c4c51ae308d0c1eb198c4eda690c",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.4267519497701536,
+    "mean_abs_error": 0.02923925735876903,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "2caf249826f86e61d795b0f71562728c57f4e45397ef41332457f1b4753427f7",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.3687268631414412,
+    "mean_abs_error": 0.03273648489352824,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "82a26d3d974e3bf608b8e5b74a1b3042444ad3bf6e1c9834845c92704130e978",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.3313490261489973,
+    "mean_abs_error": 0.03451778032489251,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "50311f0818af2c32f38017ef4bfd22a66e216e1cf1fe0aa842a10b45b14cc3ed",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.5188926751871232,
+    "mean_abs_error": 0.0384311767520056,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "a775c69786b9580377a3768b9f0e324a579cae0b9f0cf33e998e7f91ca23a5d8",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.45047637089356035,
+    "mean_abs_error": 0.04018371725149015,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "019d1b0f1034ea768ae70d1a41ceb19babd74fcb5a54f538bfa091ea1acf5901",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.6401431617671014,
+    "mean_abs_error": 0.04253129313236464,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "1cdbc1ca72464ce4dcf46b022ce913dc3ad4c8c767f0b95049247e6cec6e7ca2",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.7069391092654556,
+    "mean_abs_error": 0.04465684397823165,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "a05762086e77d7f61fe09a66979c71d35ebc2b94f27d424cd9b0bf256da81fba",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "specular",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.5901814191402004,
+    "mean_abs_error": 0.04507971452032038,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "ca372f0ec7c67c30af7ed428c797b58765f4e64f80c625c70c993f3f8cce773d",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "subsurface",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.313271392342485,
+    "mean_abs_error": 0.030762701390003828,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "cb4019103c40c2a05eca18104f719b115cb6532ae542f423a7391f1ec767dbbb",
+   "chunks": 10,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "subsurface",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.3888743007073968,
+    "mean_abs_error": 0.036825897081612234,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
+   }
+  },
+  {
+   "sha256": "ba407ad633e900b1cae19babc2292349ff979a16e91d77c24f13f51fed1d1cb7",
+   "chunks": 5,
+   "recipe": "approx_base_lit",
+   "quality": "approx",
+   "class": "subsurface",
+   "stages": 6,
+   "error": {
+    "samples": 32,
+    "max_abs_error": 0.5248044384720001,
+    "mean_abs_error": 0.03748723050406083,
+    "domain": "LDR textures/colours, random unit direction and point-light constants; dropped terms are the error"
    }
   }
  ]
