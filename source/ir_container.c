@@ -203,6 +203,7 @@ uint32_t n3ds_irc_data_crc32(const N3dsIrc *irc) { return irc ? irc->data_crc : 
 
 int n3ds_irc_lookup(const N3dsIrc *irc, uint32_t addr, N3dsIrcEntry *out) {
     if (!irc || !irc->index || !out) return N3DS_IRC_ERR_ARG;
+    HP_START(hp_t0);
     N3dsIrc *m = (N3dsIrc *)irc;
     m->st.lookups++;
     unsigned lo = 0, hi = irc->nfun;
@@ -213,10 +214,12 @@ int n3ds_irc_lookup(const N3dsIrc *irc, uint32_t addr, N3dsIrcEntry *out) {
     }
     if (lo >= irc->nfun || irc->index[lo].addr != addr) {
         m->st.lookup_misses++;
+        HP_ADD(HP_LOOKUP, hp_t0);
         return N3DS_IRC_ERR_NOT_FOUND;
     }
     *out = irc->index[lo];
     m->st.lookup_hits++;
+    HP_ADD(HP_LOOKUP, hp_t0);
     return N3DS_IRC_OK;
 }
 
@@ -731,22 +734,30 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
     /* Records are sorted by block start. A cold block before the callable
      * entry is part of this frame, so direct branches may target it. */
     uint32_t frame_start = irc_rd32(s->data + N3DS_IRC_RECORD_HEADER);
+    if (g_a43f_trace_on < 0) n3ds_a43f_trace_prime();
+    int trace = g_a43f_trace_on;
     for (;;) {
         IrExecBlock b;
         n3ds_irc_last_function = addr;
         n3ds_irc_last_block = ip;
         n3ds_irc_current_cpu = c;
+        HP_START(hp_fetch);
         if (irc_fetch_block(c, ip, func_end, &b)) {
+            HP_ADD(HP_FETCH, hp_fetch);
             char what[128];
             snprintf(what, sizeof what,
                      "IR container: block %08lx is not in the predecoded record",
                      (unsigned long)ip);
             rt_unimpl(c, ip, what);
         }
+        HP_ADD(HP_FETCH, hp_fetch);
         uint32_t next = 0;
-        n3ds_a43f_trace_pre(c, b.start, addr, 1);
-        if (exec_block(c, &b, &f, frame_start, func_end, &next)) return;
-        n3ds_a43f_trace_block(c, b.start, addr, next, 1);
+        if (trace) n3ds_a43f_trace_pre(c, b.start, addr, 1);
+        HP_START(hp_exec);
+        int done = exec_block(c, &b, &f, frame_start, func_end, &next);
+        HP_ADD(HP_EXEC, hp_exec);
+        if (done) return;
+        if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 1);
         ip = next;
     }
 }

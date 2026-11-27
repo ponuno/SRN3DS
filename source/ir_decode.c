@@ -832,6 +832,11 @@ static int decode_one(Dec *d) {
 
 /* ---------------------------------------------------------------- cache */
 
+/* Small L1/L2-resident mirror of the decoded-block index. Blocks are looked up
+ * once per execution, so this is the hottest table in the interpreter. */
+#define IR_BCACHE 4096u
+static struct { uint32_t start, off, bytes; } g_bcache[IR_BCACHE];
+
 typedef struct {
     uint32_t start;
     uint16_t x86_len;
@@ -858,6 +863,7 @@ static uint32_t hash32(uint32_t v) {
 
 static void cache_slot_clear(void) {
     if (g_slots) memset(g_slots, 0, (size_t)g_nslots * sizeof *g_slots);
+    memset(g_bcache, 0, sizeof g_bcache);
     g_used = 0;
 }
 
@@ -957,16 +963,39 @@ int n3ds_ir_fetch_block(CPU *c, uint32_t start, uint32_t func_end, IrExecBlock *
     }
     uint32_t words = 0;
     const IrBlockHeader *h = NULL;
-    IrSlot *s = slot_find(start);
-    if (s) {
+    uint32_t ci = (start >> 2) & (IR_BCACHE - 1);
+    uint32_t off, bytes;
+    if (g_bcache[ci].start == start && g_bcache[ci].off) {
+        /* Small direct-mapped mirror of the decoded-block index: the hot loop
+         * revisits the same blocks, and this avoids a random probe in the much
+         * larger open-addressed slot table. */
         g_stats.hits++;
-        words = (uint32_t)((s->bytes - sizeof(IrBlockHeader)) / 4);
-        h = (const IrBlockHeader *)(g_arena + (s->off - 1u));
+        off = g_bcache[ci].off;
+        bytes = g_bcache[ci].bytes;
     } else {
-        g_stats.misses++;
-        if (!func_end) return -1;
-        h = cache_decode(c, start, func_end, &words);
-        if (!h) return -1;
+        IrSlot *s = slot_find(start);
+        if (s) {
+            g_stats.hits++;
+            off = s->off;
+            bytes = s->bytes;
+            g_bcache[ci].start = start;
+            g_bcache[ci].off = off;
+            g_bcache[ci].bytes = bytes;
+        } else {
+            g_stats.misses++;
+            if (!func_end) return -1;
+            h = cache_decode(c, start, func_end, &words);
+            if (!h) return -1;
+            off = (uint32_t)((const uint8_t *)h - g_arena) + 1u;
+            bytes = (uint32_t)(sizeof(IrBlockHeader) + words * 4u);
+            g_bcache[ci].start = start;
+            g_bcache[ci].off = off;
+            g_bcache[ci].bytes = bytes;
+        }
+    }
+    if (!h) {
+        words = (bytes - (uint32_t)sizeof(IrBlockHeader)) / 4u;
+        h = (const IrBlockHeader *)(g_arena + (off - 1u));
     }
     out->start = h->start;
     out->x86_len = h->x86_len;
@@ -1025,3 +1054,40 @@ size_t n3ds_ir_encode_block(CPU *c, uint32_t start, uint32_t func_end,
 /* The cache arena is memory the interpreter must own; keep allocation in one
  * place so a device build can raise N3DS_IR_DEFAULT_CACHE without touching the
  * runtime. */
+
+#ifdef N3DS_HOST_PROF
+#include "hprof.h"
+#if defined(_WIN32)
+#include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+#include <stdio.h>
+uint64_t hprof_cycles[HP_COUNT];
+uint64_t hprof_calls[HP_COUNT];
+uint64_t hprof_rdtsc(void) {
+#if defined(_WIN32)
+    return (uint64_t)__rdtsc();
+#else
+    return __rdtsc();
+#endif
+}
+void hprof_reset(void) {
+    for (unsigned i = 0; i < HP_COUNT; ++i) { hprof_cycles[i] = 0; hprof_calls[i] = 0; }
+}
+static const char *hprof_name(unsigned i) {
+    static const char *names[HP_COUNT] = {
+        "exec_block", "block_fetch", "dispatch", "irc_lookup",
+        "ir_end", "guest_read32", "sync_wait"
+    };
+    return i < HP_COUNT ? names[i] : "?";
+}
+void hprof_dump(void) {
+    fprintf(stderr, "[hprof] cycles calls slot\n");
+    for (unsigned i = 0; i < HP_COUNT; ++i)
+        fprintf(stderr, "[hprof] %llu %llu %s\n",
+                (unsigned long long)hprof_cycles[i],
+                (unsigned long long)hprof_calls[i], hprof_name(i));
+}
+#endif
+

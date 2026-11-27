@@ -15,6 +15,7 @@
 #include "tesv_cecdc0_probe.h"
 #include "tesv_cecdc0_source.h"
 #include "ir_core.h"
+#include "hprof.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
 #include <stdio.h>
@@ -176,7 +177,9 @@ static int run(const char *exe, const char *root, unsigned steps, size_t budget,
     uint32_t status = 0;
     rt_prof_reset();
     rt_prof_enable(1);
+    hprof_reset();
     int r = n3ds_boot_run(&b, &status);
+    hprof_dump();
     rt_prof_enable(0);
     n3ds_ir_cache_stats(&ir_stats);
     printf("IR cache: blocks=%llu bytes=%llu hits=%llu misses=%llu evicted=%llu\n",

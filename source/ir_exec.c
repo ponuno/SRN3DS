@@ -7,6 +7,7 @@
 #include "ir_core.h"
 #include "guest.h"
 #include "n3ds_atomic.h"
+#include "hprof.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,11 @@ void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
                          int is_irc);
 void n3ds_a43f_trace_block(CPU *c, uint32_t block_ip, uint32_t func_addr,
                            uint32_t next, int is_irc);
+/* Cached trace switch (see n3ds_lift_runtime.c): -1 unknown, 1 off, 2 on. */
+extern int g_a43f_trace_on;
+void n3ds_a43f_trace_prime(void);
+/* Direct slot for the diagnostic "current IR block" value. */
+extern uint32_t g_ir_ip;
 
 /* ---------------------------------------------------------------- state */
 
@@ -161,10 +167,13 @@ static void trace_indirect_ir(CPU *c,uint32_t target,uint32_t from){
     }
 }
 static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
+    HP_START(hp_t0);
     if (n3ds_rt_dispatch(c, target)) {
+        HP_ADD(HP_DISPATCH, hp_t0);
         trace_indirect_ir(c, target, from);
         rt_unimpl(c, target, indirect ? "unknown indirect function" : "unknown function/import");
     }
+    HP_ADD(HP_DISPATCH, hp_t0);
 }
 
 /* ---------------------------------------------------------------- string */
@@ -1384,15 +1393,24 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
 void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
     Flags f = {0};
     uint32_t ip = addr;
+    if (g_a43f_trace_on < 0) n3ds_a43f_trace_prime();
+    int trace = g_a43f_trace_on;
     for (;;) {
         IrExecBlock b;
-        n3ds_lift_set_ir_ip(ip);
-        if (n3ds_ir_fetch_block(c, ip, func_end, &b))
+        g_ir_ip = ip;
+        HP_START(hp_fetch);
+        if (n3ds_ir_fetch_block(c, ip, func_end, &b)) {
+            HP_ADD(HP_FETCH, hp_fetch);
             rt_unimpl(c, ip, "IR: block does not fit the decode cache");
+        }
+        HP_ADD(HP_FETCH, hp_fetch);
         uint32_t next = 0;
-        n3ds_a43f_trace_pre(c, b.start, addr, 0);
-        if (exec_block(c, &b, &f, addr, func_end, &next)) return;
-        n3ds_a43f_trace_block(c, b.start, addr, next, 0);
+        if (trace) n3ds_a43f_trace_pre(c, b.start, addr, 0);
+        HP_START(hp_exec);
+        int done = exec_block(c, &b, &f, addr, func_end, &next);
+        HP_ADD(HP_EXEC, hp_exec);
+        if (done) return;
+        if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 0);
         ip = next;
     }
 }

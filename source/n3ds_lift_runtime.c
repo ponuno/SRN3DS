@@ -49,7 +49,7 @@ static CPU *g_last_cpu;
 /* Diagnostic only (TESV_HANG_WATCHDOG_MS): current IR block address and a
  * short ring of the most recent guest entries. AOT keeps its registers in
  * locals, so the entry ring is the only cheap PC evidence for a lifted spin. */
-static uint32_t g_ir_ip;
+uint32_t g_ir_ip;
 static uint32_t g_stream_obj;
 void n3ds_lift_dump_stream(FILE *f) {
     if (!f || !g_stream_obj || !memory) return;
@@ -137,11 +137,16 @@ typedef struct {
     unsigned long long tv[2], tok[2], tfail[2], treads, tbytes;
 } A43fTrace;
 static A43fTrace g_a43f;
+/* Cached after the first a43f_on(): -1 unknown, 1 off, 2 on. The interpreter
+ * reads this directly so a disabled trace costs one load per block instead of
+ * two cross-TU calls that immediately return. */
+int g_a43f_trace_on = -1;
 
 static int a43f_on(void) {
     if (!g_a43f.state) {
         const char *v = getenv("TESV_A43F_TRACE");
         g_a43f.state = (v && v[0] && strcmp(v, "0")) ? 2 : 1;
+        g_a43f_trace_on = g_a43f.state;
         if (g_a43f.state == 2) {
             g_a43f.t0 = g_a43f.last_t = (double)clock() / (double)CLOCKS_PER_SEC;
             fprintf(stderr, "[a43f] trace on entry=%08x ok=%08x fail=%08x "
@@ -239,6 +244,7 @@ static void a43f_periodic(int force) {
     }
 }
 void n3ds_a43f_trace_periodic(CPU *c) { (void)c; if (a43f_on()) a43f_periodic(0); }
+void n3ds_a43f_trace_prime(void) { (void)a43f_on(); }
 /* Reader-side counters, driven from the dispatcher for every tier. */
 void n3ds_a43f_trace_dispatch(CPU *c, uint32_t addr) {
     if (!a43f_on() || !c || !memory) return;
@@ -880,11 +886,22 @@ int n3ds_rt_dispatch(CPU *c,uint32_t addr) {
         }
     }
     g_last_call=addr; g_last_cpu=c;
-    uint32_t from=0;
-    if(memory&&c) (void)guest_read32(memory,c->r[4],&from);
-    g_call_ring[g_call_ring_n%RT_CALL_RING].addr=addr;
-    g_call_ring[g_call_ring_n%RT_CALL_RING].from=from;
-    ++g_call_ring_n;
+    /* The recent-call ring (including its guest stack read) is consumed only by
+     * the hang watchdog dump. Reading the return address on every dispatch costs
+     * a checked guest read; skip both when no watchdog/dump env is armed. */
+    static int call_ring_on;
+    if (!call_ring_on) {
+        const char *w = getenv("TESV_HANG_WATCHDOG_MS");
+        const char *d = getenv("TESV_DUMP_AFTER_MS");
+        call_ring_on = ((w && *w) || (d && *d)) ? 2 : 1;
+    }
+    if (call_ring_on == 2) {
+        uint32_t from=0;
+        if(memory&&c) (void)guest_read32(memory,c->r[4],&from);
+        g_call_ring[g_call_ring_n%RT_CALL_RING].addr=addr;
+        g_call_ring[g_call_ring_n%RT_CALL_RING].from=from;
+        ++g_call_ring_n;
+    }
     const FnEntry *e=lookup(addr);
     if(e){
         if(a43f_on()&&addr==0x00a43f80u){

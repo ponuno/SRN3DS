@@ -1,4 +1,5 @@
 #include "guest.h"
+#include "hprof.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -703,9 +704,11 @@ int guest_write(GuestMemory *m, uint32_t addr, const void *src, size_t n) {
     return copy_range(m, addr, (void *)src, n, 1);
 }
 int guest_read32(GuestMemory *m, uint32_t addr, uint32_t *v) {
+    HP_START(hp_t0);
     uint8_t b[4];
-    if (!v || guest_read(m,addr,b,4)) return -1;
+    if (!v || guest_read(m,addr,b,4)) { HP_ADD(HP_GUEST_READ, hp_t0); return -1; }
     *v = (uint32_t)b[0] | ((uint32_t)b[1]<<8) | ((uint32_t)b[2]<<16) | ((uint32_t)b[3]<<24);
+    HP_ADD(HP_GUEST_READ, hp_t0);
     return 0;
 }
 int guest_write32(GuestMemory *m, uint32_t addr, uint32_t v) {

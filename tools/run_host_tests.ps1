@@ -551,7 +551,14 @@ if (Test-Path $TesvExe) {
     Add-Test "tesv_probe" $liftCommon ($legacySources + @("tests/tesv_probe.c")) @($TesvExe)
     if ($TesvSliceGen -and (Test-Path (Join-Path $TesvSliceGen "tesv_table.c"))) {
         $sliceSrc = Get-ChildItem -Path $TesvSliceGen -Filter "tesv_*.c" | ForEach-Object { $_.FullName }
-        $sliceFlags = $liftCommon + @("-O0", "-I`"$TesvSliceGen`"")
+        # The diagnostic slice is enormous (mostly interpreted), so its own
+        # optimisation level is the dominant factor in menu iteration time.
+        # -O0 was the old default; -O2 is ~2.8x faster on the fixed
+        # 2e8-block run and is now the default. TESV_SLICE_OPT=-O0 restores
+        # the debugging build.
+        $sliceOpt = if ($env:TESV_SLICE_OPT) { $env:TESV_SLICE_OPT } else { "-O2" }
+        $sliceExtra = if ($env:TESV_SLICE_DEFINES) { @($env:TESV_SLICE_DEFINES -split ' ') } else { @() }
+        $sliceFlags = $liftCommon + @($sliceOpt) + $sliceExtra + @("-I`"$TesvSliceGen`"")
         $sliceD3dx = @()
         if ($PilotGen -and (Test-Path (Join-Path $PilotGen "pilot_00.c")) -and (Test-Path (Join-Path $PilotGen "pilot_table.c"))) {
             $sliceFlags += @("-I`"$PilotGen`"")

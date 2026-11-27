@@ -6,6 +6,7 @@
  * one fixed table, handles are table indices in 0x500..0x5ff, and named
  * objects resolve to the same slot so state is shared by construction. */
 #include "win32_sync.h"
+#include "hprof.h"
 #include <string.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -224,7 +225,7 @@ static int wait_set_invalid(CPU *c, const uint32_t *h, unsigned n) {
     }
     return 0;
 }
-static uint32_t wait_common(CPU *c, const uint32_t *h, unsigned n, int all,
+static uint32_t wait_common_raw(CPU *c, const uint32_t *h, unsigned n, int all,
                             uint32_t ms) {
     for (;;) {
         if (wait_set_invalid(c, h, n)) return WAIT_FAILED;
@@ -257,6 +258,14 @@ static uint32_t wait_common(CPU *c, const uint32_t *h, unsigned n, int all,
         }
         if (rc == 3) return wait_unavailable(c, h[0], ms);
     }
+}
+
+static uint32_t wait_common(CPU *c, const uint32_t *h, unsigned n, int all,
+                            uint32_t ms) {
+    HP_START(hp_t0);
+    uint32_t rc = wait_common_raw(c, h, n, all, ms);
+    HP_ADD(HP_SYNC, hp_t0);
+    return rc;
 }
 
 #define A(n) M32(c->r[4] + 4 + 4 * (n))
