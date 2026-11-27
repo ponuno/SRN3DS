@@ -2099,6 +2099,9 @@ int d9_set_back_buffer_info_ex(D9Device *d,unsigned w,unsigned h,unsigned format
 }
 int d9_reset_device_ex(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable){
     if(!d||d->scene||d->teardown||!d->limit)return D9_INVALID;
+    /* Device Reset invalidates all GPU state; the caller guarantees the GPU is
+     * idle, so frame-scoped texture pins cannot outlive this point. */
+    (void)d9_texcache_frame_clear_all(&d->tex_cache);
     for(unsigned i=0;i<MAX_TEXTURES;++i)if(d->textures[i].id&&d->textures[i].locked)return D9_INVALID;
     for(unsigned i=0;i<MAX_CUBES;++i)if(d->cubes[i].id&&d->cubes[i].locked)return D9_INVALID;
     for(unsigned i=0;i<MAX_VOLUMES;++i)if(d->volumes[i].id&&d->volumes[i].locked)return D9_INVALID;
@@ -4112,6 +4115,11 @@ int d9_texture_cache_get_limits(D9Device *d,size_t *guest_limit,size_t *gpu_limi
     if(!d)return D9_INVALID;
     if(guest_limit)*guest_limit=d->tex_cache.guest_limit;
     if(gpu_limit)*gpu_limit=d->tex_cache.gpu_limit;
+    return D9_OK;
+}
+int d9_texture_cache_unpin_all(D9Device *d){
+    if(!d)return D9_INVALID;
+    (void)d9_texcache_frame_clear_all(&d->tex_cache);
     return D9_OK;
 }
 int d9_texture_cache_trim(D9Device *d,size_t guest_target,size_t gpu_target,

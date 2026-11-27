@@ -835,6 +835,9 @@ int d9_texture_cache_get_limits(D9Device *d,size_t *guest_limit,
  * pinned bytes prevent reaching the target. */
 int d9_texture_cache_trim(D9Device *d,size_t guest_target,size_t gpu_target,
                           unsigned *evicted);
+/* Drop every frame-scoped texture pin.  Reset uses it internally; tests call it
+ * to simulate the backend frame barrier before an explicit trim. */
+int d9_texture_cache_unpin_all(D9Device *d);
 int d9_texture_layout(unsigned w,unsigned h,unsigned format,size_t *pitch,size_t *bytes);
 /* Split texture residency accounting and pool/usage metadata. */
 int d9_texture_resource_info(D9Device *d,D9Handle h,unsigned *pool,

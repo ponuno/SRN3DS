@@ -118,7 +118,10 @@ int main(void){
     D9TexCacheStats before;assert(d9_texture_cache_stats(d,&before)==D9_OK);
     assert(before.gpus==2&&before.rehydratable>=2&&before.non_evictable==0);
 
-    /* Evict both GPU copies; their CPU stores and tokens survive. */
+    /* Evict both GPU copies; their CPU stores and tokens survive.  A submitted
+     * draw pins both natives until the backend frame barrier, so simulate that
+     * barrier first: this test is about rehydration, not pin lifetime. */
+    assert(d9_texture_cache_unpin_all(d)==D9_OK);
     unsigned evicted=0;
     assert(d9_texture_cache_trim(d,SIZE_MAX,0,&evicted)==D9_OK&&evicted>=2);
     D9TexCacheStats stats;assert(d9_texture_cache_stats(d,&stats)==D9_OK);
@@ -147,6 +150,7 @@ int main(void){
 
     /* Evict again and inject a rehydrate failure.  The entry must stay
        evicted and no partial native may remain. */
+    assert(d9_texture_cache_unpin_all(d)==D9_OK);
     assert(d9_texture_cache_trim(d,SIZE_MAX,0,&evicted)==D9_OK&&evicted>=2);
     assert(d9_texture_cache_stats(d,&stats)==D9_OK);
     unsigned failures=stats.rehydrate_failures;
@@ -166,6 +170,7 @@ int main(void){
     assert(d9_bind_cube_texture(d,0,0)==D9_OK);
 
     /* Same failure contract for volume. */
+    assert(d9_texture_cache_unpin_all(d)==D9_OK);
     assert(d9_texture_cache_trim(d,SIZE_MAX,0,&evicted)==D9_OK&&evicted>=1);
     assert(d9_texture_cache_stats(d,&stats)==D9_OK);
     failures=stats.rehydrate_failures;
@@ -185,6 +190,7 @@ int main(void){
                                      D9_USAGE_RENDERTARGET,&rt)==D9_OK);
     assert(d9_texture_cache_stats(d,&stats)==D9_OK&&stats.non_evictable>=1);
     unsigned evictions=stats.evictions_gpu;
+    assert(d9_texture_cache_unpin_all(d)==D9_OK);
     int trc=d9_texture_cache_trim(d,SIZE_MAX,0,&evicted);
     assert(trc==D9_OK||trc==D9_UNSUPPORTED); /* RT cube keeps the target unreachable */
     D9TexCacheStats after;assert(d9_texture_cache_stats(d,&after)==D9_OK);

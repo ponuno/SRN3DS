@@ -595,6 +595,25 @@ int d9_texcache_last_refusal_pinned(const D9TexCache *cache) {
     return cache ? (int)cache->last_refusal_pinned : 0;
 }
 
+/* Drop every frame-scoped pin regardless of generation.  Device Reset
+ * invalidates all GPU state, so the caller guarantees the GPU is idle and no
+ * outstanding command can still reference a native. */
+unsigned d9_texcache_frame_clear_all(D9TexCache *cache) {
+    if (!cache) return 0;
+    unsigned cleared = 0;
+    for (unsigned i = 0; i < cache->capacity; ++i) {
+        D9TexEntry *entry = &cache->entry[i];
+        if (!entry_is_live(entry)) continue;
+        unsigned drop = 0;
+        if (entry->bound_frame) { entry->bound_frame = 0; ++drop; }
+        if (entry->draw_frame) { entry->draw_frame = 0; ++drop; }
+        if (!drop) continue;
+        entry->pins = entry->pins >= drop ? (uint16_t)(entry->pins - drop) : 0;
+        ++cleared;
+    }
+    return cleared;
+}
+
 int d9_texcache_frame_forget(D9TexCache *cache, uint64_t key) {
     if (!cache) return D9TEXCACHE_INVALID;
     D9TexEntry *entry = d9_texcache_find(cache, key);

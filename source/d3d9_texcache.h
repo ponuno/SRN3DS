@@ -279,6 +279,9 @@ int d9_texcache_frame_bind(D9TexCache *cache, uint64_t key, uint32_t frame);
 int d9_texcache_frame_unbind(D9TexCache *cache, uint64_t key, uint32_t frame);
 int d9_texcache_frame_pin(D9TexCache *cache, uint64_t key, uint32_t frame);
 unsigned d9_texcache_frame_clear(D9TexCache *cache, uint32_t frame);
+/* Drop every frame-scoped pin regardless of generation.  Only for paths that
+ * invalidate all GPU state (device Reset) or tests that simulate the barrier. */
+unsigned d9_texcache_frame_clear_all(D9TexCache *cache);
 /* Drop both frame-scoped pins of one entry without touching plain pins.  Used
  * by explicit ReleaseTexture, whose backend deletion already waits for the GPU
  * (citro3d C3D_FrameSync) before freeing the native. */
