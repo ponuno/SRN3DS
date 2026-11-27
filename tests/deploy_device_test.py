@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 import deploy_device as deploy  # noqa: E402
-from skyrim import bsa, bsa_write, dds  # noqa: E402
+from skyrim import bsa, bsa_write, dds, stream_index  # noqa: E402
 
 
 def tes4_header(masters=()):
@@ -162,6 +162,55 @@ def main():
         assert any(row["path"].lower().endswith("bad_bc5.dds")
                    for row in cooked_manifest["refused"])
         checks += 8
+
+        # The cooked stage writes a stream index next to the manifest; every
+        # range it publishes is re-derived from the archive directory.
+        index_path = cooked_out / "stream_index.bin"
+        assert index_path.is_file(), index_path
+        index = stream_index.read_index(str(index_path))
+        report = cooked_manifest["stream_index"]
+        assert report["resources"] == len(index.resources) == 3, report
+        assert report["archives"] == len(index.archives) >= 1
+        assert stream_index.verify_index(index, str(cooked_out / "Data")) == []
+        file_sha = {row["path"].lower(): row["sha256"]
+                    for row in cooked_manifest["files"]}
+        for row in index.resources:
+            archive_row = index.archives[row.archive]
+            with bsa.BsaArchive(str(cooked_out / "Data" / archive_row.name)) as archive:
+                entry = archive.find(row.path)
+                assert entry is not None, row.path
+                assert entry.offset == row.entry_offset
+                assert entry.offset + entry.size == \
+                    (row.physical_offset + row.payload_length)
+                assert row.payload_length == len(archive.read_file(row.path))
+                assert row.sha256 == file_sha[row.path]
+        checks += 7
+
+        # Same inputs produce byte-identical tables and generation.
+        cooked_again = root / "cooked_again"
+        rc = deploy.main(["stage", "--data", str(root / "Data"),
+                          "--tesv", str(root / "TESV.exe"),
+                          "--out", str(cooked_again), "--pack", "cooked"])
+        assert rc == 0, rc
+        assert (cooked_again / "stream_index.bin").read_bytes() == \
+            index_path.read_bytes()
+        again = json.loads((cooked_again / "deploy_manifest.json").read_text(
+            encoding="utf-8"))
+        assert again["stream_index"]["generation"] == report["generation"]
+        checks += 3
+
+        # The opt-out writes neither the file nor the manifest key.
+        plain = root / "cooked_plain"
+        rc = deploy.main(["stage", "--data", str(root / "Data"),
+                          "--tesv", str(root / "TESV.exe"),
+                          "--out", str(plain), "--pack", "cooked",
+                          "--no-stream-index"])
+        assert rc == 0, rc
+        assert not (plain / "stream_index.bin").exists()
+        plain_manifest = json.loads(
+            (plain / "deploy_manifest.json").read_text(encoding="utf-8"))
+        assert "stream_index" not in plain_manifest
+        checks += 3
 
         rc = deploy.main(["plan", "--data", str(root / "Data"),
                           "--tesv", str(root / "TESV.exe"),

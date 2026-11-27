@@ -140,6 +140,18 @@ BsaStatus bsa_read(const BsaArchive *archive, const BsaEntry *entry,
                    uint8_t *dst, size_t cap, size_t *out_len,
                    char *reason, size_t reason_cap);
 
+/* Read `n` unpacked bytes starting at `rel` directly into `dst`.
+ *
+ * Only the requested range is read: no buffer for the whole record is
+ * allocated and the physical offset is computed in 64 bits after
+ * entry_prefix() removed the embedded-name prefix.  `rel == payload_length`
+ * with `n == 0` is a valid empty read at the end.  On any error *out_len is
+ * zero and nothing after `dst` was written.  Compressed entries refuse with
+ * BSA_ERR_UNSUPPORTED: cooked streaming archives store plain payloads. */
+BsaStatus bsa_read_range(const BsaArchive *archive, const BsaEntry *entry,
+                         uint32_t rel, void *dst, uint32_t n,
+                         uint32_t *out_len, char *reason, size_t reason_cap);
+
 /* Exposed for tests and for the runtime's content identity line. */
 uint32_t bsa_crc32(const void *data, size_t size);
 

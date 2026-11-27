@@ -39,7 +39,7 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 
-from skyrim import bsa, bsa_write, dds  # noqa: E402
+from skyrim import bsa, bsa_write, data_overlay, dds, stream_index  # noqa: E402
 from skyrim import data_overlay  # noqa: E402
 
 try:  # executed as ``python tools/deploy_device.py``
@@ -391,9 +391,10 @@ def _write_rgba8_dds(path: str, levels: List[Tuple[int, int, bytes]]) -> int:
     return len(blob)
 
 
-def texture_payload(asset, row, archives, max_dim: int) -> Tuple[bytes, str]:
+def texture_payload(asset, row, archives, max_dim: int,
+                    source: Optional[bytes] = None) -> Tuple[bytes, str]:
     """Return the device bytes for one DDS plus the container name."""
-    data = _read_all(asset, archives)
+    data = _read_all(asset, archives) if source is None else source
     if row["action"] == "keep":
         return data, "copied"
     width, height, rgba = dds.decode_dds(data, 0)
@@ -567,10 +568,12 @@ def stage_cooked(overlay, args) -> dict:
                     asset, row = entry["asset"], entry["row"]
                     try:
                         if row["action"] == "copy":
-                            payload, container = _read_all(asset, archives), "copied"
+                            source = _read_all(asset, archives)
+                            payload, container = source, "copied"
                         else:
+                            source = _read_all(asset, archives)
                             payload, container = texture_payload(
-                                asset, row, archives, max_dim)
+                                asset, row, archives, max_dim, source=source)
                     except (OSError, bsa.BsaError, dds.DdsError, DeployError) as exc:
                         refusals.append({"path": asset.virtual_path,
                                          "reason": "conversion failed: %s" % exc,
@@ -578,7 +581,10 @@ def stage_cooked(overlay, args) -> dict:
                         continue
                     rows.append({"path": asset.virtual_path, "bytes": len(payload),
                                  "sha256": hashlib.sha256(payload).hexdigest(),
+                                 "source_sha256":
+                                     hashlib.sha256(source).hexdigest(),
                                  "container": container,
+                                 "archive": name,
                                  "source": {"kind": asset.kind,
                                             "plugin": asset.plugin,
                                             "archive": asset.archive}})
@@ -610,6 +616,9 @@ def stage_cooked(overlay, args) -> dict:
         "bytes": sum(row["bytes"] for row in copied)
         + sum(row["bytes"] for row in archive_rows),
     }
+    if not getattr(args, "no_stream_index", False):
+        manifest["stream_index"] = stream_index.write_from_manifest(
+            manifest, os.path.join(args.out, "stream_index.bin"), data_dir)
     with open(os.path.join(args.out, "deploy_manifest.json"), "w",
               encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=1, sort_keys=True)
@@ -723,6 +732,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        help="comma list of top-level groups, e.g. grass,sound")
         p.add_argument("--exclude-ext", default="",
                        help="comma list of extensions, e.g. .bto,.btr,.hkx")
+        p.add_argument("--no-stream-index", action="store_true",
+                       help="do not write stream_index.bin for a cooked pack")
     args = parser.parse_args(argv)
     try:
         with data_overlay.DataOverlay(args.data or None,
@@ -733,7 +744,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       else stage(overlay, args) if args.command == "stage"
                       else plan_report(overlay, args))
     except (data_overlay.OverlayError, DeployError, bsa.BsaError,
-            dds.DdsError, OSError) as exc:
+            dds.DdsError, stream_index.StreamIndexError, OSError) as exc:
         print("deploy: %s" % exc, file=sys.stderr)
         return 2
     if args.command == "plan":

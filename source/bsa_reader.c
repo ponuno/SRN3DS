@@ -1332,3 +1332,41 @@ BsaStatus bsa_read(const BsaArchive *archive, const BsaEntry *entry,
     }
     return st;
 }
+
+BsaStatus bsa_read_range(const BsaArchive *archive, const BsaEntry *entry,
+                         uint32_t rel, void *dst, uint32_t n,
+                         uint32_t *out_len, char *reason, size_t reason_cap) {
+    if (reason && reason_cap) reason[0] = 0;
+    if (!archive || !entry || (!dst && n) || !out_len) {
+        set_reason(reason, reason_cap,
+                   "range read needs an archive, entry, destination and length");
+        return BSA_ERR_ARGUMENT;
+    }
+    *out_len = 0;
+    uint32_t off = 0, len = 0, unpacked = 0;
+    BsaStatus st = entry_prefix(archive, entry, &off, &len, &unpacked,
+                                reason, reason_cap);
+    if (st != BSA_OK) return st;
+    if (archive->header.compressed) {
+        set_reason(reason, reason_cap,
+                   "range read of a compressed entry is unsupported");
+        return BSA_ERR_UNSUPPORTED;
+    }
+    /* Uncompressed: the stored payload and the unpacked record are the same
+     * bytes.  Check the relative window before touching the destination. */
+    if ((uint64_t)rel > (uint64_t)len || (uint64_t)n > (uint64_t)len - rel) {
+        set_reason(reason, reason_cap,
+                   "range %u+%u is outside the %u-byte payload",
+                   rel, n, len);
+        return BSA_ERR_BOUNDS;
+    }
+    if (!n) return BSA_OK;
+    uint64_t physical = (uint64_t)off + (uint64_t)rel;
+    st = read_exact(archive, physical, dst, n, reason, reason_cap);
+    if (st != BSA_OK) {
+        *out_len = 0;
+        return st;
+    }
+    *out_len = n;
+    return BSA_OK;
+}
