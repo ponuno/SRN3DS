@@ -139,6 +139,17 @@ A basic block is an 8-byte header (`start`, `x86_len`, `count`, `term`)
 followed by the stream. `x86_len` is also the fall-through address and the
 relative-branch base. The terminator is always the last instruction.
 
+`count` is one byte, so a block holds at most 255 x86 instructions. Compiler
+output can be straight-line for longer than that: TESV's `0x429872` is a
+333-instruction x87 run between a call and a `jmp`. When the cap is reached
+before a guest terminator, `n3ds_ir_encode_block()` appends a synthetic
+`IR_OP_JMP` with displacement 0 that targets `start + x86_len` and reports
+`IrBlockInfo.split`. The remainder decodes as the next block, which is exactly
+the CPU's fall-through. The packer uses `split` to continue a discovery span
+past that block (it already did the same after a `call`), so one long span
+becomes several record blocks with no format change. Regression:
+`tests/ir_long_block_smoke.c`.
+
 Measured word mix on the full slice (`growth12` unique pass): core 4.00,
 address word 1.37, disp32 0.58, imm32 0.97, block header 1.34 → **8.26 B/insn**
 measured. The 2,000-function slice measures 8.56 B/insn.

@@ -119,6 +119,7 @@ typedef struct {
     uint16_t ir_bytes;   /* header + IR stream, 4-byte aligned */
     uint16_t insn_count; /* x86 instructions in the block */
     uint16_t term_op;    /* IR opcode that terminated the block (0 if none) */
+    uint8_t  split;      /* 1 when the 255-insn cap, not guest code, ended it */
     char     error[56];  /* soft-decode failure ("IR: unsupported opcode ...") */
 } IrBlockInfo;
 

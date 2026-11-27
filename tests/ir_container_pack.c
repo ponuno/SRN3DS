@@ -397,8 +397,12 @@ static int build_record(Fn *fn, uint8_t **out, size_t *out_size) {
                 status = DEC_BAD_RANGE;
                 break;
             }
-            if ((info.term_op != IR_OP_CALL && info.term_op != IR_OP_CALL_IND) ||
-                info.end_ip >= hi)
+            if (info.end_ip >= hi) break;
+            /* Continue the span after a call (the interpreter resumes at the
+             * return address) and after a decoder cap split (the rest of a
+             * straight-line run becomes the next block). */
+            if (!info.split && info.term_op != IR_OP_CALL &&
+                info.term_op != IR_OP_CALL_IND)
                 break;
             pos = info.end_ip;
         }

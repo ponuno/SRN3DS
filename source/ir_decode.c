@@ -28,6 +28,7 @@ typedef struct {
     size_t words, used;
     unsigned count;
     int soft;
+    int split;
     uint16_t term_op;
     jmp_buf jb;
     char err[56];
@@ -1043,6 +1044,26 @@ size_t n3ds_ir_encode_block(CPU *c, uint32_t start, uint32_t func_end,
             dc_fail(&d, d.pos, "IR: block too long");
     }
     if (d.count == 0) dc_fail(&d, start, "IR: empty block");
+    if (!terminated && d.count == IR_MAX_BLOCK_INS && d.pos < func_end) {
+        /* Straight-line code longer than the uint8 block count (compiler
+         * output can reach a few hundred instructions between branches; TESV
+         * has a 333-instruction x87 run at 0x429872). The block cannot hold
+         * another x86 instruction, so close it with a synthetic fall-through
+         * jump to end_ip. The stream after end_ip is decoded as the next
+         * block, which is exactly what the CPU does. `split` tells the
+         * container packer that the discovery span continues past this block
+         * even though the terminator is a jump, not a call. */
+        Ins in;
+        memset(&in, 0, sizeof in);
+        in.base = 15; in.index = 15;
+        in.op = IR_OP_JMP;
+        in.immk = IR_IMM_32;
+        in.imm = 0;
+        emit(&d, &in);
+        d.term_op = IR_OP_JMP;
+        d.split = 1;
+        terminated = 1;
+    }
     if (!terminated) dc_fail(&d, start, "IR: block has no terminator");
     if (d.pos - start > IR_MAX_BLOCK_X86)
         dc_fail(&d, d.pos, "IR: block too long");
@@ -1053,6 +1074,7 @@ size_t n3ds_ir_encode_block(CPU *c, uint32_t start, uint32_t func_end,
         info->end_ip = d.pos;
         info->insn_count = (uint16_t)d.count;
         info->term_op = d.term_op;
+        info->split = (uint8_t)d.split;
         info->ir_bytes = (uint16_t)(sizeof(IrBlockHeader) + d.used * 4);
     }
     return d.used * 4;
