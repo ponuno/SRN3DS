@@ -302,9 +302,10 @@ change takes (a): `CreatePixelShader` returns `S_OK` with a real
 `has_tev=1` object for every translated plan, but `runtime`/`draw_enabled`
 stay 0 unless the whole stage contract can be produced.
 
-Measured result: **all 38 PS have a pack-side TEV plan; 35 are
-draw-enabled/runtime**, 3 are `passes[]` plans pending the multi-pass runtime
-feature. 8 of the plans carry `constant_ops` derived constants for
+Measured result: **all 38 PS have a pack-side TEV plan and all 38 are
+draw-enabled/runtime**; three of them (`d1465bec`, `916e67f1`, `a23f8b39`) are
+2-pass programs (6+1/2 stages) in the `passes[]` format, replayed by
+`d9_draw_plan_passes`. 8 plans carry `constant_ops` derived constants for
 `c0.zwzw`-style swizzles; 26 are declared approximations (`color1`→`color0`,
 dropped source negation, two-constant collapse, derived pack, or a named
 dropped trailing instruction). No plan is labelled exact unless the unchanged

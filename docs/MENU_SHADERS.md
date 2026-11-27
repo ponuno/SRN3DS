@@ -89,10 +89,10 @@ the SWF overlay.
 *Status (gfx-vs-emit, base `2240347`):* all 5 GFx VS are `emitted-verified`
 and draw-enabled (`264c2065`, `6186c545`, `4999d543` exact; `0975cc50`,
 `73904d3f` declared approx with `color1` dropped), 256 samples / pos 0, in
-`source/d3d9_pica_vs_menu_table.inc`. PS: **38/38 have pack-side TEV plans,
-35 runtime/draw-enabled**, 3 split into `passes[]` and pending that runtime
-feature. Derived constants (`constant_ops`, `c0.zwzw`-style) are recorded for
-8 plans. No `DevCaps` change, no frame.
+`source/d3d9_pica_vs_menu_table.inc`. PS: **38/38 have pack-side TEV plans and
+are runtime/draw-enabled**, including 3 two-pass `passes[]` programs. Derived
+constants (`constant_ops`, `c0.zwzw`-style) are recorded for 8 plans. No
+`DevCaps` change, no frame.
 
 1. **7 GFx PS + 3 GFx VS** — the only shaders that must run for the StartMenu
    overlay. Start here; each is a bounded, small straight-line program.

@@ -2639,6 +2639,1621 @@
       "version": "0xffff0300"
     },
     {
+      "approximation": "color1->color0; negate(v0) dropped",
+      "constant_values": {},
+      "constants": [
+        2,
+        3
+      ],
+      "draw_enabled": 1,
+      "family": "ui",
+      "id": "menu.gfx.ps.d1465bec",
+      "inputs": [
+        {
+          "reg_index": 0,
+          "tev_source": 0,
+          "usage": 10,
+          "usage_index": 0
+        }
+      ],
+      "instructions": 8,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "material_contract": {
+        "complete": true,
+        "constant_values": {},
+        "constants": [
+          2,
+          3
+        ],
+        "simplified": true,
+        "textures": [
+          {
+            "sampler_reg": 0,
+            "sampler_type": 2,
+            "texcoord_reg": 2
+          }
+        ],
+        "varyings": [
+          {
+            "reg_index": 0,
+            "tev_source": 0,
+            "usage": 10,
+            "usage_index": 0
+          }
+        ]
+      },
+      "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; 2-pass TEV program (6 + 1 stages)",
+      "objects": 1,
+      "outputs": [],
+      "passes": [
+        {
+          "blend": {
+            "dst": 1,
+            "enable": 0,
+            "op": 1,
+            "src": 2
+          },
+          "constants": [
+            2,
+            3
+          ],
+          "depth_write": 0,
+          "inputs": [
+            {
+              "reg_index": 0,
+              "tev_source": 0,
+              "usage": 10,
+              "usage_index": 0
+            }
+          ],
+          "stage_data": [
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 0,
+              "instruction": "texld",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                3,
+                15,
+                15
+              ],
+              "src_rgb": [
+                3,
+                15,
+                15
+              ],
+              "word": 256
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 2,
+              "func_rgb": 2,
+              "instruction": "add",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                0,
+                15
+              ],
+              "src_rgb": [
+                15,
+                0,
+                15
+              ],
+              "word": 272
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 8,
+              "func_rgb": 8,
+              "instruction": "mad",
+              "op_a": [
+                6,
+                0,
+                0
+              ],
+              "op_rgb": [
+                12,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                0,
+                15,
+                0
+              ],
+              "src_rgb": [
+                0,
+                15,
+                0
+              ],
+              "word": 300
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 2,
+              "const_rgba8": 0,
+              "func_a": 1,
+              "func_rgb": 1,
+              "instruction": "mad_mul",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                14,
+                15
+              ],
+              "src_rgb": [
+                15,
+                14,
+                15
+              ],
+              "word": 332
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 3,
+              "const_rgba8": 0,
+              "func_a": 2,
+              "func_rgb": 2,
+              "instruction": "mad_add",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                14,
+                15
+              ],
+              "src_rgb": [
+                15,
+                14,
+                15
+              ],
+              "word": 332
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 1,
+              "func_rgb": 0,
+              "instruction": "mul",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                2,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                0,
+                15
+              ],
+              "src_rgb": [
+                15,
+                0,
+                15
+              ],
+              "word": 352
+            }
+          ],
+          "textures": [
+            {
+              "sampler_reg": 0,
+              "sampler_type": 2,
+              "texcoord_reg": 2
+            }
+          ]
+        },
+        {
+          "blend": {
+            "dst": 2,
+            "enable": 1,
+            "op": 1,
+            "src": 2
+          },
+          "constants": [
+            2,
+            3
+          ],
+          "depth_write": 1,
+          "inputs": [],
+          "stage_data": [
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 0,
+              "instruction": "mov",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                15,
+                15
+              ],
+              "src_rgb": [
+                15,
+                15,
+                15
+              ],
+              "word": 368
+            }
+          ],
+          "textures": []
+        }
+      ],
+      "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+      "quality": "approx",
+      "requires_alpha_fixup": 0,
+      "runtime": 1,
+      "sha1": "2a1f255bc70cb652b54b7ddf0b92cd0dc59ed859",
+      "sha256": "d1465becee1e4690cf6efc5b19dc5d555b51ad0ed1814ff07ca1a1ce737af77d",
+      "source_slot": 14,
+      "source_table": "0x012dfcd8",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "texld",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "word": 256
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 2,
+          "func_rgb": 2,
+          "instruction": "add",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            0,
+            15
+          ],
+          "src_rgb": [
+            15,
+            0,
+            15
+          ],
+          "word": 272
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 8,
+          "func_rgb": 8,
+          "instruction": "mad",
+          "op_a": [
+            6,
+            0,
+            0
+          ],
+          "op_rgb": [
+            12,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            0,
+            15,
+            0
+          ],
+          "src_rgb": [
+            0,
+            15,
+            0
+          ],
+          "word": 300
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 2,
+          "const_rgba8": 0,
+          "func_a": 1,
+          "func_rgb": 1,
+          "instruction": "mad_mul",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            15,
+            14,
+            15
+          ],
+          "word": 332
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 3,
+          "const_rgba8": 0,
+          "func_a": 2,
+          "func_rgb": 2,
+          "instruction": "mad_add",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            15,
+            14,
+            15
+          ],
+          "word": 332
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 1,
+          "func_rgb": 0,
+          "instruction": "mul",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            2,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            0,
+            15
+          ],
+          "src_rgb": [
+            15,
+            0,
+            15
+          ],
+          "word": 352
+        }
+      ],
+      "stages": 6,
+      "textures": [
+        {
+          "sampler_reg": 0,
+          "sampler_type": 2,
+          "texcoord_reg": 2
+        }
+      ],
+      "total_stages": 7,
+      "uses_vertex_color": 1,
+      "version": "0xffff0300"
+    },
+    {
+      "approximation": "color1->color0; negate(v0) dropped",
+      "constant_values": {},
+      "constants": [
+        2,
+        3
+      ],
+      "draw_enabled": 1,
+      "family": "ui",
+      "id": "menu.gfx.ps.916e67f1",
+      "inputs": [
+        {
+          "reg_index": 0,
+          "tev_source": 0,
+          "usage": 10,
+          "usage_index": 0
+        }
+      ],
+      "instructions": 9,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "material_contract": {
+        "complete": true,
+        "constant_values": {},
+        "constants": [
+          2,
+          3
+        ],
+        "simplified": true,
+        "textures": [
+          {
+            "sampler_reg": 0,
+            "sampler_type": 2,
+            "texcoord_reg": 2
+          }
+        ],
+        "varyings": [
+          {
+            "reg_index": 0,
+            "tev_source": 0,
+            "usage": 10,
+            "usage_index": 0
+          }
+        ]
+      },
+      "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; 2-pass TEV program (6 + 2 stages)",
+      "objects": 1,
+      "outputs": [],
+      "passes": [
+        {
+          "blend": {
+            "dst": 1,
+            "enable": 0,
+            "op": 1,
+            "src": 2
+          },
+          "constants": [
+            2,
+            3
+          ],
+          "depth_write": 0,
+          "inputs": [
+            {
+              "reg_index": 0,
+              "tev_source": 0,
+              "usage": 10,
+              "usage_index": 0
+            }
+          ],
+          "stage_data": [
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 0,
+              "instruction": "texld",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                3,
+                15,
+                15
+              ],
+              "src_rgb": [
+                3,
+                15,
+                15
+              ],
+              "word": 256
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 2,
+              "func_rgb": 2,
+              "instruction": "add",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                0,
+                15
+              ],
+              "src_rgb": [
+                15,
+                0,
+                15
+              ],
+              "word": 272
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 8,
+              "func_rgb": 8,
+              "instruction": "mad",
+              "op_a": [
+                6,
+                0,
+                0
+              ],
+              "op_rgb": [
+                12,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                0,
+                15,
+                0
+              ],
+              "src_rgb": [
+                0,
+                15,
+                0
+              ],
+              "word": 300
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 2,
+              "const_rgba8": 0,
+              "func_a": 1,
+              "func_rgb": 1,
+              "instruction": "mad_mul",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                14,
+                15
+              ],
+              "src_rgb": [
+                15,
+                14,
+                15
+              ],
+              "word": 332
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 3,
+              "const_rgba8": 0,
+              "func_a": 2,
+              "func_rgb": 2,
+              "instruction": "mad_add",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                14,
+                15
+              ],
+              "src_rgb": [
+                15,
+                14,
+                15
+              ],
+              "word": 332
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 1,
+              "func_rgb": 0,
+              "instruction": "mul",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                2,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                0,
+                15
+              ],
+              "src_rgb": [
+                15,
+                0,
+                15
+              ],
+              "word": 352
+            }
+          ],
+          "textures": [
+            {
+              "sampler_reg": 0,
+              "sampler_type": 2,
+              "texcoord_reg": 2
+            }
+          ]
+        },
+        {
+          "blend": {
+            "dst": 2,
+            "enable": 1,
+            "op": 1,
+            "src": 2
+          },
+          "constants": [
+            2,
+            3
+          ],
+          "depth_write": 1,
+          "inputs": [],
+          "stage_data": [
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 1,
+              "instruction": "mul",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                2,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                15,
+                15
+              ],
+              "src_rgb": [
+                15,
+                15,
+                15
+              ],
+              "word": 368
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 0,
+              "instruction": "mov",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                15,
+                15
+              ],
+              "src_rgb": [
+                15,
+                15,
+                15
+              ],
+              "word": 384
+            }
+          ],
+          "textures": []
+        }
+      ],
+      "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
+      "quality": "approx",
+      "requires_alpha_fixup": 0,
+      "runtime": 1,
+      "sha1": "aabf2e2477005227f9efc169d48885fb4784569b",
+      "sha256": "916e67f105b864c80acc16b93e808f1102e458db718e49562b478c5e591ec2c8",
+      "source_slot": 37,
+      "source_table": "0x012dfcd8",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "texld",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "word": 256
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 2,
+          "func_rgb": 2,
+          "instruction": "add",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            0,
+            15
+          ],
+          "src_rgb": [
+            15,
+            0,
+            15
+          ],
+          "word": 272
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 8,
+          "func_rgb": 8,
+          "instruction": "mad",
+          "op_a": [
+            6,
+            0,
+            0
+          ],
+          "op_rgb": [
+            12,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            0,
+            15,
+            0
+          ],
+          "src_rgb": [
+            0,
+            15,
+            0
+          ],
+          "word": 300
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 2,
+          "const_rgba8": 0,
+          "func_a": 1,
+          "func_rgb": 1,
+          "instruction": "mad_mul",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            15,
+            14,
+            15
+          ],
+          "word": 332
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 3,
+          "const_rgba8": 0,
+          "func_a": 2,
+          "func_rgb": 2,
+          "instruction": "mad_add",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            15,
+            14,
+            15
+          ],
+          "word": 332
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 1,
+          "func_rgb": 0,
+          "instruction": "mul",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            2,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            0,
+            15
+          ],
+          "src_rgb": [
+            15,
+            0,
+            15
+          ],
+          "word": 352
+        }
+      ],
+      "stages": 6,
+      "textures": [
+        {
+          "sampler_reg": 0,
+          "sampler_type": 2,
+          "texcoord_reg": 2
+        }
+      ],
+      "total_stages": 8,
+      "uses_vertex_color": 1,
+      "version": "0xffff0300"
+    },
+    {
+      "approximation": "color1->color0",
+      "constant_values": {},
+      "constants": [
+        2,
+        3
+      ],
+      "draw_enabled": 1,
+      "family": "ui",
+      "id": "menu.gfx.ps.a23f8b39",
+      "inputs": [
+        {
+          "reg_index": 0,
+          "tev_source": 0,
+          "usage": 10,
+          "usage_index": 0
+        }
+      ],
+      "instructions": 7,
+      "kind": "tev",
+      "ldr_clamped": 1,
+      "material_contract": {
+        "complete": true,
+        "constant_values": {},
+        "constants": [
+          2,
+          3
+        ],
+        "simplified": true,
+        "textures": [
+          {
+            "sampler_reg": 1,
+            "sampler_type": 2,
+            "texcoord_reg": 2
+          },
+          {
+            "sampler_reg": 0,
+            "sampler_type": 2,
+            "texcoord_reg": 1
+          }
+        ],
+        "varyings": [
+          {
+            "reg_index": 0,
+            "tev_source": 0,
+            "usage": 10,
+            "usage_index": 0
+          }
+        ]
+      },
+      "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; 2-pass TEV program (6 + 1 stages)",
+      "objects": 1,
+      "outputs": [],
+      "passes": [
+        {
+          "blend": {
+            "dst": 1,
+            "enable": 0,
+            "op": 1,
+            "src": 2
+          },
+          "constants": [
+            2,
+            3
+          ],
+          "depth_write": 0,
+          "inputs": [
+            {
+              "reg_index": 0,
+              "tev_source": 0,
+              "usage": 10,
+              "usage_index": 0
+            }
+          ],
+          "stage_data": [
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 0,
+              "instruction": "texld",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                3,
+                15,
+                15
+              ],
+              "src_rgb": [
+                3,
+                15,
+                15
+              ],
+              "word": 312
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 0,
+              "instruction": "texld",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                4,
+                15,
+                15
+              ],
+              "src_rgb": [
+                4,
+                15,
+                15
+              ],
+              "word": 328
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 4,
+              "func_rgb": 4,
+              "instruction": "lrp",
+              "op_a": [
+                0,
+                6,
+                0
+              ],
+              "op_rgb": [
+                0,
+                12,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                0,
+                3
+              ],
+              "src_rgb": [
+                15,
+                0,
+                3
+              ],
+              "word": 344
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 2,
+              "const_rgba8": 0,
+              "func_a": 1,
+              "func_rgb": 1,
+              "instruction": "mad_mul",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                14,
+                15
+              ],
+              "src_rgb": [
+                15,
+                14,
+                15
+              ],
+              "word": 376
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 3,
+              "const_rgba8": 0,
+              "func_a": 2,
+              "func_rgb": 2,
+              "instruction": "mad_add",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                14,
+                15
+              ],
+              "src_rgb": [
+                15,
+                14,
+                15
+              ],
+              "word": 376
+            },
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 1,
+              "instruction": "mul",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                2,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                15,
+                15
+              ],
+              "src_rgb": [
+                15,
+                15,
+                15
+              ],
+              "word": 396
+            }
+          ],
+          "textures": [
+            {
+              "sampler_reg": 1,
+              "sampler_type": 2,
+              "texcoord_reg": 2
+            },
+            {
+              "sampler_reg": 0,
+              "sampler_type": 2,
+              "texcoord_reg": 1
+            }
+          ]
+        },
+        {
+          "blend": {
+            "dst": 2,
+            "enable": 1,
+            "op": 1,
+            "src": 2
+          },
+          "constants": [
+            2,
+            3
+          ],
+          "depth_write": 1,
+          "inputs": [],
+          "stage_data": [
+            {
+              "const_is_literal": 0,
+              "const_reg": 255,
+              "const_rgba8": 0,
+              "func_a": 0,
+              "func_rgb": 0,
+              "instruction": "mov",
+              "op_a": [
+                0,
+                0,
+                0
+              ],
+              "op_rgb": [
+                0,
+                0,
+                0
+              ],
+              "scale_a": 0,
+              "scale_rgb": 0,
+              "src_a": [
+                15,
+                15,
+                15
+              ],
+              "src_rgb": [
+                15,
+                15,
+                15
+              ],
+              "word": 412
+            }
+          ],
+          "textures": []
+        }
+      ],
+      "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
+      "quality": "approx",
+      "requires_alpha_fixup": 0,
+      "runtime": 1,
+      "sha1": "0251e2933e6595cfd5b38209d95820befcd07530",
+      "sha256": "a23f8b39681e8f38c2916e3d55bd4a72fee73449ff13c4b11fa83a90b6b2a529",
+      "source_slot": 38,
+      "source_table": "0x012dfcd8",
+      "stage": "ps_3_0",
+      "stage_data": [
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "texld",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            3,
+            15,
+            15
+          ],
+          "src_rgb": [
+            3,
+            15,
+            15
+          ],
+          "word": 312
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 0,
+          "instruction": "texld",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            4,
+            15,
+            15
+          ],
+          "src_rgb": [
+            4,
+            15,
+            15
+          ],
+          "word": 328
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 4,
+          "func_rgb": 4,
+          "instruction": "lrp",
+          "op_a": [
+            0,
+            6,
+            0
+          ],
+          "op_rgb": [
+            0,
+            12,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            0,
+            3
+          ],
+          "src_rgb": [
+            15,
+            0,
+            3
+          ],
+          "word": 344
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 2,
+          "const_rgba8": 0,
+          "func_a": 1,
+          "func_rgb": 1,
+          "instruction": "mad_mul",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            15,
+            14,
+            15
+          ],
+          "word": 376
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 3,
+          "const_rgba8": 0,
+          "func_a": 2,
+          "func_rgb": 2,
+          "instruction": "mad_add",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            0,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            14,
+            15
+          ],
+          "src_rgb": [
+            15,
+            14,
+            15
+          ],
+          "word": 376
+        },
+        {
+          "const_is_literal": 0,
+          "const_reg": 255,
+          "const_rgba8": 0,
+          "func_a": 0,
+          "func_rgb": 1,
+          "instruction": "mul",
+          "op_a": [
+            0,
+            0,
+            0
+          ],
+          "op_rgb": [
+            2,
+            0,
+            0
+          ],
+          "scale_a": 0,
+          "scale_rgb": 0,
+          "src_a": [
+            15,
+            15,
+            15
+          ],
+          "src_rgb": [
+            15,
+            15,
+            15
+          ],
+          "word": 396
+        }
+      ],
+      "stages": 6,
+      "textures": [
+        {
+          "sampler_reg": 1,
+          "sampler_type": 2,
+          "texcoord_reg": 2
+        },
+        {
+          "sampler_reg": 0,
+          "sampler_type": 2,
+          "texcoord_reg": 1
+        }
+      ],
+      "total_stages": 7,
+      "uses_vertex_color": 1,
+      "version": "0xffff0300"
+    },
+    {
       "approximation": "declared simplification: the stage list implements the verified instruction prefix; final channel equality relaxed",
       "constant_values": {
         "0": [

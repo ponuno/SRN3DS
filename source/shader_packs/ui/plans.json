@@ -1,14 +1,14 @@
 {
  "archive": "TESV.exe (GFx renderer tables 0x012dfca8 / 0x012dfcd8)",
  "coverage": {
-  "draw_enabled": 40,
+  "draw_enabled": 43,
   "full_blobs": {
    "ps": 38,
    "vs": 5
   },
   "ps": {
-   "draw": 35,
-   "pending_passes": 3,
+   "draw": 38,
+   "pending_passes": 0,
    "refused": 0,
    "translated": 38
   },
@@ -2898,7 +2898,7 @@
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.d1465bec",
    "inputs": [
@@ -2913,7 +2913,7 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
@@ -2936,17 +2936,31 @@
      }
     ]
    },
-   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; multi-pass stages pending",
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; 2-pass TEV program (6 + 1 stages)",
    "objects": 1,
    "outputs": [],
    "passes": [
     {
      "blend": {
-      "dst": "texture",
-      "func": "add",
-      "src": "prev"
+      "dst": 1,
+      "enable": 0,
+      "op": 1,
+      "src": 2
      },
-     "stages": [
+     "constants": [
+      2,
+      3
+     ],
+     "depth_write": 0,
+     "inputs": [
+      {
+       "reg_index": 0,
+       "tev_source": 0,
+       "usage": 10,
+       "usage_index": 0
+      }
+     ],
+     "stage_data": [
       {
        "const_is_literal": 0,
        "const_reg": 255,
@@ -3133,11 +3147,29 @@
        ],
        "word": 352
       }
+     ],
+     "textures": [
+      {
+       "sampler_reg": 0,
+       "sampler_type": 2,
+       "texcoord_reg": 2
+      }
      ]
     },
     {
-     "blend": null,
-     "stages": [
+     "blend": {
+      "dst": 2,
+      "enable": 1,
+      "op": 1,
+      "src": 2
+     },
+     "constants": [
+      2,
+      3
+     ],
+     "depth_write": 1,
+     "inputs": [],
+     "stage_data": [
       {
        "const_is_literal": 0,
        "const_reg": 255,
@@ -3169,14 +3201,14 @@
        ],
        "word": 368
       }
-     ]
+     ],
+     "textures": []
     }
    ],
-   "pending_runtime_feature": "passes",
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
    "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "2a1f255bc70cb652b54b7ddf0b92cd0dc59ed859",
    "sha256": "d1465becee1e4690cf6efc5b19dc5d555b51ad0ed1814ff07ca1a1ce737af77d",
    "source_slot": 14,
@@ -3389,7 +3421,7 @@
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.916e67f1",
    "inputs": [
@@ -3404,7 +3436,7 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
@@ -3427,17 +3459,31 @@
      }
     ]
    },
-   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; multi-pass stages pending",
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; 2-pass TEV program (6 + 2 stages)",
    "objects": 1,
    "outputs": [],
    "passes": [
     {
      "blend": {
-      "dst": "texture",
-      "func": "add",
-      "src": "prev"
+      "dst": 1,
+      "enable": 0,
+      "op": 1,
+      "src": 2
      },
-     "stages": [
+     "constants": [
+      2,
+      3
+     ],
+     "depth_write": 0,
+     "inputs": [
+      {
+       "reg_index": 0,
+       "tev_source": 0,
+       "usage": 10,
+       "usage_index": 0
+      }
+     ],
+     "stage_data": [
       {
        "const_is_literal": 0,
        "const_reg": 255,
@@ -3624,11 +3670,29 @@
        ],
        "word": 352
       }
+     ],
+     "textures": [
+      {
+       "sampler_reg": 0,
+       "sampler_type": 2,
+       "texcoord_reg": 2
+      }
      ]
     },
     {
-     "blend": null,
-     "stages": [
+     "blend": {
+      "dst": 2,
+      "enable": 1,
+      "op": 1,
+      "src": 2
+     },
+     "constants": [
+      2,
+      3
+     ],
+     "depth_write": 1,
+     "inputs": [],
+     "stage_data": [
       {
        "const_is_literal": 0,
        "const_reg": 255,
@@ -3691,14 +3755,14 @@
        ],
        "word": 384
       }
-     ]
+     ],
+     "textures": []
     }
    ],
-   "pending_runtime_feature": "passes",
    "prefix_sha256": "2c4a728003938d0b599f535c0c000cd6f15e96b275254871847ed6db4f82025a",
    "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "aabf2e2477005227f9efc169d48885fb4784569b",
    "sha256": "916e67f105b864c80acc16b93e808f1102e458db718e49562b478c5e591ec2c8",
    "source_slot": 37,
@@ -3911,7 +3975,7 @@
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "family": "ui",
    "id": "menu.gfx.ps.a23f8b39",
    "inputs": [
@@ -3926,7 +3990,7 @@
    "kind": "tev",
    "ldr_clamped": 1,
    "material_contract": {
-    "complete": false,
+    "complete": true,
     "constant_values": {},
     "constants": [
      2,
@@ -3954,17 +4018,31 @@
      }
     ]
    },
-   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; multi-pass stages pending",
+   "note": "GFx menu PS packed for PICA; draw-certified for the declared simplified spec; 2-pass TEV program (6 + 1 stages)",
    "objects": 1,
    "outputs": [],
    "passes": [
     {
      "blend": {
-      "dst": "texture",
-      "func": "add",
-      "src": "prev"
+      "dst": 1,
+      "enable": 0,
+      "op": 1,
+      "src": 2
      },
-     "stages": [
+     "constants": [
+      2,
+      3
+     ],
+     "depth_write": 0,
+     "inputs": [
+      {
+       "reg_index": 0,
+       "tev_source": 0,
+       "usage": 10,
+       "usage_index": 0
+      }
+     ],
+     "stage_data": [
       {
        "const_is_literal": 0,
        "const_reg": 255,
@@ -4151,11 +4229,34 @@
        ],
        "word": 396
       }
+     ],
+     "textures": [
+      {
+       "sampler_reg": 1,
+       "sampler_type": 2,
+       "texcoord_reg": 2
+      },
+      {
+       "sampler_reg": 0,
+       "sampler_type": 2,
+       "texcoord_reg": 1
+      }
      ]
     },
     {
-     "blend": null,
-     "stages": [
+     "blend": {
+      "dst": 2,
+      "enable": 1,
+      "op": 1,
+      "src": 2
+     },
+     "constants": [
+      2,
+      3
+     ],
+     "depth_write": 1,
+     "inputs": [],
+     "stage_data": [
       {
        "const_is_literal": 0,
        "const_reg": 255,
@@ -4187,14 +4288,14 @@
        ],
        "word": 412
       }
-     ]
+     ],
+     "textures": []
     }
    ],
-   "pending_runtime_feature": "passes",
    "prefix_sha256": "b527a0101301d171f291649401d9c45e64b82fb32e73e182f0725df71244275b",
    "quality": "approx",
    "requires_alpha_fixup": 0,
-   "runtime": 0,
+   "runtime": 1,
    "sha1": "0251e2933e6595cfd5b38209d95820befcd07530",
    "sha256": "a23f8b39681e8f38c2916e3d55bd4a72fee73449ff13c4b11fa83a90b6b2a529",
    "source_slot": 38,

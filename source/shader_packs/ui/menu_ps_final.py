@@ -125,7 +125,10 @@ def entry_from_plan(sha, prefix, slot, plan, notes, constant_ops,
         "note": ("GFx menu PS packed for PICA; "
                  + ("draw-certified for the declared simplified spec"
                     if quality != "exact" else "exact translation")
-                 + ("" if passes is None else "; multi-pass stages pending")),
+                 + ("" if passes is None else
+                    "; %d-pass TEV program (6 + %d stages)"
+                    % (passes and len(passes) or 0,
+                       sum(len(p["stage_data"]) for p in passes) - 6))),
     }
     if approx:
         entry["approximation"] = approx
@@ -133,25 +136,46 @@ def entry_from_plan(sha, prefix, slot, plan, notes, constant_ops,
         entry["constant_ops"] = constant_ops
     if passes is not None:
         entry["passes"] = passes
-        entry["pending_runtime_feature"] = "passes"
-        entry["total_stages"] = sum(len(p["stages"]) for p in passes)
-        # The entry itself carries the first pass; the rest waits for the
-        # runtime `passes` feature.
-        entry["stage_data"] = passes[0]["stages"]
-        entry["stages"] = len(passes[0]["stages"])
+        entry["total_stages"] = sum(len(p["stage_data"]) for p in passes)
+        # The entry itself carries the first pass; the runtime replays the
+        # remaining passes through d9_draw_plan_passes.
+        entry["stage_data"] = passes[0]["stage_data"]
+        entry["stages"] = len(passes[0]["stage_data"])
+        entry["runtime"] = 1
+        entry["draw_enabled"] = 1
+        entry["material_contract"]["complete"] = True
+        entry.pop("pending_runtime_feature", None)
     return entry
 
 
-def split_passes(stages, constant_ops):
-    first = stages[:6]
+def _pass_uses(stage_data, sources):
+    for stage in stage_data:
+        for key in ("src_rgb", "src_a"):
+            if any(v in sources for v in stage.get(key, [])):
+                return True
+    return False
+
+
+def split_passes(stages, textures, constants, inputs):
+    groups = [stages[:6]]
     rest = stages[6:]
-    passes = [{"stages": first,
-               "blend": {"src": "prev", "dst": "texture", "func": "add"}}]
     while rest:
-        passes.append({"stages": rest[:6],
-                       "blend": ({"src": "prev", "dst": "texture", "func": "add"}
-                                 if len(rest) > 6 else None)})
+        groups.append(rest[:6])
         rest = rest[6:]
+    passes = []
+    for index, group in enumerate(groups):
+        first = index == 0
+        passes.append({
+            "stage_data": group,
+            "textures": textures if (first or _pass_uses(group, (3, 4, 5))) else [],
+            "constants": constants,
+            "inputs": (inputs if (first or _pass_uses(group, (0, 1, 2))) else []),
+            # Pass 0 writes the base result; later passes accumulate additively
+            # (ONE, ONE, ADD) into the same render target.
+            "blend": ({"enable": 0, "src": 2, "dst": 1, "op": 1} if first
+                      else {"enable": 1, "src": 2, "dst": 2, "op": 1}),
+            "depth_write": 0 if first else 1,
+        })
     return passes
 
 
@@ -167,7 +191,10 @@ def plan_for(sha, row):
     # Stage budget: ask the relaxed planner for the full list, then split.
     full, _a, _w = plan_relaxed(ir, max_stages=32)
     if full is not None and full["stages"] > 6:
-        passes = split_passes(full["stage_data"], cops)
+        passes = split_passes(full["stage_data"],
+                              full.get("textures", []),
+                              full.get("constants", []),
+                              full.get("inputs", []))
         entry = entry_from_plan(sha, row["prefix_sha256"], row["slot"], full,
                                 notes, cops, "approx", passes=passes)
         return entry
