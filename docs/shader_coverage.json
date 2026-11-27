@@ -89,8 +89,8 @@
    "owner": "sm3-agent-skinning",
    "chunks": 2162,
    "unique_hashes": 1194,
-   "translated": 83,
-   "draw_enabled": 0,
+   "translated": 80,
+   "draw_enabled": 3,
    "refused": 1111,
    "contract_only": 14,
    "refused_classes": {
@@ -146,8 +146,8 @@
   }
  },
  "total": {
-  "translated": 177,
-  "draw-enabled": 7,
+  "translated": 174,
+  "draw-enabled": 10,
   "refused": 6475,
   "chunks": 10475,
   "unique_hashes": 6659
