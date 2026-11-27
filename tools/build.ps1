@@ -12,6 +12,9 @@
   Generated pilot directory (contains pilot_config.h). Required for -Mode pilot.
 .PARAMETER Opt
   Optimisation flag passed to make (default -O2).
+.PARAMETER MemProfile
+  Heap profile: 96x8 (default), 104x16 or 120x24 (newlib MiB x linear MiB).
+  Selects TESV_HEAP_MIB / TESV_LINEAR_MIB for the TESV slice.
 #>
 param(
     [ValidateSet("default", "graphics", "com", "menu", "boot", "lift", "pilot", "tesv", "audio", "va")]
@@ -19,6 +22,8 @@ param(
     [string]$PilotGen = "",
     [string]$TesvGen = "",
     [string]$Opt = "-O2",
+    [ValidateSet("", "96x8", "104x16", "120x24")]
+    [string]$MemProfile = "",
     [string]$Isolated = "",
     [switch]$NoClean,
     [int]$Jobs = 0,
@@ -50,6 +55,24 @@ $modes = @{
 if ($Opt -notmatch '^-O[0-3sg]$') { throw "Invalid -Opt '$Opt'; expected -O0..-O3, -Os or -Og" }
 $target = $modes[$Mode].Target
 $vars = $modes[$Mode].Vars
+
+$memProfiles = @{
+    "96x8"   = @{ Heap = 96;  Linear = 8 }
+    "104x16" = @{ Heap = 104; Linear = 16 }
+    "120x24" = @{ Heap = 120; Linear = 24 }
+}
+if ($MemProfile) {
+    if (-not $memProfiles.ContainsKey($MemProfile)) {
+        throw "Unknown -MemProfile '$MemProfile'; expected 96x8, 104x16 or 120x24"
+    }
+    $p = $memProfiles[$MemProfile]
+    # Pass DEFINES through the environment: make imports environment variables,
+    # so the value may contain spaces without command-line requoting.  The
+    # Makefile appends $(DEFINES) to CFLAGS.
+    $env:DEFINES = "-DTESV_HEAP_MIB=$($p.Heap) -DTESV_LINEAR_MIB=$($p.Linear)"
+} else {
+    Remove-Item Env:DEFINES -ErrorAction SilentlyContinue
+}
 
 if ($Mode -ne "default" -and $Mode -ne "graphics" -and $Mode -ne "audio" -and $Mode -ne "va") {
     if (-not (Test-Path (Join-Path $root "staged\lift.py"))) {
@@ -152,10 +175,14 @@ if ($genDir) {
     }
     $genHash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($genAgg.ToString())) | ForEach-Object { $_.ToString('x2') })
 }
+$memProfileName = if ($MemProfile) { $MemProfile } else { "default" }
+$definesValue = if ($env:DEFINES) { $env:DEFINES } else { "" }
 $manifest = [ordered]@{
     target = $target
     mode = $Mode
     opt = $Opt
+    mem_profile = $memProfileName
+    defines = $definesValue
     built_at = [DateTime]::Now.ToString("o")
     command = $cmd
     toolchain = $gccVer

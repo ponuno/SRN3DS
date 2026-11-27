@@ -14,6 +14,7 @@
 #include "d3d9_pica_vs_device.h"
 #include "n3ds_sr.h"
 #include "fsr3ds.h"
+#include "mem_stats.h"
 #include <stdarg.h>
 
 #define FRAME_VERTICES 16384u
@@ -172,10 +173,43 @@ static void sr_config_from_file(N3dsSrConfig *cfg)
     sr_log("configuration read from sdmc:/N3DS_SR.cfg");
 }
 
+static uint64_t mem_linear_free_probe(void *ctx)
+{
+    (void)ctx;
+    return (uint64_t)linearSpaceFree();
+}
+
+static uint64_t mem_vram_free_probe(void *ctx)
+{
+    (void)ctx;
+    return (uint64_t)vramSpaceFree();
+}
+
+/* PICA storage estimate for one failed request.  bpp_num/bpp_den covers ETC1
+ * (4 bpp = 1/2), ETC1A4 (8 bpp = 1) and RGBA8 (32 bpp = 4). */
+static size_t tex_request_bytes(unsigned w, unsigned h, unsigned levels,
+                                unsigned bpp_num, unsigned bpp_den, int cube)
+{
+    size_t total = 0;
+    if (!levels) levels = 1;
+    for (unsigned l = 0; l < levels; ++l) {
+        size_t lw = w ? (size_t)(w >> l) : 1;
+        size_t lh = h ? (size_t)(h >> l) : 1;
+        if (!lw) lw = 1;
+        if (!lh) lh = 1;
+        total += lw * lh * bpp_num / bpp_den;
+    }
+    return cube ? total * 6u : total;
+}
+
 static int sr_tex_alloc(C3D_Tex *tex, unsigned w, unsigned h)
 {
+    uint64_t before = mem_stats_space_begin(MEM_STATS_VRAM);
     C3D_TexInitParams params = {(u16)w, (u16)h, 0, GPU_RGBA8, GPU_TEX_2D, true};
-    if (!C3D_TexInitWithParams(tex, NULL, params))
+    int ok = C3D_TexInitWithParams(tex, NULL, params) != 0;
+    mem_stats_space_end(MEM_STATS_VRAM, before,
+                        tex_request_bytes(w, h, 1, 4, 1, 0), ok);
+    if (!ok)
         return -1;
     C3D_TexSetFilter(tex, GPU_LINEAR, GPU_LINEAR);
     C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
@@ -185,10 +219,21 @@ static int sr_tex_alloc(C3D_Tex *tex, unsigned w, unsigned h)
 static void sr_release(D9Citro *c)
 {
     C3D_FrameSync();
+    uint64_t before;
     if (c->sr_scene_rt) { C3D_RenderTargetDelete(c->sr_scene_rt); c->sr_scene_rt = NULL; }
     if (c->sr_scratch_rt) { C3D_RenderTargetDelete(c->sr_scratch_rt); c->sr_scratch_rt = NULL; }
-    if (c->sr_scene_tex.data) { C3D_TexDelete(&c->sr_scene_tex); memset(&c->sr_scene_tex, 0, sizeof c->sr_scene_tex); }
-    if (c->sr_scratch_tex.data) { C3D_TexDelete(&c->sr_scratch_tex); memset(&c->sr_scratch_tex, 0, sizeof c->sr_scratch_tex); }
+    if (c->sr_scene_tex.data) {
+        before = mem_stats_space_begin(MEM_STATS_VRAM);
+        C3D_TexDelete(&c->sr_scene_tex);
+        mem_stats_space_released(MEM_STATS_VRAM, before);
+        memset(&c->sr_scene_tex, 0, sizeof c->sr_scene_tex);
+    }
+    if (c->sr_scratch_tex.data) {
+        before = mem_stats_space_begin(MEM_STATS_VRAM);
+        C3D_TexDelete(&c->sr_scratch_tex);
+        mem_stats_space_released(MEM_STATS_VRAM, before);
+        memset(&c->sr_scratch_tex, 0, sizeof c->sr_scratch_tex);
+    }
     c->sr_ready = 0;
     c->sr_redirect = 0;
 }
@@ -307,27 +352,57 @@ static int sr_init(D9Citro *c)
 D9Citro *d9_citro_open(void){
     D9Citro *c=calloc(1,sizeof *c);if(!c)return NULL;
     if(!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE)){free(c);return NULL;}
+    MemStatsSpaceProbes probes={mem_linear_free_probe,mem_vram_free_probe,NULL};
+    mem_stats_set_space_probes(&probes);
+    uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
     c->target=C3D_RenderTargetCreate(240,400,GPU_RB_RGBA8,GPU_RB_DEPTH24_STENCIL8);
+    mem_stats_space_end(MEM_STATS_VRAM,before,tex_request_bytes(240,400,1,5,1,0),
+                        c->target!=NULL);
     if(!c->target)goto fail;
     C3D_RenderTargetSetOutput(c->target,GFX_TOP,GFX_LEFT,TRANSFER);
     c->shader=DVLB_ParseFile((u32 *)d9shader_shbin,d9shader_shbin_size);if(!c->shader)goto fail;
     if(R_FAILED(shaderProgramInit(&c->program)))goto fail;c->program_ready=1;
     if(R_FAILED(shaderProgramSetVsh(&c->program,&c->shader->DVLE[0])))goto fail;
     c->uniform=shaderInstanceGetUniformLocation(c->program.vertexShader,"clip");if(c->uniform<0)goto fail;
-    c->arena=linearAlloc(FRAME_VERTICES*sizeof(D9Vertex));if(!c->arena)goto fail;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);
+    c->arena=linearAlloc(FRAME_VERTICES*sizeof(D9Vertex));
+    mem_stats_space_end(MEM_STATS_LINEAR,before,FRAME_VERTICES*sizeof(D9Vertex),c->arena!=NULL);
+    if(!c->arena)goto fail;
     c->shader_color=DVLB_ParseFile((u32 *)d9shader_color_shbin,d9shader_color_shbin_size);if(!c->shader_color)goto fail;
     if(R_FAILED(shaderProgramInit(&c->program_color)))goto fail;c->program_color_ready=1;
     if(R_FAILED(shaderProgramSetVsh(&c->program_color,&c->shader_color->DVLE[0])))goto fail;
     c->uniform_color=shaderInstanceGetUniformLocation(c->program_color.vertexShader,"clip");if(c->uniform_color<0)goto fail;
-    c->arena_color=linearAlloc(FRAME_MENU_VERTICES*sizeof(D9ColorVertex));if(!c->arena_color)goto fail;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);
+    c->arena_color=linearAlloc(FRAME_MENU_VERTICES*sizeof(D9ColorVertex));
+    mem_stats_space_end(MEM_STATS_LINEAR,before,FRAME_MENU_VERTICES*sizeof(D9ColorVertex),c->arena_color!=NULL);
+    if(!c->arena_color)goto fail;
     c->shader_cube=DVLB_ParseFile((u32 *)d9shader_cube_shbin,d9shader_cube_shbin_size);if(!c->shader_cube)goto fail;
     if(R_FAILED(shaderProgramInit(&c->program_cube)))goto fail;c->program_cube_ready=1;
     if(R_FAILED(shaderProgramSetVsh(&c->program_cube,&c->shader_cube->DVLE[0])))goto fail;
     c->uniform_cube=shaderInstanceGetUniformLocation(c->program_cube.vertexShader,"clip");if(c->uniform_cube<0)goto fail;
-    c->arena_cube=linearAlloc(FRAME_VERTICES*sizeof(D9CubeVertex));if(!c->arena_cube)goto fail;
-    c->arena_index=linearAlloc(FRAME_INDICES*sizeof(uint16_t));if(!c->arena_index)goto fail;
-    c->arena_skin=linearAlloc(FRAME_SKIN_BYTES);if(!c->arena_skin)goto fail;
-    c->sr_quad=linearAlloc(6*sizeof *c->sr_quad);if(!c->sr_quad)goto fail;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);
+    c->arena_cube=linearAlloc(FRAME_VERTICES*sizeof(D9CubeVertex));
+    mem_stats_space_end(MEM_STATS_LINEAR,before,FRAME_VERTICES*sizeof(D9CubeVertex),c->arena_cube!=NULL);
+    if(!c->arena_cube)goto fail;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);
+    c->arena_index=linearAlloc(FRAME_INDICES*sizeof(uint16_t));
+    mem_stats_space_end(MEM_STATS_LINEAR,before,FRAME_INDICES*sizeof(uint16_t),c->arena_index!=NULL);
+    if(!c->arena_index)goto fail;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);
+    c->arena_skin=linearAlloc(FRAME_SKIN_BYTES);
+    mem_stats_space_end(MEM_STATS_LINEAR,before,FRAME_SKIN_BYTES,c->arena_skin!=NULL);
+    if(!c->arena_skin)goto fail;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);
+    c->sr_quad=linearAlloc(6*sizeof *c->sr_quad);
+    mem_stats_space_end(MEM_STATS_LINEAR,before,6*sizeof *c->sr_quad,c->sr_quad!=NULL);
+    if(!c->sr_quad)goto fail;
+    /* Actual bytes, not a derived MiB estimate. */
+    mem_stats_note_arena("vertex",FRAME_VERTICES*sizeof(D9Vertex));
+    mem_stats_note_arena("colour",FRAME_MENU_VERTICES*sizeof(D9ColorVertex));
+    mem_stats_note_arena("cube",FRAME_VERTICES*sizeof(D9CubeVertex));
+    mem_stats_note_arena("index",FRAME_INDICES*sizeof(uint16_t));
+    mem_stats_note_arena("skin",FRAME_SKIN_BYTES);
+    mem_stats_note_arena("srquad",6*sizeof *c->sr_quad);
     c->shader_sr=DVLB_ParseFile((u32 *)d9shader_sr_shbin,d9shader_sr_shbin_size);if(!c->shader_sr)goto fail;
     if(R_FAILED(shaderProgramInit(&c->program_sr)))goto fail;c->program_sr_ready=1;
     if(R_FAILED(shaderProgramSetVsh(&c->program_sr,&c->shader_sr->DVLE[0])))goto fail;
@@ -341,12 +416,13 @@ fail:d9_citro_close(c);return NULL;
 void d9_citro_close(D9Citro *c){
     if(!c)return;if(c->scene)C3D_FrameEnd(0);C3D_FrameSync();
     sr_release(c);
-    if(c->arena)linearFree(c->arena);
-    if(c->arena_color)linearFree(c->arena_color);
-    if(c->arena_cube)linearFree(c->arena_cube);
-    if(c->arena_index)linearFree(c->arena_index);
-    if(c->arena_skin)linearFree(c->arena_skin);
-    if(c->sr_quad)linearFree(c->sr_quad);
+    uint64_t before;
+    if(c->arena){before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(c->arena);mem_stats_space_released(MEM_STATS_LINEAR,before);}
+    if(c->arena_color){before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(c->arena_color);mem_stats_space_released(MEM_STATS_LINEAR,before);}
+    if(c->arena_cube){before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(c->arena_cube);mem_stats_space_released(MEM_STATS_LINEAR,before);}
+    if(c->arena_index){before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(c->arena_index);mem_stats_space_released(MEM_STATS_LINEAR,before);}
+    if(c->arena_skin){before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(c->arena_skin);mem_stats_space_released(MEM_STATS_LINEAR,before);}
+    if(c->sr_quad){before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(c->sr_quad);mem_stats_space_released(MEM_STATS_LINEAR,before);}
     d9_pica_vs_device_close(&c->pica_vs);
     if(c->program_sr_ready)shaderProgramFree(&c->program_sr);if(c->shader_sr)DVLB_Free(c->shader_sr);
     if(c->program_cube_ready)shaderProgramFree(&c->program_cube);if(c->shader_cube)DVLB_Free(c->shader_cube);
@@ -373,8 +449,12 @@ static int tex_create_format(void *ctx,unsigned w,unsigned h,unsigned levels,
     else if(format==D9_X8R8G8B8)pfmt=GPU_RGB8;
     else return -2;
     NativeTex *n=calloc(1,sizeof *n);if(!n||!levels){free(n);return -1;}
+    unsigned bpp=(pfmt==GPU_RGBA8)?4u:(pfmt==GPU_RGB8)?3u:1u;
+    uint64_t before=mem_stats_space_begin(MEM_STATS_LINEAR);
     C3D_TexInitParams params={(u16)w,(u16)h,(u8)(levels-1),pfmt,GPU_TEX_2D,false};
-    if(!C3D_TexInitWithParams(&n->tex,NULL,params)){free(n);return -1;}
+    int ok=C3D_TexInitWithParams(&n->tex,NULL,params)!=0;
+    mem_stats_space_end(MEM_STATS_LINEAR,before,tex_request_bytes(w,h,levels,bpp,1,0),ok);
+    if(!ok){free(n);return -1;}
     n->levels=levels;n->format=format;
     C3D_TexSetFilter(&n->tex,GPU_LINEAR,GPU_LINEAR);C3D_TexSetWrap(&n->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
     *handle=n;return 0;
@@ -390,7 +470,7 @@ static int tex_upload_format(void *ctx,void *handle,unsigned level,const void *d
 static int tex_upload(void *ctx,void *handle,unsigned level,const void *data,size_t bytes){
     return tex_upload_format(ctx,handle,level,data,bytes);
 }
-static void tex_delete(void *ctx,void *handle){(void)ctx;NativeTex *n=handle;C3D_FrameSync();C3D_TexDelete(&n->tex);free(n);}
+static void tex_delete(void *ctx,void *handle){(void)ctx;NativeTex *n=handle;C3D_FrameSync();uint64_t before=mem_stats_space_begin(MEM_STATS_LINEAR);C3D_TexDelete(&n->tex);mem_stats_space_released(MEM_STATS_LINEAR,before);free(n);}
 /* PICA cube textures.  C3D_TexInitWithParams allocates the six face images;
  * C3D_TexDelete frees them (the embedded C3D_TexCube struct is ours to free).
  * Formats are limited to the two the core can upload without conversion on the
@@ -402,9 +482,14 @@ static int cube_create(void *ctx,unsigned edge,unsigned levels,unsigned format,v
     else if(format==D9_X8R8G8B8)pfmt=GPU_RGB8;
     else return -2;
     NativeCube *n=calloc(1,sizeof *n);if(!n)return -3;
+    unsigned bpp=(pfmt==GPU_RGBA8)?4u:3u;
+    uint64_t before=mem_stats_space_begin(MEM_STATS_LINEAR);
     C3D_TexInitParams params={(u16)edge,(u16)edge,(u8)(levels-1),pfmt,
                               GPU_TEX_CUBE_MAP,false};
-    if(!C3D_TexInitWithParams(&n->tex,&n->cube,params)){
+    int ok=C3D_TexInitWithParams(&n->tex,&n->cube,params)!=0;
+    mem_stats_space_end(MEM_STATS_LINEAR,before,
+                        tex_request_bytes(edge,edge,levels,bpp,1,1),ok);
+    if(!ok){
         if(n->tex.cube)C3D_TexDelete(&n->tex);
         free(n);return -3;
     }
@@ -439,14 +524,19 @@ static int cube_upload(void *ctx,void *handle,unsigned face,unsigned level,
 }
 static int cube_delete(void *ctx,void *handle){
     (void)ctx;NativeCube *n=handle;if(!n)return 0;
-    C3D_FrameSync();C3D_TexDelete(&n->tex);free(n);return 0;
+    C3D_FrameSync();uint64_t before=mem_stats_space_begin(MEM_STATS_LINEAR);C3D_TexDelete(&n->tex);mem_stats_space_released(MEM_STATS_LINEAR,before);free(n);return 0;
 }
 static int tex_create_encoded(void *ctx,unsigned w,unsigned h,unsigned levels,unsigned format,void **handle){
     (void)ctx;if(!handle||(format!=D9_TEX_ETC1&&format!=D9_TEX_ETC1A4)||!levels)return -1;
     NativeTex *n=calloc(1,sizeof *n);if(!n)return -1;
+    uint64_t before=mem_stats_space_begin(MEM_STATS_LINEAR);
     C3D_TexInitParams params={(u16)w,(u16)h,(u8)(levels-1),
         format==D9_TEX_ETC1A4?GPU_ETC1A4:GPU_ETC1,GPU_TEX_2D,false};
-    if(!C3D_TexInitWithParams(&n->tex,NULL,params)){free(n);return -1;}
+    int ok=C3D_TexInitWithParams(&n->tex,NULL,params)!=0;
+    mem_stats_space_end(MEM_STATS_LINEAR,before,
+                        tex_request_bytes(w,h,levels,format==D9_TEX_ETC1A4?1u:1u,
+                                          format==D9_TEX_ETC1A4?1u:2u,0),ok);
+    if(!ok){free(n);return -1;}
     n->levels=levels;C3D_TexSetFilter(&n->tex,GPU_LINEAR,GPU_LINEAR);C3D_TexSetWrap(&n->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
     *handle=n;return 0;
 }
@@ -961,13 +1051,17 @@ static void end(void *ctx){
         C3D_FrameEnd(0);c->scene=0;
     }
     c->active_target=NULL;c->sr_redirect=0;
+    mem_stats_frame();
 }
 static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
     (void)ctx;if(!native||w<8||h<8||w>1024||h>1024||(w&(w-1))||(h&(h-1))||
        (format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))return -1;
     NativeTarget *t=calloc(1,sizeof *t);if(!t)return -1;
+    uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
     C3D_TexInitParams params={(u16)w,(u16)h,0,GPU_RGBA8,GPU_TEX_2D,true};
-    if(!C3D_TexInitWithParams(&t->tex,NULL,params)){
+    int ok=C3D_TexInitWithParams(&t->tex,NULL,params)!=0;
+    mem_stats_space_end(MEM_STATS_VRAM,before,tex_request_bytes(w,h,1,4,1,0),ok);
+    if(!ok){
         fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u VRAM texture allocation failed "
                 "(vram free %u KiB)\n",w,h,(unsigned)(vramSpaceFree()>>10));
         free(t);return -1;
@@ -980,10 +1074,12 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
      * Render-target textures used only for sampling therefore spend no VRAM on
      * depth they never touch. */
     t->head.target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,-1);
+    mem_stats_space_end(MEM_STATS_VRAM,before,0,t->head.target!=NULL);
     if(!t->head.target){
         fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed "
                 "(vram free %u KiB)\n",w,h,(unsigned)(vramSpaceFree()>>10));
-        C3D_TexDelete(&t->tex);free(t);return -1;
+        before=mem_stats_space_begin(MEM_STATS_VRAM);
+        C3D_TexDelete(&t->tex);mem_stats_space_released(MEM_STATS_VRAM,before);free(t);return -1;
     }
     t->head.has_depth=0;
     /* VRAM starts with arbitrary bytes.  PICA depth 0 is "far" and the draws
@@ -1021,8 +1117,11 @@ static int target_depth_attach(void *ctx,void *native){
     NativeTarget *t=(NativeTarget *)native;
     if(!t->tex.data)return -1;
     C3D_FrameSync();
+    uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
     C3D_RenderTarget *rt=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,
                                                        GPU_RB_DEPTH24_STENCIL8);
+    mem_stats_space_end(MEM_STATS_VRAM,before,
+                        tex_request_bytes(h->w,h->h,1,4,1,0),rt!=NULL);
     if(!rt){
         fprintf(stderr,"[d3d9-citro] target depth attach: %ux%u DEPTH24_STENCIL8 allocation failed "
                 "(vram free %u KiB)\n",h->w,h->h,(unsigned)(vramSpaceFree()>>10));
@@ -1030,7 +1129,7 @@ static int target_depth_attach(void *ctx,void *native){
     }
     C3D_RenderTarget *old=h->target;
     h->target=rt;h->has_depth=1;
-    if(old)C3D_RenderTargetDelete(old);
+    if(old){before=mem_stats_space_begin(MEM_STATS_VRAM);C3D_RenderTargetDelete(old);mem_stats_space_released(MEM_STATS_VRAM,before);}
     if(C3D_FrameBegin(C3D_FRAME_SYNCDRAW)){
         if(C3D_FrameDrawOn(rt))
             C3D_RenderTargetClear(rt,C3D_CLEAR_DEPTH,0,0);
@@ -1060,17 +1159,19 @@ static int target_read(void *ctx,void *native,void *dst,size_t pitch,
                        unsigned x,unsigned y,unsigned w,unsigned h){
     D9Citro *c=ctx;NativeTarget *t=native;if(!c||!t||!dst||c->scene||x>t->head.w||y>t->head.h||w>t->head.w-x||h>t->head.h-y)return -1;
     size_t bytes=(size_t)t->head.w*t->head.h*4;if(bytes!=t->tex.size)return -1;
-    C3D_FrameSync();uint8_t *tmp=linearAlloc(bytes);if(!tmp)return -1;
+    C3D_FrameSync();uint64_t before=mem_stats_space_begin(MEM_STATS_LINEAR);uint8_t *tmp=linearAlloc(bytes);mem_stats_space_end(MEM_STATS_LINEAR,before,bytes,tmp!=NULL);if(!tmp)return -1;
     C3D_SyncTextureCopy((u32 *)t->tex.data,0,(u32 *)tmp,0,(u32)bytes,8);
     GSPGPU_InvalidateDataCache(tmp,bytes);
     int rc=d9_unswizzle_rgba8(dst,pitch,tmp,t->head.w,t->head.h,t->head.format,x,y,w,h);
-    linearFree(tmp);return rc;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(tmp);mem_stats_space_released(MEM_STATS_LINEAR,before);return rc;
 }
 static void target_delete(void *ctx,void *native){
     D9Citro *c=ctx;NativeTarget *t=native;if(!t)return;
     if(c->active_target==native)c->active_target=NULL;
-    C3D_FrameSync();if(t->head.target)C3D_RenderTargetDelete(t->head.target);
-    C3D_TexDelete(&t->tex);free(t);
+    C3D_FrameSync();
+    uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
+    if(t->head.target)C3D_RenderTargetDelete(t->head.target);
+    C3D_TexDelete(&t->tex);mem_stats_space_released(MEM_STATS_VRAM,before);free(t);
 }
 /* Cube-face render target: a C3D_RenderTarget view over one face/level of an
  * existing NativeCube.  It owns the render-target and depth attachment only;
@@ -1081,14 +1182,17 @@ static int cube_face_create(void *ctx,void *native_cube,unsigned face,
     (void)ctx;(void)depth_flags;NativeCube *cube=native_cube;
     if(!native||!cube||face>=D9_CUBE_FACES||level>=cube->levels)return -2;
     NativeCubeFace *f=calloc(1,sizeof *f);if(!f)return -3;
+    uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
     f->head.target=C3D_RenderTargetCreateFromTex(&cube->tex,(GPU_TEXFACE)face,
                                                  (int)level,GPU_RB_DEPTH24_STENCIL8);
+    unsigned edge=cube->edge>>level;if(!edge)edge=1;
+    mem_stats_space_end(MEM_STATS_VRAM,before,tex_request_bytes(edge,edge,1,4,1,0),
+                        f->head.target!=NULL);
     if(!f->head.target){
         fprintf(stderr,"[d3d9-citro] GetCubeMapSurface: face %u level %u render-target allocation failed\n",
                 face,level);
         free(f);return -3;
     }
-    unsigned edge=cube->edge>>level;if(!edge)edge=1;
     f->head.w=f->head.h=edge;f->head.format=cube->format;
     f->head.has_depth=1;f->head.is_cube_face=1;
     f->cube=cube;f->face=face;f->level=level;
@@ -1104,7 +1208,9 @@ static int cube_face_create(void *ctx,void *native_cube,unsigned face,
 static void cube_face_delete(void *ctx,void *native){
     D9Citro *c=ctx;NativeCubeFace *f=native;if(!f)return;
     if(c&&c->active_target==native)c->active_target=NULL;
-    C3D_FrameSync();if(f->head.target)C3D_RenderTargetDelete(f->head.target);
+    C3D_FrameSync();uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
+    if(f->head.target)C3D_RenderTargetDelete(f->head.target);
+    mem_stats_space_released(MEM_STATS_VRAM,before);
     free(f);
 }
 /* Whole-surface write-back for the lockable back buffer.  The source is
@@ -1117,12 +1223,15 @@ static int target_write(void *ctx,void *native,const void *bgra,size_t pitch,
     if(!c||!t||!bgra||c->scene||w!=t->head.w||h!=t->head.h||pitch<(size_t)w*4)return -1;
     size_t bytes=(size_t)t->head.w*t->head.h*4;if(bytes!=t->tex.size)return -1;
     C3D_FrameSync();
-    uint8_t *tmp=linearAlloc(bytes);if(!tmp)return -1;
-    if(d9_swizzle_rgba8(tmp,bytes,bgra,pitch,w,h,t->head.format)){linearFree(tmp);return -1;}
+    uint64_t before=mem_stats_space_begin(MEM_STATS_LINEAR);
+    uint8_t *tmp=linearAlloc(bytes);
+    mem_stats_space_end(MEM_STATS_LINEAR,before,bytes,tmp!=NULL);
+    if(!tmp)return -1;
+    if(d9_swizzle_rgba8(tmp,bytes,bgra,pitch,w,h,t->head.format)){before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(tmp);mem_stats_space_released(MEM_STATS_LINEAR,before);return -1;}
     t->tex.maxLevel=0;t->tex.minLevel=0;
     C3D_TexLoadImage(&t->tex,tmp,GPU_TEXFACE_2D,0);
     C3D_TexFlush(&t->tex);
-    linearFree(tmp);return 0;
+    before=mem_stats_space_begin(MEM_STATS_LINEAR);linearFree(tmp);mem_stats_space_released(MEM_STATS_LINEAR,before);return 0;
 }
 /* PICA target_create/render-target views allocate depth lazily; the
  * d9_set_depth_surface path validates the descriptor size and calls

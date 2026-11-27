@@ -168,6 +168,45 @@ recurses through `NiDX9Renderer::BeginUsingRenderTargetGroup` until the 64 KiB
 worker stack overflows at `0x1d1ffffc`. The remaining work is the pair itself
 (a real 512x1024 colour target/group registration), not the error code.
 
+## Three-profile memory route (96/8, 104/16, 120/24)
+
+Build one isolated artifact per profile; do not reuse a `build/` directory
+between them:
+
+```powershell
+foreach ($p in @("96x8","104x16","120x24")) {
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
+      -Mode tesv -TesvGen <gen> -MemProfile $p -Isolated "mem$p" -Jobs 8
+}
+```
+
+Run the same route on each artifact, on the same SD card and settings:
+cold start → menu → first exterior cell → neighbour cell → return. Before
+leaving the route, let it render past at least one 300-frame snapshot (or set
+`N3DS_MEM_EVERY=60` for a denser trace) and then exit with START so the `exit`
+line is written.
+
+Collect `sdmc:/Skyrim_N3DS_mem.log` after each run. The log starts with
+`mem tag=boot ... heap_mib=` so a file cannot be attributed to the wrong
+profile. Check, per run:
+
+1. both heaps initialised (`[mem] profile ...` banner, no svcBreak);
+2. `start` and `exit` lines exist, plus at least one `frame` or `cell` line;
+3. peak acceptance: `newlib_free >= 4 MiB` and
+   `linear_free/linear_min_free >= 2 MiB` at the worst snapshot;
+4. no `mem tag=alloc_fail`; if one exists, its `fail_kind`/`fail_bytes` names
+   the rejected request.
+
+Host-side pre-check (profile arithmetic, parser, fake allocator, line format):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/check_mem_profile.ps1
+```
+
+This is measurement only: it does not claim a frame, a working set or a
+shippable heap. 96/8 stays the default until 120/24 passes the route above on
+hardware.
+
 ## Not implemented / not claimed
 
 - No HW T&L and no SM3 execution; both gates are honest refusals.

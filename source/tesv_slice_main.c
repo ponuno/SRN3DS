@@ -16,6 +16,8 @@
 #include "tesv_cecdc0_source.h"
 #include "ir_core.h"
 #include "hprof.h"
+#include "mem_stats.h"
+#include "n3ds_lift_runtime.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
 #include "win32_xaudio2.h"
@@ -40,13 +42,28 @@ extern const unsigned g_fn_count_pilot __attribute__((weak));
 #define TESV_ARM_STEPS 2000000u
 #endif
 
+/* Memory profiles are selected at build time (tools/build.ps1 -MemProfile).
+ * The default stays 96/8; nothing ships a larger heap until a device route
+ * accepts it.  The remaining region budget is code, static data and stacks. */
+#ifndef TESV_HEAP_MIB
+#define TESV_HEAP_MIB 96
+#endif
+#ifndef TESV_LINEAR_MIB
+#define TESV_LINEAR_MIB 8
+#endif
+#define TESV_RESERVE_MIB 4
+#if defined(__3DS__) && \
+    (TESV_HEAP_MIB + TESV_LINEAR_MIB + MEM_STATS_NON_HEAP_MIB > MEM_STATS_REGION_MIB)
+#error "TESV_HEAP_MIB + TESV_LINEAR_MIB + 34 MiB exceeds the 178 MiB region"
+#endif
+
 #ifdef __3DS__
 /* libctru's default split of a 178 MiB DEV1 title asks for an application heap
  * larger than the heap area and svcBreak()s before main. Pin both heaps so that
  * a diagnostic slice fits the 96 MiB .3dsx region as well as the 178 MiB CIA
  * mode: code + heap + linear must stay inside the region. */
-u32 __ctru_heap_size = 96u << 20;
-u32 __ctru_linear_heap_size = 8u << 20;
+u32 __ctru_heap_size = TESV_HEAP_MIB << 20;
+u32 __ctru_linear_heap_size = TESV_LINEAR_MIB << 20;
 #endif
 
 static unsigned g_region_mib, g_free_mib;
@@ -88,10 +105,56 @@ static const FnEntry cube_probe_table[] = {
     {0x30000010u, cube_probe_stub33}
 };
 
+/* Called before every snapshot (frame/alloc/exit) so the periodic line carries
+ * live guests, both IR caches, the texture cache and the OS region. */
+static void mem_refresh(void *ctx) {
+    BootSession *b = ctx;
+    if (!b) return;
+    mem_stats_set_guest(b->memory.used, b->memory.limit, b->memory.count);
+    IrCacheStats ir = {0};
+    n3ds_ir_cache_stats(&ir);
+    mem_stats_set_irdecode(ir.bytes, ir.blocks);
+    N3dsIrcStats irc = {0};
+    if (n3ds_lift_container_stats(&irc) == 0)
+        mem_stats_set_irc(irc.cache_bytes, irc.cache_records);
+    else
+        mem_stats_set_irc(0, 0);
+    D9Device *dev = d9_com_device();
+    if (dev) {
+        D9TexCacheStats tc;
+        if (d9_texture_cache_stats(dev, &tc) == D9_OK)
+            mem_stats_set_texcache(tc.guest_bytes, tc.gpu_bytes, tc.peak_guest,
+                                   tc.peak_gpu, tc.budget_trims,
+                                   tc.budget_trim_evictions, tc.evictions_gpu);
+    }
+    /* The overlay reports archives, not resident index bytes; report exactly
+     * what the existing API knows (have_bsa stays 0). */
+    Win32BsaOverlayStats ov = {0};
+    win32_bsa_overlay_stats(&ov);
+    mem_stats_set_bsa(0, ov.archives);
+    size_t tg = 0, tp = 0;
+    const char *gs = getenv("N3DS_TEX_GUEST_LIMIT");
+    const char *gg = getenv("N3DS_TEX_GPU_LIMIT");
+    if (gs || gg) {
+        int ok1 = 1, ok2 = 1;
+        if (gs) tg = mem_stats_parse_limit(gs, &ok1);
+        if (gg) tp = mem_stats_parse_limit(gg, &ok2);
+        if (ok1 && ok2) mem_stats_set_tex_limits(tg, tp);
+    }
+#ifdef __3DS__
+    size_t region = osGetMemRegionSize(MEMREGION_APPLICATION);
+    size_t used = osGetMemRegionUsed(MEMREGION_APPLICATION);
+    mem_stats_set_os_region(region, used, region - used);
+#endif
+}
+
 static int run(const char *exe, const char *root, uint64_t steps, size_t budget, const char *log,
                const D9Backend *backend, void *backend_ctx) {
     BootSession b;
     n3ds_boot_init(&b, budget);
+    mem_stats_set_refresh(mem_refresh, &b);
+    mem_stats_set_guest(b.memory.used, b.memory.limit, b.memory.count);
+    mem_stats_snapshot("start", NULL);
     int rc = -1;
     IrCacheStats ir_stats = {0};
     if (n3ds_boot_add_file(&b, "TESV.exe", exe, 0)) {
@@ -224,6 +287,7 @@ out:
     }
     fprintf(stderr,"[d3dx] D3DXCompileShader entries: %u\n",
             d3dx_surface_compile_shader_calls());
+    mem_stats_snapshot("exit", NULL);
     win32_memory_report(stderr);
     d3dx_surface_shutdown();
     d3dx_texture_shims_uninstall();
@@ -235,7 +299,21 @@ out:
 #ifdef __3DS__
 int main(void) {
     gfxInitDefault();
+    mem_stats_init();
+    mem_stats_configure(TESV_HEAP_MIB, TESV_LINEAR_MIB, TESV_RESERVE_MIB);
+    mem_stats_set_log_path(MEM_STATS_PATH);
+    {
+        const char *e = getenv("N3DS_MEM_EVERY");
+        if (e && *e) {
+            int ok = 0;
+            size_t n = mem_stats_parse_limit(e, &ok);
+            if (ok) mem_stats_set_every((unsigned)n);
+            else fprintf(stderr, "[mem] N3DS_MEM_EVERY='%s' ignored\n", e);
+        }
+    }
+    mem_stats_snapshot("boot", NULL);
     D9Citro *gpu=d9_citro_open();
+    mem_stats_snapshot("arenas", NULL);
     consoleInit(GFX_TOP, NULL); osSetSpeedupEnable(true);
     /* Keep the complete stderr trace on SD so emulator runs can be read
      * from the host after the console scrolls or the engine exits. */
@@ -263,11 +341,32 @@ int main(void) {
     bool n3ds = false; APT_CheckNew3DS(&n3ds);
     size_t region = osGetMemRegionSize(MEMREGION_APPLICATION);
     size_t free_mem = osGetMemRegionFree(MEMREGION_APPLICATION);
-    /* Guest mappings come from the newlib application heap. The 178 MiB CIA
-     * region has enough room for a 96 MiB heap; keep a 4 MiB reserve for libctru
-     * and runtime allocations and allow a 92 MiB guest budget. */
-    size_t budget = (92u << 20);
-    if (budget > ((__ctru_heap_size) - (4u << 20))) budget = (__ctru_heap_size) - (4u << 20);
+    /* Guest mappings come from the newlib application heap.  The guest budget is
+     * heap - reserve: explicit, logged, and never larger than the heap. */
+    size_t reserve_bytes = (size_t)TESV_RESERVE_MIB << 20;
+    size_t heap_bytes = (size_t)TESV_HEAP_MIB << 20;
+    size_t budget = mem_stats_guest_budget(TESV_HEAP_MIB, TESV_RESERVE_MIB);
+    printf("[mem] profile %ux%u MiB (newlib/linear): heap=%llu MiB "
+           "linear=%llu MiB reserve=%llu MiB guest_budget=%llu MiB\n",
+           TESV_HEAP_MIB, TESV_LINEAR_MIB,
+           (unsigned long long)(heap_bytes >> 20),
+           (unsigned long long)(((size_t)TESV_LINEAR_MIB << 20) >> 20),
+           (unsigned long long)(reserve_bytes >> 20),
+           (unsigned long long)(budget >> 20));
+    if (!budget || budget + reserve_bytes != heap_bytes) {
+        printf("[mem] FATAL: guest budget arithmetic failed (heap=%llu "
+               "reserve=%llu budget=%llu)\n",
+               (unsigned long long)heap_bytes,
+               (unsigned long long)reserve_bytes,
+               (unsigned long long)budget);
+        d9_citro_close(gpu);
+        gfxExit();
+        return 1;
+    }
+    if (((size_t)TESV_HEAP_MIB + TESV_LINEAR_MIB) << 20 > region) {
+        printf("[mem] WARNING: heap+linear exceed the %u MiB application region\n",
+               (unsigned)(region >> 20));
+    }
     g_region_mib = (unsigned)(region >> 20);
     g_free_mib = (unsigned)(free_mem >> 20);
     printf("App region: %u MiB, free %u MiB\n\n", g_region_mib, g_free_mib);
@@ -302,11 +401,17 @@ int main(void) {
 #else
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s TESV.exe [root] [steps] [budget_bytes] [memprobe]\n", argv[0]); return 2; }
+    mem_stats_init();
+    mem_stats_configure(TESV_HEAP_MIB, TESV_LINEAR_MIB, TESV_RESERVE_MIB);
+    mem_stats_set_log_path(getenv("N3DS_MEM_LOG"));
     const char *root = argc > 2 ? argv[2] : ".";
     uint64_t steps = argc > 3 ? strtoull(argv[3], NULL, 10) : 200000;
-    size_t budget = argc > 4 ? (size_t)strtoull(argv[4], NULL, 0) : (64u << 20);
+    size_t budget = argc > 4 ? (size_t)strtoull(argv[4], NULL, 0)
+                             : mem_stats_guest_budget(TESV_HEAP_MIB, TESV_RESERVE_MIB);
     if (budget < (28u << 20)) budget = 28u << 20;
     if (budget > (256u << 20)) budget = 256u << 20;
+    fprintf(stderr, "[mem] profile %ux%u MiB guest_budget=%llu MiB\n",
+            TESV_HEAP_MIB, TESV_LINEAR_MIB, (unsigned long long)(budget >> 20));
     if ((argc > 5 && !strcmp(argv[5], "memprobe")) || getenv("TESV_MEMPROBE")) {
         fprintf(stderr, "[mem] probe enabled: the engine will be told it can commit "
                         "512 MiB. Measurement only.\n");

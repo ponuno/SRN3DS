@@ -811,6 +811,10 @@ int d9_validate_device(D9Device *d,unsigned *passes);
 int d9_evict_managed_resources(D9Device *d);
 /* Read-only copy of the device's texture-cache counters (cube/volume included). */
 int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out);
+/* Diagnostic residency policy: byte caps for guest (CPU) and GPU copies.
+ * 0 means no limit.  Env N3DS_TEX_{GUEST,GPU}_LIMIT is applied by d3d9_com. */
+int d9_texture_cache_set_limits(D9Device *d,size_t guest_limit,
+                                size_t gpu_limit);
 /* Diagnostic residency control: evict unpinned GPU/guest copies until the
  * requested targets are met.  Cube/volume entries with a CPU store are
  * rehydratable; render-target cubes are explicit-release-only and are skipped.

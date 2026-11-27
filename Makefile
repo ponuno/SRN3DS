@@ -102,6 +102,10 @@ include $(DEVKITARM)/3ds_rules
 ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 OPT ?= -O2
 CFLAGS := -g $(OPT) -Wall -Wextra -std=gnu11 -mword-relocations -ffunction-sections $(ARCH) $(INCLUDE) -D__3DS__
+# Extra -D... flags from tools/build.ps1 (e.g. -MemProfile -> TESV_HEAP_MIB).
+ifneq ($(strip $(DEFINES)),)
+CFLAGS += $(DEFINES)
+endif
 ifdef TESV_ARM_STEPS
 CFLAGS += -DTESV_ARM_STEPS=$(TESV_ARM_STEPS)
 endif
@@ -155,17 +159,17 @@ export INCLUDE += -I$(PILOT_GEN)
 export OFILES := pilot_main.o n3ds_pilot.o guest.o guest_heap.o pe_image.o pe_imports.o guest_process.o $(patsubst %.c,%.o,$(notdir $(wildcard $(PILOT_GEN)/pilot_*.c)))
 endif
 ifneq ($(strip $(GRAPHICS)),)
-export OFILES := graphics_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_citro3d.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_tev.o d3d9_pica_tev.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d9shader_cube.shbin.o d9shader_sr.shbin.o
+export OFILES := graphics_main.o d3d9_core.o mem_stats.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_citro3d.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_tev.o d3d9_pica_tev.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d9shader_cube.shbin.o d9shader_sr.shbin.o
 export INCLUDE += -I$(CURDIR)/$(BUILD)
 endif
 ifneq ($(strip $(GRAPHICS_COM)),)
-export OFILES := graphics_com_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_shader_plan.o d3d9_pica_tev.o d3d9_pica_vs.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_citro3d.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d3d9_menu_text.o menu_swf_batch.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d3d9_capture.o guest.o guest_heap.o pe_imports.o bsa_reader.o menu_bsa_runtime.o d9shader_cube.shbin.o d9shader_sr.shbin.o
+export OFILES := graphics_com_main.o d3d9_core.o mem_stats.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_shader_plan.o d3d9_pica_tev.o d3d9_pica_vs.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_citro3d.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d3d9_menu_text.o menu_swf_batch.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d3d9_capture.o guest.o guest_heap.o pe_imports.o bsa_reader.o menu_bsa_runtime.o d9shader_cube.shbin.o d9shader_sr.shbin.o
 export INCLUDE += -I$(CURDIR)/$(BUILD)
 endif
 ifneq ($(strip $(MENU_FRAME)),)
 # menu_frame_main.c includes the production Citro3D adapter to count the real
 # bind/TEV/DrawElements calls, so d3d9_citro3d.o is deliberately not linked twice.
-export OFILES := menu_frame_main.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_shader_plan.o d3d9_pica_tev.o d3d9_pica_vs.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d3d9_menu_text.o d3d9_capture.o bsa_reader.o menu_bsa_runtime.o menu_swf.o menu_swf_display.o menu_swf_display_list.o menu_swf_clip.o menu_swf_shape.o menu_swf_tess.o menu_swf_text.o menu_swf_raster.o menu_swf_atlas.o menu_swf_batch.o guest.o guest_heap.o pe_imports.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d9shader_cube.shbin.o d9shader_sr.shbin.o
+export OFILES := menu_frame_main.o d3d9_core.o mem_stats.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_null.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_shader_plan.o d3d9_pica_tev.o d3d9_pica_vs.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_color_tev.o d3d9_demo_scene.o d3d9_com.o d3d9_com_demo.o d3d9_menu_text.o d3d9_capture.o bsa_reader.o menu_bsa_runtime.o menu_swf.o menu_swf_display.o menu_swf_display_list.o menu_swf_clip.o menu_swf_shape.o menu_swf_tess.o menu_swf_text.o menu_swf_raster.o menu_swf_atlas.o menu_swf_batch.o guest.o guest_heap.o pe_imports.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d9shader_cube.shbin.o d9shader_sr.shbin.o
 export INCLUDE += -I$(CURDIR)/$(BUILD)
 endif
 ifneq ($(strip $(AUDIO)),)
@@ -198,7 +202,7 @@ ifneq ($(strip $(TESV_SLICE)),)
 override export TESV_GEN := $(abspath $(TESV_GEN))
 export VPATH += $(TESV_GEN)
 export INCLUDE += -I$(TESV_GEN)
-export OFILES := n3ds_boot.o tesv_slice_main.o tesv_sm3_probe.o tesv_cube_probe.o tesv_cube_probe_slice.o tesv_cecdc0_probe.o tesv_cecdc0_source.o n3ds_pilot.o guest.o guest_heap.o pe_image.o pe_imports.o guest_process.o n3ds_lift_runtime.o rep_movs.o ir_core.o ir_decode.o ir_exec.o ir_container.o rt_prof.o fpu.o win32_shims.o win32_sync.o win32_user.o win32_locale.o win32_shell.o win32_audio.o win32_audio_3ds.o win32_thread.o win32_hostctx.o win32_input.o win32_steam.o win32_registry.o win32_xaudio2.o setjmp.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_shader_plan.o d3d9_pica_tev.o d3d9_pica_vs.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_com.o d3d9_null.o d3d9_citro3d.o d3d9_color_tev.o d3d9_capture.o d3dx_texture_shims.o d3dx_surface_shims.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d9shader_cube.shbin.o d9shader_sr.shbin.o bsa_reader.o asset_stream.o stream_cell.o menu_bsa_runtime.o menu_swf.o $(patsubst %.c,%.o,$(notdir $(wildcard $(TESV_GEN)/tesv_*.c)))
+export OFILES := n3ds_boot.o tesv_slice_main.o mem_stats.o tesv_sm3_probe.o tesv_cube_probe.o tesv_cube_probe_slice.o tesv_cecdc0_probe.o tesv_cecdc0_source.o n3ds_pilot.o guest.o guest_heap.o pe_image.o pe_imports.o guest_process.o n3ds_lift_runtime.o rep_movs.o ir_core.o ir_decode.o ir_exec.o ir_container.o rt_prof.o fpu.o win32_shims.o win32_sync.o win32_user.o win32_locale.o win32_shell.o win32_audio.o win32_audio_3ds.o win32_thread.o win32_hostctx.o win32_input.o win32_steam.o win32_registry.o win32_xaudio2.o setjmp.o d3d9_core.o d3d9_texcache.o d3d9_texture_data.o d3d9_bc.o d3d9_vertex.o d3d9_adapter.o d3d9_shader.o d3d9_tev.o d3d9_menu_closure.o d3d9_menu_shader_runtime.o d3d9_shader_plan.o d3d9_pica_tev.o d3d9_pica_vs.o d3d9_pica_citro3d.o d3d9_cube_coords.o d3d9_menu_light.o d3d9_com.o d3d9_null.o d3d9_citro3d.o d3d9_color_tev.o d3d9_capture.o d3dx_texture_shims.o d3dx_surface_shims.o n3ds_sr.o fsr3ds.o d9shader.shbin.o d9shader_color.shbin.o d9shader_cube.shbin.o d9shader_sr.shbin.o bsa_reader.o asset_stream.o stream_cell.o menu_bsa_runtime.o menu_swf.o $(patsubst %.c,%.o,$(notdir $(wildcard $(TESV_GEN)/tesv_*.c)))
 export INCLUDE += -I$(CURDIR)/$(BUILD)
 # The import linker resolves a validated MSVC hotpatch export to its real
 # body, so the lifted D3DX bodies must be dispatchable on the device too.

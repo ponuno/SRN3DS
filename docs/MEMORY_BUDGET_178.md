@@ -213,7 +213,73 @@ not remove that deficit.
    a paging provider for dirty anonymous pages, or a native patch of the
    `0x00a48a67` gate. Neither is implemented; this is a decision, not a task.
 
-## 7. Unknowns that need measurement
+## 8. Selecting a heap profile and reading the counters
+
+`TESV_HEAP_MIB` / `TESV_LINEAR_MIB` are compile-time macros in
+`source/tesv_slice_main.c` (defaults **96/8**). `tools/build.ps1 -MemProfile`
+maps the only accepted values to them and the Makefile appends them through
+`DEFINES`:
+
+| Profile | newlib heap | linear heap | guest budget (heap − 4 MiB) | region sum |
+|---|---:|---:|---:|---:|
+| `96x8` (default) | 96 MiB | 8 MiB | 92 MiB | 138 MiB |
+| `104x16` | 104 MiB | 16 MiB | 100 MiB | 154 MiB |
+| `120x24` | 120 MiB | 24 MiB | 116 MiB | 178 MiB |
+
+Anything else is refused by name:
+`throw "Unknown -MemProfile '<x>'; expected 96x8, 104x16 or 120x24"`. The
+guest budget is `mem_stats_guest_budget()`, checked against
+`heap − reserve` at startup and logged as
+`[mem] profile 120x24 MiB (newlib/linear): ...`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
+    -Mode tesv -TesvGen <gen> -MemProfile 120x24 -Isolated mem120 -Jobs 8
+```
+
+### Counters (`source/mem_stats.{h,c}`)
+
+One line per snapshot, `key=value`, fixed order:
+
+| Prefix | Meaning |
+|---|---|
+| `heap_mib`, `linear_mib`, `reserve_mib`, `guest_budget` | selected profile |
+| `guest_used`, `guest_peak`, `guest_limit`, `guest_regions` | guest pages from `GuestMemory` (peak tracked by the stats module) |
+| `newlib_used`, `newlib_peak`, `newlib_free`, `have_newlib` | `mallinfo()` on device; `have_newlib=0` on host |
+| `linear_live`, `linear_peak`, `linear_free`, `linear_min_free` | `linearSpaceFree()` sampled around every texture/target/arena create, delete and temporary upload; live bytes are observed deltas |
+| `linear_fail_n`, `linear_fail_bytes` | count and **requested size** of every failed `linearAlloc` / `C3D_*` request |
+| `vram_live`, `vram_peak`, `vram_free`, `vram_min_free`, `vram_fail_*` | same for `vramSpaceFree()`, only the `onVram=true` paths |
+| `arenas_bytes`, `arena_vertex/colour/cube/index/skin/srquad` | actual bytes: 16384×20, 65536×40, 16384×40, 262144×2, 4096×80, 6×36 |
+| `irc_bytes`, `irc_records`, `irdec_bytes`, `irdec_blocks` | live IRC index/record cache (`n3ds_lift_container_stats`) and decoded-IR cache (`n3ds_ir_cache_stats`) |
+| `bsa_resident`, `bsa_archives`, `have_bsa` | `have_bsa=0` is honest: the overlay exposes archive count, not resident index bytes |
+| `tex_guest`, `tex_gpu`, `tex_*_peak`, `tex_guest_limit`, `tex_gpu_limit`, `tex_trims`, `tex_trim_evictions`, `tex_evictions_gpu` | `d9_texcache_set_limits()` policy and LRU counters |
+| `os_region_used/free/size`, `have_os_region` | `osGetMemRegionUsed/Free/Size(MEMREGION_APPLICATION)` on device |
+| `alloc_failures` | total failed requests; the event line also has `fail_kind=` and `fail_bytes=` |
+
+Texture limits are opt-in and default to **0 = unlimited**:
+`N3DS_TEX_GUEST_LIMIT` / `N3DS_TEX_GPU_LIMIT` accept bytes or `K`/`M`/`G`
+(`4M`, `512K`, `0`). They are applied when the guest creates the device.
+
+### Where the snapshots go
+
+- Device: `sdmc:/Skyrim_N3DS_mem.log` (append, flushed every line; the console
+  copy is not relied on).
+- Host: stderr (`N3DS_MEM_LOG=<path>` redirects).
+- Triggers: `boot`, `arenas`, `start`, every `N3DS_MEM_EVERY` rendered frames
+  (default **300**, `frame` tag), `alloc_fail`, `cell` (API
+  `mem_stats_note_cell()`; no cell event is currently wired because
+  `stream_cell` is outside this change), and `exit`.
+
+### Acceptance for a profile
+
+Run the route below on 96/8, 104/16 and 120/24; accept 120/24 only when both
+heaps initialise and the `exit`/peak lines show **≥ 4 MiB free newlib and
+≥ 2 MiB free linear at the peak** (`newlib_free`, `linear_free`/`linear_min_free`).
+Any `alloc_failures` line names the failed request size, so a rejection points
+at the resource instead of a MiB estimate. `guest_budget` is a cap, not a
+working set: guest `used`/`peak` must still fit below it at cell transitions.
+
+## 9. Unknowns that need measurement
 
 - Actual `linearAlloc` high-water in the menu/world slice (no counter exists).
 - Guest `used` high-water under a real cell load (the 42.12 MiB figure is a gate

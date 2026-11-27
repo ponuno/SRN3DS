@@ -8,6 +8,7 @@
 #include "d3d9_menu_shader_runtime.h"
 #include "d3d9_shader_plan.h"
 #include "d3d9_pica_vs.h"
+#include "mem_stats.h"
 /* First-draw capture is an optional diagnostic.  It is compiled by default,
  * can be removed entirely with -DD9_CAPTURE_HOOK=0, and stays inert at run
  * time unless TESV_D3D9_CAPTURE_DRAWS requests one or more records. */
@@ -647,6 +648,27 @@ static void default_viewport(void){
      * device or the bound target changes.  The scissor test stays off. */
     g.scissor[0]=g.scissor[1]=0;g.scissor[2]=width;g.scissor[3]=height;
 }
+/* Diagnostic texture-cache caps.  Both default to 0 (unlimited) so eviction
+ * stays disabled unless the device route opts in explicitly. */
+static void apply_tex_limits(D9Device *d){
+    if(!d)return;
+    const char *gs=getenv("N3DS_TEX_GUEST_LIMIT");
+    const char *gg=getenv("N3DS_TEX_GPU_LIMIT");
+    if(!gs&&!gg)return;
+    int okg=1,okk=1;
+    size_t guest=gs?mem_stats_parse_limit(gs,&okg):0;
+    size_t gpu=gg?mem_stats_parse_limit(gg,&okk):0;
+    if(!okg||!okk){
+        fprintf(stderr,"[mem] texture limit ignored: N3DS_TEX_GUEST_LIMIT='%s' "
+                       "N3DS_TEX_GPU_LIMIT='%s'\n",gs?gs:"",gg?gg:"");
+        return;
+    }
+    if(d9_texture_cache_set_limits(d,guest,gpu)!=D9_OK)
+        fprintf(stderr,"[mem] texture limits refused\n");
+    else
+        fprintf(stderr,"[mem] texture cache limits guest=%llu gpu=%llu bytes\n",
+                (unsigned long long)guest,(unsigned long long)gpu);
+}
 static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
     if(!obj(A(0),FACTORY)||!ptr(out,4)||!ptr(pp,56)){d3d_log("CreateDevice","invalid factory, presentation parameters or output pointer");RET(INVALID,7);}
     M32(out)=0;
@@ -663,6 +685,7 @@ static void create_device(CPU *c){uint32_t pp=A(5),out=A(6);
         if(!g.device){d3d_log("CreateDevice","d3d9_core could not create the device from the backend");RET(UNAVAILABLE,7);}
         g.owns_device=1;
     }
+    apply_tex_limits(g.device);
     (void)d9_set_tnl_proto(g.device,g.tnl_proto);
     presentation_parameters(g.pp,ptr(pp,56));
     int bbrc=d9_set_back_buffer_info_ex(g.device,g.pp[0],g.pp[1],g.pp[2],g.pp[11]&1u);
@@ -2000,6 +2023,7 @@ static void surface_unlock(CPU *c){Obj *o=obj(A(0),SURFACE);if(!o)RET(INVALID,1)
 /* Host-facing surface access used by d3dx_surface_shims.c.  Rectangles arrive
  * as host int32_t[4] and no guest stack slot is involved. */
 GuestMemory *d9_com_memory(void){return g.mem;}
+D9Device *d9_com_device(void){return g.device;}
 int d9_com_surface_info(uint32_t surface,D9ComSurfaceInfo *out){
     Obj *o=obj(surface,SURFACE);
     if(!o||!out)return -1;

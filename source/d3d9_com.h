@@ -62,6 +62,9 @@ int d9_com_surface_lock(uint32_t surface, const int32_t rect[4], unsigned flags,
                         unsigned *pitch, uint32_t *address, unsigned *rows);
 int d9_com_surface_unlock(uint32_t surface);
 GuestMemory *d9_com_memory(void);
+/* Borrowed live device, or NULL before the guest CreateDevice / for an
+ * enumeration-only session.  Diagnostic consumers use it for cache counters. */
+D9Device *d9_com_device(void);
 uint32_t d9_com_resolve(const PeImport *entry,void *ctx);
 FnModule d9_com_module(void);
 /* Host-ABI texture creation for the D3DX shims.  These run the same validated

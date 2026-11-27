@@ -3957,6 +3957,11 @@ int d9_texture_cache_stats(D9Device *d,D9TexCacheStats *out){
     d9_texcache_stats(&d->tex_cache,out);
     return D9_OK;
 }
+int d9_texture_cache_set_limits(D9Device *d,size_t guest_limit,size_t gpu_limit){
+    if(!d)return D9_INVALID;
+    return d9_texcache_set_limits(&d->tex_cache,guest_limit,gpu_limit)==D9TEXCACHE_OK
+        ?D9_OK:D9_INVALID;
+}
 int d9_texture_cache_trim(D9Device *d,size_t guest_target,size_t gpu_target,
                           unsigned *evicted){
     if(evicted)*evicted=0;
