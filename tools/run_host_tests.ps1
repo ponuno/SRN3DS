@@ -275,7 +275,15 @@ $pipelineSources = @("source/d3d9_pipeline_match.c", "source/d3d9_pipeline_regis
 
 $tests = [ordered]@{}
 function Add-Test($name, $flags, $sources, $testArgs) {
-    $tests[$name] = @{ Flags = $flags; Sources = $sources; Args = $testArgs }
+    # d3d9_core.c calls into the emitted PICA VS module for the skinned draw
+    # gate. Every test that links the core needs that module; add it once so
+    # the per-test source lists stay readable and cannot drift again.
+    $list = @($sources)
+    if (($list -contains "source/d3d9_core.c") -and
+        ($list -notcontains "source/d3d9_pica_vs.c")) {
+        $list += "source/d3d9_pica_vs.c"
+    }
+    $tests[$name] = @{ Flags = $flags; Sources = $list; Args = $testArgs }
 }
 
 Add-Test "host" $common @("source/probe.c", "source/guest.c", "source/pe_image.c", "source/guest_heap.c", "source/guest_call.c", "tests/host.c") @()
@@ -289,8 +297,8 @@ Add-Test "tesv_cube_desc_probe" $liftCommon ($legacySources + @("tests/tesv_cube
 Add-Test "pe_imports" $common @("source/guest.c", "source/pe_image.c", "source/pe_imports.c", "tests/pe_imports_smoke.c") @()
 Add-Test "lift" $liftCommon ($legacySources + @("tests/lift_smoke.c", "tests/win32_smoke.c")) @()
 Add-Test "boot" $liftCommon ($comSources + @("tests/boot_smoke.c", "tests/win32_smoke.c")) @()
-Add-Test "graphics" $common ($d3dSources + @("source/d3d9_demo_scene.c", "tests/graphics_smoke.c")) @()
-Add-Test "vertex" $common ($d3dSources + @("tests/vertex_smoke.c")) @()
+Add-Test "graphics" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("source/d3d9_demo_scene.c", "tests/graphics_smoke.c")) @()
+Add-Test "vertex" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("tests/vertex_smoke.c")) @()
 Add-Test "texture_residency" $common @("source/d3d9_texcache.c", "tests/texture_residency_smoke.c") @()
 Add-Test "texture_residency_upload" $common @("source/d3d9_texcache.c", "source/d3d9_texture_data.c", "tests/texture_residency_upload_smoke.c") @()
 Add-Test "texture_container" $common @("source/d3d9_texture_data.c", "tests/texture_container_smoke.c") @()
@@ -385,7 +393,7 @@ Add-Test "scaled_target_blit" $common @("source/d3d9_core.c", "source/d3d9_texca
 Add-Test "scaled_readback" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_null.c", "tests/scaled_readback_smoke.c") @()
 Add-Test "render_texture_sample" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/render_texture_sample_smoke.c") @()
 Add-Test "stretchrect" $common @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "tests/stretchrect_smoke.c") @()
-Add-Test "up_draw" $common ($d3dSources + @("tests/up_draw_smoke.c")) @()
+Add-Test "up_draw" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("tests/up_draw_smoke.c")) @()
 Add-Test "null_backend" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_null.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader_plan.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c") + $picaSources + @("tests/null_backend_smoke.c")) @()
 Add-Test "back_buffer_lockable" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_null.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader_plan.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c") + $picaSources + @("tests/back_buffer_lockable_smoke.c")) @()
 Add-Test "depth_pair_scaled" $liftCommon ($tests["back_buffer_lockable"].Sources) @("--scaled-pair")
@@ -405,8 +413,8 @@ Add-Test "gfxmesh_core" $common @("source/d3d9_core.c", "source/d3d9_texcache.c"
 Add-Test "gfxmesh_com" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_demo_scene.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader_plan.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_com_demo.c") + $picaSources + @("tests/gfxmesh_com_smoke.c")) @()
 # Vertex-colour PICA half: stage-0 -> single TEV stage against a CPU reference,
 # exact null-backend RGBA capture, and the COM-level refusal HRESULT.
-Add-Test "color_tev" $common ($d3dSources + @("source/d3d9_color_tev.c", "tests/d3d9_color_tev_smoke.c")) @()
-Add-Test "two_stage" $common ($d3dSources + @("tests/two_stage_smoke.c")) @()
+Add-Test "color_tev" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("source/d3d9_color_tev.c", "tests/d3d9_color_tev_smoke.c")) @()
+Add-Test "two_stage" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("tests/two_stage_smoke.c")) @()
 Add-Test "texture_surface" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_demo_scene.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader_plan.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_com_demo.c") + $picaSources + @("tests/texture_surface_smoke.c")) @()
 Add-Test "color_com" $liftCommon ($legacySources + @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c", "source/d3d9_shader.c", "source/d3d9_tev.c", "source/d3d9_demo_scene.c", "source/d3d9_com.c", "source/d3d9_menu_closure.c", "source/d3d9_menu_shader_runtime.c", "source/d3d9_shader_plan.c", "source/d3d9_menu_light.c", "source/d3d9_capture.c", "source/d3d9_com_demo.c") + $picaSources + @("source/d3d9_color_tev.c", "tests/d3d9_color_com_smoke.c")) @()
 $menuClosureFixture = Join-Path $root "tests/fixtures/menu_closure_real_shaders.h"

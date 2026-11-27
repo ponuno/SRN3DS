@@ -209,12 +209,15 @@ int main(int argc,char **argv){
     sampler_args[1]=5;assert(call(&h,device,68,sampler_args,3)==0&&rd(&h,OUT)==1);
     sampler_args[1]=6;assert(call(&h,device,68,sampler_args,3)==0&&rd(&h,OUT)==1);
 
-    /* The menu material source observes c0..c8; c4..c8 are stored separately so
-     * they cannot pollute the c0..c3 clip rows.  c9 remains invalid. */
+    /* The VS constant bank is the full 256 rows; c9 is valid now, while a
+     * range that crosses c255 is not. */
     float constants[4][4]={{1,0,0,1},{0,1,0,1},{0,0,1,1},{0,0,0,1}};wr(&h,VIEW,constants,sizeof constants);
-    uint32_t const_args[]={9,VIEW,1};assert(call(&h,device,94,const_args,3)==0x8876086cu);
+    uint32_t const_args[]={256,VIEW,1};assert(call(&h,device,94,const_args,3)==0x8876086cu);
+    const_args[0]=255;const_args[2]=2;assert(call(&h,device,94,const_args,3)==0x8876086cu);
+    const_args[0]=9;const_args[2]=1;assert(call(&h,device,94,const_args,3)==0);
     const_args[0]=3;const_args[2]=2;assert(call(&h,device,94,const_args,3)==0);
     const_args[0]=0;const_args[2]=4;assert(call(&h,device,94,const_args,3)==0);
+    const_args[0]=200;const_args[2]=1;assert(call(&h,device,94,const_args,3)==0);
     const_args[0]=4;const_args[2]=1;assert(call(&h,device,94,const_args,3)==0);
     const_args[0]=8;const_args[2]=1;assert(call(&h,device,94,const_args,3)==0);
     uint32_t get_const[]={0,OUT,4};assert(call(&h,device,95,get_const,3)==0);
