@@ -6,7 +6,7 @@ character/normal-map/tint-mask shaders and skinned VS
 
 * census families: `skinning/characters`
 * chunks: **2162** / unique hashes: **1194**
-* pack catalog coverage: **83 translated**, **0 draw-enabled**, **1111 refused**
+* pack catalog coverage: **80 translated**, **3 draw-enabled**, **1111 refused**
   (`plans.json` / `refusals.json`; `manifest.json` and
   `docs/shader_coverage.json` index the catalog since `8abe218`, while the
   16-slot runtime table stays untouched because no entry sets `"runtime": 1`)
@@ -90,24 +90,34 @@ The 22 eight/nine-varying hashes remain named refusals: no normal output
 exists in this pack to pack, and an octant/hemisphere encoding was not
 adopted without a measured error bound.
 
-### Draw gate (shared request)
+### Draw gate (implemented)
 
-Three plans are *emitted and numerically verified*, but `draw_enabled` stays
-`0` because the shared contract forbids anything else:
+The three emitted plans now carry `draw_enabled: 1`.  The schema allows that
+only with `codegen == "emitted-verified"` and a complete `emitter` block
+(`generated/*.shbin`, its SHA-256 and byte count, the plan inputs and the
+PICA uniform row map).  `tools/shaders/plan_verify.py` mirrors the rule, and
+`pack_plans.py verify` re-hashes the committed `.shbin` on every run.
 
-1. `docs/shader_plan_schema.json` (`d9-shader-plan-v1`) currently requires
-   `pica_vs.draw_enabled == 0` unconditionally.  Allow `1` only when
-   `codegen == "emitted-verified"` and the `emitter` block is present.
-2. `source/d3d9_shader_plan.c` / the citro3d vertex path need a PICA VS
-   upload/bind path (`.shbin` allocation, attribute declaration, uniform bank
-   `c0..c15`) before a draw can use the emitted code.  This pack does not edit
-   C.
-3. `tests/sm3_phase1_test.py` asserts exactly one draw-enabled plan across the
-   packs; that invariant must change when verified PICA VS entries are
-   allowed to set `draw_enabled: 1`.
-4. The runtime must bind a 4-bone palette window per draw (or stream a larger
-   palette into `c0..c11`); a vertex using bone index >3 is outside this
-   representative contract.
+`source/d3d9_pica_vs.{h,c}` is the runtime side:
+
+* the `.shbin` bytes are embedded by `pack_plans.py emit-runtime` and selected
+  by exact vs_3_0 SHA-256; `d9_pica_vs_validate` checks the DVLB header, the
+  main-function word count and the pinned SHA-256;
+* `d9_pica_vs_declare` maps the active D3D9 declaration to the emitted
+  loaders — position FLOAT3, blendweight FLOAT4, blendindices UBYTE4N and the
+  optional texcoord/color inputs — and refuses any other shape by name;
+* `d9_pica_vs_bank` lays out the 4-bone window (c0..c11 palette, c12..c15
+  WVP, c16 for the 17-row program) and `d9_pica_vs_bank_ready` refuses when a
+  D3D register was never set;
+* `d9_pica_vs_device_open/bind` (3DS only) calls `DVLB_ParseFile`,
+  `shaderProgramSetVsh`, `AttrInfo_AddLoader` and `C3D_FVUnifSet`.
+
+The draw gate in `d3d9_com.c` runs every one of those checks per draw and
+names the first missing piece.  What is still missing for a real skinned
+frame: the D3D9 VS constant window is `c0..c8` (the emitted program reads
+`c0..c11` and `c180..c183`), and the skinned vertex fetch / stream submit is
+not wired into `d3d9_core.c`/`d3d9_citro3d.c`.  Until both land, the gate
+refuses by name; it never falls back to the fixed-function clip shader.
 
 ## Named refusals (`refusals.json`)
 

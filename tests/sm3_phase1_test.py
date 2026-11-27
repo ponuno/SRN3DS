@@ -138,13 +138,46 @@ class PlanSchemaTest(unittest.TestCase):
         errors = plan_verify.verify_document(doc, self.schema)
         self.assertTrue(any("duplicate sha256" in e for e in errors), errors)
 
-    def test_pica_vs_can_never_be_draw_enabled(self):
+    def test_pica_vs_draw_requires_verified_emitted_codegen(self):
         doc = copy.deepcopy(self.doc)
-        for entry in doc["entries"]:
-            if entry["kind"] == "pica_vs":
-                entry["draw_enabled"] = 1
+        synthetic = {
+            "id": "synthetic.vs",
+            "sha256": "ab" * 32,
+            "stage": "vs_3_0",
+            "kind": "pica_vs",
+            "draw_enabled": 1,
+            "note": "synthetic",
+            "inputs": [{"reg_index": 0, "usage": 0, "usage_index": 0,
+                        "usage_name": "position"}],
+            "outputs": [{"reg_index": 0, "type": 6, "usage": 0,
+                         "usage_index": 0, "usage_name": "position"}],
+            "preconditions": ["exact_hash_descriptor_match"],
+        }
+        doc["entries"].append(dict(synthetic))
         errors = plan_verify.verify_document(doc, self.schema)
-        self.assertTrue(any("never be draw-enabled" in e for e in errors), errors)
+        self.assertTrue(any("emitted-verified" in e for e in errors), errors)
+        self.assertTrue(any("emitter block" in e for e in errors), errors)
+
+        # A verified entry that carries the hardware-upload contract may be
+        # draw-enabled (the pack's three emitted programs do exactly this).
+        rows = [{"row": row,
+                 "d3d": row if row < 12 else 180 + (row - 12) if row < 16 else 184 + (row - 16)}
+                for row in range(16)]
+        verified = dict(synthetic)
+        verified["codegen"] = "emitted-verified"
+        verified["emitted_asm"] = "generated/synthetic.vs.v.pica"
+        verified["emitter"] = {
+            "samples": 256, "tolerance": 1e-4, "max_abs_position": 0.0,
+            "max_abs_varying": 0.0, "picasso": "pass", "bones": 4,
+            "uniform_rows": 16, "instructions": 35,
+            "shbin": "generated/synthetic.vs.shbin",
+            "shbin_sha256": "cd" * 32, "shbin_bytes": 388,
+            "inputs": [{"usage": 0, "usage_name": "position", "reg_index": 0}],
+            "uniforms": rows,
+        }
+        doc["entries"][-1] = verified
+        errors = plan_verify.verify_document(doc, self.schema)
+        self.assertEqual(errors, [], errors)
 
     def test_schema_rules_match_the_loaded_file(self):
         # The verifier mirrors the schema; guard the finite sets both ways.

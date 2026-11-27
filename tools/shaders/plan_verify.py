@@ -155,8 +155,26 @@ def validate_entry(entry: dict, errors: list, where: str) -> None:
         if entry.get("stage") != "vs_3_0":
             fail("kind=pica_vs requires stage vs_3_0")
         if entry.get("draw_enabled") == 1:
-            # schema allOf: pica_vs draw_enabled const 0
-            fail("pica_vs can never be draw-enabled without native codegen")
+            # schema allOf: draw-enabled pica_vs requires emitted codegen + the
+            # full emitter contract (assembly, .shbin SHA-256, inputs, rows).
+            if entry.get("codegen") != "emitted-verified":
+                fail("pica_vs can be draw-enabled only with codegen "
+                     "'emitted-verified'")
+            if not entry.get("emitted_asm"):
+                fail("draw-enabled pica_vs requires emitted_asm")
+            emitter = entry.get("emitter")
+            if not isinstance(emitter, dict):
+                fail("draw-enabled pica_vs requires an emitter block")
+            else:
+                _validate_emitter(entry, emitter, fail)
+        elif entry.get("codegen") == "emitted-verified":
+            # emitted code may stay translated until the runtime contract is
+            # deliberately enabled, but the proof block must be present.
+            emitter = entry.get("emitter")
+            if isinstance(emitter, dict):
+                _validate_emitter(entry, emitter, fail)
+        elif entry.get("draw_enabled") == 1:
+            fail("pica_vs draw-enabled without emitted codegen")
         outputs = entry.get("outputs")
         if not isinstance(outputs, list) or not 1 <= len(outputs) <= MAX_VS_VARYINGS:
             fail("pica_vs needs 1..%d outputs" % MAX_VS_VARYINGS)
@@ -166,6 +184,59 @@ def validate_entry(entry: dict, errors: list, where: str) -> None:
         uniform = entry.get("uniform_registers", 0)
         if not isinstance(uniform, int) or not 0 <= uniform <= MAX_VS_UNIFORMS:
             fail("uniform_registers must be 0..%d" % MAX_VS_UNIFORMS)
+
+
+def _validate_emitter(entry: dict, emitter: dict, fail) -> None:
+    """Mirror the schema's $defs/emitter contract."""
+    for key in ("samples", "tolerance", "max_abs_position", "max_abs_varying",
+                "picasso", "bones", "uniform_rows", "instructions", "shbin",
+                "shbin_sha256", "shbin_bytes", "inputs", "uniforms"):
+        if key not in emitter:
+            fail("emitter block lacks %r" % key)
+    if not _is_hex(emitter.get("shbin_sha256"), 64):
+        fail("emitter shbin_sha256 must be 64 lower-case hex chars")
+    shbin = emitter.get("shbin")
+    if not (isinstance(shbin, str) and shbin.startswith("generated/")
+            and shbin.endswith(".shbin")):
+        fail("emitter shbin must be 'generated/<name>.shbin'")
+    if emitter.get("picasso") not in ("pass", "skipped"):
+        fail("emitter picasso must be 'pass' or 'skipped'")
+    if not isinstance(emitter.get("samples"), int) or emitter["samples"] < 1:
+        fail("emitter samples must be >= 1")
+    for key in ("max_abs_position", "max_abs_varying"):
+        if not isinstance(emitter.get(key), (int, float)) or emitter[key] < 0:
+            fail("emitter %s must be non-negative" % key)
+    rows = emitter.get("uniforms")
+    if not isinstance(rows, list) or len(rows) < 16:
+        fail("emitter uniforms must list at least 16 PICA rows")
+    else:
+        want = [{"row": row, "d3d": d3d} for row, d3d in
+                _expected_rows(emitter.get("uniform_rows", 0))]
+        if rows != want:
+            fail("emitter uniform rows do not follow the 4-bone/WVP mapping")
+        if emitter.get("uniform_rows") != len(rows):
+            fail("emitter uniform_rows disagrees with the uniforms list")
+    plan_inputs = [{"usage": item.get("usage"),
+                    "usage_name": item.get("usage_name"),
+                    "reg_index": item.get("reg_index")}
+                   for item in entry.get("inputs", [])]
+    if emitter.get("inputs") != plan_inputs:
+        fail("emitter inputs disagree with the plan inputs")
+
+
+def _expected_rows(rows) -> list:
+    out = []
+    if not isinstance(rows, int):
+        return out
+    for row in range(rows):
+        if row < 12:
+            d3d = row
+        elif row < 16:
+            d3d = 180 + (row - 12)
+        else:
+            d3d = 184 + (row - 16)
+        out.append((row, d3d))
+    return out
 
 
 def verify_document(doc: dict, schema: dict) -> list:

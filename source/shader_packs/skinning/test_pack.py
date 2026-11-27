@@ -40,7 +40,7 @@ class SkinningCatalogTest(unittest.TestCase):
     def test_counts(self):
         coverage = self.doc["coverage"]
         self.assertEqual(coverage["translated"], 83)
-        self.assertEqual(coverage["draw_enabled"], 0)
+        self.assertEqual(coverage["draw_enabled"], 3)
         self.assertEqual(coverage["refused"], 1111)
         self.assertEqual(coverage["translated"] + coverage["refused"],
                          self.manifest["unique_hashes"])
@@ -53,13 +53,18 @@ class SkinningCatalogTest(unittest.TestCase):
             self.assertEqual(errors, [], entry["id"])
             self.assertEqual(entry["stage"], "vs_3_0")
             self.assertEqual(entry["kind"], "pica_vs")
-            self.assertEqual(entry["draw_enabled"], 0)
             self.assertLessEqual(len(entry["outputs"]), 7)
             self.assertLessEqual(len(entry["inputs"]), 16)
             self.assertLessEqual(entry["uniform_registers"], 96)
             self.assertTrue(entry["skinning"], entry["id"])
             self.assertIn(entry["codegen"], ("pending", "emitted-verified"))
-            self.assertFalse(plan_verify.derive_status(entry) == "draw-enabled")
+            if entry["codegen"] == "emitted-verified":
+                self.assertEqual(entry["draw_enabled"], 1, entry["id"])
+                self.assertEqual(plan_verify.derive_status(entry),
+                                 "draw-enabled", entry["id"])
+                self.assertIn("emitted_code_upload_path", entry["preconditions"])
+            else:
+                self.assertEqual(entry["draw_enabled"], 0, entry["id"])
         self.assertEqual(schema["$defs"]["entry"]["properties"]["kind"]
                          ["enum"], ["tev", "pica_vs"])
 
@@ -81,12 +86,20 @@ class SkinningCatalogTest(unittest.TestCase):
         self.assertEqual(plans | refused,
                          {row[0] for row in self.manifest["hashes"]})
 
-    def test_draw_is_never_enabled_without_a_material_contract(self):
+    def test_draw_is_enabled_only_with_the_full_emitter_contract(self):
         for entry in self.doc["entries"]:
             if entry["draw_enabled"] == 1:
                 self.assertTrue(entry.get("preconditions"), entry["id"])
-        # No PICA VS is draw-enabled at all; a native emitter does not exist.
-        self.assertEqual(self.doc["coverage"]["draw_enabled"], 0)
+                self.assertEqual(entry["codegen"], "emitted-verified")
+                emitter = entry["emitter"]
+                self.assertTrue(emitter["shbin"].endswith(".shbin"))
+                self.assertGreater(emitter["shbin_bytes"], 0)
+                blob = open(os.path.join(HERE, emitter["shbin"]), "rb").read()
+                import hashlib
+                self.assertEqual(hashlib.sha256(blob).hexdigest(),
+                                 emitter["shbin_sha256"], entry["id"])
+                self.assertEqual(len(blob), emitter["shbin_bytes"])
+        self.assertEqual(self.doc["coverage"]["draw_enabled"], 3)
 
 
 class SkinningSymbolicTest(unittest.TestCase):

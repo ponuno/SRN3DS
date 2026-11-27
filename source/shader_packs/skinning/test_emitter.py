@@ -53,6 +53,7 @@ class EmitterCatalogTest(unittest.TestCase):
             self.assertLessEqual(entry["max_abs_varying"], E.TOLERANCE)
 
     def test_plans_mark_the_same_three_as_emitted_verified(self):
+        entry_sha = {e["id"]: e["shbin_sha256"] for e in self.report["entries"]}
         verified = {e["id"] for e in self.report["entries"]}
         marked = {p["id"] for p in self.plans.values()
                   if p.get("codegen") == "emitted-verified"}
@@ -60,7 +61,11 @@ class EmitterCatalogTest(unittest.TestCase):
         self.assertEqual(len(marked), 3)
         for plan_id in verified:
             plan = self.plans[plan_id]
-            self.assertEqual(plan["draw_enabled"], 0)
+            self.assertEqual(plan["draw_enabled"], 1)
+            self.assertEqual(plan["emitter"]["shbin"],
+                             "generated/%s.shbin" % plan_id)
+            self.assertEqual(plan["emitter"]["shbin_sha256"],
+                             entry_sha[plan_id])
             self.assertTrue(plan["emitted_asm"].endswith(".v.pica"))
             self.assertIn("emitted_code_upload_path", plan["preconditions"])
 
@@ -110,7 +115,7 @@ class EmitterNumericTest(unittest.TestCase):
         for plan_id in E.REPRESENTATIVES:
             plan = plans[plan_id]
             ir = E.find_ir(plan["sha256"], data)
-            entry = E.verify(plan, ir, samples=256)
+            entry = E.verify(plan, ir, samples=256)[0]
             self.assertEqual(entry["status"], "pass", entry)
             self.assertLessEqual(entry["max_abs_position"], E.TOLERANCE)
             self.assertLessEqual(entry["max_abs_varying"], E.TOLERANCE)

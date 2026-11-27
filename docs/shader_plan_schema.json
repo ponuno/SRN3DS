@@ -61,7 +61,9 @@
         "expandable": { "type": "array", "items": { "type": "string" } },
         "uniform_registers": { "type": "integer", "minimum": 0 },
         "skinning": { "type": "boolean" },
-        "codegen": { "type": "string" }
+        "codegen": { "type": "string" },
+        "emitted_asm": { "type": "string" },
+        "emitter": { "$ref": "#/$defs/emitter" }
       },
       "allOf": [
         {
@@ -87,11 +89,59 @@
           }
         },
         {
-          "comment": "A PICA VS descriptor is never draw-enabled without native codegen.",
-          "if": { "properties": { "kind": { "const": "pica_vs" } } },
+          "comment": "A PICA VS contract without verified emitted codegen is never draw-enabled.",
+          "if": {
+            "required": ["kind", "codegen"],
+            "properties": { "kind": { "const": "pica_vs" },
+                            "codegen": { "not": { "const": "emitted-verified" } } }
+          },
           "then": { "properties": { "draw_enabled": { "const": 0 } } }
+        },
+        {
+          "comment": "A draw-enabled PICA VS must carry the full emitter contract: assembly, .shbin SHA-256, plan inputs and the uniform row map.",
+          "if": {
+            "required": ["kind", "draw_enabled"],
+            "properties": { "kind": { "const": "pica_vs" },
+                            "draw_enabled": { "const": 1 } }
+          },
+          "then": {
+            "required": ["codegen", "emitted_asm", "emitter"],
+            "properties": { "codegen": { "const": "emitted-verified" } }
+          }
         }
       ]
+    },
+    "emitter": {
+      "description": "Measured proof for emitted PICA VS code: the compiled .shbin, its SHA-256, the plan inputs it consumes and the PICA uniform rows it addresses.",
+      "type": "object",
+      "required": ["samples", "tolerance", "max_abs_position", "max_abs_varying",
+                   "picasso", "bones", "uniform_rows", "instructions",
+                   "shbin", "shbin_sha256", "shbin_bytes", "inputs", "uniforms"],
+      "properties": {
+        "samples": { "type": "integer", "minimum": 1 },
+        "tolerance": { "type": "number", "exclusiveMinimum": 0 },
+        "max_abs_position": { "type": "number", "minimum": 0 },
+        "max_abs_varying": { "type": "number", "minimum": 0 },
+        "picasso": { "enum": ["pass", "skipped"] },
+        "bones": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "uniform_rows": { "type": "integer", "minimum": 16, "maximum": 96 },
+        "instructions": { "type": "integer", "minimum": 1 },
+        "shbin": { "type": "string", "pattern": "^generated/[^/]+\\.shbin$" },
+        "shbin_sha256": { "$ref": "#/$defs/sha256" },
+        "shbin_bytes": { "type": "integer", "minimum": 1 },
+        "inputs": { "type": "array", "minItems": 1, "maxItems": 16 },
+        "uniforms": {
+          "type": "array", "minItems": 16,
+          "items": {
+            "type": "object",
+            "required": ["row", "d3d"],
+            "properties": {
+              "row": { "type": "integer", "minimum": 0 },
+              "d3d": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          }
+        }
+      }
     },
     "stage": {
       "type": "object",

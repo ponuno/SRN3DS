@@ -270,7 +270,7 @@ $comSources = $legacySources + @("source/guest_process.c", "source/n3ds_boot.c")
 $d3dSources = @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c")
 $d3dFull = $d3dSources + @("source/d3d9_shader.c", "source/d3d9_tev.c")
 $tevSources = $d3dSources + @("source/d3d9_tev.c", "source/d3d9_menu_light.c")
-$picaSources = @("source/d3d9_pica_tev.c")
+$picaSources = @("source/d3d9_pica_tev.c", "source/d3d9_pica_vs.c")
 $pipelineSources = @("source/d3d9_pipeline_match.c", "source/d3d9_pipeline_registry.c", "source/d3d9_menu_light.c")
 
 $tests = [ordered]@{}
@@ -301,6 +301,9 @@ Add-Test "tev_accuracy" $common ($tevSources + @("tests/tev_accuracy_smoke.c")) 
 Add-Test "menu_light" $common ($tevSources + @("tests/menu_light_smoke.c")) @()
 Add-Test "pica_tev" $common @("source/d3d9_tev.c", "source/d3d9_menu_light.c", "source/d3d9_pica_tev.c", "tests/pica_tev_smoke.c") @()
 Add-Test "shader_plan_table" $common @("source/d3d9_shader_plan.c", "source/d3d9_tev.c", "source/d3d9_adapter.c", "tests/shader_plan_table_smoke.c") @()
+# Verified emitted PICA VS: embedded .shbin SHA-256, declaration mapping and
+# the 4-bone palette/WVP uniform bank, without opening a device.
+Add-Test "pica_vs_runtime" $common @("source/d3d9_pica_vs.c", "tests/pica_vs_runtime_smoke.c") @()
 # CreatePixelShader exact-hash plan wiring: own hash -> TEV object, foreign hash
 # -> named refusal, plan draw precondition, caps unchanged.  The test hook only
 # routes lookup at a caller-owned table; production builds never see it.

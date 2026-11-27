@@ -37,6 +37,7 @@ a draw.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -118,6 +119,20 @@ def _emitter_verified() -> dict:
             if entry.get("status") == "pass"}
 
 
+def _uniform_map(rows: int) -> list:
+    """PICA row -> D3D register for the emitted 4-bone window."""
+    out = []
+    for row in range(rows):
+        if row < 12:
+            d3d = row
+        elif row < 16:
+            d3d = 180 + (row - 12)
+        else:
+            d3d = 184 + (row - 16)
+        out.append({"row": row, "d3d": d3d})
+    return out
+
+
 def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
     entry = dict(plan)
     entry["id"] = "skin.%s.%s" % ("vs" if plan["stage"] == "vs_3_0" else "ps",
@@ -138,9 +153,10 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
             "pica_vs_codegen",
         ]
         emitted = _emitter_verified().get(plan["sha256"])
-        if emitted is not None:
+        if emitted is not None and emitted.get("shbin_sha256"):
             entry["codegen"] = "emitted-verified"
             entry["emitted_asm"] = "generated/%s.v.pica" % entry["id"]
+            entry["draw_enabled"] = 1
             entry["emitter"] = {
                 "samples": emitted["samples"],
                 "tolerance": emitted["tolerance"],
@@ -149,11 +165,23 @@ def _plan_entry(ir, plan: dict, package: str, key: str) -> dict:
                 "picasso": emitted["picasso"],
                 "bones": emitted["bones"],
                 "uniform_rows": emitted["uniform_rows"],
+                "instructions": emitted["instructions"],
+                "shbin": "generated/" + emitted.get(
+                    "shbin_name", "%s.shbin" % entry["id"]),
+                "shbin_sha256": emitted["shbin_sha256"],
+                "shbin_bytes": emitted["shbin_bytes"],
+                "inputs": [
+                    {"usage": item["usage"],
+                     "usage_name": item["usage_name"],
+                     "reg_index": item["reg_index"]}
+                    for item in plan["inputs"]],
+                "uniforms": _uniform_map(emitted["uniform_rows"]),
             }
             entry["note"] = (
                 "PICA VS emitted and numerically verified against the vs_3_0 "
-                "IR (%d samples, max |dpos| %.1e, picasso pass); draw still "
-                "blocked by the shared pica_vs draw rule and upload path"
+                "IR (%d samples, max |dpos| %.1e, picasso pass, .shbin SHA-256 "
+                "pinned); draw-enabled only through the runtime upload/bind "
+                "contract (d3d9_pica_vs.c)"
                 % (emitted["samples"], emitted["max_abs_position"]))
             entry["preconditions"] = [
                 "blend_weight_blend_index_inputs",
@@ -302,8 +330,51 @@ def verify_document(doc: dict, pack_hashes: dict) -> dict:
         if row["kind"] == "vs" and entry.get("stage") != "vs_3_0":
             errors.append("%s: pack kind vs but stage %r" % (where, entry.get("stage")))
         if entry.get("kind") == "pica_vs":
-            if entry.get("draw_enabled") != 0:
-                errors.append("%s: PICA VS cannot be draw-enabled" % where)
+            if entry.get("draw_enabled") == 1:
+                # Emitted-verified PICA VS may be draw-enabled only with the
+                # full emitter contract: assembly, .shbin, its SHA-256, the
+                # input list and the uniform row map.
+                if entry.get("codegen") != "emitted-verified":
+                    errors.append("%s: PICA VS draw-enabled without emitted codegen"
+                                  % where)
+                emitter = entry.get("emitter")
+                if not isinstance(emitter, dict):
+                    errors.append("%s: draw-enabled PICA VS has no emitter block"
+                                  % where)
+                else:
+                    for key in ("shbin", "shbin_sha256", "inputs", "uniforms",
+                                "uniform_rows", "samples", "tolerance"):
+                        if key not in emitter:
+                            errors.append("%s: emitter block lacks %r" % (where, key))
+                    shbin = emitter.get("shbin")
+                    digest = emitter.get("shbin_sha256")
+                    if shbin:
+                        path = os.path.join(HERE, shbin)
+                        if not os.path.exists(path):
+                            errors.append("%s: emitter .shbin %r is absent"
+                                          % (where, shbin))
+                        else:
+                            with open(path, "rb") as handle:
+                                actual = hashlib.sha256(handle.read()).hexdigest()
+                            if actual != digest:
+                                errors.append("%s: .shbin SHA-256 %s != pinned %s"
+                                              % (where, actual[:12],
+                                                 str(digest)[:12]))
+                    if not isinstance(digest, str) or len(digest) != 64:
+                        errors.append("%s: emitter shbin_sha256 is not 64 hex"
+                                      % where)
+                    if emitter.get("inputs") != [
+                            {"usage": item.get("usage"),
+                             "usage_name": item.get("usage_name"),
+                             "reg_index": item.get("reg_index")}
+                            for item in entry.get("inputs", [])]:
+                        errors.append("%s: emitter inputs disagree with the plan"
+                                      % where)
+                    rows = emitter.get("uniforms")
+                    if not isinstance(rows, list) or \
+                            len(rows) != emitter.get("uniform_rows"):
+                        errors.append("%s: emitter uniforms do not cover %r rows"
+                                      % (where, emitter.get("uniform_rows")))
             if len(entry.get("outputs", [])) > 7:
                 errors.append("%s: more than 7 varyings" % where)
             if len(entry.get("inputs", [])) > 16:
@@ -375,6 +446,99 @@ def verify_symbolic(doc: dict, data_dir: str) -> dict:
             "checked": len(wanted), "problems": problems}
 
 
+def emit_runtime(doc: dict) -> dict:
+    """Write the C tables for the verified PICA VS programs.
+
+    Two includes: the program descriptors (`d3d9_pica_vs_table.inc`) and the
+    embedded `.shbin` bytes (`d3d9_pica_vs_shbin.inc`).  Only entries with
+    `codegen == "emitted-verified"` and a pinned `.shbin` are emitted.
+    """
+    verified = []
+    for entry in doc.get("entries", []):
+        if entry.get("codegen") != "emitted-verified":
+            continue
+        emitter = entry.get("emitter") or {}
+        if not emitter.get("shbin") or not emitter.get("shbin_sha256"):
+            continue
+        path = os.path.join(HERE, emitter["shbin"])
+        with open(path, "rb") as handle:
+            blob = handle.read()
+        if hashlib.sha256(blob).hexdigest() != emitter["shbin_sha256"]:
+            raise SystemExit("%s: pinned shbin SHA-256 mismatch" % entry["id"])
+        verified.append((entry, blob))
+
+    table = [
+        "/* Generated by source/shader_packs/skinning/pack_plans.py emit-runtime.",
+        " * Verified emitted PICA VS programs; exact vs_3_0 SHA-256 only. */",
+        "static const D9PicaVsProgram d9_pica_vs_entries[] = {",
+    ]
+    blobs = [
+        "/* Generated by source/shader_packs/skinning/pack_plans.py emit-runtime.",
+        " * Embedded picasso .shbin bytes.  Do not edit. */",
+    ]
+
+    # Declared input usage -> (required D9_DECL_* type, loader components,
+    # loader format).  The emitted assembly reads the input register that the
+    # plan names; the declaration must supply exactly that shape.
+    decl_for_usage = {
+        "position": ("D9_DECL_FLOAT3", 3, "D9_PICA_VS_FMT_FLOAT"),
+        "blendweight": ("D9_DECL_FLOAT4", 4, "D9_PICA_VS_FMT_FLOAT"),
+        "blendindices": ("D9_DECL_UBYTE4N", 4, "D9_PICA_VS_FMT_UBYTE_NORM"),
+        "texcoord": ("D9_DECL_FLOAT2", 2, "D9_PICA_VS_FMT_FLOAT"),
+        "color": ("D9_DECL_UBYTE4N", 4, "D9_PICA_VS_FMT_UBYTE_NORM"),
+    }
+    attr_const = {"position": "D9_PICA_VS_ATTR_POSITION",
+                  "blendweight": "D9_PICA_VS_ATTR_BLENDWEIGHT",
+                  "blendindices": "D9_PICA_VS_ATTR_BLENDINDICES",
+                  "texcoord": "D9_PICA_VS_ATTR_TEXCOORD",
+                  "color": "D9_PICA_VS_ATTR_COLOR"}
+    for entry, blob in verified:
+        emitter = entry["emitter"]
+        symbol = "d9_pica_vs_shbin_%s" % entry["id"].rsplit(".", 1)[-1]
+        rows = []
+        for item in entry["inputs"]:
+            usage = item["usage_name"]
+            if usage not in decl_for_usage:
+                raise SystemExit("%s: no attribute mapping for %r"
+                                 % (entry["id"], usage))
+            decl_type, count, fmt = decl_for_usage[usage]
+            rows.append("        {%s, %s, %u, %s, %uu},"
+                        % (attr_const[usage], decl_type, count, fmt,
+                           item["reg_index"]))
+        table.append("    {")
+        table.append('        "%s",' % entry["id"])
+        table.append('        "%s",' % entry["sha256"])
+        table.append('        "%s",' % os.path.basename(entry["emitted_asm"]))
+        table.append('        "%s",' % os.path.basename(emitter["shbin"]))
+        table.append('        "%s",' % emitter["shbin_sha256"])
+        table.append("        %s, %u," % (symbol, len(blob)))
+        table.append("        %uu, %uu, 12u, 12u, 4u," % (
+            emitter["instructions"], emitter["uniform_rows"]))
+        table.append("        %uu," % len(rows))
+        table.append("        {")
+        table.extend(rows)
+        table.append("        },")
+        table.append("    },")
+        blobs.append("static const uint8_t %s[%u] = {" % (symbol, len(blob)))
+        for start in range(0, len(blob), 16):
+            row = ",".join("0x%02x" % byte for byte in blob[start:start + 16])
+            blobs.append("    %s," % row)
+        blobs.append("};")
+    table.append("};")
+    table.append("#define D9_PICA_VS_ENTRY_COUNT "
+                 "(sizeof(d9_pica_vs_entries)/sizeof(d9_pica_vs_entries[0]))")
+    blobs.append("")
+
+    table_path = os.path.join(REPO, "source", "d3d9_pica_vs_table.inc")
+    shbin_path = os.path.join(REPO, "source", "d3d9_pica_vs_shbin.inc")
+    with open(table_path, "w", encoding="ascii", newline="\n") as handle:
+        handle.write("\n".join(table) + "\n")
+    with open(shbin_path, "w", encoding="ascii", newline="\n") as handle:
+        handle.write("\n".join(blobs))
+    return {"verified": len(verified), "table": table_path,
+            "shbin": shbin_path}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -383,6 +547,7 @@ def main(argv=None) -> int:
     ver = sub.add_parser("verify")
     ver.add_argument("--data", default="")
     ver.add_argument("--json", default="")
+    cgen = sub.add_parser("emit-runtime")
     args = parser.parse_args(argv)
 
     if args.cmd == "generate":
@@ -393,6 +558,12 @@ def main(argv=None) -> int:
         print("wrote %s and %s: %d translated (%d draw-enabled), %d refused"
               % (PLANS, REFUSALS, coverage["translated"],
                  coverage["draw_enabled"], coverage["refused"]))
+        return 0
+
+    if args.cmd == "emit-runtime":
+        result = emit_runtime(_load(PLANS))
+        print("wrote %s and %s: %d verified program(s)"
+              % (result["table"], result["shbin"], result["verified"]))
         return 0
 
     doc = load_catalog()

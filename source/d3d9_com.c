@@ -7,6 +7,7 @@
 #include "d3d9_menu_closure.h"
 #include "d3d9_menu_shader_runtime.h"
 #include "d3d9_shader_plan.h"
+#include "d3d9_pica_vs.h"
 /* First-draw capture is an optional diagnostic.  It is compiled by default,
  * can be removed entirely with -DD9_CAPTURE_HOOK=0, and stays inert at run
  * time unless TESV_D3D9_CAPTURE_DRAWS requests one or more records. */
@@ -101,6 +102,10 @@ typedef struct Obj {
      * object is created from the compiled descriptor and remains subject to
      * the draw gate; it is not a D3D9 capability report. */
     const D9ShaderPlan *plan;
+    /* Verified emitted PICA VS program (d3d9_pica_vs.h).  Selection is by the
+     * exact bytecode SHA-256; the per-draw declaration/palette gate decides
+     * whether it may be submitted. */
+    const D9PicaVsProgram *pica_vs;
     int probe_skip; /* TEST-ONLY shader-skip object: bytecode kept, no TEV/plan */
     D9Decl *declaration;
     D9ComStateBlock *state_block;
@@ -2942,6 +2947,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
      * marked for the named draw refusal.  The closure precreate above is still
      * the authority while the menu contract is armed. */
     const D9ShaderPlan *plan=NULL;int has_plan_ps=0,has_plan_vs=0;
+    const D9PicaVsProgram *pvs=NULL;int has_pvs=0;
     if(kind==VS&&shape.saw_end&&stream_words){
         char sha[65];shader_plan_sha256_hex(code,stream_words,sha);
         const D9ShaderPlan *hit=NULL;char plan_why[160];
@@ -2962,6 +2968,22 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
                 fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
                 d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
                 free(code);return UNAVAILABLE;
+            }
+        }else{
+            /* Pack-owned emitted PICA VS: exact-hash .shbin + verified emitter
+             * contract.  This is a separate catalog from the 16-slot runtime
+             * plan table; a miss stays on the legacy path below. */
+            pvs=d9_pica_vs_lookup(sha);
+            if(pvs){
+                char vs_why[192];
+                if(d9_pica_vs_validate(pvs,vs_why,sizeof vs_why)){
+                    snprintf(g.last_shader_rejection,sizeof g.last_shader_rejection,
+                             "PICA VS %s: %s",pvs->id,vs_why);
+                    fprintf(stderr,"D3D9 shader rejected: %s\n",g.last_shader_rejection);shader_note_rejection();
+                    d9_menu_closure_commit_failed(&closure,g.last_shader_rejection);
+                    free(code);return UNAVAILABLE;
+                }
+                has_pvs=1;
             }
         }
     }
@@ -3041,7 +3063,7 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             free(code);return UNAVAILABLE;}
     }
     D9ShaderInfo info;D9TevProgram tev;int result;
-    if(has_menu||has_menu_vs||has_plan_ps||has_plan_vs){
+    if(has_menu||has_menu_vs||has_plan_ps||has_plan_vs||has_pvs){
         memset(&info,0,sizeof info);
         memset(&tev,0,sizeof tev);
         info.version=code[0];info.major=3;info.minor=0;
@@ -3137,6 +3159,10 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
             /* PICA VS descriptor: recorded for diagnostics only.  No native
              * code emitter exists, so the draw gate refuses by name. */
             o->plan=plan;
+        }else if(has_pvs){
+            /* Verified emitted program: the draw gate checks the declaration,
+             * the 4-bone palette window and the backend stream path. */
+            o->pica_vs=pvs;
         }
     }
     retain(g.dev);M32(out)=o->guest;
@@ -3392,6 +3418,50 @@ static void declaration_data(CPU *c){Obj *o=obj(A(0),DECL);uint32_t p=A(1),n=A(2
  * refusals before the batch, never a partial submit. */
 static int plan_draw_state(void){
     char why[192];
+    if(g.vs&&g.vs->pica_vs){
+        /* Full emitted-PICA-VS contract.  Each step is a named refusal; the
+         * shader is never submitted on a partial declaration or a short
+         * palette/uniform bank. */
+        const D9PicaVsProgram *pv=g.vs->pica_vs;
+        char pwhy[192];
+        if(d9_pica_vs_validate(pv,pwhy,sizeof pwhy)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",pwhy);
+            return D9_UNSUPPORTED;
+        }
+        const D9Decl *decl=g.declaration?g.declaration->declaration:NULL;
+        if(!decl){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                     "PICA VS %s: draw has no active vertex declaration",pv->id);
+            return D9_UNSUPPORTED;
+        }
+        D9PicaVsDecl loaders;D9PicaVsBank bank;
+        if(d9_pica_vs_declare(pv,decl,&loaders,pwhy,sizeof pwhy)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",pwhy);
+            return D9_UNSUPPORTED;
+        }
+        if(d9_pica_vs_bank(pv,&bank,pwhy,sizeof pwhy)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",pwhy);
+            return D9_UNSUPPORTED;
+        }
+        /* The current VS constant window is c0..c8; the emitted program reads
+         * the 4-bone palette c0..c11 and WVP c180..c183.  Until the D3D9
+         * constant bank is widened, this refusal names exactly what is
+         * missing instead of drawing with stale rows. */
+        uint32_t mask[8];memset(mask,0,sizeof mask);
+        for(unsigned i=0;i<9;++i)
+            if(g.constants_mask&(1u<<i))mask[i>>5]|=1u<<(i&31u);
+        if(d9_pica_vs_bank_ready(&bank,mask,8,pwhy,sizeof pwhy)){
+            snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                     "PICA VS %s: %s (D3D9 VS constant window is c0..c8)",
+                     pv->id,pwhy);
+            return D9_UNSUPPORTED;
+        }
+        snprintf(g.last_diagnostic,sizeof g.last_diagnostic,
+                 "PICA VS %s: program, declaration and palette window verified; "
+                 "the skinned vertex-fetch/stream submit path is not wired yet",
+                 pv->id);
+        return D9_UNSUPPORTED;
+    }
     if(g.vs&&g.vs->plan){
         if(d9_shader_plan_draw_allowed(g.vs->plan,why,sizeof why)){
             snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",why);

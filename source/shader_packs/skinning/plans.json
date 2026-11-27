@@ -1,7 +1,7 @@
 {
  "archive": "Skyrim - Shaders.bsa",
  "coverage": {
-  "draw_enabled": 0,
+  "draw_enabled": 3,
   "refused": 1111,
   "translated": 83
  },
@@ -1232,16 +1232,103 @@
     183,
     184
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "emitted_asm": "generated/skin.vs.20f4db07.v.pica",
    "emitter": {
     "bones": 4,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 1,
+      "usage_name": "blendweight"
+     },
+     {
+      "reg_index": 2,
+      "usage": 2,
+      "usage_name": "blendindices"
+     }
+    ],
+    "instructions": 37,
     "max_abs_position": 0.0,
     "max_abs_varying": 0.0,
     "picasso": "pass",
     "samples": 256,
+    "shbin": "generated/skin.vs.20f4db07.shbin",
+    "shbin_bytes": 420,
+    "shbin_sha256": "5e88c3740892ad06e87caea201df3222650906460272b7f91dfb6b560b6d67e2",
     "tolerance": 0.0001,
-    "uniform_rows": 16
+    "uniform_rows": 16,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     },
+     {
+      "d3d": 4,
+      "row": 4
+     },
+     {
+      "d3d": 5,
+      "row": 5
+     },
+     {
+      "d3d": 6,
+      "row": 6
+     },
+     {
+      "d3d": 7,
+      "row": 7
+     },
+     {
+      "d3d": 8,
+      "row": 8
+     },
+     {
+      "d3d": 9,
+      "row": 9
+     },
+     {
+      "d3d": 10,
+      "row": 10
+     },
+     {
+      "d3d": 11,
+      "row": 11
+     },
+     {
+      "d3d": 180,
+      "row": 12
+     },
+     {
+      "d3d": 181,
+      "row": 13
+     },
+     {
+      "d3d": 182,
+      "row": 14
+     },
+     {
+      "d3d": 183,
+      "row": 15
+     }
+    ]
    },
    "expandable": [],
    "family": "skinning",
@@ -1268,7 +1355,7 @@
    ],
    "instructions": 27,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw still blocked by the shared pica_vs draw rule and upload path",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); draw-enabled only through the runtime upload/bind contract (d3d9_pica_vs.c)",
    "outputs": [
     {
      "reg_index": 0,
@@ -3338,16 +3425,117 @@
     184,
     185
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "emitted_asm": "generated/skin.vs.60dbd11a.v.pica",
    "emitter": {
     "bones": 4,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     },
+     {
+      "reg_index": 2,
+      "usage": 10,
+      "usage_name": "color"
+     },
+     {
+      "reg_index": 3,
+      "usage": 1,
+      "usage_name": "blendweight"
+     },
+     {
+      "reg_index": 4,
+      "usage": 2,
+      "usage_name": "blendindices"
+     }
+    ],
+    "instructions": 39,
     "max_abs_position": 0.0,
     "max_abs_varying": 0.0,
     "picasso": "pass",
     "samples": 256,
+    "shbin": "generated/skin.vs.60dbd11a.shbin",
+    "shbin_bytes": 444,
+    "shbin_sha256": "1c006e5b91806ce43d051e018402410ea3f45deab60d7bd1c8d99c343f22bdbf",
     "tolerance": 0.0001,
-    "uniform_rows": 17
+    "uniform_rows": 17,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     },
+     {
+      "d3d": 4,
+      "row": 4
+     },
+     {
+      "d3d": 5,
+      "row": 5
+     },
+     {
+      "d3d": 6,
+      "row": 6
+     },
+     {
+      "d3d": 7,
+      "row": 7
+     },
+     {
+      "d3d": 8,
+      "row": 8
+     },
+     {
+      "d3d": 9,
+      "row": 9
+     },
+     {
+      "d3d": 10,
+      "row": 10
+     },
+     {
+      "d3d": 11,
+      "row": 11
+     },
+     {
+      "d3d": 180,
+      "row": 12
+     },
+     {
+      "d3d": 181,
+      "row": 13
+     },
+     {
+      "d3d": 182,
+      "row": 14
+     },
+     {
+      "d3d": 183,
+      "row": 15
+     },
+     {
+      "d3d": 184,
+      "row": 16
+     }
+    ]
    },
    "expandable": [],
    "family": "skinning",
@@ -3386,7 +3574,7 @@
    ],
    "instructions": 28,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw still blocked by the shared pica_vs draw rule and upload path",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); draw-enabled only through the runtime upload/bind contract (d3d9_pica_vs.c)",
    "outputs": [
     {
      "reg_index": 0,
@@ -7946,16 +8134,103 @@
     183,
     184
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
    "emitted_asm": "generated/skin.vs.f8ffaecd.v.pica",
    "emitter": {
     "bones": 4,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 1,
+      "usage_name": "blendweight"
+     },
+     {
+      "reg_index": 2,
+      "usage": 2,
+      "usage_name": "blendindices"
+     }
+    ],
+    "instructions": 35,
     "max_abs_position": 0.0,
     "max_abs_varying": 0.0,
     "picasso": "pass",
     "samples": 256,
+    "shbin": "generated/skin.vs.f8ffaecd.shbin",
+    "shbin_bytes": 388,
+    "shbin_sha256": "d36e7611442339ad8e110524453324e74d752536d62e08587f5e297833bc8143",
     "tolerance": 0.0001,
-    "uniform_rows": 16
+    "uniform_rows": 16,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     },
+     {
+      "d3d": 4,
+      "row": 4
+     },
+     {
+      "d3d": 5,
+      "row": 5
+     },
+     {
+      "d3d": 6,
+      "row": 6
+     },
+     {
+      "d3d": 7,
+      "row": 7
+     },
+     {
+      "d3d": 8,
+      "row": 8
+     },
+     {
+      "d3d": 9,
+      "row": 9
+     },
+     {
+      "d3d": 10,
+      "row": 10
+     },
+     {
+      "d3d": 11,
+      "row": 11
+     },
+     {
+      "d3d": 180,
+      "row": 12
+     },
+     {
+      "d3d": 181,
+      "row": 13
+     },
+     {
+      "d3d": 182,
+      "row": 14
+     },
+     {
+      "d3d": 183,
+      "row": 15
+     }
+    ]
    },
    "expandable": [],
    "family": "skinning",
@@ -7982,7 +8257,7 @@
    ],
    "instructions": 25,
    "kind": "pica_vs",
-   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass); draw still blocked by the shared pica_vs draw rule and upload path",
+   "note": "PICA VS emitted and numerically verified against the vs_3_0 IR (256 samples, max |dpos| 0.0e+00, picasso pass, .shbin SHA-256 pinned); draw-enabled only through the runtime upload/bind contract (d3d9_pica_vs.c)",
    "outputs": [
     {
      "reg_index": 0,

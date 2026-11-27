@@ -14,8 +14,8 @@
   "vs": 290
  },
  "coverage": {
-  "translated": 83,
-  "draw-enabled": 0,
+  "translated": 80,
+  "draw-enabled": 3,
   "refused": 1111,
   "contract_only": 14
  },
@@ -119,7 +119,7 @@
   },
   {
    "id": "skin.vs.20f4db07",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "skinning",
    "sha256": "20f4db07add12d807b5cdd81a8457b93ae913998f7d21ca09194ba177dd70275"
@@ -252,7 +252,7 @@
   },
   {
    "id": "skin.vs.60dbd11a",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "skinning",
    "sha256": "60dbd11a23ffbf74517f1256edaadadb62441fe1ed120d413540b220b9833407"
@@ -567,7 +567,7 @@
   },
   {
    "id": "skin.vs.f8ffaecd",
-   "status": "translated",
+   "status": "draw-enabled",
    "kind": "pica_vs",
    "family": "skinning",
    "sha256": "f8ffaecd431d4416a4503b2e8ca80b6dad57a128dc1782c941f97db346072efa"

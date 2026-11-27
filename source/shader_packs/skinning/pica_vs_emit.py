@@ -35,6 +35,7 @@ is a draw-time palette-window contract, not an approximation of the maths.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -647,13 +648,18 @@ def verify(plan: dict, ir: C.IR, samples: int = SAMPLES,
                 max_varying = max(max_varying, error)
     picasso = "skipped"
     shbin_bytes = 0
+    shbin = b""
     if compile_asm:
-        picasso, shbin_bytes = run_picasso(text)
+        picasso, shbin = run_picasso(text)
+        shbin_bytes = len(shbin)
     ok = (max_position <= TOLERANCE and max_varying <= TOLERANCE
           and picasso in ("pass", "skipped"))
     return {
         "id": plan["id"], "sha256": plan["sha256"],
         "asm": "%s.v.pica" % plan["id"],
+        "shbin_name": "%s.shbin" % plan["id"],
+        "shbin_sha256": hashlib.sha256(shbin).hexdigest(),
+        "shbin_bytes": shbin_bytes,
         "bones": bones, "uniform_rows": _d3d_const_rows(ir, bones)[1],
         "instructions": len([line for line in text.splitlines()
                              if line.startswith("    ") and
@@ -662,17 +668,16 @@ def verify(plan: dict, ir: C.IR, samples: int = SAMPLES,
         "samples": samples, "tolerance": TOLERANCE,
         "max_abs_position": max_position,
         "max_abs_varying": max_varying,
-        "picasso": picasso, "shbin_bytes": shbin_bytes,
-        "status": "pass" if ok else "fail",
-    }
+        "picasso": picasso, "status": "pass" if ok else "fail",
+    }, shbin
 
 
-def run_picasso(text: str) -> Tuple[str, int]:
+def run_picasso(text: str) -> Tuple[str, bytes]:
     exe = os.environ.get("PICASSO")
     if not exe:
         exe = next((p for p in PICASSO_CANDIDATES if os.path.exists(p)), None)
     if not exe:
-        return "skipped", 0
+        return "skipped", b""
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "shader.v.pica")
         out = os.path.join(tmp, "shader.shbin")
@@ -681,8 +686,9 @@ def run_picasso(text: str) -> Tuple[str, int]:
         proc = subprocess.run([exe, "-o", out, src],
                               capture_output=True, text=True)
         if proc.returncode != 0 or not os.path.exists(out):
-            return "fail: %s" % (proc.stderr.strip() or proc.stdout.strip()), 0
-        return "pass", os.path.getsize(out)
+            return "fail: %s" % (proc.stderr.strip() or proc.stdout.strip()), b""
+        with open(out, "rb") as handle:
+            return "pass", handle.read()
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +709,11 @@ def emit_all(out_dir: str = GENERATED, data_dir: str = "",
         path = os.path.join(out_dir, "%s.v.pica" % plan_id)
         with open(path, "w", encoding="ascii", newline="\n") as handle:
             handle.write(text)
-        entries.append(verify(plan, ir, samples))
+        entry, shbin = verify(plan, ir, samples)
+        if shbin:
+            with open(os.path.join(out_dir, "%s.shbin" % plan_id), "wb") as handle:
+                handle.write(shbin)
+        entries.append(entry)
     report = {
         "schema": "skinning-pica-vs-emitter/1",
         "samples": samples, "tolerance": TOLERANCE,
@@ -737,7 +747,7 @@ def main(argv=None) -> int:
             for plan_id in REPRESENTATIVES:
                 plan = plans[plan_id]
                 entries.append(verify(plan, find_ir(plan["sha256"], args.data),
-                                      args.samples))
+                                      args.samples)[0])
             report = {"status": "pass" if all(e["status"] == "pass"
                                               for e in entries) else "fail",
                       "entries": entries}

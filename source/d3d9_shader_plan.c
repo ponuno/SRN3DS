@@ -140,8 +140,13 @@ int d9_shader_plan_draw_allowed(const D9ShaderPlan *plan,
         return -1;
     }
     if (plan->kind == D9_SHADER_PLAN_PICA_VS) {
+        /* A PICA VS descriptor is draw-enabled only through the emitted
+         * program contract (d3d9_pica_vs.c: exact-hash .shbin, declaration and
+         * 4-bone uniform bank).  The plan table alone cannot certify that, so
+         * the per-draw gate in d3d9_com.c owns the decision. */
         if (why && why_size)
-            snprintf(why, why_size, "plan %s: PICA VS code emitter is absent",
+            snprintf(why, why_size,
+                     "plan %s: PICA VS needs the emitted-program draw contract",
                      plan->id ? plan->id : "(unnamed)");
         return -1;
     }
