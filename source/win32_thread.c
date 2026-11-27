@@ -796,6 +796,7 @@ int win32_thread_init(GuestMemory *m) {
     reap_pending = NULL;
     win32_sync_set_current_thread(MAIN_THREAD_ID);
     win32_sync_set_waker(win32_thread_wake);
+    win32_sync_set_note(win32_thread_wait_note);
     /* Diagnostic PC ring (N3DS_PC_RING=1).  Installed here so the IR executors
      * keep linking without guest.c/win32_thread.c in standalone tools. */
     n3ds_ir_pc_note_hook = guest_pc_ring_note;
@@ -822,6 +823,7 @@ void win32_thread_shutdown(void) {
     scheduler_up = 0;
     cur = NULL;
     win32_sync_set_waker(NULL);
+    win32_sync_set_note(NULL);
     mem = NULL;
     teb_ready = 0;
 }

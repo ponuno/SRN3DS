@@ -4,7 +4,6 @@
 #include "x86.h"
 #include "guest.h"
 #include "win32_shims.h" /* WIN32_THUNK_BASE */
-#include "win32_thread.h" /* win32_thread_wait_note (diagnostics only) */
 
 /* Private thunk window for the single-thread Win32 synchronization subset.
  * It is disjoint from the main win32_shims table, whose win32_lookup returns
@@ -38,8 +37,13 @@ typedef int (*Win32SyncBlock)(const uint32_t *handles, unsigned count,
                               int wait_all, uint32_t timeout_ms);
 typedef const char *(*Win32SyncBlockText)(void);
 typedef void (*Win32SyncWaker)(uint32_t handle);
+/* Diagnostics: records the shim call site a blocking wait came from.  Kept as
+ * a hook so a standalone sync test (no win32_thread.c) still links. */
+typedef void (*Win32SyncNote)(const char *what, uint32_t caller, uint32_t a0,
+                              uint32_t a1, uint32_t ms);
 void win32_sync_set_blocker(Win32SyncBlock block, Win32SyncBlockText text);
 void win32_sync_set_waker(Win32SyncWaker wake);
+void win32_sync_set_note(Win32SyncNote note);
 /* Called by win32_thread.c when a thread handle becomes signaled. */
 void win32_sync_notify(uint32_t handle);
 

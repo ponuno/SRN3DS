@@ -1,6 +1,5 @@
 #include "n3ds_lift_runtime.h"
 #include "win32_shims.h"
-#include "win32_thread.h"
 #include "ir_core.h"
 /* Optional measurement hook; absent from ordinary host/ARM test binaries. */
 extern void *tesv_sm3_probe_level_ptr(uint32_t address, size_t bytes)
@@ -194,7 +193,7 @@ static void menu_trace(CPU *c,uint32_t addr){
         uint32_t owner=menu_rd32(lock),depth=menu_rd32(lock+4);
         fprintf(stderr,"[menu] lock=%08x owner=%08x depth=%08x thread=%u\n",
                 (unsigned)lock,(unsigned)owner,(unsigned)depth,
-                (unsigned)win32_thread_current_id());
+                (unsigned)(n3ds_ir_thread_id_hook?n3ds_ir_thread_id_hook():0));
     }
     if(addr==0x0069df7eu){
         uint32_t app=menu_rd32(0x1b2e860u);

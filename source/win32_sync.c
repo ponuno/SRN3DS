@@ -58,6 +58,7 @@ static Win32SyncThreadQuery thread_query;
 static Win32SyncBlock blocker;
 static Win32SyncBlockText blocker_text;
 static Win32SyncWaker waker;
+static Win32SyncNote noter;
 
 uint32_t win32_sync_set_current_thread(uint32_t id) {
     uint32_t previous = current_thread;
@@ -71,6 +72,7 @@ void win32_sync_set_blocker(Win32SyncBlock block, Win32SyncBlockText text) {
     blocker_text = text;
 }
 void win32_sync_set_waker(Win32SyncWaker wake) { waker = wake; }
+void win32_sync_set_note(Win32SyncNote note) { noter = note; }
 void win32_sync_notify(uint32_t handle) { if (waker) waker(handle); }
 static void guest_sleep(uint32_t ms) {
     if (!ms) return;
@@ -233,8 +235,7 @@ static uint32_t wait_common_raw(CPU *c, const uint32_t *h, unsigned n, int all,
         if (idx >= 0) return WAIT_OBJECT_0 + (uint32_t)idx;
         if (ms == 0) return WAIT_TIMEOUT;
         if (!blocker) return wait_unavailable(c, h[0], ms);
-        win32_thread_wait_note("Wait", (unsigned)M32(c->r[4]), h[0], n, ms);
-        {
+        if (noter) noter("Wait", (unsigned)M32(c->r[4]), h[0], n, ms);        {
             static unsigned block_logged;
             if (block_logged < 400) {
                 ++block_logged;
