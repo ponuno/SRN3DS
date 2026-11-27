@@ -227,6 +227,11 @@ static void run_case(Harness *h,int probe){
 
 int main(void){
     Harness h;memset(&h,0,sizeof h);
+    /* A structural VS family walk can report zero words; a malformed walk can
+     * report past the allocation. Neither may reach realloc(ptr,0)/GetFunction. */
+    assert(d9_com_retain_words(0,10)==10);
+    assert(d9_com_retain_words(20,10)==10);
+    assert(d9_com_retain_words(5,10)==5);
     guest_init(&h.memory,4u<<20);
     assert(!guest_map(&h.memory,0x10000000,0x4000)&&!guest_map(&h.memory,SCRATCH,0x8000));
     static const FnEntry probe_fn[]={{PROBE_FN,guest_dispatch_probe}};

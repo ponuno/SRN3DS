@@ -25,6 +25,10 @@ void d9_com_shutdown(void);
 /* Host-side regression introspection for the CreatePixelShader path. */
 int d9_com_pixel_shader_tev(uint32_t address,D9TevProgram *out);
 const char *d9_com_last_shader_rejection(void);
+/* Clamp a token-walk word count to the bytes actually allocated. A zero walk
+ * (structural VS family match) or a count past the allocation must not reach
+ * realloc(ptr, 0) or GetFunction's copy. */
+size_t d9_com_retain_words(unsigned walk, size_t allocated);
 /* Observable menu-material evidence derived from the current device state
  * (bound LDR textures, declaration/FVF colour, constants c0..c7).  It never
  * includes normal/tangent/ambient evidence, which must be reported explicitly

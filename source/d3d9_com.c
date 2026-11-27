@@ -2763,6 +2763,10 @@ static uint32_t shader_probe_object(unsigned kind,uint32_t out,const char *reaso
 static void shader_note_rejection(void){
     snprintf(g.last_diagnostic,sizeof g.last_diagnostic,"%s",g.last_shader_rejection);
 }
+size_t d9_com_retain_words(unsigned walk,size_t allocated){
+    if(!walk||(size_t)walk>allocated)return allocated;
+    return walk;
+}
 /* Measurement-only fallback for a structurally valid stream that this device
  * cannot execute.  With the skip probe it becomes a non-executable object;
  * without it the caller's named D3DERR_NOTAVAILABLE refusal stands. */
@@ -3097,8 +3101,24 @@ static uint32_t shader_new(unsigned kind,uint32_t address,uint32_t out){
         }
     }
     g.last_shader_rejection[0]=0;
-    /* Retain original bytecode for GetFunction, including comments. */
-    uint32_t *exact=realloc(code,(size_t)info.words*4);if(exact)code=exact;
+    /* Retain original bytecode for GetFunction, including comments.  The
+     * closure walk may report no word count (a structural VS family match) or
+     * a count larger than the allocation; realloc(ptr, 0) frees the buffer and
+     * returns NULL, which would leave a dangling o->code for a later free.
+     * Clamp to the bytes actually allocated and keep the full stream when the
+     * walk has no count. */
+    if(!info.words||info.words>words){
+        static unsigned trim_logged;
+        if(trim_logged<8){++trim_logged;fprintf(stderr,
+            "[shader] retain clamp: walk_words=%u allocated=%lu staged=%s\n",
+            (unsigned)info.words,(unsigned long)words,
+            has_menu||has_menu_vs?"menu":has_plan_ps||has_plan_vs?"plan":"legacy");}
+    }
+    info.words=d9_com_retain_words(info.words,words);
+    if((size_t)info.words!=words){
+        uint32_t *exact=realloc(code,(size_t)info.words*4);
+        if(exact)code=exact;
+    }
     Obj *o=new_obj(kind);o->code=code;o->words=info.words;
     if(kind==PS&&result==D9_SHADER_TEV){
         o->tev=tev;o->has_tev=1;
