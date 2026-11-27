@@ -139,6 +139,18 @@
    ]
   }
  ],
+ "extra_plans": {
+  "plans": 19,
+  "draw_enabled": 3,
+  "by_pack": {
+   "ui": {
+    "plans": 19,
+    "draw_enabled": 3,
+    "exact": 15,
+    "approx": 4
+   }
+  }
+ },
  "total": {
   "translated": 137,
   "draw-enabled": 1,

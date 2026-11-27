@@ -347,6 +347,42 @@ def check() -> list:
     return errors
 
 
+def _extra_plans(index: dict) -> dict:
+    """Plans whose hashes are not in the census.
+
+    GFx's built-in menu programs live in `TESV.exe` tables, not in the shader
+    BSA, so the census partition cannot see them.  They still consume runtime
+    slots and can be draw-enabled; report them separately instead of letting
+    the census total claim there is one draw plan when there are four.
+    """
+    census_hashes = set()
+    for name in index["packs"]:
+        manifest = _load_json(os.path.join(PACKS_DIR, name, "manifest.json"))
+        census_hashes.update(row[0] for row in manifest["hashes"])
+    by_pack = {}
+    for name in PACKS:
+        path = os.path.join(PACKS_DIR, name, "plans.json")
+        if not os.path.isfile(path):
+            continue
+        entries = [entry for entry in _load_json(path).get("entries", [])
+                   if entry.get("sha256") not in census_hashes]
+        if entries:
+            by_pack[name] = {
+                "plans": len(entries),
+                "draw_enabled": sum(1 for entry in entries
+                                    if entry.get("draw_enabled") == 1),
+                "exact": sum(1 for entry in entries
+                             if entry.get("quality") == "exact"),
+                "approx": sum(1 for entry in entries
+                              if entry.get("quality") == "approx"),
+            }
+    return {
+        "plans": sum(row["plans"] for row in by_pack.values()),
+        "draw_enabled": sum(row["draw_enabled"] for row in by_pack.values()),
+        "by_pack": by_pack,
+    }
+
+
 def coverage_report(built_or_none=None) -> dict:
     index = _load_json(INDEX_PATH)
     merged_plans = _plan_index()
@@ -381,6 +417,7 @@ def coverage_report(built_or_none=None) -> dict:
         "census_chunks": census["chunks"],
         "census_hashes": census["distinct_hashes"],
         "packs": rows,
+        "extra_plans": _extra_plans(index),
         "total": dict(total),
         "note": ("translated = offline plan/contract exists; draw-enabled = "
                  "certified runtime plan; refused = named software refusal; "

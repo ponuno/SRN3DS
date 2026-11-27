@@ -307,3 +307,8 @@ translated-but-not-runtime plan still counts as `translated` in coverage.
 symbolic regeneration, so the committed runtime table must still equal the
 generator's output exactly. Regenerating against the retail archive reproduces
 the committed 4-entry manifest byte-for-byte.
+
+Coverage totals count census hashes only. Plans whose SHA-256 is not in the
+census — GFx's built-in menu programs live in `TESV.exe` tables, not in the
+shader BSA — are reported in `docs/shader_coverage.json` under `extra_plans`,
+so the census `draw-enabled: 1` cannot hide three certified menu descriptors.
