@@ -290,3 +290,28 @@ $env:N3DS_WATCH_VALUE='0x4259eb50'
   `[bucket+0x04] = 0x012b6634` during TES init, but not fixed. The next agent
   should decide between the uninitialized-value path and a loader store bug
   (hypotheses 1 and 2) before touching the allocator.
+
+## Root cause found (2026-11-27, after this handoff)
+
+The fault was **not** in the NAVI loader or the hash map. Tracing every insert
+(`TESV_NAVI_TRACE`, 15 474 inserts into `ctr=0x554f7e90`) showed a valid
+`NavMeshInfo*` in `0x5015f0` every time, and `0x012b6634` never appeared in a
+bucket.
+
+The corruption came from `rep movsd` in the CRT `memcpy` used when the
+`0x5fc640` temporary vector grew `0x800 -> 0x1000`. `guest_ptr()` on a range that
+crosses several pages builds a bridge and drops the page allocations it covers;
+the old copy resolved `dst` and `src` with two such calls and then ran one
+`memmove`, so the second call could free the allocation under the first pointer.
+The copy landed in freed host memory and element 0 kept stale shader-heap data
+(`0x012b6634`, RTTI bytes), which then faulted at `0x62783049`.
+
+Fixed by the page-windowed copy in `source/rep_movs.c` (`n3ds_rep_movsd`,
+shared by AOT and IR). Evidence after the fix: the same vector growth yields
+`55805400 558053a0 55805370 55804fe0`, the drain completes, and the run proceeds
+past `0x5fc640`. Regression: `tests/rep_movs_slab_smoke.c` (fragmented slab,
+src/dst sharing a page) and `tests/rep_movs_smoke.c` (forced eviction), under
+ASan for the failure case.
+
+Next independent blocker on this path: `IR: block has no terminator at
+00429872`.
