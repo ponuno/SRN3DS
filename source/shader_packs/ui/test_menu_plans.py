@@ -46,9 +46,10 @@ def main(argv=None):
     check(len(vs) == 5, "five VS full blobs translated")
     check(len(entries) + len(refusals) == 43, "43 full blobs partition")
     check(len(refusals) == 24, "24 named PS refusals")
-    check(2 <= len(runtime) <= 4, "2-4 runtime entries")
+    check(2 <= len(runtime) <= 6, "2-6 runtime entries")
     check(all(e["draw_enabled"] == 1 and e["quality"] == "exact"
-              and e["material_contract"]["complete"] for e in runtime),
+              and (e["kind"] == "pica_vs"
+                   or e["material_contract"]["complete"]) for e in runtime),
           "runtime entries are exact with a complete contract")
     check(all(e["draw_enabled"] == 0 for e in entries if e not in runtime),
           "non-runtime entries never claim draw")

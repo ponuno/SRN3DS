@@ -50,7 +50,7 @@ static void skin_decl(D9Decl *decl, unsigned index_type) {
 }
 
 int main(void) {
-    CHECK(d9_pica_vs_count() == 3, "three verified programs");
+    CHECK(d9_pica_vs_count() == 6, "three skin + three GFx menu programs");
 
     for (unsigned i = 0; i < d9_pica_vs_count(); ++i) {
         const D9PicaVsProgram *p = d9_pica_vs_at(i);
@@ -168,6 +168,43 @@ int main(void) {
         why[0] = 0;
         CHECK(d9_pica_vs_validate(&bad, why, sizeof why) != 0,
               "huge DVLE offset is rejected without overflow");
+    }
+
+    /* GFx menu VS: identity uniform bank, no bone window, and a declaration
+     * with extra unread elements (position/texcoord/color/normal) is accepted
+     * for mode MENU (bone_rows == 0) but still requires every emitted input. */
+    {
+        const D9PicaVsProgram *m = d9_pica_vs_lookup(
+            "264c20659a094788a9f7c7f53e7626fc5f6a07613894c150510ffb5a3066be39");
+        char why[192] = "";
+        CHECK(m != NULL, "menu 264c2065 is present");
+        if (m) {
+            D9PicaVsBank bank;
+            CHECK(d9_pica_vs_bank(m, &bank, why, sizeof why) == 0, why);
+            CHECK(bank.rows == 4u && bank.d3d_reg[0] == 0u && bank.d3d_reg[3] == 3u,
+                  "menu bank is the identity c0..c3");
+            {
+                D9VertexElement elements[5] = {{0}};
+                D9Decl decl;
+                D9PicaVsDecl loaders;
+                elements[0] = entry(0, 0, D9_DECL_FLOAT3, D9_USAGE_POSITION, 0);
+                elements[1] = entry(0, 12, D9_DECL_FLOAT2, 5 /* texcoord */, 0);
+                elements[2] = entry(0, 20, D9_DECL_COLOR, 10 /* color */, 0);
+                elements[3] = entry(0, 24, D9_DECL_FLOAT3, 3 /* normal */, 0);
+                memset(&decl, 0, sizeof decl);
+                decl.count = 4;
+                memcpy(decl.elements, elements, sizeof elements);
+                CHECK(d9_pica_vs_declare(m, &decl, &loaders, why, sizeof why) == 0,
+                      why);
+                CHECK(loaders.count == 3u, "menu loads its three inputs only");
+                memset(&decl, 0, sizeof decl);
+                decl.count = 1;
+                memcpy(decl.elements, elements, sizeof elements[0]);
+                why[0] = 0;
+                CHECK(d9_pica_vs_declare(m, &decl, &loaders, why, sizeof why) != 0,
+                      "menu declaration without texcoord/color is refused");
+            }
+        }
     }
 
     if (failures) {

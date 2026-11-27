@@ -566,7 +566,10 @@ def check(plans_path=PLANS_PATH, ir_path=IR_PATH, catalog_path=CATALOG_PATH,
         shas.add(entry.get("sha256"))
         if len(entry.get("sha256", "")) != 64:
             problems.append("%s: sha256 is not 64 hex" % where)
-        if entry.get("draw_enabled") != 0:
+        if entry.get("draw_enabled") != 0 and not (
+                entry.get("kind") == "pica_vs"
+                and entry.get("codegen") == "emitted-verified"
+                and entry.get("runtime") == 1):
             problems.append("%s: menu plan claims draw without certification" % where)
         prefix = entry.get("prefix_sha256")
         seen_prefix.add(prefix)

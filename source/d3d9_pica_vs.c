@@ -7,9 +7,12 @@
 #include <string.h>
 
 #include "d3d9_pica_vs_shbin.inc"
+#include "d3d9_pica_vs_menu_shbin.inc"
 
 /* Verified emitted programs (exact vs_3_0 SHA-256 keys). */
 #include "d3d9_pica_vs_table.inc"
+/* GFx menu VS: same emitter contract, no bone palette (mode == MENU). */
+#include "d3d9_pica_vs_menu_table.inc"
 
 /* ------------------------------------------------------------------------- */
 /* SHA-256 (FIPS 180-4), used to pin the embedded .shbin bytes. */
@@ -104,12 +107,14 @@ int d9_pica_vs_sha256_equal(const char *a, const char *b) {
 }
 
 unsigned d9_pica_vs_count(void) {
-    return (unsigned)D9_PICA_VS_ENTRY_COUNT;
+    return (unsigned)(D9_PICA_VS_ENTRY_COUNT + D9_PICA_VS_MENU_ENTRY_COUNT);
 }
 
 const D9PicaVsProgram *d9_pica_vs_at(unsigned index) {
-    if (index >= D9_PICA_VS_ENTRY_COUNT) return NULL;
-    return &d9_pica_vs_entries[index];
+    if (index < D9_PICA_VS_ENTRY_COUNT) return &d9_pica_vs_entries[index];
+    index -= D9_PICA_VS_ENTRY_COUNT;
+    if (index >= D9_PICA_VS_MENU_ENTRY_COUNT) return NULL;
+    return &d9_pica_vs_menu_entries[index];
 }
 
 const D9PicaVsProgram *d9_pica_vs_lookup(const char *sha256_hex) {
@@ -117,6 +122,9 @@ const D9PicaVsProgram *d9_pica_vs_lookup(const char *sha256_hex) {
     for (unsigned i = 0; i < D9_PICA_VS_ENTRY_COUNT; ++i)
         if (d9_pica_vs_sha256_equal(d9_pica_vs_entries[i].sha256, sha256_hex))
             return &d9_pica_vs_entries[i];
+    for (unsigned i = 0; i < D9_PICA_VS_MENU_ENTRY_COUNT; ++i)
+        if (d9_pica_vs_sha256_equal(d9_pica_vs_menu_entries[i].sha256, sha256_hex))
+            return &d9_pica_vs_menu_entries[i];
     return NULL;
 }
 
@@ -198,12 +206,28 @@ int d9_pica_vs_validate(const D9PicaVsProgram *program,
                      program->id, hex, program->shbin_sha256);
         return -1;
     }
-    if (program->uniform_rows < D9_PICA_VS_BONE_ROWS + 4u ||
-        program->uniform_rows > D9_PICA_VS_MAX_ROWS ||
-        program->bone_rows != D9_PICA_VS_BONE_ROWS ||
-        program->wvp_first_row != D9_PICA_VS_BONE_ROWS ||
-        program->wvp_rows != 4u || program->attr_count == 0 ||
-        program->attr_count > D9_PICA_VS_MAX_ATTRS) {
+    if (program->bone_rows == 0) {
+        /* GFx menu programs use the plain D3D c0..cN bank: no bone window
+         * remap, no c180 WVP indirection. */
+        if (program->uniform_rows == 0 ||
+            program->uniform_rows > D9_PICA_VS_MAX_ROWS ||
+            program->bone_rows != 0 || program->wvp_first_row != 0 ||
+            program->wvp_rows != program->uniform_rows ||
+            program->attr_count == 0 ||
+            program->attr_count > D9_PICA_VS_MAX_ATTRS) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "plan %s: menu uniform/attribute contract is inconsistent",
+                         program->id);
+            return -1;
+        }
+    } else if (program->bone_rows != D9_PICA_VS_BONE_ROWS ||
+               program->uniform_rows < D9_PICA_VS_BONE_ROWS + 4u ||
+               program->uniform_rows > D9_PICA_VS_MAX_ROWS ||
+               program->bone_rows != D9_PICA_VS_BONE_ROWS ||
+               program->wvp_first_row != D9_PICA_VS_BONE_ROWS ||
+               program->wvp_rows != 4u || program->attr_count == 0 ||
+               program->attr_count > D9_PICA_VS_MAX_ATTRS) {
         if (why && why_size)
             snprintf(why, why_size, "plan %s: uniform/attribute contract is inconsistent",
                      program->id);
@@ -329,7 +353,15 @@ int d9_pica_vs_declare(const D9PicaVsProgram *program, const D9Decl *decl,
             int color_alias = attr->attr == D9_PICA_VS_ATTR_COLOR &&
                               attr->decl_type == D9_DECL_UBYTE4N &&
                               found->type == D9_DECL_COLOR;
-            if (!color_alias) {
+            /* The GFx menu declarations are not the skin contract: position
+             * and texcoord may be declared FLOAT1..4 as long as they carry
+             * the components the emitted program reads.  Integers other than
+             * a colour stay a named refusal (PICA loaders do not normalise). */
+            int menu_float = program->bone_rows == 0 &&
+                             (attr->attr == D9_PICA_VS_ATTR_POSITION ||
+                              attr->attr == D9_PICA_VS_ATTR_TEXCOORD) &&
+                             decl_type_components(found->type) >= attr->components;
+            if (!color_alias && !menu_float) {
                 if (why && why_size)
                     snprintf(why, why_size,
                              "plan %s: %s element type %u != required %u",
@@ -364,7 +396,11 @@ int d9_pica_vs_declare(const D9PicaVsProgram *program, const D9Decl *decl,
     }
     /* No silent drops: every declared usage must belong to the emitted
      * program.  A declaration element the shader never reads is a contract
-     * mismatch, not something to ignore. */
+     * mismatch, not something to ignore.  The GFx menu family is the
+     * exception: Scaleform declarations are shared between programs and may
+     * carry elements a particular program does not read; only the emitted
+     * inputs are loaded. */
+    if (program->bone_rows == 0) return 0;
     for (unsigned i = 0; i < decl->count; ++i) {
         const D9VertexElement *e = &decl->elements[i];
         if (e->stream == 0xff) continue;
@@ -390,6 +426,20 @@ int d9_pica_vs_bank(const D9PicaVsProgram *program, D9PicaVsBank *out,
     if (!program || !out) {
         if (why && why_size) snprintf(why, why_size, "invalid argument");
         return -1;
+    }
+    if (program->bone_rows == 0) {
+        if (program->uniform_rows == 0 ||
+            program->uniform_rows > D9_PICA_VS_MAX_ROWS) {
+            if (why && why_size)
+                snprintf(why, why_size,
+                         "plan %s: %u uniform rows outside the menu bank",
+                         program->id, program->uniform_rows);
+            return -1;
+        }
+        out->rows = program->uniform_rows;
+        for (unsigned row = 0; row < out->rows; ++row)
+            out->d3d_reg[row] = row;
+        return 0;
     }
     if (program->uniform_rows < D9_PICA_VS_BONE_ROWS + 4u ||
         program->uniform_rows > D9_PICA_VS_MAX_ROWS) {

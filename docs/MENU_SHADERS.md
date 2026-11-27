@@ -86,6 +86,14 @@ the SWF overlay.
 
 ## 5. Priority for the shader agents
 
+*Status (gfx-vs-emit, base `2240347`):* 3/5 GFx VS are `emitted-verified`
+(`264c2065`, `6186c545`, `4999d543`, 4/5 objects, 256 samples, pos 0) and live
+in `source/d3d9_pica_vs_menu_table.inc`; `0975cc50`/`73904d3f` are refused by
+the one-colour-output PICA limit. PS: 15/38 have exact TEV descriptors, 3 are
+draw-enabled (`bfc0b3e0`, `0eb58f00`, `9c152cf8`); `0cce461b` and `5b990161`
+are TEV-exact but need `color1`, which PICA cannot source (see
+`docs/GFX_COMPAT.md` §5.3). No `DevCaps` change, no frame.
+
 1. **7 GFx PS + 3 GFx VS** — the only shaders that must run for the StartMenu
    overlay. Start here; each is a bounded, small straight-line program.
 2. `menu.composite.ps` (already draw-enabled) and `menu.logo.ps` (needs

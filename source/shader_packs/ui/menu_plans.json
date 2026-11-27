@@ -1,20 +1,71 @@
 {
  "coverage": {
-  "draw_enabled": 0,
+  "draw_enabled": 2,
   "measured_prefix_hashes": 10,
   "refused": 5,
-  "translated": 5
+  "translated": 5,
+  "vs_emitted": 2
  },
  "entries": [
   {
-   "codegen": "pending",
+   "codegen": "emitted-verified",
    "constants": [
     0,
     1,
     2,
     3
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
+   "emitted_asm": "generated/menu.gfx.vs.264c2065.v.pica",
+   "emitter": {
+    "asm": "generated/menu.gfx.vs.264c2065.v.pica",
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     },
+     {
+      "reg_index": 1,
+      "usage": 5,
+      "usage_name": "texcoord"
+     },
+     {
+      "reg_index": 2,
+      "usage": 10,
+      "usage_name": "color"
+     }
+    ],
+    "instructions": 12,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "shbin": "generated/menu.gfx.vs.264c2065.shbin",
+    "shbin_bytes": 268,
+    "shbin_sha256": "213137c167b534d83f68231afe38507bfb071e54e3ebf04c9f75c32c401ffca9",
+    "tolerance": 0.0001,
+    "uniform_rows": 4,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     }
+    ]
+   },
    "expandable": [],
    "family": "ui",
    "id": "menu.gfx.vs.4281bd82",
@@ -41,7 +92,7 @@
    "instructions": 6,
    "kind": "pica_vs",
    "measurable_objects": 1,
-   "note": "PICA VS descriptor for a GFx menu program; native codegen pending, draw disabled",
+   "note": "GFx menu VS emitted and verified: dp4 matrix/texgen rows, 256 samples, max |dpos| 0.0e+00, picasso pass",
    "outputs": [
     {
      "reg_index": 0,
@@ -66,6 +117,8 @@
     }
    ],
    "prefix_sha256": "4281bd82262c5a5a8d26588a60fea83d52a265f8ef08fcbf34ce2b0045eb826a",
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "9187a51ac807e1ac37efe7dcbc9a820a95b0f7aa",
    "sha256": "264c20659a094788a9f7c7f53e7626fc5f6a07613894c150510ffb5a3066be39",
    "skinning": false,
@@ -76,7 +129,7 @@
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
+   "codegen": "emitted-verified",
    "constants": [
     0,
     1,
@@ -85,7 +138,55 @@
     4,
     5
    ],
-   "draw_enabled": 0,
+   "draw_enabled": 1,
+   "emitted_asm": "generated/menu.gfx.vs.6186c545.v.pica",
+   "emitter": {
+    "asm": "generated/menu.gfx.vs.6186c545.v.pica",
+    "bones": 0,
+    "inputs": [
+     {
+      "reg_index": 0,
+      "usage": 0,
+      "usage_name": "position"
+     }
+    ],
+    "instructions": 12,
+    "max_abs_position": 0.0,
+    "max_abs_varying": 0.0,
+    "picasso": "pass",
+    "samples": 256,
+    "shbin": "generated/menu.gfx.vs.6186c545.shbin",
+    "shbin_bytes": 244,
+    "shbin_sha256": "3c814fb53c6fb97f015da11d9aef59d3b6307412180c43ebe2f1937d8fe84897",
+    "tolerance": 0.0001,
+    "uniform_rows": 6,
+    "uniforms": [
+     {
+      "d3d": 0,
+      "row": 0
+     },
+     {
+      "d3d": 1,
+      "row": 1
+     },
+     {
+      "d3d": 2,
+      "row": 2
+     },
+     {
+      "d3d": 3,
+      "row": 3
+     },
+     {
+      "d3d": 4,
+      "row": 4
+     },
+     {
+      "d3d": 5,
+      "row": 5
+     }
+    ]
+   },
    "expandable": [],
    "family": "ui",
    "id": "menu.gfx.vs.77bc67a8",
@@ -100,7 +201,7 @@
    "instructions": 6,
    "kind": "pica_vs",
    "measurable_objects": 3,
-   "note": "PICA VS descriptor for a GFx menu program; native codegen pending, draw disabled",
+   "note": "GFx menu VS emitted and verified: dp4 matrix/texgen rows, 256 samples, max |dpos| 0.0e+00, picasso pass",
    "outputs": [
     {
      "reg_index": 0,
@@ -118,6 +219,8 @@
     }
    ],
    "prefix_sha256": "77bc67a86e38ea6565c82f95313185a48420430c4f4c7afa6144d144ce075376",
+   "quality": "exact",
+   "runtime": 1,
    "sha1": "caa4027654aef71bbbd81767a06e1bcce29b3831",
    "sha256": "6186c545f488d0f84789cf3e0ca55d0fd87f37c2091f87239f5dccf7afc404a0",
    "skinning": false,
@@ -128,7 +231,7 @@
    "version": "0xfffe0300"
   },
   {
-   "codegen": "pending",
+   "codegen": "refused",
    "constants": [
     0,
     1,
@@ -166,7 +269,7 @@
    "instructions": 10,
    "kind": "pica_vs",
    "measurable_objects": 1,
-   "note": "PICA VS descriptor for a GFx menu program; native codegen pending, draw disabled",
+   "note": "PICA VS refusal: color1_output_unmapped (PICA has one primary colour output); CreateVertexShader keeps the plan-selected object and the draw gate refuses by name",
    "outputs": [
     {
      "reg_index": 0,
@@ -205,6 +308,8 @@
     }
    ],
    "prefix_sha256": "ad97e55f922355acfd8f40e8d37f53ab122c8d3f7dbc5e2af1cc5e4adbe1f924",
+   "quality": "exact",
+   "runtime": 0,
    "sha1": "ef20631c6c684a230fb5ada056115d91dbedcf16",
    "sha256": "0975cc503f63d9b1a1a36f8886a34043742e9a13f4a351e203d5dbd33b3f95ce",
    "skinning": false,

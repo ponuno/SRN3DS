@@ -207,7 +207,14 @@ def _validate_emitter(entry: dict, emitter: dict, fail) -> None:
         if not isinstance(emitter.get(key), (int, float)) or emitter[key] < 0:
             fail("emitter %s must be non-negative" % key)
     rows = emitter.get("uniforms")
-    if not isinstance(rows, list) or len(rows) < 16:
+    if emitter.get("bones") == 0:
+        # GFx menu VS: no bone palette, identity c0..cN bank (4/6/8 rows).
+        count = emitter.get("uniform_rows", 0)
+        if not isinstance(count, int) or not 1 <= count <= 32:
+            fail("emitter uniform_rows must be 1..32 for a menu program")
+        elif rows != [{"row": row, "d3d": row} for row in range(count)]:
+            fail("emitter uniform rows are not the menu identity mapping")
+    elif not isinstance(rows, list) or len(rows) < 16:
         fail("emitter uniforms must list at least 16 PICA rows")
     else:
         want = [{"row": row, "d3d": d3d} for row, d3d in

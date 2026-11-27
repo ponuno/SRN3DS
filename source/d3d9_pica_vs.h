@@ -8,12 +8,19 @@
  * pack's rows are touched.
  *
  * Selection is by exact bytecode hash only.  `d9_pica_vs_declare()` refuses by
- * name unless the active D3D9 vertex declaration supplies exactly the three
- * inputs the emitted assembly reads, and `d9_pica_vs_bank()` refuses unless the
- * 4-bone palette window and the WVP rows the assembly addresses are present.
+ * name unless the active D3D9 vertex declaration supplies the inputs the
+ * emitted assembly reads.  Two contracts share this catalog:
  *
- * This module never reports a D3D9 capability: GetDeviceCaps stays VS/PS 2.0
- * and DevCaps 0x00082000.  A loaded program is not a drawn frame.
+ *   - `bone_rows != 0` (skinning pack): POSITION/BLENDWEIGHT/BLENDINDICES (and
+ *     optional TEXCOORD/COLOR), 4-bone palette c0..c11 + WVP c12..c15.
+ *   - `bone_rows == 0` (GFx menu pack): POSITION FLOAT3, TEXCOORD and COLOR as
+ *     the program declares, identity uniform bank c0..cN.  Declaration
+ *     elements the program does not read are ignored (Scaleform shares one
+ *     declaration between programs); every emitted input is still required.
+ *
+ * `d9_pica_vs_bank()` refuses unless the uniform window the assembly addresses
+ * is present.  This module never reports a D3D9 capability: GetDeviceCaps stays
+ * VS/PS 2.0 and DevCaps 0x00082000.  A loaded program is not a drawn frame.
  */
 
 #include <stddef.h>

@@ -202,25 +202,33 @@ defs. They are plain matrix transforms:
 
 Constants: c0..c3 (and c0..c7 for the 10-instruction variant).
 
-**Coverage: 0 of 5 executable.** `source/d3d9_generated_vs_table.inc` emits
-exactly 3 PICA programs and all three are engine `game.vs.*`
-(`0ccc7542`, `31d368ce`, `5b644ad2`) from `imagespace002.fxp` — none is a GFx
-program. `d9_menu_shader_match_vs` will *select* a member of the structural
-family, but `set_vs` then requires the current declaration to feed
-`position0/texcoord0/color0/color1`, and the fixed PICA VS only emits
-`position + texcoord0`. So today the family is accepted and the colours are
-dropped, or the declaration check refuses by name.
+**Coverage: 3 of 5 executable (4 of 5 objects).** `source/shader_packs/ui/menu_vs_emit.py`
+reads the five real `vs_3_0` blobs from table `0x12dfca8`, emits PICA VS
+(`dp4` matrix rows, `dp4` texgen pairs, `mov` passthroughs, PICA clip remap),
+runs them against the D3D IR interpreter on 256 samples (`max |dpos| = 0`) and
+compiles each with picasso. The three verified programs are appended to
+`source/d3d9_pica_vs_menu_table.inc`/`_menu_shbin.inc` (exact hash,
+`codegen=emitted-verified`, `runtime=1`, `draw_enabled=1`):
 
-What GFx VS codegen needs is trivial — a 4-row `dp4` matrix transform plus
-passthrough of the declared varyings, with `oPos = dp4(c0..c3, v0)`:
+| full SHA-256 | plan | objects |
+|---|---|---:|
+| `264c2065` | `menu.gfx.vs.264c2065` | 1 |
+| `6186c545` | `menu.gfx.vs.6186c545` | 3 |
+| `4999d543` | `menu.gfx.vs.4999d543` | 1 |
 
-```text
-o0 = dp4(c0,v0), dp4(c1,v0), dp4(c2,v0), dp4(c3,v0)   ; position
-o1 = v1 (texcoord) / v2 (color) as the declaration says
-```
+Two programs are a *hardware* refusal, not a codegen gap: `0975cc50` and
+`73904d3f` write `color0` **and** `color1`, and picasso accepts exactly one
+`color` output (`error: invalid output type: color1`); PICA TEV also has a
+single primary raster colour. They stay exact plan descriptors (so
+`CreateVertexShader` returns `S_OK` and selects the plan) with
+`draw_enabled=0` and a named note. `SetVertexShader` no longer needs the
+fixed position+texcoord0 program for the colour-carrying family: the plan
+program is selected by exact hash and carries its declared inputs.
 
-`tools/vs_emit.py` already emits that shape for the engine programs; a
-`menu.gfx.vs.<sha8>` entry per full hash is a table addition, not new codegen.
+The menu runtime contract reuses `d3d9_pica_vs` with `bone_rows == 0` meaning
+"menu": the uniform bank is the identity `c0..cN` (no bone/WVP remap) and the
+declaration may carry extra elements the program does not read, while every
+emitted input is still required. Skin programs are unchanged.
 
 ### 5.2 Pixel shaders (40 objects, 38 distinct full blobs)
 
@@ -252,6 +260,44 @@ that env the same 36 return `D3DERR_NOTAVAILABLE`, and because stage 3 tests
 `jl` the whole menu HAL init returns 0.
 
 So: **creating 5 VS/40 PS today is a measurement artefact, not compatibility.**
+
+### 5.3 PS critical four: TEV expressibility vs PICA colour sources
+
+All four critical programs now have exact TEV descriptors (or a concrete stage
+scheme), and `0cce461b`'s four-stage translation is exact. The remaining block
+for `0cce461b` and `5b990161` is the *second vertex colour*, not TEV:
+
+| program | TEV stages | blocker |
+|---|---|---|
+| `bfc0b3e0` | 1 | none — `runtime=1`, draw-enabled |
+| `0eb58f00` | 3 | none — `runtime=1`, draw-enabled |
+| `0cce461b` | 4 (`mov c2`, `mad color0*c2+c3`, `mul α·color1.a`, `mov rgb`) | reads `color1.a`; PICA has one raster colour |
+| `5b990161` | 5 (see below) | reads `color1.z` as the lerp factor |
+
+`5b990161` is expressible in one 5-stage TEV program (previous refusal was a
+planner `temp_not_previous`, not hardware):
+
+```text
+s0 TEX1 <- texcoord1        REPLACE(TEX1)
+s1 TEX0 <- texcoord0        REPLACE(TEX0)
+s2 INTERPOLATE(TEX0, PRIMARY=color1, TEX1)   ; tex0*c + tex1*(1-c)
+s3 MODULATE(PREV, c2)
+s4 ADD(PREV, c3)                            ; oC0 = s2*c2 + c3
+```
+
+Both still need `color1` at draw time. picasso rejects an output semantic
+`color1` and PICA's TEV has a single primary colour, so there is no exact
+vertex-colour producer for `color1`. The options are: (a) accept these plans
+as create-time TEV objects (not probe) and keep the draw refused by name, or
+(b) bind a proxy 256x1 identity texture and read `color1` through a texcoord
+varying — exact only up to 8-bit quantisation and an extra texture slot. This
+change takes (a): `CreatePixelShader` returns `S_OK` with a real
+`has_tev=1` object for every translated plan, but `runtime`/`draw_enabled`
+stay 0 unless the whole stage contract can be produced.
+
+Measured result after this change: **15 of 38 PS and 3 of 5 VS have real
+native descriptors at create time; 3 PS (and 3 VS) are draw-enabled.** None of
+the 24 named PS refusals changed.
 
 ## 6. Status matrix
 

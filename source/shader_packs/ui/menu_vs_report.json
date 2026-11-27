@@ -1,0 +1,38 @@
+{
+ "entries": [
+  {
+   "id": "menu.gfx.vs.6186c545",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "status": "pass"
+  },
+  {
+   "id": "menu.gfx.vs.264c2065",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "status": "pass"
+  },
+  {
+   "id": "menu.gfx.vs.4999d543",
+   "max_abs_position": 0.0,
+   "max_abs_varying": 0.0,
+   "picasso": "pass",
+   "status": "pass"
+  },
+  {
+   "id": "menu.gfx.vs.73904d3f",
+   "reason": "color1_output_unmapped (PICA has one primary colour output)",
+   "status": "refused"
+  },
+  {
+   "id": "menu.gfx.vs.0975cc50",
+   "reason": "color1_output_unmapped (PICA has one primary colour output)",
+   "status": "refused"
+  }
+ ],
+ "samples": 256,
+ "schema": "ui-menu-vs-emitter/1",
+ "tolerance": 0.0001
+}
