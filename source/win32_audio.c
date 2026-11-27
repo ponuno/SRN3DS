@@ -1040,6 +1040,14 @@ void win32_audio_uninstall(void) {
 
 unsigned win32_audio_device_count(void) { return open_count; }
 
+unsigned win32_audio_submit_stereo(const int16_t *frames, unsigned count) {
+    if (!backend || !backend->submit || !frames || !count) return 0;
+    unsigned n = backend->submit(frames, count);
+    return n > count ? count : n;
+}
+
+int win32_audio_backend_present(void) { return backend && backend->submit ? 1 : 0; }
+
 int64_t win32_audio_position_frames(unsigned index) {
     if (index >= WIN32_AUDIO_HANDLE_COUNT) return -1;
     if (!devices[index].used) return -1;

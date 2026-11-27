@@ -741,6 +741,49 @@ static void s_CreateThread(CPU *c) {
     }
     RET(t->handle, 6);
 }
+uint32_t win32_thread_begin(uint32_t start, uint32_t param, uint32_t stack, uint32_t flags) {
+    if (!start) return 0;
+    if (!stack) stack = WIN32_THREAD_DEFAULT_STACK;
+    if (stack < 0x10000u) stack = 0x10000u;
+    if (stack > WIN32_THREAD_MAX_STACK) return 0;
+    stack = (stack + 0xfff) & ~0xfffu;
+    unsigned slot;
+    for (slot = 0; slot < MAX_THREADS; ++slot) if (threads[slot].state == ST_FREE) break;
+    if (slot == MAX_THREADS) return 0;
+    W32Thread *t = &threads[slot];
+    memset(t, 0, sizeof *t);
+    t->slot = slot;
+    t->id = tid_of(slot);
+    t->handle = WIN32_THREAD_HANDLE_BASE + slot;
+    t->start = start;
+    t->param = param;
+    t->affinity = 1;
+    ready_stamp(t);
+    t->suspends = (flags & CREATE_SUSPENDED) ? 1 : 0;
+    if (build_thread_memory(t, stack)) { memset(t, 0, sizeof *t); return 0; }
+    n3ds_lift_init_cpu(&t->cpu, t->stack_top, t->teb);
+    t->cpu.thread = t;
+    n3ds_lift_thread_state_init(&t->rt);
+    if (win32_hostctx_create(&t->ctx, thread_trampoline, t, WIN32_THREAD_HOST_STACK)) {
+        if (t->region_base) guest_unmap(mem, t->region_base);
+        memset(t, 0, sizeof *t);
+        return 0;
+    }
+    if (!t->suspends) activate(t);
+    return t->handle;
+}
+static void s__beginthread(CPU *c) {
+    uint32_t handle = win32_thread_begin(A(0), A(2), A(1), 0);
+    if (!handle) { set_error(c, ERR_NOT_ENOUGH_MEMORY); RET(0xffffffffu, 3); }
+    set_error(c, 0);
+    RET(handle, 3);
+}
+static void s__beginthreadex(CPU *c) {
+    uint32_t handle = win32_thread_begin(A(2), A(3), A(1), A(4) & (CREATE_SUSPENDED | STACK_SIZE_IS_RESERVATION));
+    if (!handle) { set_error(c, ERR_NOT_ENOUGH_MEMORY); RET(0, 6); }
+    set_error(c, 0);
+    RET(handle, 6);
+}
 static void s_SuspendThread(CPU *c) {
     uint32_t h = A(0);
     if (h == 0xfffffffeu) {
@@ -848,6 +891,8 @@ static const Win32ThreadDef defs[] = {
     DEF(GetExitCodeThread) DEF(SetThreadPriority) DEF(GetThreadPriority)
     DEF(SetThreadAffinityMask) DEF(OpenThread) DEF(OpenProcess)
     DEF(GetExitCodeProcess)
+    {"msvcrt.dll", "_beginthread", s__beginthread},
+    {"msvcrt.dll", "_beginthreadex", s__beginthreadex},
 };
 #undef DEF
 #define NDEFS (sizeof defs / sizeof defs[0])
@@ -866,7 +911,9 @@ static int same(const char *a, const char *b) {
     return *a == *b;
 }
 uint32_t win32_thread_resolve(const char *dll, const char *name) {
-    if (!dll || !name || (!same(dll, "kernel32.dll") && !same(dll, "kernel32"))) return 0;
+    if (!dll || !name) return 0;
+    if (!same(dll, "kernel32.dll") && !same(dll, "kernel32") &&
+        !same(dll, "msvcrt.dll") && !same(dll, "msvcrt")) return 0;
     for (unsigned i = 0; i < NDEFS; ++i)
         if (!strcmp(name, defs[i].name)) return WIN32_THREAD_BASE + 4 * i;
     return 0;

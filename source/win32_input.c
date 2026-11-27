@@ -183,6 +183,26 @@ void win32_input_map_pad(Win32InputProfile profile, uint32_t pad,
 #undef SET
 }
 
+/* D-pad -> DirectInput POV hat (DIJOYSTATE.dwPOV): hundredths of a degree,
+ * clockwise from up, 0xFFFF when centred.  This is the value a pad object would
+ * report; the keyboard/mouse objects express the same D-pad as WASD/arrows, so
+ * the helper is also the documented mapping table used by tests. */
+uint32_t win32_input_pov(uint32_t pad) {
+    int up = (pad & WIN32_INPUT_PAD_UP) != 0;
+    int right = (pad & WIN32_INPUT_PAD_RIGHT) != 0;
+    int down = (pad & WIN32_INPUT_PAD_DOWN) != 0;
+    int left = (pad & WIN32_INPUT_PAD_LEFT) != 0;
+    if (up && right) return 4500;
+    if (right && down) return 13500;
+    if (down && left) return 22500;
+    if (left && up) return 31500;
+    if (up) return 0;
+    if (right) return 9000;
+    if (down) return 18000;
+    if (left) return 27000;
+    return 0xFFFFu;
+}
+
 /* ---- state --------------------------------------------------------------------- */
 enum { OBJ_FREE = 0, OBJ_DI_A, OBJ_DI_W, OBJ_KB_A, OBJ_KB_W, OBJ_MOUSE_A, OBJ_MOUSE_W };
 typedef struct {
@@ -207,6 +227,43 @@ static struct {
     int cb_ready;
     int rumble_logged;
 } g;
+
+/* ---- buffered DirectInput events (upstream dinput.c semantics) -------------
+ * A transition is recorded when the state changes, not when the guest polls:
+ * a key tapped and released between two GetDeviceData calls still produces two
+ * elements, as DirectInput guarantees.  The ring is shared; each device drains
+ * the offsets that belong to it, so a keyboard call never consumes mouse
+ * events.  DIGDD_PEEK copies without removing. */
+typedef struct { uint32_t ofs, data, ts, seq; } DIEvent;
+#define DI_EVENTS 256u
+static DIEvent g_events[DI_EVENTS];
+static unsigned g_event_count;
+static uint32_t g_event_seq;
+static uint64_t input_now_ms(void);
+static void push_event(uint32_t ofs, uint32_t data) {
+    if (g_event_count >= DI_EVENTS) { /* drop oldest, keep the newest transition */
+        memmove(g_events, g_events + 1, sizeof g_events[0] * (DI_EVENTS - 1));
+        --g_event_count;
+    }
+    g_events[g_event_count++] = (DIEvent){ofs, data, (uint32_t)input_now_ms(), ++g_event_seq};
+}
+/* True when `ofs` belongs to the device kind.  Mouse offsets match
+ * DIMOUSESTATE/DIMOUSESTATE2: X=0 Y=4 Z=8, buttons 12..19. */
+static int event_for_device(unsigned kind, uint32_t ofs) {
+    if (kind == OBJ_MOUSE_A || kind == OBJ_MOUSE_W)
+        return ofs == 0 || ofs == 4 || ofs == 8 || (ofs >= 12 && ofs < 20);
+    return ofs < 256;
+}
+/* Remove the events this device just returned. */
+static void consume_events(unsigned kind, unsigned n) {
+    unsigned w = 0, taken = 0;
+    for (unsigned r = 0; r < g_event_count; ++r) {
+        if (event_for_device(kind, g_events[r].ofs) && taken < n) { ++taken; continue; }
+        if (w != r) g_events[w] = g_events[r];
+        ++w;
+    }
+    g_event_count = w;
+}
 
 static void set_error(CPU *c, uint32_t v) {
     if (c && c->fs_base) M32(c->fs_base + 0x34) = v;
@@ -337,11 +394,17 @@ static int refresh(void) {
             g.pressed[i] = 1; changed = 1;
             if (i == 0x14 || i == 0x90 || i == 0x91) g.toggled[i] ^= 1u;
         }
-        if (g.down[i] != g.prev[i]) changed = 1;
+        if (g.down[i] != g.prev[i]) {
+            changed = 1;
+            if (vk2dik[i]) push_event(vk2dik[i], g.down[i] ? 0x80u : 0u);
+        }
         g.prev[i] = g.down[i];
     }
     for (unsigned i = 0; i < 8; ++i) {
-        if (g.mb[i] != g.mb_prev[i]) changed = 1;
+        if (g.mb[i] != g.mb_prev[i]) {
+            changed = 1;
+            push_event(12u + i, g.mb[i] ? 0x80u : 0u);
+        }
         g.mb_prev[i] = g.mb[i];
     }
     if (changed)
@@ -372,6 +435,8 @@ void win32_input_set_key(unsigned vk, int down) {
 }
 void win32_input_set_mouse(int32_t x, int32_t y, int32_t dx, int32_t dy, unsigned buttons) {
     g.mx = x; g.my = y; g.dx += dx; g.dy += dy;
+    if (dx) push_event(0, (uint32_t)dx);
+    if (dy) push_event(4, (uint32_t)dy);
     for (unsigned i = 0; i < 8; ++i) g.mb[i] = (uint8_t)((buttons >> i) & 1);
     refresh();
 }
@@ -635,11 +700,33 @@ static void s_dev_get_state(CPU *c) {
 }
 static void s_dev_get_data(CPU *c) {
     DIObj *o = dobj(A(0), 0);
-    uint32_t out = A(3);
+    uint32_t sz = A(1), buf = A(2), pn = A(3), flags = A(4);
     if (!o) RET(DIERR_INVALIDPARAM, 5);
     if (!o->acquired) RET(DIERR_NOTACQUIRED, 5);
-    if (!out || !guest_ptr(g.mem, out, 4)) RET(DIERR_INVALIDPARAM, 5);
-    M32(out) = 0; /* buffered queue is empty; GetDeviceState is the state path */
+    if (!pn || !guest_ptr(g.mem, pn, 4)) RET(DIERR_INVALIDPARAM, 5);
+    if (!o->data_size) RET(DIERR_NOTINITIALIZED, 5);
+    if (sz < 16) RET(DIERR_INVALIDPARAM, 5);
+    unsigned kind = o->mouse ? OBJ_MOUSE_A : OBJ_KB_A;
+    uint32_t cap = M32(pn), n = 0;
+    if (cap == 0) { M32(pn) = 0; RET(S_OK, 5); }
+    for (unsigned i = 0; i < g_event_count; ++i) {
+        DIEvent *e = &g_events[i];
+        if (!event_for_device(kind, e->ofs)) continue;
+        if (buf && n < cap) {
+            uint32_t p = buf + n * sz;
+            uint8_t *b = guest_ptr(g.mem, p, 16);
+            if (!b) RET(DIERR_INVALIDPARAM, 5);
+            memset(b, 0, 16);
+            M32(p) = e->ofs;
+            M32(p + 4) = e->data;
+            M32(p + 8) = e->ts;
+            M32(p + 12) = e->seq;
+        }
+        ++n;
+        if (n >= cap) break;
+    }
+    if (!(flags & 1u)) consume_events(kind, n); /* DIGDD_PEEK keeps them */
+    M32(pn) = n;
     RET(S_OK, 5);
 }
 static void s_dev_set_format(CPU *c) {

@@ -168,6 +168,57 @@ int main(void) {
     a[0] = DATA + 0x520; CHECK(!U(GetCursorPos, a, 1) && r == 1);
     CHECK(M32(DATA + 0x520) == 10 && M32(DATA + 0x524) == 20);
 
+    /* Buffered DirectInput events: a key tapped between polls still produces
+     * down+up elements, mouse axes/buttons carry DIMOFS offsets, DIGDD_PEEK
+     * leaves the queue untouched, and each device drains only its own kind. */
+    {
+        uint32_t n = 64;
+        do {
+            a[0] = kbd; a[1] = 16; a[2] = DATA + 0x700; a[3] = DATA + 0x780; a[4] = 0;
+            M32(DATA + 0x780) = n;
+            CHECK(!method(cpu, kvt, 10, a, 5, &r) && r == 0);
+            n = M32(DATA + 0x780);
+        } while (n == 64);
+        win32_input_set_key('Q', 1);
+        win32_input_set_key('Q', 0);
+        a[0] = kbd; a[1] = 16; a[2] = DATA + 0x700; a[3] = DATA + 0x780; a[4] = 0;
+        M32(DATA + 0x780) = 8;
+        CHECK(!method(cpu, kvt, 10, a, 5, &r) && r == 0);
+        CHECK(M32(DATA + 0x780) == 2);
+        CHECK(M32(DATA + 0x700) == 0x10 && M32(DATA + 0x704) == 0x80);   /* DIK_Q down */
+        CHECK(M32(DATA + 0x710) == 0x10 && M32(DATA + 0x714) == 0);      /* DIK_Q up */
+        CHECK(M32(DATA + 0x718) != 0 && M32(DATA + 0x71c) != 0);         /* timestamp, sequence */
+
+        win32_input_set_mouse(10, 20, 7, -2, 0);
+        for (;;) { /* drain the earlier mouse movement/button probes */
+            a[0] = mouse; a[1] = 16; a[2] = DATA + 0x700; a[3] = DATA + 0x780; a[4] = 0;
+            M32(DATA + 0x780) = 8;
+            CHECK(!method(cpu, mvt, 10, a, 5, &r) && r == 0);
+            if (M32(DATA + 0x780) < 8) break;
+        }
+        win32_input_set_mouse(10, 20, 7, -2, 0);
+        a[0] = mouse; a[1] = 16; a[2] = DATA + 0x700; a[3] = DATA + 0x780; a[4] = 1;
+        M32(DATA + 0x780) = 4;
+        CHECK(!method(cpu, mvt, 10, a, 5, &r) && r == 0);
+        CHECK(M32(DATA + 0x780) == 2);                                   /* X and Y, no keys */
+        CHECK(M32(DATA + 0x700) == 0 && M32(DATA + 0x704) == 7);         /* DIMOFS_X */
+        CHECK(M32(DATA + 0x710) == 4 && (int32_t)M32(DATA + 0x714) == -2); /* DIMOFS_Y */
+        M32(DATA + 0x780) = 4;                                           /* peek: same two */
+        CHECK(!method(cpu, mvt, 10, a, 5, &r) && r == 0 && M32(DATA + 0x780) == 2);
+        a[4] = 0;
+        M32(DATA + 0x780) = 4;
+        CHECK(!method(cpu, mvt, 10, a, 5, &r) && r == 0 && M32(DATA + 0x780) == 2);
+        M32(DATA + 0x780) = 4;
+        CHECK(!method(cpu, mvt, 10, a, 5, &r) && r == 0 && M32(DATA + 0x780) == 0);
+        /* POV hat encoding covers the four cardinal and diagonal D-pad states. */
+        CHECK(win32_input_pov(0) == 0xFFFFu);
+        CHECK(win32_input_pov(WIN32_INPUT_PAD_UP) == 0);
+        CHECK(win32_input_pov(WIN32_INPUT_PAD_RIGHT) == 9000);
+        CHECK(win32_input_pov(WIN32_INPUT_PAD_DOWN) == 18000);
+        CHECK(win32_input_pov(WIN32_INPUT_PAD_LEFT) == 27000);
+        CHECK(win32_input_pov(WIN32_INPUT_PAD_UP | WIN32_INPUT_PAD_RIGHT) == 4500);
+    }
+
     /* EnumDevices invokes the guest callback once per attached device. */
     M32(DATA + 0x300) = 0;
     a[0] = di; a[1] = 0; a[2] = 0x00501000u; a[3] = 0; a[4] = 0;

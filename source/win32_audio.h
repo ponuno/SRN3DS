@@ -74,6 +74,15 @@ void win32_audio_tick(void);
 unsigned win32_audio_device_count(void);
 int64_t win32_audio_position_frames(unsigned index);
 
+/* Raw sink access for the XAudio2 module (source/win32_xaudio2.c).  Submits
+ * interleaved stereo PCM16 frames that are already at WIN32_AUDIO_OUTPUT_HZ to
+ * the installed backend, exactly like waveOutWrite's pump but without a guest
+ * header.  Returns frames accepted (0 when no backend is installed or the
+ * device is full), so XAudio2 can count underruns instead of pretending to
+ * play.  Never blocks and never allocates. */
+unsigned win32_audio_submit_stereo(const int16_t *frames, unsigned count);
+int win32_audio_backend_present(void);
+
 /* Semantics implemented (single guest thread, no audio thread):
  * - Handles are 0x700..0x707.  waveOutOpen accepts WAVE_MAPPER (0xffffffff)
  *   and device id 0 while a backend is installed; otherwise NODRIVER, for

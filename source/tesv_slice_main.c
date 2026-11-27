@@ -18,6 +18,7 @@
 #include "hprof.h"
 #include "win32_audio_3ds.h"
 #include "win32_audio.h"
+#include "win32_xaudio2.h"
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef __3DS__
@@ -290,6 +291,7 @@ int main(void) {
     while (aptMainLoop()) {
         hidScanInput();
         win32_audio_tick();
+        win32_xaudio2_tick(0);
         if (hidKeysDown() & KEY_START) break;
         gspWaitForVBlank();
     }

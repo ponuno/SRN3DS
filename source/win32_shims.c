@@ -8,6 +8,7 @@
 #include "win32_audio.h"
 #include "win32_thread.h"
 #include "win32_input.h"
+#include "win32_xaudio2.h"
 #include "win32_steam.h"
 #include "win32_registry.h"
 #include "guest_heap.h"
@@ -302,7 +303,11 @@ int win32_init(GuestMemory *m,uint32_t bytes,const char *game_root) {
     win32_sync_set_thread_query(win32_thread_query);
     win32_sync_set_blocker(win32_thread_block, win32_thread_deadlock_text);
     if(win32_input_init(m)){win32_thread_shutdown();win32_user_shutdown();mem=NULL;return -1;}
+    if(win32_xaudio2_init(m)){
+        win32_input_shutdown();win32_thread_shutdown();win32_user_shutdown();mem=NULL;return -1;
+    }
     if(win32_steam_init(m)){
+        win32_xaudio2_shutdown();
         win32_input_shutdown();
         win32_thread_shutdown();
         win32_user_shutdown();
@@ -325,6 +330,7 @@ void win32_shutdown(void) {
     if(!mem)return;
     win32_registry_shutdown();
     win32_steam_shutdown();
+    win32_xaudio2_shutdown();
     win32_input_shutdown();
     win32_thread_shutdown();
     win32_user_shutdown();
@@ -2123,6 +2129,12 @@ static void s_calloc(CPU *c){
     mem_track(MEM_CRT,(uint32_t)n,p!=0);CRT(p);
 }
 static void s_realloc(CPU *c){
+    if(A(0) && !A(1)){ /* C89/msvcrt realloc(p,0) frees and returns NULL */
+        uint32_t n=hsize(&heap,A(0));
+        if(heap_free(&heap,A(0)))rt_unimpl(c,A(0),"invalid realloc free");
+        if(n)mem_untrack(MEM_CRT,n);
+        CRT(0);
+    }
     uint32_t old=A(0)?hsize(&heap,A(0)):0,n=A(1)?A(1):1;
     uint32_t p=heap_realloc(&heap,A(0),n);
     if(p){if(old)mem_untrack(MEM_CRT,old);mem_track(MEM_CRT,n,1);}
@@ -2135,6 +2147,122 @@ static void s_free(CPU *c){
     if(n)mem_untrack(MEM_CRT,n);
     CRT(0);
 }
+/* MSVC setjmp family.  rt_setjmp3 writes the jmp_buf and already adjusted ESP
+ * past the return address; no extra RET.  longjmp never returns. */
+static void s__setjmp3(CPU *c){rt_setjmp3(c);}
+static void s_longjmp(CPU *c){rt_longjmp(c,A(0),A(1));}
+
+/* Reentrant guest callback used by qsort/locale helpers.  A private CPU with a
+ * dedicated mapped stack keeps the caller's frame and TEB intact. */
+#define CRT_CB_STACK 0x1e400000u
+#define CRT_CB_STACK_BYTES 0x10000u
+static CPU crt_cb_cpu;
+static int crt_cb_ready;
+static int crt_guest_call(CPU *c,uint32_t fn,const uint32_t *args,size_t argc,uint32_t *result){
+    if(!crt_cb_ready){
+        if(guest_map(mem,CRT_CB_STACK,CRT_CB_STACK_BYTES))return -1;
+        n3ds_lift_init_cpu(&crt_cb_cpu,CRT_CB_STACK+CRT_CB_STACK_BYTES-64,
+                           c&&c->fs_base?c->fs_base:GP_TEB);
+        crt_cb_ready=1;
+    }
+    int rc=n3ds_lift_invoke_reentrant(&crt_cb_cpu,fn,args,argc,result);
+    if(rc)rt_unimpl(c,fn,rc==N3DS_INVOKE_EXIT?"qsort comparator called ExitProcess"
+                                             :"qsort comparator faulted");
+    return rc;
+}
+/* qsort with a guest comparator (cdecl int cmp(const void*, const void*)).
+ * Insertion sort matches upstream msvcrt.c: stable for equal elements and it
+ * only calls the comparator O(n^2) times on already-sorted data, which is the
+ * documented worst case and is acceptable for the guest's small arrays. */
+static CPU *qsort_cpu;
+static uint32_t qsort_fn;
+static void qsort_elem(uint32_t base,uint32_t i,uint32_t size,uint32_t tmp){
+    memcpy(n3ds_guest_ptr(tmp,size),n3ds_guest_ptr(base+i*size,size),size);
+    uint32_t j=i;
+    while(j>0){
+        uint32_t args[2]={base+(j-1)*size,tmp},res=0;
+        crt_guest_call(qsort_cpu,qsort_fn,args,2,&res);
+        if((int32_t)res<=0)break;
+        memcpy(n3ds_guest_ptr(base+j*size,size),n3ds_guest_ptr(base+(j-1)*size,size),size);
+        --j;
+    }
+    memcpy(n3ds_guest_ptr(base+j*size,size),n3ds_guest_ptr(tmp,size),size);
+}
+static void s_qsort(CPU *c){
+    uint32_t base=A(0),n=A(1),size=A(2),cmp=A(3);
+    if(!cmp || !size || n<2 || !base)CRT(0);
+    uint64_t bytes=(uint64_t)n*size;
+    if(bytes>UINT32_MAX || !guest_ptr(mem,base,(size_t)bytes))FAIL(ERR_INVALID_PARAMETER,0,4);
+    uint32_t tmp=heap_alloc(&heap,size);
+    if(!tmp)FAIL(ERR_NO_MEMORY,0,4);
+    qsort_cpu=c;qsort_fn=cmp;
+    for(uint32_t i=1;i<n;++i)qsort_elem(base,i,size,tmp);
+    heap_free(&heap,tmp);CRT(0);
+}
+/* strtol/strtoul over guest memory with the C rules msvcrt uses (leading
+ * whitespace, optional sign, base 0 prefixes, endptr). */
+static uint32_t strto_common(CPU *c,uint32_t s,uint32_t endp,int base,int is_signed){
+    uint32_t i=0;
+#define CHQ(k) (n3ds_guest_ptr(s+(k),1)?*(const char*)n3ds_guest_ptr(s+(k),1):0)
+    while(CHQ(i)==' '||CHQ(i)=='\t'||CHQ(i)=='\n'||CHQ(i)=='\r'||CHQ(i)=='\v'||CHQ(i)=='\f')++i;
+    int neg=0;
+    if(CHQ(i)=='+'||CHQ(i)=='-'){neg=CHQ(i)=='-';++i;}
+    if((base==0||base==16) && CHQ(i)=='0' && (CHQ(i+1)=='x'||CHQ(i+1)=='X') && CHQ(i+2)){
+        base=16;i+=2;
+    } else if(base==0){
+        base=(CHQ(i)=='0')?8:10;
+    }
+    if(base<2||base>36)base=10;
+    uint64_t v=0;uint32_t start=i;int any=0;
+    for(;;++i){
+        char ch=CHQ(i);int d;
+        if(ch>='0'&&ch<='9')d=ch-'0';
+        else if(ch>='a'&&ch<='z')d=ch-'a'+10;
+        else if(ch>='A'&&ch<='Z')d=ch-'A'+10;
+        else break;
+        if(d>=base)break;
+        v=v*(uint32_t)base+(uint32_t)d;any=1;
+    }
+    if(!any)i=0; /* no conversion: endptr = original string */
+    uint32_t endpos=any?i:0;
+    if(endp)M32(endp)=s+endpos;
+    if(is_signed)return neg?(uint32_t)(-(int64_t)v):(uint32_t)v;
+    return neg?(uint32_t)(-(int64_t)v):(uint32_t)v;
+#undef CHQ
+}
+static void s_strtol(CPU *c){CRT(strto_common(c,A(0),A(1),(int)A(2),1));}
+static void s_strtoul(CPU *c){CRT(strto_common(c,A(0),A(1),(int)A(2),0));}
+static void s_atoi(CPU *c){CRT(strto_common(c,A(0),0,10,1));}
+static void s_atol(CPU *c){CRT(strto_common(c,A(0),0,10,1));}
+static void s_strtoll(CPU *c){ /* long long in EDX:EAX is not needed by 32-bit TESV; return low */
+    uint32_t v=strto_common(c,A(0),A(1),(int)A(2),1);c->r[2]=v>>31;CRT(v);
+}
+static uint32_t crt_locale, crt_localeconv;
+static void crt_locale_init(void){
+    if(crt_locale)return;
+    crt_locale=heap_alloc(&heap,8);crt_localeconv=heap_alloc(&heap,64);
+    if(crt_locale)memcpy(n3ds_guest_ptr(crt_locale,3),"C",3);
+    if(crt_localeconv){
+        memset(n3ds_guest_ptr(crt_localeconv,64),0,64);
+        uint32_t dot=heap_alloc(&heap,2),empty=heap_alloc(&heap,1);
+        if(dot)M8(dot)='.'; if(dot)M8(dot+1)=0; if(empty)M8(empty)=0;
+        M32(crt_localeconv)=dot;M32(crt_localeconv+4)=empty;M32(crt_localeconv+8)=empty;
+        M32(crt_localeconv+12)=empty;M32(crt_localeconv+16)=empty;
+    }
+}
+static void s_setlocale(CPU *c){
+    crt_locale_init();
+    uint32_t loc=A(1);
+    if(!loc){crt_locale_init();CRT(crt_locale);}
+    const char *s=str(c,loc);
+    if(!s[0]||!strcmp(s,"C")||!strcmp(s,"POSIX")||!strcmp(s,"English")||!strcmp(s,"en-US")){
+        CRT(crt_locale);
+    }
+    static int logged;
+    if(!logged){logged=1;fprintf(stderr,"[guest] setlocale(\"%s\") is not implemented; keeping \"C\"\n",s);}
+    CRT(0);
+}
+static void s_localeconv(CPU *c){crt_locale_init();CRT(crt_localeconv);}
 static void s_memcpy(CPU *c){uint32_t n=A(2),d=A(0);if(n)memmove(checked(c,d,n),checked(c,A(1),n),n);if(n)guest_watch_check(mem,"memcpy");CRT(d);}
 static void s_memset(CPU *c){uint32_t n=A(2),d=A(0);if(n)memset(checked(c,d,n),(int)A(1),n);if(n)guest_watch_check(mem,"memset");CRT(d);}
 static void s_memcmp(CPU *c){uint32_t n=A(2);CRT(n?memcmp(checked(c,A(0),n),checked(c,A(1),n),n):0);}
@@ -3107,7 +3235,12 @@ static void s_BinkCopyToBufferRect(CPU *c){
  X("msvcrt.dll","malloc",malloc) X("msvcrt.dll","calloc",calloc) X("msvcrt.dll","realloc",realloc) X("msvcrt.dll","free",free) \
  X("msvcrt.dll","memcpy",memcpy) X("msvcrt.dll","memmove",memcpy) X("msvcrt.dll","memset",memset) X("msvcrt.dll","memcmp",memcmp) \
  X("msvcrt.dll","strlen",strlen) X("msvcrt.dll","strcmp",strcmp) X("msvcrt.dll","_stricmp",stricmp) \
- X("msvcrt.dll","strcpy",strcpy) X("msvcrt.dll","_strdup",strdup)
+ X("msvcrt.dll","strcpy",strcpy) X("msvcrt.dll","_strdup",strdup) \
+ X("msvcrt.dll","_setjmp3",_setjmp3) X("msvcrt.dll","_setjmp",_setjmp3) X("msvcrt.dll","longjmp",longjmp) \
+ X("msvcrt.dll","qsort",qsort) X("msvcrt.dll","strtol",strtol) X("msvcrt.dll","strtoul",strtoul) \
+ X("msvcrt.dll","atoi",atoi) X("msvcrt.dll","atol",atol) \
+ X("msvcrt.dll","setlocale",setlocale) X("msvcrt.dll","_setlocale",setlocale) \
+ X("msvcrt.dll","localeconv",localeconv)
 #define DEF(d,n,f) {d,n,s_##f},
 static const struct {const char *dll,*name;GuestFn fn;} defs[]={K(DEF) C(DEF) BINK(DEF)};
 #undef DEF
@@ -3124,6 +3257,7 @@ const FnEntry *win32_lookup(uint32_t addr){
     const FnEntry *aud=win32_audio_lookup(addr);if(aud)return aud;
     const FnEntry *steam=win32_steam_lookup(addr);if(steam)return steam;
     const FnEntry *reg=win32_registry_lookup(addr);if(reg)return reg;
+    const FnEntry *xa=win32_xaudio2_lookup(addr);if(xa)return xa;
     unsigned i=(addr-WIN32_THUNK_BASE)/4;
     if(i<NDEFS){entries[i]=(FnEntry){addr,defs[i].fn};return &entries[i];}
     unsigned t=i-NDEFS;
@@ -3145,6 +3279,7 @@ uint32_t win32_resolve(const PeImport *e,void *ctx){
         uint32_t aud=win32_audio_resolve(e->dll,e->name);if(aud)return aud;
         uint32_t steam=win32_steam_resolve(e->dll,e->name);if(steam)return steam;
         uint32_t reg=win32_registry_resolve(e->dll,e->name);if(reg)return reg;
+        uint32_t xa=win32_xaudio2_resolve(e->dll,e->name);if(xa)return xa;
     } else {
         uint32_t inp=win32_input_resolve_ordinal(e->dll,e->ordinal);if(inp)return inp;
     }

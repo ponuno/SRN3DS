@@ -28,6 +28,7 @@
 
 void rt_unimpl(CPU *c, uint32_t addr, const char *what) __attribute__((noreturn));
 void rt_int3(CPU *c, uint32_t addr) __attribute__((noreturn));
+extern uint32_t n3ds_ir_cur_func_end;
 void rt_cpuid(CPU *c, uint32_t *a, uint32_t *b, uint32_t *cc, uint32_t *d);
 uint64_t rt_rdtsc(void);
 void n3ds_lift_set_ir_ip(uint32_t ip);
@@ -1393,6 +1394,8 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
 void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
     Flags f = {0};
     uint32_t ip = addr;
+    uint32_t prev_end = n3ds_ir_cur_func_end;
+    n3ds_ir_cur_func_end = func_end;
     if (g_a43f_trace_on < 0) n3ds_a43f_trace_prime();
     int trace = g_a43f_trace_on;
     for (;;) {
@@ -1409,7 +1412,7 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
         HP_START(hp_exec);
         int done = exec_block(c, &b, &f, addr, func_end, &next);
         HP_ADD(HP_EXEC, hp_exec);
-        if (done) return;
+        if (done) { n3ds_ir_cur_func_end = prev_end; return; }
         if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 0);
         ip = next;
     }

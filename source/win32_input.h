@@ -73,6 +73,10 @@ void win32_input_apply_pad(uint32_t pad_mask);
  * 256-entry virtual-key table plus the 8 mouse-button bits. */
 void win32_input_map_pad(Win32InputProfile profile, uint32_t pad_mask,
                          uint8_t vk_down[256], uint8_t mouse_buttons[8]);
+/* D-pad -> DirectInput POV value (0..35900 hundredths of a degree, clockwise
+ * from up; 0xFFFF centred).  The pad objects map the D-pad to arrows/WASD; this
+ * is the equivalent hat encoding for a joystick-shaped consumer. */
+uint32_t win32_input_pov(uint32_t pad_mask);
 /* Test / front-end injection. State changes raise GetAsyncKeyState's "pressed
  * since last call" bit and signal a DirectInput event set with
  * SetEventNotification. `buttons` bit 0 = left, 1 = right, 2 = middle. */

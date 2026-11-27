@@ -1004,9 +1004,14 @@ void rt_call_ic(CPU *c,uint32_t addr,const FnEntry **cache) {
     trace_indirect_fault(c,addr);
     rt_unimpl(c,addr,"unknown indirect function");
 }
-/* Nonlocal returns depend on the full Wine/Win32 shim semantics. Fail loudly. */
-jmp_buf *rt_setjmp_slot(CPU *c,uint32_t guest_jb) {rt_unimpl(c,guest_jb,"setjmp not implemented");}
-void rt_setjmp3(CPU *c) {rt_unimpl(c,0,"setjmp3 not implemented");}
+/* Nonlocal returns for recompiled code.  setjmp.c owns the guest jmp_buf
+ * slots; these hooks let it resume the interpreter without jumping into a
+ * dead host frame. */
+jmp_buf *rt_setjmp_slot(CPU *c, uint32_t guest_jb);
+void rt_setjmp3(CPU *c);
+void rt_longjmp(CPU *c, uint32_t jb, uint32_t val);
+uint32_t n3ds_lift_current_function_end(void);
+void n3ds_lift_guest_resume(CPU *c, uint32_t eip, uint32_t func_end);
 void rt_cpuid(CPU *c,uint32_t *a,uint32_t *b,uint32_t *cc,uint32_t *d) {
     (void)c;uint32_t leaf=*a;*a=*b=*cc=*d=0;
     /* Report the same virtual Pentium-4 profile as the upstream lifter. */
@@ -1021,6 +1026,20 @@ uint64_t rt_rdtsc(void) {
     return (uint64_t)clock();
 #endif
 }
+uint32_t n3ds_ir_cur_func_end;
+uint32_t n3ds_lift_current_function_end(void){return n3ds_ir_cur_func_end;}
+
+static volatile int g_guest_resume_pending;
+static uint32_t g_guest_resume_eip, g_guest_resume_end;
+void n3ds_lift_guest_resume(CPU *c,uint32_t eip,uint32_t func_end) {
+    if(!active)rt_unimpl(c,eip,"longjmp outside an active guest invocation");
+    g_guest_resume_eip=eip;
+    g_guest_resume_end=func_end;
+    g_guest_resume_pending=1;
+    longjmp(active->jb,3);
+    __builtin_unreachable();
+}
+
 static int invoke_common(CPU *c,uint32_t address,uint32_t ir_end,int reentrant,
                          const uint32_t *args,size_t argc,uint32_t *result) {
     int have=ir_end?1:(n3ds_lift_has_function(address)!=0);
@@ -1040,8 +1059,19 @@ static int invoke_common(CPU *c,uint32_t address,uint32_t ir_end,int reentrant,
         return N3DS_INVOKE_TRAP;
     }
     c->r[4]=base;
-    if(ir_end)n3ds_ir_run(c,address,ir_end);
-    else if(n3ds_rt_dispatch(c,address))rt_unimpl(c,address,"unknown function/import");
+    /* A guest longjmp unwinds to this frame with code 3.  Loop so a resumed
+     * function may longjmp again (nested setjmp), and only then take the usual
+     * epilogue.  The guest stack/registers were restored by rt_longjmp(). */
+    for (;;) {
+        if(ir_end)n3ds_ir_run(c,address,ir_end);
+        else if(n3ds_rt_dispatch(c,address))rt_unimpl(c,address,"unknown function/import");
+        if (!g_guest_resume_pending) break;
+        g_guest_resume_pending = 0;
+        address = g_guest_resume_eip;
+        ir_end = g_guest_resume_end;
+        if (!ir_end || !address)
+            rt_unimpl(c, address, "longjmp without a resumable IR function range");
+    }
     active=f.prev;
     int ok=c->r[4]==base+4 || c->r[4]==sp;
     if(!ok){

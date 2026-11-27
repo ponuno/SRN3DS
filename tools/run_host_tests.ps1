@@ -272,7 +272,7 @@ $liftCommon = @("-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-fwrapv", "-
 if ($env:N3DS_WATCH_STORE_CHECKS -eq '1') { $liftCommon += '-DN3DS_WATCH_STORE_CHECKS' }
 if ($Sanitize) { $liftCommon = $common + @("-Istaged", "-fwrapv", "-fno-strict-aliasing") }
 
-$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_steam.c", "source/win32_registry.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", "staged/fpu.c")
+$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", "staged/fpu.c")
 $comSources = $legacySources + @("source/guest_process.c", "source/n3ds_boot.c")
 $d3dSources = @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c")
 $d3dFull = $d3dSources + @("source/d3d9_shader.c", "source/d3d9_tev.c")
@@ -462,6 +462,10 @@ Add-Test "audio" $liftCommon @("source/guest.c", "source/win32_audio.c", "tests/
 Add-Test "audio_ndsp_host" $liftCommon @("source/guest.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_ndsp_host_smoke.c") @()
 # Real source/win32_audio_3ds.c against the fake libctru surface (ARM path on host).
 Add-Test "audio_3ds_backend" ($common + @("-Istaged", "-D__3DS__", "-Itests/audio_3ds_stubs")) @("source/guest.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_3ds_backend_smoke.c") @()
+# Ported XAudio2 COM/mixer/sink path (no SDL, no engine thread).
+Add-Test "xaudio2" $liftCommon ($legacySources + @("tests/xaudio2_smoke.c")) @()
+# Ported msvcrt heap/qsort/strtol/locale/setjmp behaviour.
+Add-Test "win32_crt" $liftCommon ($legacySources + @("tests/win32_crt_smoke.c")) @()
 Add-Test "steam" $liftCommon @("source/guest.c", "source/win32_steam.c", "tests/win32_steam_smoke.c") @()
 Add-Test "registry" $liftCommon @("source/guest.c", "source/win32_registry.c", "tests/win32_registry_smoke.c") @()
 # Profile/save path mapping + a real .ess/.skse write-read-enumerate round-trip.

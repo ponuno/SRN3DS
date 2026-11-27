@@ -27,6 +27,14 @@ int n3ds_ir_invoke(CPU *c,uint32_t address,uint32_t end,const uint32_t *args,siz
 int n3ds_lift_invoke_reentrant(CPU *c,uint32_t address,const uint32_t *args,size_t argc,uint32_t *result);
 enum { N3DS_INVOKE_OK=0,N3DS_INVOKE_BAD=-1,N3DS_INVOKE_TRAP=-2,N3DS_INVOKE_EXIT=1 };
 const char *n3ds_lift_fault(void);
+/* Guest setjmp/longjmp (source/setjmp.c).  rt_longjmp restores the MSVC jmp_buf
+ * registers and resumes the interpreter at the saved EIP/ESP; the host frames
+ * of the call that already returned are never re-entered. */
+struct __jmp_buf_tag;
+void rt_setjmp3(CPU *c);
+void rt_longjmp(CPU *c, uint32_t jb, uint32_t val) __attribute__((noreturn));
+uint32_t n3ds_lift_current_function_end(void);
+void n3ds_lift_guest_resume(CPU *c, uint32_t eip, uint32_t func_end) __attribute__((noreturn));
 /* Bounded guest tracing helpers used only by diagnostic generated slices. */
 void n3ds_trace_cstr(const char *tag, uint32_t ptr);
 void n3ds_trace_u32(const char *tag, uint32_t value);
