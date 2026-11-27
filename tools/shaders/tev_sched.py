@@ -826,10 +826,15 @@ class TevScheduler:
 
     def _close_pass(self, output_sampler: Optional[int]):
         if self.stages:
+            consts = sorted({s["const_reg"] for s in self.stages
+                             if s.get("const_reg", 255) != 255})
             p = {
                 "stage_data": self.stages,
                 "textures": self.pass_textures,
-                "blend": "replace",
+                "constants": consts,
+                "inputs": [],
+                "blend": {"enable": 0, "src": 1, "dst": 1, "op": 1},
+                "depth_write": 0,
                 "writes": ["oC0"],
                 "reads": list(self._pass_reads),
             }
@@ -1134,6 +1139,8 @@ class TevScheduler:
         if not self.stages:
             self._emit_carry(final)
         self._close_pass(None)
+        if len(self.passes) > 4:
+            raise PlanImpossible("passes_limit_%d" % len(self.passes))
         # The final pass is the descriptor the schema sees.
         last = self.passes[-1] if self.passes else {
             "stage_data": [], "textures": [], "blend": "replace",
@@ -2066,7 +2073,7 @@ def plan_shader(ir: C.IR, *, family="generic", approx_only=False,
                 sched = TevScheduler(ir, info, approx=True)
                 sched._emit_carry(vleaf("tex", 0))
                 sched._close_pass(None)
-    last = sched.passes[-1] if sched.passes else {
+    first = sched.passes[0] if sched.passes else {
         "stage_data": [], "textures": []}
     entry = {
         "id": "sched.%s.%s" % (family, ir.sha256[:8]),
@@ -2077,9 +2084,9 @@ def plan_shader(ir: C.IR, *, family="generic", approx_only=False,
         "version": "0x%08x" % ir.version,
         "instructions": len([i for i in ir.body if i.opcode not in (0x00,)]),
         "draw_enabled": 0, "runtime": 0,
-        "stages": len(last["stage_data"]),
-        "stage_data": last["stage_data"],
-        "textures": last.get("textures", []),
+        "stages": len(first["stage_data"]),
+        "stage_data": first["stage_data"],
+        "textures": first.get("textures", []),
         "inputs": _input_entries(ir, sched),
         "constants": sorted(sched.constants),
         "uses_vertex_color": sched.uses_vertex_color,
@@ -2095,7 +2102,6 @@ def plan_shader(ir: C.IR, *, family="generic", approx_only=False,
     if len(sched.passes) > 1:
         entry["pass_count"] = len(sched.passes)
         entry["passes"] = sched.passes
-        entry["blend"] = "replace"
     if any(any(not (0.0 <= v <= 1.0) for v in vals)
            for vals in ir.defs.values()):
         entry["constant_values"] = {str(reg): list(vals)

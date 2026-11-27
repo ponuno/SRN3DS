@@ -406,12 +406,20 @@ def verify_against_archive(doc: dict, data_dir: str,
     if not data_dir or not os.path.isdir(data_dir):
         return {"status": "skipped", "reason": "retail data dir absent"}
     regenerated = build_manifest(data_dir, include_update=False)
-    runtime_docs = [(origin, {"entries": runtime_entries(doc)})
-                    for origin, doc in extra_docs]
-    runtime_docs = [(origin, doc) for origin, doc in runtime_docs if doc["entries"]]
+    # Only regenerate the runtime rows this manifest commits.  Pack catalogs
+    # may legitimately contain more runtime-certified descriptors than the
+    # 64-slot C table currently holds; the runtime-table capacity is a
+    # separate check in tools/fxp_compile.py, not a symbolic-equivalence
+    # failure for an already committed row.
+    committed = {entry["sha256"]: entry for entry in doc.get("entries", [])}
+    runtime_docs = [(origin, {"entries": [
+        entry for entry in runtime_entries(extra_doc)
+        if entry["sha256"] in committed]})
+        for origin, extra_doc in extra_docs]
+    runtime_docs = [(origin, extra_doc) for origin, extra_doc in runtime_docs
+                    if extra_doc["entries"]]
     if runtime_docs:
         regenerated = merge_extra_entries(regenerated, runtime_docs)
-    committed = {entry["sha256"]: entry for entry in doc.get("entries", [])}
     fresh = {entry["sha256"]: entry for entry in regenerated.get("entries", [])}
     problems = []
     for sha, entry in committed.items():

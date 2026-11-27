@@ -86,24 +86,29 @@ none of these rows consumes a runtime slot.
 
 Measured over `Skyrim - Shaders.bsa` (base archive, 2026-11-27):
 
-| Quantity | Before | After |
+| Quantity | Before (main integration) | After |
 |---|---:|---:|
 | Distinct census hashes | 6,659 | 6,659 |
-| translated | 460 | **6,432** |
-| draw-enabled | 10 | 10 |
-| refused | 6,189 | **217** |
-| pixel-shader refusals | 5,975 | **0** |
-| scheduler catalog rows | -- | 5,972 (12 exact, 5,960 approx, 18 multipass) |
+| translated | 664 | **6,497** |
+| draw-enabled | 140 | 140 |
+| refused | 5,855 | **22** |
+| pixel-shader refusals | 5,972 | **0** |
+| scheduler catalog rows | -- | 5,833 (2 exact, 5,831 approx, 4 multipass) |
+
+The scheduler catalog is a cross-pack overlay: any hash already owned by a
+pack catalog is omitted (the pack plan is authoritative), so the two sources
+never disagree and the committed catalog contains no duplicate hash.
 
 All 5,975 previously refused PS hashes now have a plan: exact where the
 expression is symbolically inside the TEV op set, otherwise an approximation
-with its lost term, fit and measured error, or an explicit `passes[]` split.
-The 217 remaining refusals are **vertex-stage** programs only:
+with its lost term, fit and measured error, or an explicit `passes[]` split
+(2..4 passes, each <=6 stages; `passes[0]` mirrors the main descriptor).  The
+22 remaining refusals are all **vertex-stage** programs:
 
-* 184 `pica_vs`: they fit the PICA VS envelope but this layer is the PS TEV
-  scheduler; a VS contract/emitter is owned by the skinning/lighting VS work.
-* 33 `too_many_vs_varyings (8 > 7)`/`(9 > 7)`: PICA VS has seven varying
+* 22 `too_many_vs_varyings (8 > 7)`/`(9 > 7)`: PICA VS has seven varying
   outputs; reducing them needs varying packing/dropping or a multi-pass VS.
+* The `pica_vs` contract-only hashes are now covered by the pack VS catalogs
+  from the integration branch.
 
 Nothing in the catalog is draw-enabled.  `DevCaps` is unchanged.
 

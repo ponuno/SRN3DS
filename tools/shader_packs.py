@@ -123,6 +123,7 @@ def _plan_index(path: str = PLANS_PATH, include_scheduler: bool = False) -> dict
     if include_scheduler and os.path.isfile(SCHEDULER_PATH):
         documents.append((SCHEDULER_PATH, _load_json(SCHEDULER_PATH)))
     out = {}
+    scheduler_origin = os.path.abspath(SCHEDULER_PATH)
     for origin, doc in documents:
         for entry in doc.get("entries", []):
             status = ("draw-enabled" if entry.get("draw_enabled") == 1
@@ -132,6 +133,10 @@ def _plan_index(path: str = PLANS_PATH, include_scheduler: bool = False) -> dict
             seen = out.get(entry["sha256"])
             if seen is None:
                 out[entry["sha256"]] = row
+            elif os.path.abspath(origin) == scheduler_origin:
+                # Pack-owned catalogs are authoritative; the cross-pack
+                # scheduler overlay never overrides an existing hash.
+                continue
             elif seen != row:
                 raise SystemExit("%s: plan %r disagrees with the catalog for %s"
                                  % (origin, entry["id"], entry["sha256"][:16]))

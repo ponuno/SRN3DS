@@ -116,7 +116,8 @@ class SchedulerSyntheticTest(unittest.TestCase):
         self.assertLessEqual(p["stages"], 6)
         for entry in p["passes"]:
             self.assertLessEqual(len(entry["stage_data"]), 6)
-            self.assertEqual(entry["blend"], "replace")
+            self.assertIn("enable", entry["blend"])
+            self.assertIn(entry["depth_write"], (0, 1))
 
     def test_constant_ifc_is_folded(self):
         blob = _program(
