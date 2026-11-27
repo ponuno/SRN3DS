@@ -37,13 +37,27 @@ static const Win32AudioBackend sink = {"xaudio-test", sink_submit, sink_volume, 
 
 static void dummy(CPU *c) { c->r[4] += 4; }
 static unsigned cb_events, cb_last_ctx;
-static void voice_callback(CPU *c) {
+/* One host thunk per IXAudio2VoiceCallback slot: each pops exactly the
+ * stdcall arguments of its method, so the lift runtime's ESP check passes. */
+static void cb_pass_start(CPU *c) { ++cb_events; c->r[4] += 4 + 4; }
+static void cb_pass_end(CPU *c) { ++cb_events; c->r[4] += 4; }
+static void cb_stream_end(CPU *c) { ++cb_events; c->r[4] += 4; }
+static void cb_buffer_start(CPU *c) { ++cb_events; c->r[4] += 4 + 4; }
+static void cb_buffer_end(CPU *c) {
     ++cb_events;
     uint32_t ctx = M32(c->r[4] + 8);
     if (ctx) cb_last_ctx = ctx;
-    c->r[4] += 4 + 8;
+    c->r[4] += 4 + 4;
 }
-static const FnEntry table[] = {{0x00500000u, dummy}, {0x00501000u, voice_callback}};
+static void cb_loop_end(CPU *c) { ++cb_events; c->r[4] += 4 + 4; }
+static void cb_voice_error(CPU *c) { ++cb_events; c->r[4] += 4 + 4 + 4; }
+static const FnEntry table[] = {
+    {0x00500000u, dummy},
+    {0x00501000u, cb_pass_start}, {0x00501010u, cb_pass_end},
+    {0x00501020u, cb_stream_end}, {0x00501030u, cb_buffer_start},
+    {0x00501040u, cb_buffer_end}, {0x00501050u, cb_loop_end},
+    {0x00501060u, cb_voice_error},
+};
 
 static int call(CPU *c, const char *dll, const char *name, const uint32_t *args, size_t n, uint32_t *out) {    PeImport e = {.dll = dll, .name = name};
     uint32_t fn = win32_resolve(&e, NULL);
@@ -91,7 +105,9 @@ int main(void) {
     M16(WFX) = 1; M16(WFX + 2) = 2; M32(WFX + 4) = 48000;
     M32(WFX + 8) = 192000; M16(WFX + 12) = 4; M16(WFX + 14) = 16; M16(WFX + 16) = 0;
     a[0] = xa; a[1] = PP; a[2] = WFX; a[3] = 0; a[4] = 0x40000000u; a[5] = DATA + 0x900; a[6] = 0; a[7] = 0;
-    for (unsigned i = 0; i < 7; ++i) M32(DATA + 0x900 + 4 * i) = 0x00501000u;
+    /* COM callback object: [0x900] -> vtable at 0x940, one slot per method. */
+    M32(DATA + 0x900) = DATA + 0x940;
+    for (unsigned i = 0; i < 7; ++i) M32(DATA + 0x940 + 4 * i) = 0x00501000u + 0x10u * i;
     CHECK(!method(cpu, xavt, 8, a, 8, &r) && r == 0);
     uint32_t src = M32(PP), svt = M32(src);
     CHECK(src && svt);

@@ -22,16 +22,22 @@ COM model:
   `FlushSourceBuffers`, `Discontinuity`, `ExitLoop`, `GetState`,
   `Set/GetFrequencyRatio`, `SetSourceSampleRate`.
 - Formats: PCM8/16/24/32, IEEE float32, WAVE_FORMAT_EXTENSIBLE and MS ADPCM
-  decoding (same tables/block walk as upstream). Unknown tags play silence and
-  are logged, not guessed.
+  decoding (same tables/block walk as upstream). Unknown tags (including
+  WMA/XMA `0x0161`/`0x0166`) are not decoded: they play silence and are logged,
+  but the buffer occupies its nominal `bytes / nAvgBytesPerSec` duration so a
+  music stream does not spin the callback queue.
 - Buffer queue: play region, loop begin/len/count (255 = forever), buffer
   context, `XAUDIO2_END_OF_STREAM`, and `OnBufferStart`/`OnBufferEnd`/
-  `OnLoopEnd`/`OnStreamEnd` callbacks. `GetState` reports
-  `pCurrentBufferContext`, `BuffersQueued`, `SamplesPlayed` in the upstream
-  layout.
+  `OnLoopEnd`/`OnStreamEnd` callbacks. Callback pointers are COM objects: the
+  shim dereferences `pCallback -> vtable` before the call (the first port had
+  dropped this indirection and would have crashed on a real C++ callback).
+  Argument counts match XAudio2 exactly, including the argument-less
+  `OnVoiceProcessingPassEnd`. `GetState` reports `pCurrentBufferContext`,
+  `BuffersQueued`, `SamplesPlayed` in the upstream layout.
 - Mixing preserves upstream behaviour: linear interpolation resampling,
   default speaker matrices, submix processing stages ordered by `stage`, and a
-  stereo downmix at the mastering voice.
+  stereo downmix at the mastering voice. The master clamps to [-1, 1] before
+  the PCM16 conversion; NaN samples become silence.
 - `XAPOFX1_5!CreateFX` returns a live IUnknown-shaped stub object.
 
 Changes required by the 3DS port:
@@ -40,25 +46,38 @@ Changes required by the 3DS port:
   same 10 ms pass on the calling (single guest) thread; every shim entry
   advances the clock first, matching `win32_audio`'s completion rule. The TESV
   slice loop calls it once per frame; host tests drive it with an explicit
-  clock.
+  deterministic clock (`win32_xaudio2_host_reset/advance_us`; while that clock
+  is active `tick(0)` no longer reads the wall clock).
 - Output is `win32_audio_submit_stereo()`: the same NDSP/OpenDSP sink that
   `waveOut` uses. `N3DS_AUDIO=off` (or a missing backend) mixes normally but
-  accepts no frames; `win32_xaudio2_host_stats()` reports submitted frames so
-  this is visible instead of hidden.
+  accepts no frames; `win32_xaudio2_host_stats()` reports submitted frames and
+  starved source frames (`underrun_frames`) so this is visible instead of
+  hidden.
 - No mutexes: there is exactly one guest thread and callbacks run after a pass
   with the queue in a consistent state, so a guest may submit/flush from
   `OnBufferEnd`.
-- No engine thread means a stopped voice cannot be drained by a pass. Unlike
-  upstream, `FlushSourceBuffers` on a stopped voice drops its queue
-  immediately (closer to real XAudio2); a running voice keeps the playing
-  buffer and marks the rest finished at the next pass.
+- `FlushSourceBuffers` removes the whole queue immediately (including the
+  playing buffer), leaves `BuffersQueued == 0` before returning and raises
+  `OnBufferEnd` for every removed buffer, as real XAudio2 does. An earlier port
+  kept the playing buffer until the next pass.
+- `DestroyVoice` frees queued decoded data and the mix accumulator at once, so
+  a stopped engine cannot strand them; pending events for the dead voice are
+  skipped.
+- `SetFrequencyRatio` rejects NaN/Inf/<= 0 (`XAUDIO2_E_INVALID_CALL`), clamps
+  to the create-time maximum and bounds the resampler step so a hostile ratio
+  cannot spin; `SetSourceSampleRate` rejects 0/> 384000.
 - Object cells and vtables live at `0x1e300000..0x1e310000`, callback stack at
   `0x1e310000`, thunk window `0xff0a0000` (checked by
   `tools/check_shim_bases.py`).
 
 Still absent: filters/effects are accepted and ignored (upstream too), no
 X3DAudio integration into XAudio2 voices, no hardware-accelerated mixing, no
-device enumeration beyond the single default device.
+device enumeration beyond the single default device, and no WMA/XMA decoder.
+Also note that the audited `TESV.exe` has no XAudio2 IAT import or export-name
+string, so this shim is not proven reachable from that binary; see
+`docs/AUDIO.md` §1 and the `module_handle` gap it names. Signal-level coverage
+is `tests/xaudio2_signal_smoke.c`; the full audio inventory, NDSP status and
+limits are in `docs/AUDIO.md`.
 
 ## DirectInput 8 — `source/win32_input.c`
 

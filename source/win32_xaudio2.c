@@ -67,6 +67,7 @@ struct Voice {
     uint32_t guest, callback;
     int in_ch, rate;
     int fmt, bpf, block_align, spb;
+    uint32_t avg_bytes;
     uint8_t adpcm_coef[64];
     int ncoef;
     float ratio, max_ratio;
@@ -117,6 +118,7 @@ static uint32_t g_engine_cb[8];
 static unsigned g_nengine_cb;
 static int g_running;
 static uint64_t g_now_us, g_last_pass_us;
+static int g_fake_clock; /* host_reset/advance: tick(0) must not read the wall clock */
 static uint32_t g_out_rate = WIN32_AUDIO_OUTPUT_HZ;
 static int g_in_tick;
 static CPU g_cb_cpu;
@@ -176,6 +178,7 @@ static void set_format(Voice *v, uint32_t wf) {
     if (v->in_ch > MAX_CH) v->in_ch = MAX_CH;
     v->rate = (int)M32(wf + 4);
     if (v->rate < 1000) v->rate = 44100;
+    v->avg_bytes = M32(wf + 8);
     v->block_align = M16(wf + 12);
     if (tag == 0xFFFE) tag = M16(wf + 24);
     v->fmt = FMT_NONE;
@@ -251,6 +254,7 @@ static int next_frame(Voice *v, float *out) {
         g_stats.buffers_completed++;
     }
     for (int c = 0; c < v->in_ch; c++) out[c] = 0;
+    g_stats.underrun_frames++;
     return 0;
 }
 
@@ -296,6 +300,10 @@ static void route(Voice *v, const float *in, int frames) {
 static void mix_source(Voice *v, int frames, float *tmp) {
     float step = v->ratio * (float)v->rate / (float)g_out_rate;
     int ch = v->in_ch;
+    /* A guest may pass NaN/Inf or a huge finite ratio.  Clamp the step so the
+     * resampler cannot loop for an unbounded number of source frames. */
+    if (!isfinite(step) || step < 0) step = 0;
+    if (step > 64.0f) step = 64.0f;
     if (!v->primed) {
         next_frame(v, v->cur);
         memcpy(v->prev, v->cur, sizeof v->prev);
@@ -314,20 +322,28 @@ static void mix_source(Voice *v, int frames, float *tmp) {
     route(v, tmp, frames);
 }
 
-static void invoke_cb(uint32_t cb, int method, uint32_t arg) {
+static void invoke_cb_ex(uint32_t cb, int method, uint32_t arg, unsigned extra) {
     if (!g_cb_ready || !cb) return;
-    uint32_t fn = M32(cb + 4u * (uint32_t)method);
+    uint32_t vt = M32(cb);
+    if (!vt) return;
+    uint32_t fn = M32(vt + 4u * (uint32_t)method);
     if (!fn) return;
-    uint32_t args[2] = {cb, arg};
+    uint32_t args[3] = {cb, arg, 0};
     uint32_t result = 0;
-    if (n3ds_lift_invoke_reentrant(&g_cb_cpu, fn, args, method == 2 ? 1u : 2u, &result) == 0)
+    if (n3ds_lift_invoke_reentrant(&g_cb_cpu, fn, args, 1u + extra, &result) == 0)
         g_stats.callbacks++;
+}
+/* Voice callback argument counts: PassStart(bytes), PassEnd(), StreamEnd(),
+ * BufferStart/End and LoopEnd(context), VoiceError(context, hr). */
+static void invoke_cb(uint32_t cb, int method, uint32_t arg) {
+    unsigned extra = method == 0 || method >= 3 ? (method == 6 ? 2u : 1u) : 0u;
+    invoke_cb_ex(cb, method, arg, extra);
 }
 
 static void engine_pass(int frames, float *out, int16_t *pcm) {
     static float tmp[MAX_CH * 512];
     if (frames > 512) frames = 512;
-    for (unsigned i = 0; i < g_nengine_cb; i++) invoke_cb(g_engine_cb[i], 0, 0);
+    for (unsigned i = 0; i < g_nengine_cb; i++) invoke_cb_ex(g_engine_cb[i], 0, 0, 0);
     for (int i = 0; i < (int)MAX_VOICES; i++) {
         Voice *v = g_voices[i];
         if (v && !v->dead && v->kind == V_SOURCE && v->callback && v->running)
@@ -362,6 +378,8 @@ static void engine_pass(int frames, float *out, int16_t *pcm) {
             }
             if (l > 1) l = 1; else if (l < -1) l = -1;
             if (r > 1) r = 1; else if (r < -1) r = -1;
+            if (!(l == l)) l = 0; /* NaN from a malformed float source */
+            if (!(r == r)) r = 0;
             out[2 * f] = l;
             out[2 * f + 1] = r;
             pcm[2 * f] = (int16_t)(l * 32767.0f);
@@ -376,7 +394,12 @@ static void engine_pass(int frames, float *out, int16_t *pcm) {
     memcpy(ev, g_ev, sizeof(Event) * (size_t)nev);
     for (unsigned i = 0; i < nev; i++)
         if (!ev[i].v->dead) invoke_cb(ev[i].cb, ev[i].method, ev[i].arg);
-    for (unsigned i = 0; i < g_nengine_cb; i++) invoke_cb(g_engine_cb[i], 1, 0);
+    for (int i = 0; i < (int)MAX_VOICES; i++) {
+        Voice *v = g_voices[i];
+        if (v && !v->dead && v->kind == V_SOURCE && v->callback && v->running)
+            invoke_cb(v->callback, 1, 0); /* OnVoiceProcessingPassEnd */
+    }
+    for (unsigned i = 0; i < g_nengine_cb; i++) invoke_cb_ex(g_engine_cb[i], 1, 0, 0);
     g_stats.passes++;
     g_stats.frames_mixed += (unsigned)frames;
     /* Free voices destroyed during the pass. */
@@ -407,7 +430,7 @@ static uint64_t host_now_us(void) {
 
 void win32_xaudio2_tick(uint64_t now_us) {
     if (g_in_tick) return;
-    if (!now_us) now_us = host_now_us();
+    if (!now_us) now_us = g_fake_clock ? g_now_us : host_now_us();
     if (now_us > g_now_us) g_now_us = now_us;
     if (!g_last_pass_us) { g_last_pass_us = g_now_us; return; }
     if (g_now_us - g_last_pass_us < PASS_FRAMES_MS * 1000u) return;
@@ -442,6 +465,7 @@ void win32_xaudio2_host_stats(Win32XAudio2Stats *out) {
 }
 
 uint64_t win32_xaudio2_host_advance_us(uint64_t delta) {
+    g_fake_clock = 1;
     g_now_us += delta;
     win32_xaudio2_tick(g_now_us);
     return g_now_us;
@@ -451,6 +475,7 @@ void win32_xaudio2_host_reset(void) {
     g_stats = (Win32XAudio2Stats){0};
     g_now_us = 0;
     g_last_pass_us = 0;
+    g_fake_clock = 1;
     g_nev = 0;
 }
 
@@ -583,6 +608,16 @@ static void s_v_getmatrix(CPU *c) {
 static void s_v_destroy(CPU *c) {
     Voice *v = V; if (!v) RET(E_INVALIDARG, 1);
     v->dead = 1;
+    /* Release the queue now: if the engine is stopped no pass would ever run
+     * the deferred free in engine_pass(). */
+    for (int k = 0; k < v->qn; k++) {
+        XBuf *b = &v->q[(v->qhead + k) % MAX_QUEUE];
+        free(b->decoded);
+        b->decoded = NULL;
+    }
+    v->qn = 0;
+    free(v->acc);
+    v->acc = NULL;
     if (v == g_master) g_master = NULL;
     for (int i = 0; i < (int)MAX_VOICES; i++) {
         Voice *o = g_voices[i];
@@ -611,6 +646,7 @@ static void s_s_submit(CPU *c) {
     x->loop_len = M32(b + 24);
     x->loop_count = M32(b + 28);
     x->ctx = M32(b + 32);
+    if (x->bytes && !x->data) { g_stats.last_error = XAUDIO2_E_INVALID_CALL; RET(XAUDIO2_E_INVALID_CALL, 3); }
     if (v->fmt == FMT_ADPCM && v->block_align && v->spb) {
         uint32_t nb = x->bytes / (uint32_t)v->block_align;
         x->nframes = nb * (uint32_t)v->spb;
@@ -620,7 +656,14 @@ static void s_s_submit(CPU *c) {
                 adpcm_block(v, n3ds_guest_ptr(x->data + i * (uint32_t)v->block_align, (size_t)v->block_align),
                             x->decoded + (size_t)i * (size_t)v->spb * (size_t)v->in_ch);
     } else if (v->fmt == FMT_NONE) {
-        x->nframes = 0;
+        /* WMA/XMA and unknown tags are not decoded.  Keep the buffer in the
+         * queue for its nominal duration (bytes / average bytes per second)
+         * instead of completing instantly, so a music stream does not spin the
+         * callback loop; the samples themselves are silence, which is counted
+         * and logged by set_format(). */
+        x->nframes = (v->avg_bytes && v->rate > 0 && x->bytes)
+                         ? (uint32_t)(((uint64_t)x->bytes * (uint64_t)v->rate) / v->avg_bytes)
+                         : 0;
     } else {
         x->nframes = v->bpf ? x->bytes / (uint32_t)v->bpf : 0;
     }
@@ -635,16 +678,23 @@ static void s_s_submit(CPU *c) {
 }
 static void s_s_flush(CPU *c) {
     Voice *v = V; if (!v) RET(E_INVALIDARG, 1);
-    for (int k = v->running ? 1 : 0; k < v->qn; k++) {
+    /* Real XAudio2 removes every queued buffer, including the one currently
+     * mixing, and reports OnBufferEnd for each removed buffer.  Do it
+     * immediately: BuffersQueued is 0 when FlushSourceBuffers returns. */
+    uint32_t ctx[MAX_QUEUE];
+    int n = 0;
+    uint32_t callback = v->callback;
+    for (int k = 0; k < v->qn && n < MAX_QUEUE; k++) {
         XBuf *b = &v->q[(v->qhead + k) % MAX_QUEUE];
-        b->pos = b->end;
-        b->loops_left = 0;
-        b->flags &= ~0x40u;
+        ctx[n++] = b->ctx;
+        free(b->decoded);
+        b->decoded = NULL;
     }
-    if (!v->running && v->qn) { /* stopped voice: drop the whole queue at once */
-        for (int k = 0; k < v->qn; k++) free(v->q[(v->qhead + k) % MAX_QUEUE].decoded);
-        v->qn = 0;
-    }
+    v->qhead = 0;
+    v->qn = 0;
+    g_stats.buffers_flushed += (unsigned)n;
+    for (int i = 0; i < n && !v->dead; i++)
+        invoke_cb(callback, 4, ctx[i]);
     RET(S_OK, 1);
 }
 static void s_s_discontinuity(CPU *c) { RET(S_OK, 1); }
@@ -661,13 +711,20 @@ static void s_s_getstate(CPU *c) {
 static void s_s_setratio(CPU *c) {
     Voice *v = V; if (!v) RET(E_INVALIDARG, 3);
     float r = argf(A(1));
+    if (!isfinite(r) || r <= 0) { g_stats.last_error = XAUDIO2_E_INVALID_CALL; RET(XAUDIO2_E_INVALID_CALL, 3); }
     if (r < 1.0f / 1024) r = 1.0f / 1024;
     if (v->max_ratio > 0 && r > v->max_ratio) r = v->max_ratio;
     v->ratio = r;
     RET(S_OK, 3);
 }
 static void s_s_getratio(CPU *c) { Voice *v = V; if (!v) RET(E_INVALIDARG, 2); MF32(A(1)) = v->ratio; RET(S_OK, 2); }
-static void s_s_setsamplerate(CPU *c) { Voice *v = V; if (!v) RET(E_INVALIDARG, 2); v->rate = (int)A(1); RET(S_OK, 2); }
+static void s_s_setsamplerate(CPU *c) {
+    Voice *v = V; if (!v) RET(E_INVALIDARG, 2);
+    uint32_t r = A(1);
+    if (r < 1000 || r > 384000) { g_stats.last_error = E_INVALIDARG; RET(E_INVALIDARG, 2); }
+    v->rate = (int)r;
+    RET(S_OK, 2);
+}
 
 /* ---------------------------------------------------------------- IXAudio2 */
 static void s_query(CPU *c) {
@@ -862,6 +919,7 @@ int win32_xaudio2_init(GuestMemory *m) {
     g_running = 0;
     g_now_us = g_last_pass_us = 0;
     g_in_tick = 0;
+    g_fake_clock = 0;
     g_mem = m;
     if (guest_map(m, XA_MEM_BASE, XA_MEM_BYTES)) { g_mem = NULL; return -1; }
     if (guest_map(m, XA_CB_STACK, XA_CB_STACK_BYTES)) {

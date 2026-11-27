@@ -477,6 +477,9 @@ Add-Test "audio_ndsp_host" $liftCommon @("source/guest.c", "source/win32_audio.c
 Add-Test "audio_3ds_backend" ($common + @("-Istaged", "-D__3DS__", "-Itests/audio_3ds_stubs")) @("source/guest.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_3ds_backend_smoke.c") @()
 # Ported XAudio2 COM/mixer/sink path (no SDL, no engine thread).
 Add-Test "xaudio2" $liftCommon ($legacySources + @("tests/xaudio2_smoke.c")) @()
+# Signal-level mixer regression: sine through the graph, callbacks/context,
+# SamplesPlayed drift, underruns, flush/destroy, 2-voice mix and WMA duration.
+Add-Test "xaudio2_signal" $liftCommon ($legacySources + @("tests/xaudio2_signal_smoke.c")) @()
 # Ported msvcrt heap/qsort/strtol/locale/setjmp behaviour.
 Add-Test "win32_crt" $liftCommon ($legacySources + @("tests/win32_crt_smoke.c")) @()
 # Papyrus-facing msvcrt surface: strtod/_itoa/rand/_errno/is*/math (ST0 return).

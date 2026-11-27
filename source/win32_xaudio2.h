@@ -51,6 +51,8 @@ typedef struct {
     unsigned passes;
     unsigned callbacks;       /* guest callbacks invoked */
     unsigned last_error;      /* last XAUDIO2_E_* returned, 0 = none */
+    unsigned underrun_frames; /* source frames requested with an empty queue */
+    unsigned buffers_flushed; /* buffers removed by FlushSourceBuffers */
 } Win32XAudio2Stats;
 
 void win32_xaudio2_host_stats(Win32XAudio2Stats *out);
