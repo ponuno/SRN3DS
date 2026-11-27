@@ -170,6 +170,13 @@ int n3ds_ir_fetch_block(CPU *c, uint32_t start, uint32_t func_end, IrExecBlock *
 void n3ds_ir_call(CPU *c, uint32_t addr);
 void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end);
 
+/* Live decoded-block executions, including ones suspended on another guest
+ * thread's host stack. The decode arena may not be reused while this is
+ * non-zero: a suspended block's instruction pointer still points into it. */
+int n3ds_ir_blocks_live(void);
+void n3ds_ir_block_enter(void);
+void n3ds_ir_block_leave(void);
+
 /* Cooperative time slicing between guest IR blocks.  Both executors (slice IR
  * and the all-functions container) run long guest loops that make no import
  * call; without a tick such a thread owns the CPU forever and starves every

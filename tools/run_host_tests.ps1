@@ -549,6 +549,7 @@ Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "te
 Add-Test "ir_havok_ext" $liftCommon ($legacySources + @("tests/ir_havok_ext_smoke.c", "tests/ir_aot_fixture.c")) @()
 # Straight-line runs longer than the uint8 IR block count must split, not fault.
 Add-Test "ir_long_block" $liftCommon ($legacySources + @("tests/ir_long_block_smoke.c")) @()
+Add-Test "ir_cache_flush" $liftCommon ($legacySources + @("tests/ir_cache_flush_smoke.c")) @()
 # rep movs host-pointer lifetime: force page eviction between the src and dst
 # pointer fetch and require correct bytes (See the comment in
 # source/n3ds_lift_runtime.c and docs/IR.md).

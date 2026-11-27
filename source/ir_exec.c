@@ -1481,6 +1481,11 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
     Flags f = {0};
     uint32_t ip = addr;
     uint32_t prev_end = n3ds_ir_cur_func_end;
+    /* Diagnostic only: the fault dump used to blame the last dispatched CPU,
+     * which is another guest thread after a blocking shim (Sleep) yields. The
+     * slice executor is the actual running thread here, so record it. */
+    extern CPU *n3ds_irc_current_cpu;
+    n3ds_irc_current_cpu = c;
     n3ds_ir_cur_func_end = func_end;
     if (g_a43f_trace_on < 0) n3ds_a43f_trace_prime();
     int trace = g_a43f_trace_on;
@@ -1488,6 +1493,11 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
     for (;;) {
         IrExecBlock b;
         g_ir_ip = ip;
+        /* Diagnostic: keep the fault dump's CPU pointing at the thread that is
+         * actually executing. A cooperative yield resumes mid-function, so the
+         * entry-time assignment alone goes stale. */
+        extern CPU *n3ds_irc_current_cpu;
+        n3ds_irc_current_cpu = c;
         n3ds_ir_note_pc(ip, c->r[4], c->r[1], c->r[0]);
         HP_START(hp_fetch);
         if (n3ds_ir_fetch_block(c, ip, func_end, &b)) {
@@ -1500,7 +1510,9 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
         ++n3ds_ir_blocks_run;
         n3ds_ir_block_begin(ip);
         HP_START(hp_exec);
+        n3ds_ir_block_enter();
         int done = exec_block(c, &b, &f, addr, func_end, &next);
+        n3ds_ir_block_leave();
         n3ds_ir_block_end();
         HP_ADD(HP_EXEC, hp_exec);
         if (done) { n3ds_ir_cur_func_end = prev_end; return; }

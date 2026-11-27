@@ -867,6 +867,53 @@ static IrSlot *g_slots;
 static unsigned g_nslots;
 static IrCacheStats g_stats;
 
+/* A decoded block is a pointer into g_arena, and a cooperative guest thread can
+ * be suspended *inside* one (a shim it called switched host stacks). A later
+ * whole-arena flush on another thread would then overwrite the suspended
+ * block's instruction stream, and the resumed executor would run garbage. Keep
+ * flushed arenas alive while any block is still executing, and free them at the
+ * next quiescent point. */
+#define IR_RETIRED_ARENAS 4
+static struct {
+    uint8_t *arena;
+    IrSlot *slots;
+    unsigned nslots;
+} g_retired[IR_RETIRED_ARENAS];
+static unsigned g_retired_n;
+
+static void retired_free_all(void) {
+    for (unsigned i = 0; i < g_retired_n; ++i) {
+        free(g_retired[i].arena);
+        free(g_retired[i].slots);
+    }
+    g_retired_n = 0;
+}
+
+/* Replace the current arena with fresh memory. Returns 0 on success. */
+static int arena_flush(void) {
+    uint8_t *a = (uint8_t *)calloc(1, g_cap);
+    IrSlot *s = (IrSlot *)calloc(g_nslots, sizeof *s);
+    if (!a || !s) { free(a); free(s); return -1; }
+    if (n3ds_ir_blocks_live() == 0) {
+        retired_free_all();
+    } else if (g_retired_n < IR_RETIRED_ARENAS) {
+        g_retired[g_retired_n].arena = g_arena;
+        g_retired[g_retired_n].slots = g_slots;
+        g_retired[g_retired_n].nslots = g_nslots;
+        ++g_retired_n;
+    } else {
+        /* Bound the host memory rather than silently corrupt a live block. */
+        free(a);
+        free(s);
+        return -1;
+    }
+    g_arena = a;
+    g_slots = s;
+    g_used = 0;
+    memset(g_bcache, 0, sizeof g_bcache);
+    return 0;
+}
+
 static uint32_t hash32(uint32_t v) {
     v *= 2654435761u;
     return v ^ (v >> 16);
@@ -888,6 +935,7 @@ int n3ds_ir_cache_init(size_t bytes) {
     IrSlot *s = (IrSlot *)calloc(nslots, sizeof *s);
     if (!a || !s) { free(a); free(s); return -1; }
     free(g_arena); free(g_slots);
+    retired_free_all();
     g_arena = a; g_cap = cap; g_slots = s; g_nslots = nslots;
     cache_slot_clear();
     memset(&g_stats, 0, sizeof g_stats);
@@ -932,7 +980,7 @@ static const IrBlockHeader *cache_decode(CPU *c, uint32_t start, uint32_t func_e
              * capacity shortfall never turns into a spurious decode fault. */
             g_stats.flushes++;
             g_stats.evicted += g_used;
-            cache_slot_clear();
+            if (arena_flush()) return NULL;
             off = 0;
         }
         size_t cap = g_cap > off + sizeof(IrBlockHeader) ? (g_cap - off - sizeof(IrBlockHeader)) / 4 : 0;
@@ -960,15 +1008,18 @@ static const IrBlockHeader *cache_decode(CPU *c, uint32_t start, uint32_t func_e
             }
         }
         /* Whole-arena flush: deterministic and bounded; decoded code is a pure
-         * function of the guest bytes, so dropping it cannot change behaviour. */
+         * function of the guest bytes, so dropping it cannot change behaviour
+         * unless another thread is still executing a block from it, which
+         * arena_flush() preserves. */
         g_stats.flushes++;
         g_stats.evicted += g_used;
-        cache_slot_clear();
+        if (arena_flush()) return NULL;
     }
     return NULL;
 }
 
 int n3ds_ir_fetch_block(CPU *c, uint32_t start, uint32_t func_end, IrExecBlock *out) {
+    if (n3ds_ir_blocks_live() == 0 && g_retired_n) retired_free_all();
     if (!g_arena) {
         if (n3ds_ir_cache_init(0)) return -1;
     }

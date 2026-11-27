@@ -700,10 +700,17 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
         if(logged<8u){
             ++logged;
             fprintf(stderr,"[guest] unmapped addr=%08x bytes=%lu last_call=%08x "
-                    "irc_fn=%08x irc_block=%08x\n",
+                    "irc_fn=%08x irc_block=%08x ir_ip=%08x\n",
                     addr,(unsigned long)bytes,g_last_call,
-                    (unsigned)n3ds_irc_last_function,(unsigned)n3ds_irc_last_block);
-            CPU *log_cpu = g_last_cpu ? g_last_cpu : n3ds_irc_current_cpu;
+                    (unsigned)n3ds_irc_last_function,(unsigned)n3ds_irc_last_block,
+                    (unsigned)g_ir_ip);
+            /* The slice executor records its own CPU; g_last_cpu is only the
+             * last dispatcher and may belong to another thread that blocked in
+             * a shim. Prefer the running interpreter's CPU. */
+            CPU *log_cpu = n3ds_irc_current_cpu ? n3ds_irc_current_cpu : g_last_cpu;
+            if (n3ds_irc_current_cpu && g_last_cpu && n3ds_irc_current_cpu != g_last_cpu)
+                fprintf(stderr,"[guest] cpu mismatch: running=%p last_dispatch=%p\n",
+                        (void *)n3ds_irc_current_cpu,(void *)g_last_cpu);
             if(log_cpu){
                 CPU *c=log_cpu;
                 uint32_t esp=c->r[4], st[6]={0};
@@ -840,6 +847,66 @@ void *n3ds_guest_ptr(uint32_t addr,size_t bytes) {
                             }
                         }else{
                             fprintf(stderr,"[guest] ecx_deref: unreadable\n");
+                        }
+                        /* Map state of the faulting address: a reserved slab
+                         * page (never committed) reads differently from an
+                         * address outside every region (freed object/UAF). */
+                        {
+                            int region=-1;
+                            for (size_t ri=0;ri<memory->count;++ri){
+                                GuestRegion *r=&memory->regions[ri];
+                                if (addr>=r->base && addr-r->base<r->size){region=(int)ri;break;}
+                            }
+                            GuestSlab *fs=guest_slab_find(memory,addr,1);
+                            uint32_t fprot=0;int fstate=guest_slab_state(memory,addr,&fprot);
+                            fprintf(stderr,"[guest] fault_map: region=%d slab=%s state=%d protect=%02x",
+                                    region, fs?"yes":"no", fstate,(unsigned)fprot);
+                            if (fs){
+                                uint32_t pg=(addr-fs->base)/GUEST_PAGE_SIZE;
+                                fprintf(stderr," slab_base=%08x slab_size=%08x page=%u "
+                                        "page_ptr=%p backed=%u used=%lu",
+                                        (unsigned)fs->base,(unsigned)fs->size,
+                                        (unsigned)pg,(void *)fs->page[pg],
+                                        (unsigned)fs->backed_pages,
+                                        (unsigned long)memory->used);
+                            }
+                            fputc('\n',stderr);
+                        }
+                        /* zlib inflate_table (0x91dd30) / inflate (0x91a7c0):
+                         * the state pointer and the frame slots that decide the
+                         * table lookup. A value larger than the code count means
+                         * the state or the sorted table is corrupt, not merely
+                         * an unbacked page. */
+                        if (g_ir_ip>=0x91a7c0u && g_ir_ip<=0x91e216u && log_cpu){
+                            uint32_t espf=log_cpu->r[4], sl[8]={0};
+                            static const uint32_t so[8]={0x14,0x18,0x20,0x24,
+                                                         0x2c,0x30,0x34,0xa4};
+                            fprintf(stderr,"[guest] zlib esp=%08x:",espf);
+                            for(unsigned k=0;k<8;++k){
+                                (void)guest_read32(memory,espf+so[k],&sl[k]);
+                                fprintf(stderr," [+%02x]=%08x",so[k],sl[k]);
+                            }
+                            fputc('\n',stderr);
+                            uint32_t work=sl[3], state=work-0x2f0u;
+                            uint32_t w[16]={0};int okw=1;
+                            for(unsigned k=0;k<16;++k)
+                                if(guest_read32(memory,work+4u*k,&w[k])){okw=0;break;}
+                            fprintf(stderr,"[guest] inflate work=%08x state_guess=%08x words=",work,state);
+                            for(unsigned k=0;k<16;++k)
+                                fprintf(stderr,"%s%08x",k?" ":"",okw?w[k]:0);
+                            fprintf(stderr,"%s\n",okw?"":" unreadable");
+                            uint32_t st=log_cpu->r[7], sf[8]={0};
+                            static const uint32_t sfo[8]={0x00,0x4c,0x50,0x54,
+                                                          0x60,0x64,0x68,0x6c};
+                            int oks=1;
+                            for(unsigned k=0;k<8;++k)
+                                if(guest_read32(memory,st+sfo[k],&sf[k])){oks=0;break;}
+                            fprintf(stderr,"[guest] state edi=%08x mode=%08x lencode=%08x "
+                                    "distcode=%08x lenbits=%08x nlen=%08x ndist=%08x "
+                                    "have=%08x next=%08x%s\n",st,
+                                    oks?sf[0]:0,oks?sf[1]:0,oks?sf[2]:0,oks?sf[3]:0,
+                                    oks?sf[4]:0,oks?sf[5]:0,oks?sf[6]:0,oks?sf[7]:0,
+                                    oks?"":" unreadable");
                         }
                     }else{
                         fprintf(stderr,"[guest] ecx_deref: unreadable\n");

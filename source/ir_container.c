@@ -764,7 +764,9 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
         ++n3ds_ir_blocks_run;
         n3ds_ir_block_begin(ip);
         HP_START(hp_exec);
+        n3ds_ir_block_enter();
         int done = exec_block(c, &b, &f, frame_start, func_end, &next);
+        n3ds_ir_block_leave();
         n3ds_ir_block_end();
         HP_ADD(HP_EXEC, hp_exec);
         if (done) return;

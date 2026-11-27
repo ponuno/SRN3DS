@@ -21,6 +21,13 @@ void (*n3ds_ir_yield_hook)(void);
 void (*n3ds_ir_pc_note_hook)(uint32_t pc, unsigned thread, uint32_t esp,
                              uint32_t ecx, uint32_t eax);
 uint32_t (*n3ds_ir_thread_id_hook)(void);
+/* Live decoded-block executions. See ir_core.h. */
+static int g_ir_blocks_live;
+int n3ds_ir_blocks_live(void) { return g_ir_blocks_live; }
+void n3ds_ir_block_enter(void) { ++g_ir_blocks_live; }
+void n3ds_ir_block_leave(void) {
+    if (g_ir_blocks_live > 0) --g_ir_blocks_live;
+}
 /* Diagnostic counters: how many IR blocks the current guest thread has run and
  * how many times the cooperative yield hook actually fired.  A hang dump can
  * then tell "the interpreter is stuck inside one block" (blocks flat) from
