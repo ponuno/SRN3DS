@@ -816,9 +816,8 @@ static void s_FreeEnvironmentStringsW(CPU *c){if(A(0)!=GP_ENV_W)FAIL(ERR_INVALID
 static void s_GetStartupInfoA(CPU *c){uint32_t p=A(0);memset(checked(c,p,68),0,68);M32(p)=68;RET(0,1);}
 /* Critical sections are real per-thread ownership records with the standard
  * 24-byte guest layout: +4 owner thread id (0xffffffff = free), +8 recursion,
- * +12 "held" flag, +20 spin count. A section held by another guest thread
- * cannot be waited for in the one-shot thread model, so the attempt faults
- * instead of silently entering. */
+ * +12 "held" flag, +20 spin count.  A section held by another guest thread is
+ * waited for cooperatively (see s_EnterCriticalSection). */
 #define CS_BYTES 24
 #define CS_MAX_TRACKED 64
 static uint32_t cs_tracked[CS_MAX_TRACKED];
@@ -854,8 +853,28 @@ static void s_DeleteCriticalSection(CPU *c){uint32_t p=A(0);memset(checked(c,p,C
 static void s_EnterCriticalSection(CPU *c){
     uint32_t p=A(0),me=win32_sync_current_thread();checked(c,p,CS_BYTES);
     uint32_t owner=M32(p+4);
-    if(owner!=0xffffffffu && owner!=me)
-        rt_unimpl(c,p,"EnterCriticalSection held by another guest thread (no cooperative wait)");
+    /* A section owned by another guest thread is waited for, exactly as on
+     * Windows: a short yield spin, then a timed cooperative block so the owner
+     * is scheduled and can leave.  Faulting here (the old one-shot behaviour)
+     * kills a perfectly valid waiter now that guest threads really run
+     * concurrently: TESV's stream loader enters a section held by the thread it
+     * just preempted.  Only a scheduler-less caller still refuses. */
+    if(owner!=0xffffffffu && owner!=me){
+        if(!win32_thread_scheduler_ready())
+            rt_unimpl(c,p,"EnterCriticalSection held by another guest thread (no scheduler)");
+        unsigned waited_ms=0;
+        for(unsigned spin=0;;++spin){
+            if(spin<64u){win32_thread_yield();}
+            else{
+                win32_thread_block(NULL,0,0,1);
+                if(waited_ms<60000u)++waited_ms;
+            }
+            owner=M32(p+4);
+            if(owner==0xffffffffu||owner==me)break;
+            if(waited_ms>=60000u)
+                rt_unimpl(c,p,"EnterCriticalSection still held after 60s");
+        }
+    }
     if(owner==0xffffffffu){M32(p+4)=me;M32(p+8)=1;}
     else M32(p+8)+=1;
     M32(p+12)=1;RET(0,1);

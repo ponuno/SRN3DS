@@ -106,6 +106,20 @@ static void body_waiter(CPU *c) {
     ret4(c, 0);
 }
 /* TLS / TEB / last-error isolation: set, block, read back */
+/* Blocking critical section: param layout {cs, entered, seen, finished}.  The
+ * counter is bumped only while this thread actually owns the section. */
+static void body_cs(CPU *c) {
+    uint32_t st = param_of(c);
+    uint32_t cs = M32(st + 0);
+    W1(c, "EnterCriticalSection", cs);
+    uint32_t seen = M32(st + 4);
+    M32(st + 8) = seen;
+    M32(st + 4) = seen + 1;
+    W1(c, "LeaveCriticalSection", cs);
+    M32(st + 12) = 1;
+    ret4(c, 0);
+}
+
 static void body_tls(CPU *c) {
     uint32_t st = param_of(c);
     uint32_t me = win32_thread_current_id();
@@ -154,6 +168,7 @@ static const FnEntry table[] = {
     {0x00500050u, body_return},
     {0x00500060u, body_fault},
     {0x00500070u, body_wait_forever},
+    {0x00500080u, body_cs},
     {ENTRY_DEADLOCK, body_main_deadlock},
 };
 
@@ -448,6 +463,41 @@ static void test_ir_compute_loop_yields(void) {
     close_h(t);
 }
 
+/* ---------------------------------------------------------------- 9 */
+/* A critical section owned by another guest thread is waited for, not refused
+ * and not entered.  Before this the shim faulted (the one-shot model assumed no
+ * other thread could ever hold a section), which killed TESV's loader while it
+ * waited on a lock held by a thread the executor had just preempted. */
+static void test_critical_section_waits(void) {
+    reset_state();
+    uint32_t rec = DATA + 0x220;
+    uint32_t cs = DATA + 0x2c0;
+    memset(guest_ptr(&m, cs, 64), 0, 64);
+    M32(rec + 0) = cs;
+    M32(rec + 4) = 0;
+    M32(rec + 8) = 0;
+    M32(rec + 12) = 0;
+    CPU tmp = *cpu;
+    W1(&tmp, "InitializeCriticalSection", cs);
+    W1(&tmp, "EnterCriticalSection", cs);
+    *cpu = tmp;
+    uint32_t t = spawn(0x00500080u, rec, 0);
+    CHECK(M32(rec + 4) == 0, "a thread does not enter a section another thread owns");
+    CHECK(M32(rec + 12) == 0, "the waiter is still waiting, not finished");
+    tmp = *cpu;
+    W1(&tmp, "LeaveCriticalSection", cs);
+    *cpu = tmp;
+    CHECK(wait1(t, 0xffffffffu) == 0, "the waiter finishes once the owner leaves");
+    CHECK(M32(rec + 4) == 1, "the waiter entered the section exactly once");
+    CHECK(M32(rec + 8) == 0, "the waiter saw a free section, never a shared lock");
+    CHECK(M32(rec + 12) == 1, "the waiter left the section");
+    tmp = *cpu;
+    W1(&tmp, "DeleteCriticalSection", cs);
+    *cpu = tmp;
+    printf("PASS critical section waits instead of faulting\n");
+    close_h(t);
+}
+
 /* ---------------------------------------------------------------- timeouts */
 static void test_timeout_paths(void) {
     reset_state();
@@ -523,6 +573,7 @@ int main(void) {
     test_timeout_paths();
     test_ir_flags_and_continuation();
     test_ir_compute_loop_yields();
+    test_critical_section_waits();
     report_memory();
 
     printf("SUMMARY checks=%d failures=%d\n", checks, failures);
