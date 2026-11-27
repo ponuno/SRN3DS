@@ -1403,3 +1403,61 @@ Manual Azahar step (not performed by the build agent):
 Until that screenshot/log exists this section is **build-only; frame not
 claimed**. The next possible blocker is actual Azahar `GPU_A8` sampling or
 visible rasterisation, not host geometry or index counts.
+
+## 22. External-asset closure (2026-11-27)
+
+`tools/menu_swf_assets.py` closes the question "what does `StartMenu.swf` need
+from outside itself?" without touching the C renderer. It reads the movie
+read-only from `Skyrim - Interface.bsa` through `tools/skyrim/bsa.py` (the Python
+twin of `source/bsa_reader.c`), walks every top-level tag, and resolves external
+references through a `Data` overlay. The overlay is loose file first, then
+archives searched last-to-first, matching `menu_bsa_runtime` (`Update.bsa`
+overrides `Skyrim - Interface.bsa`). `Skyrim - Interface.bsa` is the default
+movie source because it is the archive named in the task; the winning
+`Update.bsa` copy (60,284 B) is the same movie with a later revision.
+
+Measured real closure on `F:\Skyrim\Data\Skyrim - Interface.bsa`:
+
+| Item | Result |
+|---|---|
+| Movie | `interface/startmenu.swf`, 60,157 B, CWS, SWF 10, SHA-256 `26a46704...4e6d38922` |
+| Tags | 1,186 total / 950 nested in `DefineSprite` |
+| Bitmaps | **0** (`DefineBits`, JPEG2/3/4, Lossless/2) |
+| Sounds | **0** (`DefineSound`) |
+| Local fonts | **1**: `DefineFont3` id 1 "Futura Condensed", 243 glyphs, flags `0x85` (Bold bit) |
+| Imports | **2** `ImportAssets2` records, both `gfxfontlib.swf` |
+| External images | **0** (`DefineExternalImage`) |
+
+`gfxfontlib.swf` is virtual: it is not a file in any archive. Both symbols
+resolve through the shipped `Interface/fontconfig.txt`:
+
+* id 34 `$EverywhereMediumFont` -> face "Futura Condensed" Normal ->
+  `Interface/fonts_en.swf` (417,809 B) `DefineFont3` id 3.
+* id 41 `$EverywhereFont` -> face "Futura CondensedLight" Normal ->
+  `Interface/fonts_en.swf` `DefineFont3` id 1.
+
+The predicate mirrors `menu_swf_font.c`: case-insensitive face name with
+trailing NUL/space trimmed, exact Bold/Italic flag match, and more than one
+candidate is the named refusal `face ... is ambiguous` rather than a guess.
+Used font ids are 3 and 1 -- the ids the runtime already resolves. There is no
+missing bitmap, font or external movie asset, so the real closure is
+**CLOSED**. Sounds are reported as deferred, not missing: a `DefineSound` tag is
+inline audio and menu drawing does not read it, and `StartMenu.swf` has none.
+
+The tool's asset classes are complete for SWF external references:
+
+| Tag | Handling |
+|---|---|
+| `ImportAssets` (57) / `ImportAssets2` (71) | URL + ordered `id -> symbol`; direct overlay movie, else virtual font library via fontconfig |
+| `DefineExternalImage` (1000) | `Interface\...` path through the overlay (0 in StartMenu) |
+| `DefineBits` / JPEG2/3/4 (6/21/35/90) | inline; SOF dimensions read without decoding, JPEG3/4 alpha split |
+| `DefineBitsLossless` (20) / `Lossless2` (36) | inline; id/format/dimensions from the 7-byte header |
+| `DefineFont` (10) / `Font2` (48) / `Font3` (75) | inline; id/flags/name/glyph count |
+| `DefineSound` (14) | inline; format/rate/stereo/sample count/duration, deferred |
+
+JSON (`--json`) carries the full report. Exit status is 0 only when every
+drawing-relevant reference resolves. `tests/menu_swf_assets_test.py` covers the
+synthetic SWF/BSA path (35 checks, no game bytes) and, with
+`SKYRIM_N3DS_REAL_DATA=1`, the real closure above (10 more checks). Both are
+registered in `tools/run_host_tests.ps1`.
+

@@ -88,6 +88,47 @@ Masters: `Skyrim.esm` 249,371,467 B `bc84992a...a5b6ed`;
 - `Translate_ENGLISH.txt`: UTF-16LE BOM, CRLF, 20,356 B,
   `e59f31c5f3a217ac8abb78f4e45c742e07f61c38e18e39ef65e23d3275bccc20`.
 
+## SWF external-asset closure (tool, 2026-11-27)
+
+`tools/menu_swf_assets.py` answers the external-asset question for
+`Interface/StartMenu.swf` read-only. It reads the movie from
+`Skyrim - Interface.bsa` (default; `--bsa` overrides) through
+`tools/skyrim/bsa.py`, the Python twin of `source/bsa_reader.c`, walks every
+top-level tag, and resolves references through a `Data` overlay in
+`menu_bsa_runtime` order: loose file first, then archives last-to-first
+(`Update.bsa` overrides `Skyrim - Interface.bsa`).
+
+Real result (`F:\Skyrim\Data`, movie 60,157 B, SHA-256
+`26a46704c034536fb64ce9064cd70df74fe656bda1ea1a5241f20dc4e6d38922`):
+
+| Asset class | Found | Resolution |
+|---|---:|---|
+| `DefineBits` / JPEG2/3/4 / Lossless/2 | 0 | nothing external; none present |
+| `DefineSound` | 0 | nothing external; none present |
+| Local `DefineFont3` | 1 | inline: id 1 "Futura Condensed", 243 glyphs |
+| `ImportAssets2` | 2 (`gfxfontlib.swf`) | virtual; fontconfig -> `fonts_en.swf` |
+| `DefineExternalImage` | 0 | n/a |
+
+| Import | Symbol | Fontconfig | Winner | Size |
+|---|---|---|---|---:|
+| id 34 | `$EverywhereMediumFont` | "Futura Condensed" Normal | `Interface/fonts_en.swf` `DefineFont3` id 3 | 417,809 B |
+| id 41 | `$EverywhereFont` | "Futura CondensedLight" Normal | `Interface/fonts_en.swf` `DefineFont3` id 1 | 417,809 B |
+
+Resolved 3 drawing-relevant references, **missing 0**: the SWF external-asset
+closure is **CLOSED**. The face predicate is the runtime one (case-insensitive
+name, trailing NUL/space trimmed, exact Bold/Italic flags, ambiguity is a named
+refusal). A sound tag would be reported as *deferred*, never missing, because
+menu drawing does not read it; this movie has no sound tag anyway.
+
+Coverage: `tests/menu_swf_assets_test.py` builds synthetic FWS movies and a
+synthetic BSA overlay (35 checks, no game bytes) and adds 10 real-data checks
+under `SKYRIM_N3DS_REAL_DATA=1`. Registered in `tools/run_host_tests.ps1`.
+Details and the per-tag table are in `docs/MENU_SWF.md` §22.
+
+What remains outside this closure: AVM/AS2-driven `loadMovie`/`loadVariables`
+URLs (not executed), NIF/DDS logo and fog meshes, `Titles.swf` (a separate
+menu), and the `DefineSound` playback path if a future movie adds audio.
+
 ## First guest-side blocker (after caps/shader gates)
 
 Primary: **the GFx batch vertex contract**. `source/d3d9_com.c`

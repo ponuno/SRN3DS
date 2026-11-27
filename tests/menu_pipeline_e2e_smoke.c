@@ -472,10 +472,11 @@ static int backend_draw_menu_indexed(void *ctx, const D9ColorVertex *vertices,
         !state->pixel_shader ||
         !(state->pixel_shader->backend_flags & D9TEV_PLAN_MENU_TEXT) ||
         state->pixel_shader->stages != 1 || state->pixel_shader->textures != 1 ||
-        state->pixel_shader->stage[0].func_rgb != D9TEV_FUNC_MODULATE ||
+        state->pixel_shader->stage[0].func_rgb != D9TEV_FUNC_REPLACE ||
         state->pixel_shader->stage[0].func_a != D9TEV_FUNC_MODULATE ||
-        state->pixel_shader->stage[0].src_rgb[0] != D9TEV_SRC_TEX0 ||
-        state->pixel_shader->stage[0].src_rgb[1] != D9TEV_SRC_PRIMARY ||
+        state->pixel_shader->stage[0].src_rgb[0] != D9TEV_SRC_PRIMARY ||
+        state->pixel_shader->stage[0].src_a[0] != D9TEV_SRC_TEX0 ||
+        state->pixel_shader->stage[0].src_a[1] != D9TEV_SRC_PRIMARY ||
         ((MockTex *)texture)->format != D9_A8 || ((MockTex *)texture)->w != 64 ||
         ((MockTex *)texture)->h != 64 ||
         state->address_u != 3 || state->address_v != 3 ||
