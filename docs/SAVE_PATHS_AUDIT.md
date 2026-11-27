@@ -110,3 +110,14 @@ required size and untouched data, `NULL` data performs a size/type probe.
   `sBasePath`.
 * Verified: `lift` (includes `win32_smoke`), `registry`, `save_paths` all pass
   with `-SkipPython`.
+
+## 6. Save list ordering (Continue)
+
+`tests/win32_save_paths_smoke.c` also creates three `zz_*.ess` files with
+distinct mtimes, enumerates `Saves\zz_*.ess`, reads `ftLastWriteTime` from the
+320-byte `WIN32_FIND_DATAA` and sorts newest-first with the guest
+`CompareFileTime` shim, then checks that a `*.ESS` pattern matches
+case-insensitively and does not return the `.skse` sidecar. The engine itself
+sorts the list (`0xa5a9df`); the shim only has to return a truthful
+`st_mtime`. Details and the full save-loader checklist are in
+`docs/SAVE_LOADER.md`.

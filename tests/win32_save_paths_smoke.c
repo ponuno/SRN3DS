@@ -227,6 +227,110 @@ int main(void) {
     CHECK(!invoke(&cpu, "kernel32.dll", "GetFileAttributesA", args, 1, &r));
     CHECK(r == 0x80);
 
+    /* --- multiple saves + mtime ordering -------------------------------
+     * The Continue list enumerates "Saves\*.ess", reads ftLastWriteTime from
+     * WIN32_FIND_DATAA and orders entries newest-first with CompareFileTime.
+     * Pin three files with known, distinct times so a shim that loses the
+     * mtime (or returns creation time) is visible. */
+    {
+        static const struct { const char *name; uint64_t unix_sec; }
+        saves[] = {
+            { "Documents\\My Games\\Skyrim\\Saves\\zz_old.ess", 1577836800ull },
+            { "Documents\\My Games\\Skyrim\\Saves\\zz_mid.ess", 1609459200ull },
+            { "Documents\\My Games\\Skyrim\\Saves\\zz_new.ess", 1640995200ull },
+        };
+        /* 1970-01-01 .. year 3000, FILETIME uses 100 ns ticks since 1601. */
+        const uint64_t epoch = 11644473600ull;
+        for (unsigned i = 0; i < sizeof saves / sizeof saves[0]; ++i) {
+            uint32_t path = put_str(DATA + 0x4000 + i * 0x100, saves[i].name);
+            uint32_t a7[7];
+            a7[0] = path; a7[1] = 0xC0000000u; a7[2] = 0; a7[3] = 0;
+            a7[4] = 2; a7[5] = 0x80; a7[6] = 0;
+            CHECK(!invoke(&cpu, "kernel32.dll", "CreateFileA", a7, 7, &r));
+            CHECK(r != UINT32_MAX);
+            uint32_t h = r;
+            uint64_t ft = (saves[i].unix_sec + epoch) * 10000000ull;
+            CHECK(!guest_write(g_mem, DATA + 0x4800 + i * 8, &ft, 8));
+            a7[0] = h; a7[1] = 0; a7[2] = 0; a7[3] = DATA + 0x4800 + i * 8;
+            CHECK(!invoke(&cpu, "kernel32.dll", "SetFileTime", a7, 4, &r));
+            CHECK(r == 1);
+            a7[0] = h;
+            CHECK(!invoke(&cpu, "kernel32.dll", "CloseHandle", a7, 1, &r));
+            CHECK(r == 1);
+        }
+
+        struct found { char name[64]; uint64_t ft; };
+        struct found got[8];
+        unsigned ngot = 0;
+        uint32_t pat = put_str(DATA + 0x4c00,
+                               "Documents\\My Games\\Skyrim\\Saves\\zz_*.ess");
+        uint32_t fd = DATA + 0x5000;
+        args[0] = pat; args[1] = fd;
+        CHECK(!invoke(&cpu, "kernel32.dll", "FindFirstFileA", args, 2, &r));
+        CHECK(r != UINT32_MAX);
+        uint32_t fh = r;
+        do {
+            const char *nm = guest_cstr(g_mem, fd + 44, 260);
+            if (ngot < sizeof got / sizeof got[0]) {
+                snprintf(got[ngot].name, sizeof got[ngot].name, "%s", nm);
+                uint8_t ts[8];
+                CHECK(!guest_read(g_mem, fd + 20, ts, 8));
+                memcpy(&got[ngot].ft, ts, 8);
+                ++ngot;
+            }
+            args[0] = fh; args[1] = fd;
+        } while (invoke(&cpu, "kernel32.dll", "FindNextFileA", args, 2, &r) && r);
+        args[0] = fh;
+        CHECK(!invoke(&cpu, "kernel32.dll", "FindClose", args, 1, &r));
+        CHECK(r == 1);
+        CHECK(ngot == 3);
+
+        /* Insertion sort newest-first using the guest CompareFileTime shim,
+         * exactly the comparison the save menu performs. */
+        for (unsigned i = 1; i < ngot; ++i) {
+            struct found key = got[i];
+            unsigned j = i;
+            while (j > 0) {
+                uint32_t fa = DATA + 0x5800, fb = DATA + 0x5808;
+                CHECK(!guest_write(g_mem, fa, &key.ft, 8));
+                CHECK(!guest_write(g_mem, fb, &got[j - 1].ft, 8));
+                args[0] = fa; args[1] = fb;
+                CHECK(!invoke(&cpu, "kernel32.dll", "CompareFileTime", args, 2, &r));
+                if ((int32_t)r <= 0) break;
+                got[j] = got[j - 1];
+                --j;
+            }
+            got[j] = key;
+        }
+        for (unsigned i = 0; i < 3; ++i) {
+            char want[32];
+            snprintf(want, sizeof want, "zz_%s.ess",
+                     i == 0 ? "new" : i == 1 ? "mid" : "old");
+            if (strcmp(got[i].name, want) != 0)
+                fprintf(stderr, "sort[%u]='%s' want '%s'\n", i, got[i].name, want);
+            CHECK(!strcmp(got[i].name, want));
+        }
+
+        /* Extension matching must be case-insensitive and must not pick up
+         * the .skse sidecar written above. */
+        uint32_t upper = put_str(DATA + 0x4d00,
+                                 "Documents\\My Games\\Skyrim\\Saves\\*.ESS");
+        args[0] = upper; args[1] = fd;
+        CHECK(!invoke(&cpu, "kernel32.dll", "FindFirstFileA", args, 2, &r));
+        CHECK(r != UINT32_MAX);
+        fh = r;
+        unsigned ess_count = 0;
+        do {
+            const char *nm = guest_cstr(g_mem, fd + 44, 260);
+            CHECK(strstr(nm, ".skse") == NULL);
+            ++ess_count;
+            args[0] = fh; args[1] = fd;
+        } while (invoke(&cpu, "kernel32.dll", "FindNextFileA", args, 2, &r) && r);
+        args[0] = fh;
+        CHECK(!invoke(&cpu, "kernel32.dll", "FindClose", args, 1, &r));
+        CHECK(ess_count == 4);   /* autosave.ess + zz_old/mid/new */
+    }
+
     win32_shutdown();
     if (!failures) puts("PASS: win32_save_paths smoke");
 done:
