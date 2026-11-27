@@ -696,7 +696,18 @@ static void s_CreateThread(CPU *c) {
     }
     if (tid_out) M32(tid_out) = t->id;
     set_error(c, 0);
-    if (!t->suspends) activate(t);
+    /* TESV's BSThread::Start (return address 0x00a4b53b) stores the handle and
+     * sets its own +0x2c "running" flag *after* CreateThread returns.  Running
+     * the new body synchronously here is safe for the existing tests, but for
+     * that caller it lets a short-lived VMInitThread run Run->Stop before the
+     * handle/flag exist, so Stop sees [+0x1c]==0 and never clears +0x2c; the
+     * thread is gone but main spins forever in 0x690f90.  Defer only that
+     * Windows-ordered caller; the body runs at the next yield or its
+     * ResumeThread. */
+    if (!t->suspends) {
+        if (M32(c->r[4]) == 0x00a4b53bu) { if (!t->in_ready) enqueue(t); }
+        else activate(t);
+    }
     RET(t->handle, 6);
 }
 static void s_SuspendThread(CPU *c) {
