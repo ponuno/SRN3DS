@@ -46,6 +46,7 @@ PACKS_DIR = os.path.join(REPO, "source", "shader_packs")
 INDEX_PATH = os.path.join(PACKS_DIR, "index.json")
 TABLE_PATH = os.path.join(REPO, "source", "d3d9_shader_pack_table.inc")
 PLANS_PATH = os.path.join(REPO, "docs", "shader_plans.json")
+SCHEDULER_PATH = os.path.join(REPO, "docs", "scheduler_plans.json")
 CENSUS_PATH = os.path.join(REPO, "docs", "SHADER_CENSUS.json")
 
 DEFAULT_CORPUS = r"E:\host_sm3"
@@ -102,13 +103,14 @@ def _load_json(path: str):
         return json.load(handle)
 
 
-def _plan_index(path: str = PLANS_PATH) -> dict:
+def _plan_index(path: str = PLANS_PATH, include_scheduler: bool = False) -> dict:
     """Runtime plans plus every pack-owned catalog.
 
     A pack catalog (``source/shader_packs/<pack>/plans.json``) is where an
     agent's translations live; only entries marked ``"runtime": 1`` are also
-    mirrored into the shared 16-entry runtime table.  Coverage must see the
-    whole catalog, otherwise honest translations would look like refusals.
+    mirrored into the shared runtime table.  ``docs/scheduler_plans.json`` is
+    an additional cross-pack catalog; it is included for coverage but kept out
+    of the per-pack manifests so those stay owned by their generators.
     """
     documents = []
     if os.path.exists(path):
@@ -118,6 +120,8 @@ def _plan_index(path: str = PLANS_PATH) -> dict:
             extra = os.path.join(PACKS_DIR, name, "plans.json")
             if os.path.isfile(extra):
                 documents.append((extra, _load_json(extra)))
+    if include_scheduler and os.path.isfile(SCHEDULER_PATH):
+        documents.append((SCHEDULER_PATH, _load_json(SCHEDULER_PATH)))
     out = {}
     for origin, doc in documents:
         for entry in doc.get("entries", []):
@@ -385,30 +389,37 @@ def _extra_plans(index: dict) -> dict:
 
 def coverage_report(built_or_none=None) -> dict:
     index = _load_json(INDEX_PATH)
-    merged_plans = _plan_index()
+    merged_plans = _plan_index(include_scheduler=True)
     census = _load_json(CENSUS_PATH)
     rows = []
     total = Counter()
     for name, data in index["packs"].items():
         manifest = _load_json(os.path.join(PACKS_DIR, name, "manifest.json"))
         queues = Counter()
+        derived = Counter()
         for row in manifest["hashes"]:
-            if row[0] not in merged_plans:
+            plan = merged_plans.get(row[0])
+            if plan is None:
                 queues[row[2] or "unclassified"] += 1
+                derived["refused"] += 1
+                if row[2] == "pica_vs":
+                    derived["contract_only"] += 1
+            else:
+                derived[plan["status"]] += 1
         row = {
             "pack": name,
             "owner": data["owner"],
             "chunks": data["chunks"],
             "unique_hashes": data["unique_hashes"],
-            "translated": data["coverage"]["translated"],
-            "draw_enabled": data["coverage"]["draw-enabled"],
-            "refused": data["coverage"]["refused"],
-            "contract_only": data["coverage"].get("contract_only", 0),
+            "translated": derived["translated"],
+            "draw_enabled": derived["draw-enabled"],
+            "refused": derived["refused"],
+            "contract_only": derived["contract_only"],
             "refused_classes": dict(sorted(queues.items(), key=lambda kv: -kv[1])),
-            "needs": _needs(manifest),
+            "needs": _needs({"refusal_classes": dict(queues)}),
         }
         rows.append(row)
-        total.update({k: data["coverage"][k] for k in
+        total.update({k: derived[k] for k in
                       ("translated", "draw-enabled", "refused")})
         total["chunks"] += data["chunks"]
         total["unique_hashes"] += data["unique_hashes"]
@@ -422,7 +433,7 @@ def coverage_report(built_or_none=None) -> dict:
         "note": ("translated = offline plan/contract exists; draw-enabled = "
                  "certified runtime plan; refused = named software refusal; "
                  "contract_only = a pica_vs envelope hash with no committed "
-                 "descriptor"),
+                 "descriptor. Scheduler catalog rows count as translated."),
     }
 
 

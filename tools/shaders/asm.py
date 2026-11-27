@@ -237,6 +237,9 @@ class Instruction:
     literal: Tuple[float, ...] = ()
     decl: Optional[dict] = None
     control: int = 0
+    #: ``D3DSHADER_COMPARISON`` for ``ifc``/``breakc``/``setp`` (token bits
+    #: 16-23).  Zero for every other opcode.
+    comparison: int = 0
 
     @property
     def control_name(self) -> str:
@@ -436,6 +439,9 @@ def parse_program(code: bytes) -> Program:
             # Only plain TEXLD uses bits 16-23 for PROJECT/BIAS; TEXLDD/TEXLDL
             # have no control word.
             ins.control = (token >> 16) & 0xFF
+        elif opcode in (0x29, 0x2D, 0x5E):
+            # D3DSHADER_COMPARISON lives in instruction-token bits 16-23.
+            ins.comparison = (token >> 16) & 0x7
         try:
             if opcode == 0x1F and len(operands) >= 2:
                 ins.decl = _parse_decl(operands[0], operands[1]).as_dict()

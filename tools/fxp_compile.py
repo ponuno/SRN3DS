@@ -238,7 +238,9 @@ def pack_plan_paths() -> List[str]:
 
     Every ``source/shader_packs/<pack>/plans.json`` is merged into the shared
     manifest, so regenerating ``docs/shader_plans.json`` cannot silently drop
-    an agent's plans.
+    an agent's plans.  ``docs/scheduler_plans.json`` is the cross-pack
+    scheduler catalog; it is merged only for validation (all its rows are
+    ``runtime = 0``).
     """
     if not os.path.isdir(PACKS_DIR):
         return []
@@ -247,6 +249,9 @@ def pack_plan_paths() -> List[str]:
         path = os.path.join(PACKS_DIR, name, "plans.json")
         if os.path.isfile(path):
             found.append(path)
+    scheduler = os.path.join(REPO, "docs", "scheduler_plans.json")
+    if os.path.isfile(scheduler):
+        found.append(scheduler)
     return found
 
 
