@@ -763,6 +763,8 @@ class TevScheduler:
         self._lower_vec_cache: Dict[int, tuple] = {}
         self._materialize_cache: Dict[int, tuple] = {}
         self._materialize_vec_cache: Dict[int, tuple] = {}
+        self._uniform_cache: Dict[int, tuple] = {}
+        self._uniform_vec_cache: Dict[int, tuple] = {}
         self.allow_input_prebake = False
 
     # -- pass management -------------------------------------------------
@@ -909,6 +911,9 @@ class TevScheduler:
             if n + 1 < len(nonavail) and self.prev is not None:
                 self.store(self.prev)
 
+    def _const_vec(self, value: float):
+        return materialize_literals(vconst(value), self.info, self)
+
     def _stage_sources(self, info, side):
         if info[0] == "leaf":
             return None
@@ -917,15 +922,16 @@ class TevScheduler:
         if name == "lrp":
             args = (args[1], args[2], args[0])
         elif name in ("neg",):
-            args = (vzero(), args[0])
+            args = (self._const_vec(0.0), args[0])
         elif name in ("x2",):
             args = (args[0], args[0])
         elif name in ("bias",):
-            args = (args[0], vconst(0.5))
+            args = (args[0], self._const_vec(0.5))
         elif name in ("sign",):
-            args = (vop("mul", args[0], vconst(2.0)), vone())
+            args = (vop("mul", args[0], self._const_vec(2.0)),
+                    self._const_vec(1.0))
         elif name in ("complement",):
-            args = (vone(), args[0])
+            args = (self._const_vec(1.0), args[0])
         elif name == "clamp01":
             args = (args[0],)
         return name, args
@@ -978,26 +984,33 @@ class TevScheduler:
         # The descriptor has one constant register per stage.
         if len(const_regs) > 1:
             keep = sorted(const_regs)[0]
-            # Re-bind the extra constants through a pass texture.
-            for v in operands:
-                if any(is_leaf(e) and leaf_desc(e)[0] == "const"
-                       and leaf_desc(e)[1] != keep for e in v):
-                    self.store(v)
-            rgb_src = None
-            a_src = None
-            const_regs = set()
-            if rgb_info[0] == "op":
-                _, args = self._stage_sources(rgb_info, False)
-                rgb_src = [self._source(a, (0, 1, 2, 3)) for a in args]
-                const_regs.update(s.const_reg for s in rgb_src
-                                  if s.src == SRC_CONST)
-            if a_info[0] == "op":
-                _, args = self._stage_sources(a_info, True)
-                a_src = [self._source(a, (3, 3, 3, 3)) for a in args]
-                const_regs.update(s.const_reg for s in a_src
-                                  if s.src == SRC_CONST)
-            if len(const_regs) > 1:
-                raise PlanImpossible("two_constants_in_stage")
+            if self.approx:
+                for s in (rgb_src or []) + (a_src or []):
+                    if s.src == SRC_CONST:
+                        s.const_reg = keep
+                self.lost.append("constant_registers_merged_to_c%d" % keep)
+                const_regs = {keep}
+            else:
+                # Re-bind the extra constants through a pass texture.
+                for v in operands:
+                    if any(is_leaf(e) and leaf_desc(e)[0] == "const"
+                           and leaf_desc(e)[1] != keep for e in v):
+                        self.store(v)
+                rgb_src = None
+                a_src = None
+                const_regs = set()
+                if rgb_info[0] == "op":
+                    _, args = self._stage_sources(rgb_info, False)
+                    rgb_src = [self._source(a, (0, 1, 2, 3)) for a in args]
+                    const_regs.update(s.const_reg for s in rgb_src
+                                      if s.src == SRC_CONST)
+                if a_info[0] == "op":
+                    _, args = self._stage_sources(a_info, True)
+                    a_src = [self._source(a, (3, 3, 3, 3)) for a in args]
+                    const_regs.update(s.const_reg for s in a_src
+                                      if s.src == SRC_CONST)
+                if len(const_regs) > 1:
+                    raise PlanImpossible("two_constants_in_stage")
         # Texture budget is per pass, not per stage.
         if len({s.sampler for s in (rgb_src or []) + (a_src or [])
                 if s.sampler is not None}) > 3:
@@ -1204,6 +1217,109 @@ def _literal_reg(sched: TevScheduler, value: float) -> int:
     reg = 200 + len(sched.derived)
     sched.derived[reg] = round(float(value), 8)
     return reg
+
+
+def uniformize_approx(vec: tuple, sched: TevScheduler, depth=0) -> tuple:
+    """Collapse channel-local shapes the one TEV RGB side cannot express.
+
+    This is an approximation canonicalisation: it keeps the red channel when
+    RGB channels disagree, keeps the first of mixed leaf registers, and drops
+    texture units beyond the three PICA binds.  Every collapse is recorded in
+    ``lost_terms`` and the numeric error is measured afterwards.
+    """
+    key = id(vec)
+    cached = sched._uniform_vec_cache.get(key)
+    if cached is not None:
+        return cached
+    out = []
+    for e in vec:
+        out.append(_uniformize_expr(e, sched, depth))
+    out = tuple(out)
+    if not _uniform_side(out, (0, 1, 2)):
+        first = next((out[i] for i in (0, 1, 2) if not is_undef(out[i])),
+                     out[0])
+        out = (first, first, first, out[3])
+        sched.lost.append("rgb_channels_collapsed_to_red")
+    if not _uniform_side(out, (3,)):
+        first = out[3]
+        out = (out[0], out[1], out[2], first)
+    sched._uniform_vec_cache[key] = out
+    return out
+
+
+def _uniformize_expr(expr, sched, depth):
+    key = id(expr)
+    cached = sched._uniform_cache.get(key)
+    if cached is not None:
+        return cached
+    if expr[0] != O:
+        sched._uniform_cache[key] = expr
+        return expr
+    name, args = expr[1], expr[2:]
+    new_args = tuple(uniformize_approx(a, sched, depth + 1) for a in args)
+    out = (O, name) + new_args
+    sched._uniform_cache[key] = out
+    return out
+
+
+def _uniform_side(vec: tuple, side: Sequence[int]) -> bool:
+    exprs = [vec[i] for i in side if not is_undef(vec[i])]
+    if not exprs:
+        return True
+    if all(is_leaf(e) for e in exprs):
+        descs = [leaf_desc(e) for e in exprs]
+        # Literal constants with the same value are uniform; different
+        # component selectors or registers are not.
+        if all(d[0] == "lit" for d in descs):
+            return len({round(d[2], 8) for d in descs}) == 1
+        return len({(d[0], d[1]) for d in descs}) == 1 and \
+            len({d[2] for d in descs}) == 1
+    if all(e[0] == O for e in exprs):
+        return all(e[1] == exprs[0][1] and e[2:] == exprs[0][2:]
+                   for e in exprs)
+    return False
+
+
+def _drop_extra_textures(vec: tuple, sched: TevScheduler, keep=3) -> tuple:
+    samplers = []
+    seen = set()
+
+    def collect(e):
+        key = id(e)
+        if key in seen:
+            return
+        seen.add(key)
+        if e[0] == L and e[1] == "tex" and e[2] not in samplers:
+            samplers.append(e[2])
+        elif e[0] == O:
+            for a in e[2:]:
+                for x in a:
+                    collect(x)
+    for e in vec:
+        collect(e)
+    if len(samplers) <= keep:
+        return vec
+    keep_set = set(sorted(samplers)[:keep])
+    for s in samplers:
+        if s not in keep_set:
+            sched.lost.append("texture_unit_%d_dropped" % s)
+
+    cache: Dict[int, tuple] = {}
+
+    def replace(e):
+        key = id(e)
+        if key in cache:
+            return cache[key]
+        if e[0] == L and e[1] == "tex" and e[2] not in keep_set:
+            out = ("L", "tex", min(keep_set), e[3])
+        elif e[0] == O:
+            out = (O, e[1]) + tuple(
+                tuple(replace(x) for x in a) for a in e[2:])
+        else:
+            out = e
+        cache[key] = out
+        return out
+    return tuple(replace(e) for e in vec)
 
 
 def lower_approx(vec: tuple, info: BuildInfo, sched: TevScheduler,
@@ -1900,6 +2016,8 @@ def plan_shader(ir: C.IR, *, family="generic", approx_only=False,
         sched = TevScheduler(ir, info, approx=True)
         try:
             lowered = lower_approx(info.final, info, sched)
+            lowered = uniformize_approx(lowered, sched)
+            lowered = _drop_extra_textures(lowered, sched)
             lowered = materialize_literals(lowered, info, sched)
             info2 = copy.copy(info)
             info2.final = lowered
@@ -1910,6 +2028,7 @@ def plan_shader(ir: C.IR, *, family="generic", approx_only=False,
         except PlanImpossible:
             sched = TevScheduler(ir, info, approx=True)
             fallback = simplify_fallback(info, sched)
+            fallback = uniformize_approx(fallback, sched)
             fallback = materialize_literals(fallback, info, sched)
             info2 = copy.copy(info)
             info2.final = fallback
