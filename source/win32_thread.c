@@ -733,7 +733,12 @@ static void s_ResumeThread(CPU *c) {
     uint32_t previous = t->suspends;
     if (t->suspends) --t->suspends;
     set_error(c, 0);
-    if (t->suspends == 0 && t->state == ST_READY) {
+    /* ResumeThread on an already-runnable thread returns immediately on
+     * Windows; it does not switch to it.  Switching here delayed the caller
+     * (TESV's BSThread::Start -> main) until the resumed init thread happened
+     * to yield, which starved main before its next init call.  Only a real
+     * suspend->resume transition needs to activate the thread. */
+    if (previous && t->suspends == 0 && t->state == ST_READY) {
         if (!t->in_ready) enqueue(t);
         activate(t);
     }
