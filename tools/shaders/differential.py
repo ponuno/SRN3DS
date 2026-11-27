@@ -57,11 +57,12 @@ REG_NAME_TO_TYPE = {
     "b": asm.REG_CONSTBOOL,
     "l": asm.REG_LABEL,
     "p": asm.REG_PREDICATE,
+    "aL": asm.REG_LOOP,
     "vPos": 17,
     "vFace": 17,
 }
 _REG_RE = re.compile(
-    r"^(?P<type>oDepth|oPos|oFog|oC|rast|attr|[rvcaosib]l?|i|p)"
+    r"^(?P<type>oDepth|oPos|oFog|oC|aL|rast|attr|[rvcaosib]l?|i|p)"
     r"(?P<index>\d*)"
 )
 _TYPE_ORDER = sorted(REG_NAME_TO_TYPE, key=len, reverse=True)
@@ -86,11 +87,9 @@ COMP_FROM_ALIAS = {"if_lt": 4, "if_ge": 3, "if_gt": 1, "if_le": 6,
 TEXLD_OPS = {0x42, 0x5D, 0x5F}
 COMPARE_OPS = {0x29, 0x2D}
 
-# Opcodes whose operands are all sources (no destination argument).
-NO_DST_OPS = {
-    0x1B, 0x1D, 0x1C, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D,
-    0x60, 0x19, 0x1A, 0x1E, 0x00,
-}
+# Opcodes whose operands are all sources (no destination argument).  The
+# decoder exposes the same table, so the differential and the IR cannot drift.
+NO_DST_OPS = asm.NO_DST_OPCODES
 # Declaration/literal opcodes: compared out of band, not in the body.
 DECL_OPS = {0x00, 0x1F, 0x51, 0x2F, 0x30}
 
@@ -303,25 +302,34 @@ def parse_mojoshader(text: str) -> dict:
     return {"version": version, "body": body, "defs": defs, "decls": decls}
 
 
-REL_NAME_TO_TYPE = {"a": asm.REG_ADDR, "aL": 15, "i": asm.REG_CONSTINT,
-                    "b": asm.REG_CONSTBOOL, "c": asm.REG_CONST}
+REL_NAME_TO_TYPE = {"a": asm.REG_ADDR, "aL": asm.REG_LOOP,
+                    "i": asm.REG_CONSTINT, "b": asm.REG_CONSTBOOL,
+                    "c": asm.REG_CONST}
 
 
 def _parse_relative(text: Optional[str]):
+    """Normalise MojoShader's ``a0.y`` (and hypothetical ``a0.y + 4``) tuple."""
     if not text:
         return None
-    match = re.match(r"^(aL|[aicb])(\d*)(?:\.([xyzw]))?$", text)
+    # MojoShader currently prints the fxc form ``c12[a0.x]`` (base in the
+    # source register), so the explicit offset is normally absent.
+    match = re.match(r"^(aL|[aicb])(\d*)(?:\.([xyzw]))?(?:\s*\+\s*(\d+))?$",
+                     text)
     if not match:
-        return ("?", text, None)
+        return ("?", text, None, None)
     comp = match.group(3)
     return (REL_NAME_TO_TYPE.get(match.group(1), -1),
-            int(match.group(2) or 0), comp)
+            int(match.group(2) or 0), comp, int(match.group(4) or 0))
 
 
 def _proj_src(src) -> dict:
+    rel = None
+    if src.relative is not None:
+        rel = (src.relative.index_type, src.relative.index_index,
+               src.relative.component, src.relative.offset)
     return {"type": src.reg_type, "index": src.index,
             "swizzle": src.swizzle, "modifier": src.modifier,
-            "relative": None}
+            "relative": rel}
 
 
 def parse_project(code: bytes) -> dict:
@@ -353,36 +361,14 @@ def parse_project(code: bytes) -> dict:
             # 16-23; MojoShader folds it into the opcode spelling (if_lt, ...).
             comp = (opcode_token >> 16) & 0x7
         if ins.opcode in TEXLD_OPS:
-            controls = (opcode_token >> 16) & 0xFF
-        if ins.dst is not None:
-            if ins.opcode in NO_DST_OPS:
-                # asm.parse_program wraps the first operand as a destination
-                # for every opcode; for branch/loop/label opcodes that word is a
-                # source.  Re-decode the raw token as a source instead of
-                # calling this a divergence.
-                srcs.append(_proj_src(asm._src(ins.dst.token)))
-            else:
-                dst = {"type": ins.dst.reg_type, "index": ins.dst.index,
-                       "mask": ins.dst.mask, "modifier": ins.dst.modifier}
-        # Walk the source words directly: a relative-addressed source is
-        # followed by one extra relative token that is not a source operand.
-        # Word 0 is the opcode token and word 1 is the destination (or, for a
-        # branch/loop opcode, the first source already handled above).
-        start = 2
-        words = [struct.unpack_from("<I", code, ins.offset + 4 * k)[0]
-                 for k in range(start, ins.words)]
-        k = 0
-        while k < len(words):
-            token = words[k]
-            entry = _proj_src(asm._src(token))
-            if asm.is_relative(token) and k + 1 < len(words):
-                rel = words[k + 1]
-                entry["relative"] = (asm.reg_type(rel), asm.reg_number(rel),
-                                     "xyzw"[(rel >> 16) & 3])
-                k += 2
-            else:
-                k += 1
-            srcs.append(entry)
+            # The decoder now exposes the instruction control word directly.
+            controls = ins.control
+        if ins.dst is not None and ins.opcode not in NO_DST_OPS:
+            dst = {"type": ins.dst.reg_type, "index": ins.dst.index,
+                   "mask": ins.dst.mask, "modifier": ins.dst.modifier}
+        # asm.parse_program() already swallowed relative-address tokens and
+        # attached the full tuple to each source; no raw-word walk is needed.
+        srcs = [_proj_src(src) for src in ins.srcs]
         body.append({"opcode": ins.opcode, "dst": dst, "srcs": srcs,
                      "comp": comp, "controls": controls})
     return {"version": program.version, "body": body, "defs": defs,

@@ -99,21 +99,22 @@ like a divergence:
    (`LT = 3`). Using the wrong table reported 2,197 phantom mismatches.
 4. **`texldp`/`texldb`.** These are `TEXLD` with control bits
    (`D3DSI_TEXLD_PROJECT = 0x01`, `BIAS = 0x02`) in the opcode token.
-   `asm.py` decodes them as a plain `texld` and never exposes the control word,
-   so projected sampling is currently invisible to the planner. The
-   differential reads the raw token to compare it.
-5. **No-destination opcodes.** `asm.parse_program()` wraps operand 0 as a
-   destination for every opcode, so `if`, `ifc`, `loop`, `rep`, `label`,
-   `breakc`, `else` and `endif` carry a bogus destination. The differential
-   re-decodes that word as a source (`asm._src`) rather than failing.
+   `asm.py` now exposes that word (`Instruction.control`, `projected`, `biased`)
+   and names the instruction `texldp`/`texldb`, so the differential and the
+   planner both see it. It previously decoded as a plain `texld`.
+5. **No-destination opcodes.** `asm.parse_program()` used to wrap operand 0 as
+   a destination for every opcode, so `if`, `ifc`, `loop`, `rep`, `label`,
+   `breakc`, `else` and `endif` carried a bogus destination. `NO_DST_OPCODES`
+   now decodes those operands as sources, and `dst is None` in the IR.
 6. **Relative tokens are not operands.** A relative-addressed source is followed
-   by one extra relative token. `asm.py` counts it as a second source, which
-   made 320 chunks look structurally different.
+   by one extra relative token. `asm.py` now swallows it and attaches the full
+   `(base, index register, component, offset)` tuple to the source instead of
+   counting it as a second source.
 
-Items 4 and 5 are worth fixing in `asm.py`/`compile.py` before the agents rely
-on the planner for these opcodes; the differential compensates today, but the
-planner does not. This is recorded as a named follow-up, not silently patched in
-phase 1.
+Items 4-6 are now fixed in `asm.py`; the differential compares the exposed
+fields instead of compensating, and `compile.py` refuses projected/biased
+sampling and relative addressing by name rather than silently mis-planning
+them. The measured result is unchanged: zero field divergences.
 
 ## 3. One plan format, one verifier
 
@@ -247,10 +248,14 @@ python tools\shader_packs.py check
 * `tests/menu_text_plan_draw_smoke.c` needs the git-ignored `staged/` lift
   sources; a fresh worktree must copy them from the main tree before the suite
   can build that test. This is an environment prerequisite, not a code change.
-* `asm.py` still does not expose `texldp`/`texldb` control bits, relative
-  tuples, or a no-destination opcode table (section 2.1, items 4-5). The
-  differential compensates; the planner should be fixed before an agent claims
-  those chunks.
+* The three decoder gaps in section 2.1 are closed in `tools/shaders/asm.py`:
+  `texld` carries its instruction control word (`texldp`/`texldb`), relative
+  sources carry the full `(base, index reg, component, offset)` tuple and no
+  longer add a phantom source, and branch/loop opcodes have no destination.
+  `tools/shaders/differential.py` compares the exposed fields directly and
+  still reports 10,475/10,475 chunks and 6,659/6,659 streams equal. The TEV
+  planner now names projected/biased sampling and relative addressing as
+  refusals instead of mis-reading them (`tests/sm3_asm_gaps_test.py`).
 * The retail archive is only read by host tools. No capability flag, no SM3
   advertisement, no silent fallback and no new draw path were added.
 

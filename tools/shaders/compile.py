@@ -249,6 +249,9 @@ def build_value_graph(ir: IR) -> Tuple[Dict[int, tuple], tuple, Optional[str]]:
         else:
             return {}, tuple(out), "writes unsupported register type %d" % dst.reg_type
         if ins.opcode == 0x42:
+            if ins.control:
+                return {}, tuple(out), "texld control 0x%02x (%s) at word %d" % (
+                    ins.control, ins.control_name, ins.offset)
             if len(ins.srcs) < 2:
                 return {}, tuple(out), "texld without coord/sampler"
             coord, samp = ins.srcs[0], ins.srcs[1]
@@ -446,6 +449,9 @@ class TevPlanner:
     def emit(self, ins: asm.Instruction, dst_vec: tuple) -> Tuple[dict, tuple]:
         mask = ins.dst.mask
         if ins.opcode == 0x42:
+            if ins.control:
+                raise PlanError("texld_control_unsupported",
+                                "%s at word %d" % (ins.control_name, ins.offset))
             sampler = ins.srcs[1].index
             unit = self._tex_unit(sampler)
             self.textures[unit]["texcoord_reg"] = ins.srcs[0].index

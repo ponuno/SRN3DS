@@ -75,7 +75,8 @@ class MojoShaderFieldTest(unittest.TestCase):
         op = self.parse("mul r0, v2.y, c0[a0.y]")["body"][0]
         self.assertEqual(len(op["srcs"]), 2)
         self.assertIsNone(op["srcs"][0]["relative"])
-        self.assertEqual(op["srcs"][1]["relative"], (asm.REG_ADDR, 0, "y"))
+        # Full tuple: (index reg type, index reg number, component, offset).
+        self.assertEqual(op["srcs"][1]["relative"], (asm.REG_ADDR, 0, "y", 0))
 
     def test_dcl_usage_index_and_partial_precision(self):
         decls = self.parse("dcl_texcoord1_pp v1\ndcl_2d s0")["decls"]

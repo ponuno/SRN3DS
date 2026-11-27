@@ -56,14 +56,36 @@ REG_SAMPLER = 10
 REG_CONSTBOOL = 11
 REG_LABEL = 12
 REG_PREDICATE = 13
+REG_LOOP = 15
+REG_MISCTYPE = 17
 
 REG_TYPE_NAMES = {
     REG_TEMP: "r", REG_INPUT: "v", REG_CONST: "c", REG_ADDR: "a",
     REG_RASTOUT: "rast", REG_ATTROUT: "attr", REG_OUTPUT: "o",
     REG_CONSTINT: "i", REG_COLOROUT: "oC", REG_DEPTHOUT: "oDepth",
     REG_SAMPLER: "s", REG_CONSTBOOL: "b", REG_LABEL: "l",
-    REG_PREDICATE: "p",
+    REG_PREDICATE: "p", REG_LOOP: "aL", REG_MISCTYPE: "misc",
 }
+
+#: ``texld``/``texldd``/``texldl`` opcodes; the first two control names apply
+#: only to plain ``texld`` (0x42), where the instruction token carries
+#: ``D3DSI_TEXLD_PROJECT``/``D3DSI_TEXLD_BIAS`` in bits 16-23.
+TEXLD_OPS = frozenset({0x42, 0x5D, 0x5F})
+TEXLD_PROJECT = 0x01
+TEXLD_BIAS = 0x02
+
+#: Opcodes whose first operand is a source, not a destination.  Mirrors the
+#: MojoShader instruction table (``parse_args_S``/``parse_args_SS``/NULL).
+NO_DST_OPCODES = frozenset({
+    0x00,  # nop
+    0x19, 0x1A,                # call, callnz
+    0x1B, 0x1C, 0x1D,          # loop, ret, endloop
+    0x1E,                      # label
+    0x26, 0x27,                # rep, endrep
+    0x28, 0x29, 0x2A, 0x2B,    # if, ifc, else, endif
+    0x2C, 0x2D,                # break, breakc
+    0x60,                      # breakp
+})
 
 USAGE_NAMES = {
     0: "position", 1: "blendweight", 2: "blendindices", 3: "normal",
@@ -103,12 +125,47 @@ def source_modifier(token: int) -> int:
 
 SRC_MODIFIER_NAMES = {
     0: "", 1: "neg", 2: "bias", 3: "biasneg", 4: "sign", 5: "signneg",
-    6: "complement", 7: "x2", 8: "abs", 9: "absneg", 10: "not",
+    6: "complement", 7: "x2", 8: "x2neg", 9: "dz", 10: "dw", 11: "abs",
+    12: "absneg", 13: "not",
 }
 
 
 def is_relative(token: int) -> bool:
-    return bool((token >> 13) & 0x7)
+    """``D3DSP_ADDRESSMODE_RELATIVE`` (bit 13) on a source token."""
+    return bool((token >> 13) & 0x1)
+
+
+@dataclass(frozen=True)
+class Relative:
+    """Full relative-addressing tuple for an indexed source.
+
+    ``base`` is the register being indexed (the source token itself),
+    ``index_type``/``index_index`` the address or loop register (``a0``/``aL``),
+    ``component`` its channel and ``offset`` the extra constant carried in the
+    relative token.  fxc encodes ``c[a0.x + 12]`` as base ``c12`` with a zero
+    offset, so the base register number is part of the tuple.
+    """
+
+    base_type: int
+    base_index: int
+    index_type: int
+    index_index: int
+    component: str
+    offset: int
+
+    def as_dict(self) -> dict:
+        return {"base_type": self.base_type, "base_index": self.base_index,
+                "index_type": self.index_type, "index_index": self.index_index,
+                "component": self.component, "offset": self.offset}
+
+    def name(self) -> str:
+        text = REG_TYPE_NAMES.get(self.index_type,
+                                  "t%d" % self.index_type) + str(self.index_index)
+        if self.component:
+            text += "." + self.component
+        if self.offset:
+            text += " + %d" % self.offset
+        return text
 
 
 @dataclass(frozen=True)
@@ -118,7 +175,7 @@ class Src:
     index: int
     swizzle: str
     modifier: int
-    relative: bool
+    relative: Optional[Relative] = None
 
     @property
     def type_name(self) -> str:
@@ -126,6 +183,8 @@ class Src:
 
     def name(self) -> str:
         text = "%s%d" % (self.type_name, self.index)
+        if self.relative is not None:
+            text += "[%s]" % self.relative.name()
         if self.swizzle != "xyzw":
             text += "." + self.swizzle
         if self.modifier:
@@ -138,7 +197,7 @@ class Src:
             "index": self.index,
             "swizzle": self.swizzle,
             "modifier": self.modifier,
-            "relative": self.relative,
+            "relative": self.relative.as_dict() if self.relative is not None else None,
         }
 
 
@@ -177,9 +236,41 @@ class Instruction:
     srcs: Tuple[Src, ...] = ()
     literal: Tuple[float, ...] = ()
     decl: Optional[dict] = None
+    control: int = 0
+
+    @property
+    def control_name(self) -> str:
+        if self.opcode not in TEXLD_OPS:
+            return ""
+        name = "texld"
+        if self.opcode == 0x42:
+            if self.control & TEXLD_PROJECT:
+                name = "texldp"
+            if self.control & TEXLD_BIAS:
+                name = "texldb"
+        return name
+
+    @property
+    def projected(self) -> bool:
+        return self.opcode == 0x42 and bool(self.control & TEXLD_PROJECT)
+
+    @property
+    def biased(self) -> bool:
+        return self.opcode == 0x42 and bool(self.control & TEXLD_BIAS)
+
+    @property
+    def texture(self) -> Optional[dict]:
+        """``texld`` sampler/coordinate pair plus its control bits."""
+        if self.opcode not in TEXLD_OPS or len(self.srcs) < 2:
+            return None
+        return {"control": self.control, "projected": self.projected,
+                "biased": self.biased,
+                "coord": self.srcs[0], "sampler": self.srcs[1]}
 
     @property
     def name(self) -> str:
+        if self.opcode == 0x42 and self.control in (TEXLD_PROJECT, TEXLD_BIAS):
+            return self.control_name
         return OPCODE_NAMES.get(self.opcode, "op_0x%02x" % self.opcode)
 
     def text(self) -> str:
@@ -190,6 +281,19 @@ class Instruction:
         if self.literal:
             parts.append("{%s}" % ", ".join("%g" % v for v in self.literal))
         return " ".join(parts)
+
+    def as_dict(self) -> dict:
+        return {
+            "opcode": self.opcode,
+            "name": self.name,
+            "offset": self.offset,
+            "words": self.words,
+            "control": self.control,
+            "dst": self.dst.as_dict() if self.dst is not None else None,
+            "srcs": [src.as_dict() for src in self.srcs],
+            "literal": list(self.literal),
+            "decl": self.decl,
+        }
 
 
 @dataclass
@@ -328,6 +432,10 @@ def parse_program(code: bytes) -> Program:
             return program
         operands = [_u32(code, pos + 4 * i) for i in range(1, total_words)]
         ins = Instruction(opcode=opcode, offset=pos, words=total_words)
+        if opcode == 0x42:
+            # Only plain TEXLD uses bits 16-23 for PROJECT/BIAS; TEXLDD/TEXLDL
+            # have no control word.
+            ins.control = (token >> 16) & 0xFF
         try:
             if opcode == 0x1F and len(operands) >= 2:
                 ins.decl = _parse_decl(operands[0], operands[1]).as_dict()
@@ -339,13 +447,18 @@ def parse_program(code: bytes) -> Program:
             elif opcode == 0x30 and len(operands) >= 5:  # defi
                 ins.dst = _dst(operands[0])
                 ins.literal = tuple(float(v) for v in operands[1:5])
-            elif opcode in (0x2F, 0x1E) and len(operands) >= 2:  # defb/label
+            elif opcode == 0x2F:  # defb: destination + one literal dword
                 ins.dst = _dst(operands[0])
+                if len(operands) >= 2:
+                    ins.literal = (float(operands[1] & 0xFFFF),)
+            elif opcode in NO_DST_OPCODES:
+                # Branch/loop/label operands are source-format tokens: there is
+                # no destination to wrap.  A relative source still consumes a
+                # second token.
+                ins.srcs = _parse_srcs(operands, 0)
             elif operands:
                 ins.dst = _dst(operands[0])
-                ins.srcs = tuple(_src(v) for v in operands[1:])
-            if ins.decl is None and opcode not in (0x1F,):
-                pass
+                ins.srcs = _parse_srcs(operands, 1)
         except (struct.error, IndexError) as exc:
             program.error = "operand decode failed at %d: %s" % (pos, exc)
             return program
@@ -355,9 +468,35 @@ def parse_program(code: bytes) -> Program:
     return program
 
 
-def _src(token: int) -> Src:
+def _src(token: int, relative: Optional[Relative] = None) -> Src:
     return Src(token, reg_type(token), reg_number(token), swizzle(token),
-               source_modifier(token), is_relative(token))
+               source_modifier(token), relative)
+
+
+def _parse_srcs(operands: Sequence[int], start: int) -> Tuple[Src, ...]:
+    """Decode source operands, swallowing relative-address tokens.
+
+    A relative source is followed by one extra token describing the index
+    register; that token is not an operand of its own.
+    """
+    srcs: List[Src] = []
+    index = start
+    while index < len(operands):
+        token = operands[index]
+        relative: Optional[Relative] = None
+        step = 1
+        if is_relative(token) and index + 1 < len(operands):
+            rel = operands[index + 1]
+            relative = Relative(
+                base_type=reg_type(token), base_index=reg_number(token),
+                index_type=reg_type(rel), index_index=reg_number(rel),
+                component=SWIZZLE_NAMES[(rel >> 16) & 3],
+                offset=reg_number(rel),
+            )
+            step = 2
+        srcs.append(_src(token, relative))
+        index += step
+    return tuple(srcs)
 
 
 def _dst(token: int) -> Dst:
@@ -380,16 +519,24 @@ def feature_vector(program: Program) -> dict:
     inputs = [d for d in program.declarations if d.reg_type == REG_INPUT]
     constants_used = set()
     out_regs = set()
+    projected = 0
+    biased = 0
     for ins in program.instructions:
         for src in ins.srcs:
             if src.reg_type == REG_CONST:
                 constants_used.add(src.index)
         if ins.dst is not None and ins.dst.reg_type == REG_COLOROUT:
             out_regs.add(ins.dst.index)
+        if ins.projected:
+            projected += 1
+        if ins.biased:
+            biased += 1
     return {
         "opcodes": set(counter),
         "instructions": len(program.instructions),
         "texture_samples": texld,
+        "projected_samples": projected,
+        "biased_samples": biased,
         "samplers": [d.reg_index for d in samplers],
         "sampler_types": [d.texture_type for d in samplers],
         "inputs": [(d.usage_name, d.usage_index, d.reg_index) for d in inputs],
@@ -424,9 +571,10 @@ def used_constant_names(program: Program) -> List[str]:
 
 __all__ = [
     "OPCODE_NAMES", "NAME_TO_OPCODE", "REG_TEMP", "REG_INPUT", "REG_CONST",
-    "REG_COLOROUT", "REG_DEPTHOUT", "REG_SAMPLER", "USAGE_NAMES", "Src", "Dst",
-    "Instruction", "ConstantInfo", "Declaration", "Program", "parse_program",
-    "parse_constants", "feature_vector", "constant_name_map",
-    "used_constant_names", "swizzle", "write_mask", "reg_type", "reg_number",
-    "TEV_SIMPLE_OPCODES",
+    "REG_COLOROUT", "REG_DEPTHOUT", "REG_SAMPLER", "REG_LOOP", "USAGE_NAMES",
+    "Src", "Dst", "Relative", "Instruction", "ConstantInfo", "Declaration",
+    "Program", "parse_program", "parse_constants", "feature_vector",
+    "constant_name_map", "used_constant_names", "swizzle", "write_mask",
+    "reg_type", "reg_number", "is_relative", "TEXLD_OPS", "TEXLD_PROJECT",
+    "TEXLD_BIAS", "NO_DST_OPCODES", "TEV_SIMPLE_OPCODES",
 ]
