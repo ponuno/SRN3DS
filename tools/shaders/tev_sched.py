@@ -2018,7 +2018,7 @@ def _preconditions(ir, info, sched, quality):
 
 
 def plan_shader(ir: C.IR, *, family="generic", approx_only=False,
-                samples=8) -> Optional[dict]:
+                samples=8, max_textures=3) -> Optional[dict]:
     if ir.kind != "ps" or ir.error:
         return None
     reduced, flow = reduce_flow(ir)
@@ -2050,7 +2050,7 @@ def plan_shader(ir: C.IR, *, family="generic", approx_only=False,
         try:
             lowered = lower_approx(info.final, info, sched)
             lowered = uniformize_approx(lowered, sched)
-            lowered = _drop_extra_textures(lowered, sched)
+            lowered = _drop_extra_textures(lowered, sched, keep=max_textures)
             lowered = materialize_literals(lowered, info, sched)
             info2 = copy.copy(info)
             info2.final = lowered

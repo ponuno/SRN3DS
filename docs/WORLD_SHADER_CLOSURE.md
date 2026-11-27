@@ -308,6 +308,48 @@ one-dominant-texture plan at ~0.9 error is not a meaningful runtime path and
 stays off. Estimate **L** (pass decomposition + per-pass texture budget); the
 opcode work is not the blocker.
 
+## 2i. Multi-pass texture-splitting pilot (`53fe44bb`)
+
+`tools/multipass_split.py` probed all eight refused 10-chunk lighting PS with
+256 samples and the scheduler's two-texture cap:
+
+| Hash | Samplers | Passes if split 2/unit | Best 2-texture error | Executable |
+|---|---|---:|---:|---|
+| `53fe44bb` (pilot) | s0..s6 | 4 | 0.972 | no |
+| `6b95db62` | s0..s4 | 3 | 0.972 | no |
+| `c157fddc` | s0..s4 | 3 | 0.972 | no |
+| `c2b26bfe` | s0..s4 | 3 | 0.972 | no |
+| `997083d1` | s0..s3 | 2 | 0.943 | no |
+| `a47654d2` | s0..s3 | 2 | 0.972 | no |
+| `f43b6dc2` | s0..s3 | 2 | 0.972 | no |
+| `d8a0ed61` | s0..s2 | 2 | 0.943 | no |
+
+Two independent reasons block promotion:
+
+1. **Runtime contract.** `d9_draw_plan_passes` replays the draw once per pass
+   with the same `d->texture`/`d->texture1`; the COM layer stores only stage 0
+   and 1 textures (`SetTexture` maps to `g.tex`/`g.tex1`). A pass cannot
+   rebind s2..s6, so a 4-pass plan would still sample the same two textures.
+   Executing a texture split needs per-pass texture handles in
+   `D9ShaderPlanPass`, core binding for them, and COM storage for stages > 1 —
+   `d3d9_core.c` is owned by another agent this round, so this is recorded as
+   blocked rather than half-implemented.
+2. **The two-texture reduction is a different shader.** Even with 256 samples
+   the best 2-texture plan is 0.94–0.97 max error (the dominant-texture
+   fallback), far above the 0.10 review bar. A split that keeps two terms and
+   drops five is not a runtime path.
+
+**Fill-rate note for the eventual design:** 53fe44bb would need 4 passes;
+at the 240×400 device surface (~96k px) that is ~384k shaded pixels per
+affected surface, plus an RGBA8 blend target (rounding at every accumulate).
+The 2–4 pass hashes would cost 2–4×. This must be measured before claiming a
+frame.
+
+**Promoted: 0 of 8.** The pilot stays `draw_enabled: 0` with the exact reasons
+above; the feasibility record is
+`source/shader_packs/multipass_split_report.json` and
+`tests/multipass_split_test.py` keeps it honest.
+
 ## 3. Top-30 world plans by frequency
 
 By census chunk count (`manifest.json` `hashes[3]`); status is the committed

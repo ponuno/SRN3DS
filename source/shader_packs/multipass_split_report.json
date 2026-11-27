@@ -1,0 +1,213 @@
+{
+ "device_textures": 2,
+ "entries": [
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.53fe44bb",
+   "passes_needed": 4,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 7 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.972 > 0.10"
+   ],
+   "sampler_count": 7,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6"
+   ],
+   "sha256": "53fe44bbf0df41698bfa5c6b56a4143cbe4e26dfdb8403d24ce6456370d110d9",
+   "two_texture_plan": {
+    "max_abs_error": 0.9720558521384784,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  },
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.6b95db62",
+   "passes_needed": 3,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 5 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.972 > 0.10"
+   ],
+   "sampler_count": 5,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2",
+    "s3",
+    "s4"
+   ],
+   "sha256": "6b95db62925cd2db98afcffee95d6e5157a0121e47c30ced38d7bfe332237a07",
+   "two_texture_plan": {
+    "max_abs_error": 0.9720558521384784,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  },
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.997083d1",
+   "passes_needed": 2,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 4 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.943 > 0.10"
+   ],
+   "sampler_count": 4,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2",
+    "s3"
+   ],
+   "sha256": "997083d1e3f0e092ef0f6af7ff8ea3c4791092e8097730e20b84d98ce99e6755",
+   "two_texture_plan": {
+    "max_abs_error": 0.9432826568834476,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  },
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.a47654d2",
+   "passes_needed": 2,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 4 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.972 > 0.10"
+   ],
+   "sampler_count": 4,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2",
+    "s3"
+   ],
+   "sha256": "a47654d2b4aa45719b4264ef3b9bf331225682759cfff9ad1a421a3180d699cd",
+   "two_texture_plan": {
+    "max_abs_error": 0.9720558521384784,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  },
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.c157fddc",
+   "passes_needed": 3,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 5 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.972 > 0.10"
+   ],
+   "sampler_count": 5,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2",
+    "s3",
+    "s4"
+   ],
+   "sha256": "c157fddc80953f6dc9315801eb14a356984b695b88f99ac29391f0d158d68661",
+   "two_texture_plan": {
+    "max_abs_error": 0.9720558521384784,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  },
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.c2b26bfe",
+   "passes_needed": 3,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 5 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.972 > 0.10"
+   ],
+   "sampler_count": 5,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2",
+    "s3",
+    "s4"
+   ],
+   "sha256": "c2b26bfeb2b3a875bb97df2ce048f5804d4e82edd61eefdd9aa9841fd837cc88",
+   "two_texture_plan": {
+    "max_abs_error": 0.9720558521384784,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  },
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.d8a0ed61",
+   "passes_needed": 2,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 3 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.943 > 0.10"
+   ],
+   "sampler_count": 3,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2"
+   ],
+   "sha256": "d8a0ed61a53d04be8a5103ea94c3de8bb429de58e19bdbe00e8cc13cde1592fc",
+   "two_texture_plan": {
+    "max_abs_error": 0.9432826568834476,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  },
+  {
+   "chunks": 10,
+   "device_textures": 2,
+   "executable": false,
+   "id": "multipass.f43b6dc2",
+   "passes_needed": 2,
+   "reasons": [
+    "d9d9_draw_plan_passes reuses d->texture/d->texture1 for every pass; 4 samplers cannot be rebound per pass",
+    "best 2-texture plan error 0.972 > 0.10"
+   ],
+   "sampler_count": 4,
+   "samplers": [
+    "s0",
+    "s1",
+    "s2",
+    "s3"
+   ],
+   "sha256": "f43b6dc2e1479082e71471d08a1a8ac1b646cbde6c5f951ac8c5eff57fc09d5c",
+   "two_texture_plan": {
+    "max_abs_error": 0.9720558521384784,
+    "samples": 256,
+    "stages": 1,
+    "textures": 1
+   }
+  }
+ ],
+ "meaningful_error": 0.1,
+ "samples": 256,
+ "schema": "multipass-split/1"
+}
