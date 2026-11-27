@@ -55,6 +55,8 @@ void rt_cpuid(CPU *c, uint32_t *a, uint32_t *b, uint32_t *cc, uint32_t *d) {
     (void)c; (void)a; (void)b; (void)cc; (void)d;
 }
 uint64_t rt_rdtsc(void) { return 1; }
+int g_a43f_trace_on = 0;
+void n3ds_a43f_trace_prime(void) {}
 uint32_t g_ir_ip;
 void n3ds_lift_set_ir_ip(uint32_t ip) { (void)ip; }
 void n3ds_a43f_trace_pre(CPU *c, uint32_t block_ip, uint32_t func_addr,
