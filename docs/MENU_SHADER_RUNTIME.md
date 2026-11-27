@@ -43,7 +43,8 @@ from a shipped family. The runtime contract is:
 - `vs_3_0`, no texture sample, no branch/loop;
 - opcodes restricted to the measured static menu set
   (`mov/add/mad/mul/rcp/rsq/dp3/dp4/min/max/slt/sge/frc/dcl/pow/sincos/mova/def`);
-- input semantics only `position0`, `texcoord0..4`, `color0`;
+- input semantics only `position0`, `normal0`, `texcoord0..4`, `tangent0`,
+  `binormal0`, `color0`, `color1` (the measured static set);
 - output declarations for `position0`, `texcoord0`, `color0`, `color1`;
 - 1..96 instructions.
 
@@ -228,6 +229,84 @@ diagnostic only; no compiler, no bytecode cache and no fake success were added.
   first-draw capture does not yet record it.
 - **A rendered main-menu frame or pixel proof.**
 
+### 1.6 Residual `menu.generic.vs` inventory (314 dumped hashes)
+
+The dumps under `TESV_MENU_SHADER_DUMP` (314 unique `vs_*.bin`, captured while
+the StartMenu assets load) were replayed with
+`tools/shaders/menu_vs_residual.py`.  It mirrors `vs_input_allowed()`,
+`vs_opcode_allowed()` and `vs_cpu_safe()`, and taints the visible outputs from
+`tangent0`/`binormal0`.  Result:
+
+| Class | Unique hashes | Runtime decision |
+|---|---:|---|
+| CPU-safe fixed transform | 5 | selected and drawable |
+| `tangent0`/`binormal0` family, non-fixed position | 46 | selected, draw refused by name |
+| skinning `blendweight0`/`blendindices0` | 37 | named creation refusal |
+| `nrm` opcode | 92 | named creation refusal |
+| `lrp` (0x12) | 10 | named creation refusal |
+| structural (no texcoord0, >96 instructions) | 20 | named creation refusal |
+
+The five CPU-safe hashes are exactly the fixed position/UV/colour members:
+
+```
+0975cc503f63d9b1  uvgen=1
+264c20659a094788  uvgen=0 zyxw
+4999d5438e8c7758  uvgen=1
+6186c545f488d0f8  uvgen=1
+73904d3f32bd5eec  uvgen=1
+```
+
+`tangent0` and `binormal0` are now measured input declarations
+(`vs_input_allowed()`), because the taint pass shows that in all 46 members
+they reach only normal/tangent-space lighting outputs (`texcoord1..7`,
+`color1`) and never `position0`, `texcoord0` or `color0`.  They still do not
+become drawable: every one of the 46 builds its clip position through a
+temporary (`dp4 c0..c3, rT`, where `rT` is a `cN`-scaled/`NORMAL`-displaced
+copy of POSITION0).  `vs_cpu_safe()` therefore keeps `backend_cpu_safe = 0`
+and the draw is refused by name as "not the fixed CPU transform".  This is a
+dataflow proof, not a hash allow-list.
+
+`lrp` (0x12) stays a named refusal: `lrp` is a vertex arithmetic instruction,
+the fixed COM path is not a VS interpreter, and there is no PICA VS emitter for
+it.  Each dumped `lrp` member also fails the fixed-position proof, so accepting
+the opcode would not make a single draw possible.  The diagnostic now says
+`opcode 'lrp' (0x12) has no accepted PICA VS equivalent`.
+
+None of the 46 tangent/binormal, 92 `nrm` or 10 `lrp` members is needed for the
+StartMenu GFx draw: the measured run creates the menu VS objects but submits
+only the 8 background primitives, no menu draw.  They are world/effect shaders
+loaded while the menu is resident; they remain bounded, named refusals rather
+than being routed through a generic interpreter.
+
+### 1.7 Offscreen render targets for GFx
+
+The real run logs were checked for `CreateRenderTarget`, `CreateTexture`
+(`D3DUSAGE_RENDERTARGET`), `SetRenderTarget`, `StretchRect` and
+`GetRenderTargetData`:
+
+- `E:\menu_draw\last_run.log` and `E:\slice_b7c\last_run.log` contain **no**
+  `CreateRenderTarget`, `SetRenderTarget`, `StretchRect` or
+  `GetRenderTargetData` call (successes and named failures would both be
+  logged by the COM bridge).
+- Both logs contain exactly **three**
+  `CreateTexture: render-target textures must be power-of-two 8..1024`
+  refusals, immediately after the menu texture loads and before the menu VS
+  creation.  GFx therefore *does* request offscreen render-target textures
+  (Scaleform mask/filter targets), and the current POT-only gate is the hole.
+
+What is already supported: one-level, `D3DPOOL_DEFAULT`,
+`D3DUSAGE_RENDERTARGET`, `A8R8G8B8`/`X8R8G8B8`; the texture is sampleable and
+bindable as a target; `StretchRect` handles same-format surface blits; depth
+attachments are supported for explicit targets.  What is missing is a
+non-power-of-two logical target.  `Target` already separates logical `w/h`
+from native `nw/nh` and `apply_target_viewport()` already has a
+`target_viewport_scaled` path, but `create_target()` rejects NPOT before that
+path, and a padded POT storage view would need UV sub-rect scaling for the
+sampled target.  That is not implemented in this change; the three requests
+stay named `D3DERR_NOTAVAILABLE` refusals.  **Offscreen RTs are required for
+the GFx masks; this is the next RT task, not a shader task.**  No `DevCaps`
+field is changed by that gap.
+
 ## 4. Tests
 
 Targeted command:
@@ -298,3 +377,25 @@ application.`), not a rendering PASS.
 Note: `-OutDir` must be absolute. With a relative `-OutDir` the harness sets
 `TEMP` to a relative path and `steam`/`registry` exit 2 from `tmpfile_s`
 before running any check; both pass when `TEMP` is absolute.
+
+### 4.1 Residual-family coverage
+
+`menu_vs_family` now covers the measured input additions and real dumped
+bytecode:
+
+- synthetic `tangent0`/`binormal0` declaration used only in a temp:
+  selected, `backend_cpu_safe = 1` (dataflow keeps it off the visible path);
+- the same declaration feeding a position row: selected, `cpu_safe = 0`;
+- real `6186c545...` (position+texgen, no colour): `cpu_safe = 1`, `uvgen = 1`;
+- real `10d46b0a...` (tangent/binormal): selected, `cpu_safe = 0`;
+- real `08865907...` (`lrp`): named refusal containing `lrp` and `0x12`.
+
+The dump bytes stay outside the repository. The test reads
+`%TESV_MENU_VS_DUMPS%\vs_<sha>.bin` (default `E:\menu_draw_dump`) and prints a
+skip notice when the directory is absent.
+
+Targeted run in this worktree (`com`, `render_texture`, `rt_readback`,
+`d3dx_*`, `menu_vs_family`, `menu_closure`): **8 passed, 0 failed** for the
+C tests plus **menu_vs_family PASS** and **menu_closure 279 checks, 0
+failures**.  `tools/shaders/runtime_audit.py` reports 128 draw-enabled plans,
+128 runtime paths and 30 valid PICA VS programs (0 unmatched).

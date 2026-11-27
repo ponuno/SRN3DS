@@ -245,6 +245,8 @@ static int vs_input_allowed(unsigned usage, unsigned index) {
     if (usage == 0u && index == 0u) return 1;       /* position0 */
     if (usage == 3u && index == 0u) return 1;       /* normal0 (logo light) */
     if (usage == 5u && index <= 4u) return 1;       /* texcoord0..4 */
+    if (usage == 6u && index == 0u) return 1;       /* tangent0 (measured) */
+    if (usage == 7u && index == 0u) return 1;       /* binormal0 (measured) */
     if (usage == 10u && index == 0u) return 1;      /* color0 */
     if (usage == 10u && index == 1u) return 1;      /* color1 (logo tint) */
     return 0;
@@ -496,10 +498,19 @@ static int walk_vs(const uint32_t *code, size_t words, D9MenuShaderMatch *out,
             return -1;
         }
         if (!vs_opcode_allowed(op)) {
-            if (why && why_size)
-                snprintf(why, why_size,
-                         "menu.generic.vs: opcode '0x%02x' is outside the measured static VS set",
-                         op);
+            if (why && why_size) {
+                /* lrp is measured but has no accepted PICA VS equivalent: the
+                 * fixed backend is not an interpreter, and every dumped lrp
+                 * member also needs a non-fixed position path.  Keep it a
+                 * named refusal instead of pretending to execute it. */
+                if (op == 0x12u)
+                    snprintf(why, why_size,
+                             "menu.generic.vs: opcode 'lrp' (0x12) has no accepted PICA VS equivalent");
+                else
+                    snprintf(why, why_size,
+                             "menu.generic.vs: opcode '0x%02x' is outside the measured static VS set",
+                             op);
+            }
             return -1;
         }
         if (op == D3DSIO_DCL) {
