@@ -11,6 +11,7 @@
 
 #include "bsa_reader.h"
 #include "menu_swf_atlas.h"
+#include "menu_swf_batch.h"
 #include "menu_swf_display.h"
 #include "menu_swf_font.h"
 #include "menu_swf_raster.h"
@@ -21,6 +22,7 @@
 #include <string.h>
 
 #define REAL_ATLAS_SIZE 64u
+#define REAL_TEXT_ATLAS_SIZE 512u
 #define REAL_RASTER_SIZE 64u
 #define REAL_WHITE_GLYPH 0xffffu
 
@@ -261,6 +263,15 @@ static void test_real(const char *data_dir) {
     uint32_t nonempty = 0, glyphs = 0, missing_glyphs = 0;
     uint32_t vertices = 0, indices = 0, triangles = 0;
     uint32_t substituted = 0, layout_records = 0;
+    uint32_t batch_glyph_count = 0, geometry_slots = 0, empty_slots = 0;
+    uint32_t zero_advances = 0, raster_refusals = 0;
+    uint32_t letter_spacing_attrs = 0, kerning_attrs = 0, unknown_attrs = 0;
+    uint32_t label_mask = 0;
+    MenuSwfTextGlyph batch_glyphs[MENU_SWF_TEXT_MAX_GLYPHS];
+    MenuSwfAtlasGlyph atlas_glyphs[MENU_SWF_TEXT_MAX_GLYPHS];
+    uint8_t *atlas_owned[MENU_SWF_TEXT_MAX_GLYPHS];
+    memset(atlas_glyphs, 0, sizeof atlas_glyphs);
+    memset(atlas_owned, 0, sizeof atlas_owned);
     if (st == MENU_SWF_OK) {
         char plain[MENU_SWF_TEXT_MAX_CHARS + 1];
         for (uint32_t i = 0; i < edits.count; ++i) {
@@ -270,6 +281,10 @@ static void test_real(const char *data_dir) {
                                           reason, sizeof reason);
             if (st != MENU_SWF_OK || !len) continue;
             ++nonempty;
+            if (!strcmp(plain, "$Loading extra content.")) label_mask |= 1u;
+            else if (!strcmp(plain, "$Loading downloadable content...")) label_mask |= 2u;
+            else if (!strcmp(plain, "Start a New Game?")) label_mask |= 4u;
+            printf("real: label id=%u text=\"%s\"\n", edit->character_id, plain);
             MenuSwfFontResolution res;
             st = menu_swf_font_resolve(&imports, &config, &font_list,
                                        edit->font_id, "fonts_en.swf", &res,
@@ -289,6 +304,9 @@ static void test_real(const char *data_dir) {
                 MENU_SWF_TEXT_MAX_RUNS, &run_count, &html, reason,
                 sizeof reason);
             if (st != MENU_SWF_OK) continue;
+            letter_spacing_attrs += html.letter_spacing_attrs;
+            kerning_attrs += html.kerning_attrs;
+            unknown_attrs += html.unknown_attrs;
             const MenuSwfFontSummary *run_fonts[MENU_SWF_TEXT_MAX_RUNS];
             memset(run_fonts, 0, sizeof run_fonts);
             int run_fonts_ok = 1;
@@ -339,6 +357,97 @@ static void test_real(const char *data_dir) {
                    edit->character_id, res.requested_id, res.resolved_id,
                    mesh.glyph_count, mesh.missing_glyphs, mesh.vertex_count,
                    mesh.index_count, mesh.triangle_count);
+
+            /* Preserve each real placement, then rasterise its resolved outline
+             * at the exact layout scale into a local A8 rectangle.  Repeated
+             * characters remain separate atlas inputs so the resulting entry
+             * array is directly aligned with the combined text mesh. */
+            for (uint32_t j = 0; j < mesh.glyph_count; ++j) {
+                if (batch_glyph_count >= MENU_SWF_TEXT_MAX_GLYPHS) {
+                    ++failures;
+                    break;
+                }
+                uint32_t slot = batch_glyph_count++;
+                const MenuSwfTextGlyph *g = &mesh.glyphs[j];
+                batch_glyphs[slot] = *g;
+                MenuSwfAtlasGlyph *ag = &atlas_glyphs[slot];
+                memset(ag, 0, sizeof *ag);
+                ag->glyph_index = (uint16_t)slot;
+                if (!g->has_geometry) {
+                    ++empty_slots;
+                    continue;
+                }
+                ++geometry_slots;
+                if (!g->advance && g->code != ' ') ++zero_advances;
+                uint32_t r = g->run_index;
+                const MenuSwfFontSummary *rf =
+                    r < run_count && run_fonts[r] ? run_fonts[r] : res.font;
+                MenuSwfTextMesh glyph_mesh;
+                text_init(&glyph_mesh);
+                st = menu_swf_tess_glyph(
+                    fonts, font_size, rf->font_id, g->code,
+                    MENU_SWF_TESS_NON_ZERO, &glyph_mesh.glyph_tess, reason,
+                    sizeof reason);
+                if (st != MENU_SWF_OK) {
+                    printf("real: glyph code=%u tess refused: %s\n", g->code,
+                           reason);
+                    ++raster_refusals;
+                    continue;
+                }
+                int32_t width = g->bounds.xmax - g->bounds.xmin;
+                int32_t height = g->bounds.ymax - g->bounds.ymin;
+                if (width <= 0 || height <= 0) {
+                    ++raster_refusals;
+                    continue;
+                }
+                uint8_t *pixels = malloc((size_t)width * height);
+                if (!pixels) {
+                    ++raster_refusals;
+                    continue;
+                }
+                atlas_owned[slot] = pixels;
+                double run_scale =
+                    r < run_count && runs[r].has_size
+                        ? (double)runs[r].size / ((double)edit->font_height / 20.0)
+                        : 1.0;
+                double sx = ((double)style.m00 / 65536.0) * run_scale;
+                double sy = ((double)style.m11 / 65536.0) * run_scale;
+                MenuSwfRasterTransform transform;
+                memset(&transform, 0, sizeof transform);
+                transform.m00 = sx;
+                transform.m11 = sy;
+                transform.tx = (double)g->x - g->bounds.xmin;
+                transform.ty = (double)g->y - g->bounds.ymin;
+                MenuSwfRasterTarget target = {
+                    (uint32_t)width, (uint32_t)height, (uint32_t)width,
+                    pixels, g->advance, 0};
+                MenuSwfRasterResult raster_result;
+                MenuSwfRasterStatus raster_status = menu_swf_raster_mesh(
+                    &glyph_mesh.glyph_tess, &transform, &target,
+                    &raster_result, reason, sizeof reason);
+                if (raster_status != MENU_SWF_RASTER_OK ||
+                    !raster_result.has_coverage) {
+                    printf("real: glyph code=%u raster refused: %s "
+                           "(bounds=%d,%d,%d,%d pen=%d,%d transform=%.6f,%.6f,%.6f,%.6f size=%dx%d tris=%u used=%u,%u,%u,%u)\n",
+                           g->code, reason, g->bounds.xmin, g->bounds.xmax,
+                           g->bounds.ymin, g->bounds.ymax, g->pen_x, g->pen_y,
+                           transform.m00, transform.m11, transform.tx,
+                           transform.ty, width, height,
+                           glyph_mesh.glyph_tess.triangle_count,
+                           raster_result.x0, raster_result.y0,
+                           raster_result.x1, raster_result.y1);
+                    free(pixels);
+                    atlas_owned[slot] = NULL;
+                    memset(ag, 0, sizeof *ag);
+                    ag->glyph_index = (uint16_t)slot;
+                    ++raster_refusals;
+                    continue;
+                }
+                ag->pixels = pixels;
+                ag->stride = (uint32_t)width;
+                ag->width = (uint32_t)width;
+                ag->height = (uint32_t)height;
+            }
         }
     }
     printf("real: nonempty=%u layout=%u substituted=%u glyphs=%u missing=%u "
@@ -349,11 +458,87 @@ static void test_real(const char *data_dir) {
           "three retail labels resolve through substituted faces");
     check(glyphs == 72 && missing_glyphs == 0,
           "72 real glyph placements, none missing");
-    check(vertices == 3024 && indices == 4320 && triangles > 0,
-          "resolved text produces the expected real outline counts");
-    check(57480u + vertices <= 65536u,
-          "shape plus resolved text stays inside the 16-bit vertex range");
+    check(vertices == 106836 && indices == 160182 && triangles == 53394,
+          "resolved labels produce real Futura outlines, not password-mask glyphs");
+    check(vertices > 3024 && indices > 4320,
+          "real label outlines exceed the old asterisk-mask geometry");
     check(indices % 3 == 0, "resolved text index count is triangle-complete");
+    check(label_mask == 7u,
+          "real authored labels are the two loading strings and New Game confirmation");
+    check(letter_spacing_attrs == 3 && kerning_attrs == 3 && unknown_attrs == 0,
+          "real HTML letterSpacing/kerning attributes are parsed, not ignored");
+    check(zero_advances == 0,
+          "every non-space real menu glyph has a positive advance");
+    check(raster_refusals == 0 &&
+              geometry_slots + empty_slots == glyphs,
+          "every real text outline rasterises; only empty glyphs use no atlas rect");
+
+    if (batch_glyph_count) {
+        static uint8_t atlas_pixels[REAL_TEXT_ATLAS_SIZE * REAL_TEXT_ATLAS_SIZE];
+        static MenuSwfAtlasEntry entries[MENU_SWF_TEXT_MAX_GLYPHS];
+        static MenuSwfBatchVertex batch_vertices[MENU_SWF_TEXT_MAX_GLYPHS * 4u];
+        static uint32_t batch_indices[MENU_SWF_TEXT_MAX_GLYPHS * 6u];
+        MenuSwfAtlasTarget atlas = {
+            REAL_TEXT_ATLAS_SIZE, REAL_TEXT_ATLAS_SIZE,
+            REAL_TEXT_ATLAS_SIZE, atlas_pixels};
+        MenuSwfAtlasResult ar;
+        MenuSwfAtlasStatus as = menu_swf_atlas_pack(
+            atlas_glyphs, batch_glyph_count, &atlas, entries,
+            MENU_SWF_TEXT_MAX_GLYPHS, &ar, reason, sizeof reason);
+        check(as == MENU_SWF_ATLAS_OK && ar.placed_glyphs == geometry_slots &&
+                  ar.empty_glyphs == empty_slots && ar.occupied_pixels > 0,
+              "all real label glyph coverage packs into one A8 atlas");
+        if (as == MENU_SWF_ATLAS_OK) {
+            MenuSwfTextMesh batch_mesh;
+            memset(&batch_mesh, 0, sizeof batch_mesh);
+            batch_mesh.glyphs = batch_glyphs;
+            batch_mesh.glyph_count = batch_glyph_count;
+            MenuSwfBatchStyle batch_style;
+            memset(&batch_style, 0, sizeof batch_style);
+            batch_style.m00 = batch_style.m11 = 1.0;
+            batch_style.color = 0xffffffffu;
+            MenuSwfBatchResult br;
+            MenuSwfBatchStatus bs = menu_swf_batch_text(
+                &batch_mesh, entries, batch_glyph_count, &batch_style, NULL,
+                batch_vertices, MENU_SWF_TEXT_MAX_GLYPHS * 4u, batch_indices,
+                MENU_SWF_TEXT_MAX_GLYPHS * 6u, &br, reason, sizeof reason);
+            check(bs == MENU_SWF_BATCH_OK && br.quad_count == geometry_slots &&
+                      br.vertex_count == geometry_slots * 4u &&
+                      br.index_count == geometry_slots * 6u,
+                  "real label atlas entries produce a complete text quad batch");
+            if (bs == MENU_SWF_BATCH_OK) {
+                int indices_ok = 1, uv_ok = 1;
+                for (uint32_t i = 0; i < br.index_count; ++i)
+                    if (batch_indices[i] >= br.vertex_count) indices_ok = 0;
+                for (uint32_t i = 0; i < batch_glyph_count; ++i)
+                    if (entries[i].u + entries[i].uw > 65536u ||
+                        entries[i].v + entries[i].vh > 65536u) uv_ok = 0;
+                check(indices_ok && uv_ok && br.has_bounds,
+                      "real text batch indices and atlas UVs stay in range");
+                check(57480u + br.vertex_count <= 65536u,
+                      "shape plus real text quads stay inside 16-bit indexed range");
+            }
+            uint32_t nonzero = 0;
+            for (uint32_t i = 0; i < REAL_TEXT_ATLAS_SIZE * REAL_TEXT_ATLAS_SIZE;
+                 ++i)
+                if (atlas_pixels[i]) ++nonzero;
+            check(nonzero > 0 && nonzero <= ar.occupied_pixels,
+                  "real text atlas contains nonzero coverage within packed rects");
+            printf("real: text_atlas=%ux%u placed=%u empty=%u occupied=%u "
+                   "used_height=%u occupancy16=%u nonzero=%u batch_quads=%u "
+                   "batch_vertices=%u batch_indices=%u\n",
+                   REAL_TEXT_ATLAS_SIZE, REAL_TEXT_ATLAS_SIZE, ar.placed_glyphs,
+                   ar.empty_glyphs, ar.occupied_pixels, ar.used_height,
+                   ar.occupancy_16, nonzero, br.quad_count, br.vertex_count,
+                   br.index_count);
+        } else {
+            printf("real: text atlas refused: %s (%s)\n",
+                   menu_swf_atlas_status_name(as), reason);
+            ++failures;
+        }
+    }
+    for (uint32_t i = 0; i < MENU_SWF_TEXT_MAX_GLYPHS; ++i)
+        free(atlas_owned[i]);
 
     if (layout_records) {
         const MenuSwfFontSummary *face = menu_swf_display_find_font(&font_list,

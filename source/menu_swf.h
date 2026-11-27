@@ -98,6 +98,8 @@ typedef struct {
     uint32_t define_shape;   /* codes 2, 22, 32, 83 */
     uint32_t define_font2;   /* code 48 */
     uint32_t define_font3;   /* code 75 */
+    uint32_t define_text;    /* codes 11, 33 (DefineText/DefineText2) */
+    uint32_t define_edit_text; /* code 37 */
     uint32_t define_sprite;  /* code 39 (nested tags are not walked) */
     uint32_t place_object2;  /* code 26 */
     uint32_t place_object3;  /* code 70 */

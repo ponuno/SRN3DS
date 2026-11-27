@@ -241,7 +241,8 @@ static void make_edit(MenuSwfEditText *e, const char *html) {
 static void test_runs_parse(void) {
     const char *html =
         "<p align=\"center\"><font color=\"#ff0000\" size=\"14\" "
-        "face=\"Test\"><b>A</b><i>V</i></font><u>U</u><br>B &amp; C "
+        "face=\"Test\" letterSpacing=\"0.5\" kerning=\"0\"><b>A</b><i>V</i>"
+        "</font><u>U</u><br>B &amp; C "
         "&lt; D &gt; E &quot; F &apos; G&nbsp;H</p><unknown>Z</unknown>";
     MenuSwfEditText edit;
     make_edit(&edit, html);
@@ -271,13 +272,17 @@ static void test_runs_parse(void) {
           "HTML tag kinds");
     check(summary.entities == 6 && summary.color_attrs == 1 &&
               summary.size_attrs == 1 && summary.face_attrs == 1 &&
-              summary.align_attrs == 1,
+              summary.align_attrs == 1 && summary.letter_spacing_attrs == 1 &&
+              summary.kerning_attrs == 1 && summary.unknown_attrs == 0,
           "HTML entity/attribute census");
     if (run_count == 7) {
         check(runs[0].text_first == 0 && runs[0].text_length == 1 &&
                   runs[0].color == 0xffff0000u && runs[0].has_color &&
                   runs[0].size == 14 && runs[0].has_size &&
                   runs[0].has_face && !strcmp(runs[0].face, "Test") &&
+                   runs[0].letter_spacing == 32768 &&
+                   runs[0].has_letter_spacing && runs[0].has_kerning &&
+                   !runs[0].kerning &&
                   runs[0].bold && !runs[0].italic && !runs[0].underline &&
                   runs[0].align == MENU_SWF_EDIT_TEXT_ALIGN_CENTER,
               "HTML run 0 colour/size/face/bold");
@@ -346,6 +351,19 @@ static void test_refusals(void) {
                                  sizeof reason);
     check(st == MENU_SWF_ERR_FORMAT && strstr(reason, "size"),
           "bad size refused");
+
+    make_edit(&edit, "<font letterSpacing=\"wide\">X</font>");
+    st = menu_swf_text_edit_runs(&edit, plain, sizeof plain, &plain_len, runs,
+                                 4, &run_count, &summary, reason,
+                                 sizeof reason);
+    check(st == MENU_SWF_ERR_FORMAT && strstr(reason, "letterSpacing"),
+          "bad letterSpacing refused");
+    make_edit(&edit, "<font kerning=\"maybe\">X</font>");
+    st = menu_swf_text_edit_runs(&edit, plain, sizeof plain, &plain_len, runs,
+                                 4, &run_count, &summary, reason,
+                                 sizeof reason);
+    check(st == MENU_SWF_ERR_FORMAT && strstr(reason, "kerning"),
+          "bad kerning flag refused");
 
     make_edit(&edit, "<font face=\"012345678901234567890123456789012345\">X</font>");
     st = menu_swf_text_edit_runs(&edit, plain, sizeof plain, &plain_len, runs,
@@ -429,6 +447,34 @@ static void test_layout_and_batch(void) {
           "HTML glyph run colours");
     check(mesh.glyphs[1].x - mesh.glyphs[0].x == 150,
           "HTML size 24 doubles the 12 px advance");
+    /* Cross-run kerning must use the resolved font for the incoming glyph. */
+    MenuSwfFontSummary alternate = display->fonts[0];
+    alternate.kerning[0].adjustment = -50;
+    const MenuSwfFontSummary *run_fonts[2] = {
+        &display->fonts[0], &alternate};
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit_resolved(
+        file, file_len, &display->fonts[0], run_fonts, &items[0], &style,
+        &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && mesh.glyphs[2].pen_x == 2350 &&
+              mesh.glyphs[2].kerning == -50,
+           "HTML cross-run kerning uses the resolved incoming font");
+    MenuSwfEditText spacing_edit;
+    make_edit(&spacing_edit,
+              "<font letterSpacing=\"1\" kerning=\"0\">AV</font>");
+    MenuSwfTextStyle spacing_style = style;
+    spacing_style.m00 = spacing_style.m11 = 65536;
+    static TextFixture spacing_fixture;
+    MenuSwfTextMesh spacing_mesh;
+    fixture_init(&spacing_fixture, &spacing_mesh);
+    st = menu_swf_text_layout_edit(
+        file, file_len, &display->fonts[0], &spacing_edit, &spacing_style,
+        &spacing_mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && spacing_mesh.glyph_count == 2 &&
+              spacing_mesh.glyphs[1].pen_x == 601 &&
+              spacing_mesh.glyphs[1].kerning == 0 &&
+              spacing_mesh.pen_x == 1202,
+          "HTML letterSpacing advances and kerning=0 affect layout/measurement");
     unsigned reds = 0, blues = 0;
     for (uint32_t i = 0; i < mesh.vertex_count; ++i) {
         if (mesh.vertices[i].color == 0xffff0000u) ++reds;

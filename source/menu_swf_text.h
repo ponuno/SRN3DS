@@ -48,6 +48,10 @@ typedef struct {
     uint32_t color;                    /* explicit run ARGB */
     uint16_t size;                     /* explicit HTML size, 0 = default */
     uint8_t has_color, has_size, has_face;
+    int32_t letter_spacing; /* 16.16 output pixels, applied after each glyph */
+    uint8_t has_letter_spacing;
+    uint8_t kerning;        /* default 1; HTML kerning="0" disables pairs */
+    uint8_t has_kerning;
     uint8_t bold, italic, underline;
     uint8_t align;                     /* MenuSwfEditTextAlign */
     char face[MENU_SWF_TEXT_FACE_MAX];
@@ -61,6 +65,7 @@ typedef struct {
     uint32_t unknown_tags;
     uint32_t entities;
     uint32_t color_attrs, size_attrs, face_attrs, align_attrs;
+    uint32_t letter_spacing_attrs, kerning_attrs;
     uint32_t unknown_attrs;
 } MenuSwfTextHtmlSummary;
 
@@ -152,11 +157,14 @@ MenuSwfStatus menu_swf_text_layout(const uint8_t *data, size_t size,
  * edit bounds/margins, explicit newlines require Multiline, alignment and
  * first-line indent/leading are applied, and Justify distributes extra space
  * after spaces on non-final lines.  Password fields display '*' when the font
- * provides it, otherwise NOTIMPL.  Retail GFx HTML payloads stored in the
- * variable-name slot are parsed into runs; explicit run colours/sizes/flags
- * affect layout and per-vertex colour, while face names are metadata-only and
- * unknown tags preserve their text.  Empty text keeps the transformed edit
- * bounds and emits one empty line/zero glyphs. */
+ * provides it, otherwise NOTIMPL.  GFx HTML labels in the variable-name slot
+ * are authored rich text and are not password-masked.  A missing glyph is a
+ * named NOTIMPL rather than a silently collapsed field.  Retail GFx HTML
+ * payloads stored in the variable-name slot are parsed into runs; explicit run
+ * colours/sizes/flags/letter-spacing/kerning affect layout and per-vertex colour,
+ * while face names are metadata-only and unknown tags preserve their text.
+ * Empty text keeps the transformed edit bounds and emits one empty line/zero
+ * glyphs. */
 MenuSwfStatus menu_swf_text_layout_edit(
     const uint8_t *data, size_t size, const MenuSwfFontSummary *font,
     const MenuSwfEditText *edit, const MenuSwfTextStyle *style,
@@ -183,11 +191,11 @@ MenuSwfStatus menu_swf_text_edit_plain(
     char *reason, size_t reason_cap);
 
 /* Parse the same source into plain text plus bounded style runs.  Supported
- * HTML: <font color="#RRGGBB" size="N" face="...">, <b>, <i>, <u>, <br>,
- * <p align=...> and <li> (paragraph break).  Entities: amp/lt/gt/quot/apos/
- * nbsp.  Unknown tags are skipped while their inner text is preserved and are
- * counted in `summary->unknown_tags`; malformed tags and unknown entities are
- * named refusals.  Face names are retained but this layer has no face-to-font
+ * HTML: <font color="#RRGGBB" size="N" face="..." letterSpacing="N"
+ * kerning="0|1">, <b>, <i>, <u>, <br>, <p align=...> and <li> (paragraph
+ * break).  Entities: amp/lt/gt/quot/apos/nbsp.  Unknown tags are skipped while
+ * their inner text is preserved and counted in `summary->unknown_tags`;
+ * malformed tags and unknown entities are named refusals.  Face names are retained but this layer has no face-to-font
  * matching: layout uses the supplied font for every run.  `runs` may be NULL
  * only with `run_capacity` zero; `summary` is optional. */
 MenuSwfStatus menu_swf_text_edit_runs(

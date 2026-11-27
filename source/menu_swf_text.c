@@ -38,14 +38,6 @@ static int buffers_bad(const MenuSwfTextMesh *m) {
            (!m->runs && m->run_capacity);
 }
 
-static void map_point(const MenuSwfTextStyle *s, int64_t x, int64_t y,
-                      int32_t *out_x, int32_t *out_y) {
-    int64_t tx = (s->m00 * x + s->m01 * y) / 65536 + s->tx;
-    int64_t ty = (s->m10 * x + s->m11 * y) / 65536 + s->ty;
-    *out_x = (int32_t)tx;
-    *out_y = (int32_t)ty;
-}
-
 static int map_point_checked(const MenuSwfTextStyle *s, int64_t x, int64_t y,
                              int32_t *out_x, int32_t *out_y) {
     int64_t tx = (s->m00 * x + s->m01 * y) / 65536 + s->tx;
@@ -128,7 +120,11 @@ MenuSwfStatus menu_swf_text_layout(const uint8_t *data, size_t size,
         int32_t pen_x = out->pen_x;
         int32_t pen_y = out->pen_y;
         int32_t place_x, place_y;
-        map_point(style, pen_x, pen_y, &place_x, &place_y);
+        if (map_point_checked(style, pen_x, pen_y, &place_x, &place_y)) {
+            text_reason(reason, reason_cap, "swf text: placement overflow");
+            text_reset(out);
+            return MENU_SWF_ERR_BUDGET;
+        }
 
         MenuSwfTextGlyph glyph;
         memset(&glyph, 0, sizeof glyph);
@@ -175,7 +171,12 @@ MenuSwfStatus menu_swf_text_layout(const uint8_t *data, size_t size,
                 int32_t rx = out->glyph_tess.vertices[v].x + pen_x;
                 int32_t ry = out->glyph_tess.vertices[v].y + pen_y;
                 int32_t tx, ty;
-                map_point(style, rx, ry, &tx, &ty);
+                if (map_point_checked(style, rx, ry, &tx, &ty)) {
+                    text_reason(reason, reason_cap,
+                                "swf text: glyph point overflow");
+                    text_reset(out);
+                    return MENU_SWF_ERR_BUDGET;
+                }
                 out->vertices[out->vertex_count].x = tx;
                 out->vertices[out->vertex_count].y = ty;
                 out->vertices[out->vertex_count].color = style->color;
@@ -258,6 +259,9 @@ typedef struct {
     uint16_t size;
     char face[MENU_SWF_TEXT_FACE_MAX];
     uint8_t has_color, has_size, has_face;
+    int32_t letter_spacing;
+    uint8_t has_letter_spacing;
+    uint8_t kerning, has_kerning;
     uint8_t bold, italic, underline;
     uint8_t align;
 } HtmlStyle;
@@ -338,6 +342,42 @@ static int parse_html_uint(const char *v, size_t n, uint16_t *out) {
     return 0;
 }
 
+static int parse_html_fixed(const char *v, size_t n, int32_t *out) {
+    if (!n) return -1;
+    size_t i = 0;
+    int negative = 0;
+    if (v[i] == '-' || v[i] == '+') {
+        negative = v[i] == '-';
+        if (++i == n) return -1;
+    }
+    uint32_t whole = 0, fraction = 0;
+    unsigned digits = 0, fraction_digits = 0;
+    int dot = 0;
+    for (; i < n; ++i) {
+        if (v[i] == '.' && !dot) {
+            dot = 1;
+            continue;
+        }
+        if (v[i] < '0' || v[i] > '9') return -1;
+        ++digits;
+        if (!dot) {
+            whole = whole * 10u + (uint32_t)(v[i] - '0');
+            if (whole > 4096u) return -1;
+        } else if (fraction_digits < 6) {
+            fraction = fraction * 10u + (uint32_t)(v[i] - '0');
+            ++fraction_digits;
+        }
+    }
+    if (!digits || (dot && !fraction_digits)) return -1;
+    while (fraction_digits++ < 6) fraction *= 10u;
+    uint32_t frac16 = (uint32_t)(((uint64_t)fraction * 65536u + 500000u) /
+                                 1000000u);
+    uint32_t value = whole * 65536u + frac16;
+    if (value > (uint32_t)INT32_MAX) return -1;
+    *out = negative ? -(int32_t)value : (int32_t)value;
+    return 0;
+}
+
 static int html_flush(HtmlCtx *c) {
     if (c->used <= c->run_start) {
         c->run_start = (uint32_t)c->used;
@@ -359,6 +399,10 @@ static int html_flush(HtmlCtx *c) {
         run->size = c->style.size;
         run->has_size = c->style.has_size;
         run->has_face = c->style.has_face;
+        run->letter_spacing = c->style.letter_spacing;
+        run->has_letter_spacing = c->style.has_letter_spacing;
+        run->kerning = c->style.kerning;
+        run->has_kerning = c->style.has_kerning;
         run->bold = c->style.bold;
         run->italic = c->style.italic;
         run->underline = c->style.underline;
@@ -469,6 +513,37 @@ static int html_set_attr(HtmlCtx *c, const char *name, size_t name_len,
         if (c->summary) ++c->summary->align_attrs;
         return 0;
     }
+    if (ci_equal(name, name_len, "letterspacing")) {
+        int32_t spacing;
+        if (!value || parse_html_fixed(value, value_len, &spacing)) {
+            text_reason(c->reason, c->reason_cap,
+                        "swf edit text: bad HTML letterSpacing attribute");
+            return -1;
+        }
+        c->style.letter_spacing = spacing;
+        c->style.has_letter_spacing = 1;
+        if (c->summary) ++c->summary->letter_spacing_attrs;
+        return 0;
+    }
+    if (ci_equal(name, name_len, "kerning")) {
+        if (!value) return 0;
+        if (ci_equal(value, value_len, "0") ||
+            ci_equal(value, value_len, "false") ||
+            ci_equal(value, value_len, "no"))
+            c->style.kerning = 0;
+        else if (ci_equal(value, value_len, "1") ||
+                 ci_equal(value, value_len, "true") ||
+                 ci_equal(value, value_len, "yes"))
+            c->style.kerning = 1;
+        else {
+            text_reason(c->reason, c->reason_cap,
+                        "swf edit text: bad HTML kerning attribute");
+            return -1;
+        }
+        c->style.has_kerning = 1;
+        if (c->summary) ++c->summary->kerning_attrs;
+        return 0;
+    }
     if (c->summary) ++c->summary->unknown_attrs;
     return 0;
 }
@@ -554,6 +629,7 @@ static MenuSwfStatus edit_html_runs(const MenuSwfEditText *edit, char *dst,
             run->text_first = 0;
             run->text_length = (uint32_t)len;
             run->align = edit->alignment;
+            run->kerning = 1;
             if (edit->has_text_color) {
                 run->color = ((uint32_t)edit->color[3] << 24) |
                              ((uint32_t)edit->color[0] << 16) |
@@ -582,6 +658,7 @@ static MenuSwfStatus edit_html_runs(const MenuSwfEditText *edit, char *dst,
     c.run_cap = run_cap;
     c.run_start = 0;
     c.style.align = edit->alignment;
+    c.style.kerning = 1;
     if (edit->has_text_color) {
         c.style.color = ((uint32_t)edit->color[3] << 24) |
                         ((uint32_t)edit->color[0] << 16) |
@@ -737,11 +814,22 @@ static double html_run_scale(const MenuSwfTextRun *run, double default_px) {
     return (double)run->size / default_px;
 }
 
+static double run_letter_spacing_px(const MenuSwfTextRun *run) {
+    return run && run->has_letter_spacing
+               ? (double)run->letter_spacing / 65536.0
+               : 0.0;
+}
+
+static int run_kerning_enabled(const MenuSwfTextRun *run) {
+    return !run || !run->has_kerning || run->kerning;
+}
+
 static double measure_text_run(const MenuSwfFontSummary *font,
                                const MenuSwfFontSummary *const *run_fonts,
+                               const MenuSwfTextRun *runs,
                                const char *text, size_t start, size_t len,
                                const uint16_t *run_of_char,
-                               const double *run_scales) {
+                               const double *run_scales, double scale_x) {
     double width = 0.0;
     uint16_t previous = 0;
     int have_previous = 0;
@@ -751,13 +839,15 @@ static double measure_text_run(const MenuSwfFontSummary *font,
             (run_fonts && run_of_char) ? run_fonts[run_of_char[start + i]]
                                        : font;
         if (!rf) rf = font;
-        uint32_t run = run_of_char ? run_of_char[start + i] : 0;
-        double scale = run_scales ? run_scales[run] : 1.0;
-        if (have_previous)
-            width += (double)find_kerning(rf, previous, code) * scale;
+        uint32_t run_index = run_of_char ? run_of_char[start + i] : 0;
+        const MenuSwfTextRun *run = runs ? &runs[run_index] : NULL;
+        double scale = run_scales ? run_scales[run_index] : 1.0;
+        if (have_previous && run_kerning_enabled(run))
+            width += (double)find_kerning(rf, previous, code) * scale * scale_x;
         const MenuSwfGlyph *glyph = find_glyph(rf, code);
         if (glyph && glyph->has_advance)
-            width += (double)glyph->advance * scale;
+            width += (double)glyph->advance * scale * scale_x;
+        width += run_letter_spacing_px(run);
         previous = code;
         have_previous = 1;
     }
@@ -778,7 +868,7 @@ static MenuSwfStatus split_text_lines(
     const MenuSwfFontSummary *const *run_fonts, const char *text, size_t len,
     int64_t available_raw, const uint16_t *run_of_char,
     const double *run_scales, const MenuSwfTextRun *runs, uint32_t run_count,
-    TextSpan *spans, uint32_t span_capacity, uint32_t *span_count,
+    double scale_x, TextSpan *spans, uint32_t span_capacity, uint32_t *span_count,
     char *reason, size_t reason_cap) {
     uint32_t count = 0;
     if (!len) {
@@ -814,19 +904,25 @@ static MenuSwfStatus split_text_lines(
                 int have_previous = 0;
                 for (size_t i = cur; i < end; ++i) {
                     uint16_t code = (uint8_t)text[i];
-                    uint32_t run = run_of_char[i];
+                    uint32_t run_index = run_of_char[i];
+                    const MenuSwfTextRun *run = &runs[run_index];
                     const MenuSwfFontSummary *rf =
-                        (run_fonts && run < run_count) ? run_fonts[run] : font;
+                        (run_fonts && run_index < run_count)
+                            ? run_fonts[run_index]
+                            : font;
                     if (!rf) rf = font;
-                    double scale = run_scales[run];
-                    double kerning = have_previous
-                                         ? (double)find_kerning(rf, previous, code) * scale
-                                         : 0.0;
+                    double scale = run_scales[run_index];
+                    double kerning =
+                        have_previous && run_kerning_enabled(run)
+                            ? (double)find_kerning(rf, previous, code) * scale
+                            : 0.0;
                     const MenuSwfGlyph *glyph = find_glyph(rf, code);
                     double advance = glyph && glyph->has_advance
                                          ? (double)glyph->advance * scale
                                          : 0.0;
-                    double next = width + kerning + advance;
+                    double spacing_raw =
+                        run_letter_spacing_px(run) / scale_x;
+                    double next = width + kerning + advance + spacing_raw;
                     if (next > (double)available_raw && i > cur) {
                         take = last_space != SIZE_MAX
                                    ? last_space - cur
@@ -876,12 +972,13 @@ static MenuSwfStatus append_edit_glyph(
     const uint8_t *data, size_t size, const MenuSwfFontSummary *font,
     uint16_t code, int32_t pen_x, int32_t pen_y,
     const MenuSwfTextStyle *style, uint16_t line_index, uint16_t run_index,
-    MenuSwfTextMesh *out, MenuSwfTextGlyph *glyph,
+    int16_t kerning, MenuSwfTextMesh *out, MenuSwfTextGlyph *glyph,
     char *reason, size_t reason_cap) {
     memset(glyph, 0, sizeof *glyph);
     glyph->code = code;
     glyph->line_index = line_index;
     glyph->run_index = run_index;
+    glyph->kerning = kerning;
     glyph->has_color = 1;
     glyph->color = style->color;
     glyph->pen_x = pen_x;
@@ -1059,7 +1156,15 @@ static MenuSwfStatus layout_edit_impl(
      * StartMenu fields carry HasMaxLength with small sentinel values while
      * their HTML initial text is longer, so refusing the authored text here
      * would suppress every real label. */
-    if (edit->password && plain_len) {
+    /* Retail StartMenu stores authored rich-text labels in the GFx
+     * variable-name convention (the first '<' is omitted) and also sets the
+     * SWF Password bit on those definitions.  This bounded path treats that
+     * convention as an authored label, not secret input; masking it would
+     * render only '*' glyphs.  Keep normal DefineEditText password semantics
+     * for ordinary text fields. */
+    int gfx_html_label = edit->html && !edit->initial_text_length &&
+                         edit->variable_name[0] && edit->variable_name[0] != '<';
+    if (edit->password && plain_len && !gfx_html_label) {
         if (!find_glyph(font, '*')) {
             text_reason(reason, reason_cap,
                         "swf edit text: password mask '*' is absent from font %u",
@@ -1152,7 +1257,7 @@ static MenuSwfStatus layout_edit_impl(
     uint32_t span_count = 0;
     st = split_text_lines(edit, font, run_fonts_used, plain, plain_len,
                           available_raw, run_of_char, run_scales, runs,
-                          run_count, spans, MENU_SWF_TEXT_MAX_LINES,
+                          run_count, scale_x, spans, MENU_SWF_TEXT_MAX_LINES,
                           &span_count, reason, reason_cap);
     if (st != MENU_SWF_OK) return st;
     if (out->lines && span_count > out->line_capacity) {
@@ -1197,10 +1302,9 @@ static MenuSwfStatus layout_edit_impl(
             if (run_ascent > line_ascent) line_ascent = run_ascent;
             if (run_height > line_height) line_height = run_height;
         }
-        double line_width =
-            measure_text_run(font, run_fonts_used, plain, span->start, span->len,
-                             run_of_char, run_scales) *
-            scale_x;
+        double line_width = measure_text_run(
+            font, run_fonts_used, runs, plain, span->start, span->len,
+            run_of_char, run_scales, scale_x);
         double x_offset = (double)edit->left_margin / 20.0;
         if (!line_index) x_offset += (double)edit->indent / 20.0;
         uint32_t spaces = 0;
@@ -1236,6 +1340,7 @@ static MenuSwfStatus layout_edit_impl(
             uint16_t code = (uint8_t)plain[span->start + i];
             uint32_t r = run_count ? run_of_char[span->start + i] : 0;
             double scale = run_count ? run_scales[r] : 1.0;
+            const MenuSwfTextRun *run = run_count ? &runs[r] : NULL;
             MenuSwfTextStyle glyph_style = line_style;
             double sm00 = (double)style->m00 * scale;
             double sm11 = (double)style->m11 * scale;
@@ -1251,9 +1356,14 @@ static MenuSwfStatus layout_edit_impl(
             glyph_style.color = (run_count && runs[r].has_color)
                                     ? runs[r].color
                                     : style->color;
+            const MenuSwfFontSummary *glyph_font =
+                (run_count && r < run_count) ? run_fonts_used[r] : font;
+            int16_t kerning =
+                have_previous && run_kerning_enabled(run)
+                    ? find_kerning(glyph_font, previous, code)
+                    : 0;
             if (have_previous)
-                pen_base +=
-                    (double)find_kerning(font, previous, code) * scale;
+                pen_base += (double)kerning * scale;
             double pen_local = pen_base / scale;
             if (!isfinite(pen_local) || pen_local < INT32_MIN ||
                 pen_local > INT32_MAX) {
@@ -1262,14 +1372,12 @@ static MenuSwfStatus layout_edit_impl(
                 text_reset(out);
                 return MENU_SWF_ERR_BUDGET;
             }
-            const MenuSwfFontSummary *glyph_font =
-                (run_count && r < run_count) ? run_fonts_used[r] : font;
             uint32_t before = out->glyph_count;
             MenuSwfTextGlyph glyph;
             st = append_edit_glyph(
                 data, size, glyph_font, code, (int32_t)llround(pen_local), 0,
-                &glyph_style, (uint16_t)line_index, (uint16_t)r, out, &glyph,
-                reason, reason_cap);
+                &glyph_style, (uint16_t)line_index, (uint16_t)r, kerning, out,
+                &glyph, reason, reason_cap);
             if (st != MENU_SWF_OK) {
                 text_reset(out);
                 return st;
@@ -1280,6 +1388,7 @@ static MenuSwfStatus layout_edit_impl(
                 ++run->glyph_count;
             }
             pen_base += (double)glyph.advance * scale;
+            pen_base += run_letter_spacing_px(run) / scale_x;
             if (justify_raw > 0.0 && code == ' ')
                 pen_base += justify_raw;
             if (code != ' ' && code != '\t') has_content = 1;
@@ -1318,6 +1427,24 @@ static MenuSwfStatus layout_edit_impl(
         line_top += line_height + leading_px;
     }
     out->line_count = span_count;
+    if (out->missing_glyphs) {
+        for (uint32_t i = 0; i < out->glyph_count; ++i) {
+            if (out->glyphs[i].missing) {
+                text_reason(reason, reason_cap,
+                            "swf edit text: font %u has no glyph for code %u "
+                            "('%c')",
+                            out->glyphs[i].run_index < run_count
+                                ? run_fonts_used[out->glyphs[i].run_index]->font_id
+                                : font->font_id,
+                            out->glyphs[i].code,
+                            out->glyphs[i].code >= 32 && out->glyphs[i].code < 127
+                                ? (char)out->glyphs[i].code
+                                : '?');
+                text_reset(out);
+                return MENU_SWF_ERR_NOTIMPL;
+            }
+        }
+    }
     return MENU_SWF_OK;
 }
 

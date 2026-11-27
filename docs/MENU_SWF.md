@@ -8,15 +8,16 @@ imported font ids 34/41 from `gfxfontlib.swf`; that URL is absent, but the
 shipped `Interface/fontconfig.txt` maps the symbols to real faces
 (`$EverywhereMediumFont` -> Futura Condensed, `$EverywhereFont` -> Futura
 CondensedLight) and those faces exist in `fonts_en.swf` (DefineFont3 ids 3 and
-1).  All 57 text records resolve with a logged face substitution and the three
-authored labels produce **72 real glyphs / 3,024 vertices / 4,320 indices /
-1,440 triangles**.  An isolated ARM runner also reads the real `Update.bsa`
-SWF and submits the combined batch through COM/core to the real PICA
-`C3D_DrawElements` path with a 64x64 A8 atlas and the menu-text TEV plan.  That
-runner is build-only until it is launched in Azahar and a screenshot plus
-`sdmc:/Skyrim_N3DS_stderr.log` are archived.  Focal/bitmap fill sampling,
-complete mask/AVM/AS2 behaviour, a persistent cache, PICA A8 pixel proof and a
-real GFx text object remain open.
+1).  All 57 text records resolve with a logged face substitution.  The three
+authored GFx HTML labels produce **72 real glyph placements / 106,836 outline
+vertices / 160,182 indices / 53,394 triangles** and a compact **65-quad text
+batch (260 vertices / 390 indices)** from a 512x512 A8 atlas.  An isolated ARM
+runner also reads the real `Update.bsa` SWF and submits the shape+control batch
+through COM/core to the real PICA `C3D_DrawElements` path with a 64x64 A8 atlas
+and the menu-text TEV plan.  That runner is build-only until it is launched in
+Azahar and a screenshot plus `sdmc:/Skyrim_N3DS_stderr.log` are archived.
+Focal/bitmap fill sampling, complete mask/AVM/AS2 behaviour, a persistent cache,
+PICA A8 pixel proof and a real GFx text object remain open.
 
 The input is the winning `Interface/StartMenu.swf` bytes from
 `docs/MENU_BSA_RUNTIME.md` (`Update.bsa`, 60,284 B, CRC32 `0x6910248f`).
@@ -33,7 +34,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `source/menu_swf_clip.h` / `.c` | Clip-depth mask pairs/rectangles, active-mask lists, intersection, fully-clipped flags and rectangle mask quads |
 | `source/menu_swf_shape.h` / `.c` | DefineShape/2/3/4 fill/line styles and shape records, path summaries, retained solid RGBA/gradient stops+matrix/bitmap ids, streaming geometry sink, and DefineFont2/3 glyph SHAPE contours/bounds |
 | `source/menu_swf_tess.h` / `.c` | Bounded even-odd/non-zero tessellation of one shape or DefineFont2/3 glyph into caller-owned vertex/index/triangle-style pools, optional fill-style table and separate stroked line segments |
-| `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement/tessellation, 16.16 transform, ARGB vertices, GFx HTML runs (colour/size/face/flags/alignment), plus DefineEditText WordWrap/Multiline/alignment/Justify/indent/leading/Password layout |
+| `source/menu_swf_text.h` / `.c` | Latin-1 layout with advances/kerning, per-glyph placement/tessellation, 16.16 transform, ARGB vertices, GFx HTML runs (colour/size/face/flags/alignment/letterSpacing/kerning), plus DefineEditText WordWrap/Multiline/alignment/Justify/indent/leading/Password layout and named missing-glyph refusals |
 | `source/menu_swf_raster.h` / `.c` | Bounded A8 coverage rasterisation of tessellated glyph triangles with 4x4 subpixel samples, caller buffers, 16.16-quantised matrix/pen and named refusals |
 | `source/menu_swf_atlas.h` / `.c` | Deterministic shelf packing of A8 coverage rectangles into a caller atlas, zero-filled padding, per-glyph rect/UV and named refusals |
 | `source/menu_swf_batch.h` / `.c` | Text quad/index batch with per-run colours and optional record CXFORM, plus shape triangle batch with solid colours and per-vertex linear/radial gradients from tess fill metadata, record CXFORM, optional axis-aligned viewport clipping, full/outside culling plus Sutherland-Hodgman partial clipping for axis-aligned masks, rotated-mask/text named refusals and count-before-write overflow |
@@ -56,7 +57,7 @@ The input is the winning `Interface/StartMenu.swf` bytes from
 | `tests/menu_swf_partial_mask_smoke.c` | Edge-crossing triangle positions/area/colour/winding, inside/outside, source dedup, partially clipped text UVs, rotated-mask and rotated-text named refusals, real StartMenu zero-mask equivalence |
 | `tests/menu_text_draw_smoke.c` | COM demo: 2-glyph 8x8 A8 texture/upload, sampler/TSS/FVF, one DrawPrimitiveUP, empty/overflow and A8-refusal cases |
 | `tests/menu_pipeline_e2e_smoke.c` | Real `Update.bsa` StartMenu: font library + fontconfig load, exact-id/alias-face resolution and substitution log, solid-fill shape batch, separate resolved-label tessellation -> local-font raster/atlas control -> compact indexed or bounded UP COM submission; no frame claim |
-| `tests/menu_font_resolve_smoke.c` | Synthetic fontconfig parser/lookup/refusal cases plus real StartMenu/fonts_en/fontconfig: ids 34/41 -> DefineFont3 3/1, 72 real glyphs, raster + A8 atlas, 16-bit batch headroom |
+| `tests/menu_font_resolve_smoke.c` | Synthetic fontconfig parser/lookup/refusal cases plus real StartMenu/fonts_en/fontconfig: ids 34/41 -> DefineFont3 3/1, 72 real glyphs, full label A8 raster/atlas and 65-quad batch, 16-bit shape+quad headroom |
 | `tests/menu_swf_glyph_smoke.c` | Real fonts_en single-glyph tessellation across multiple faces, target filter, and named missing-code refusal |
 | `tools/run_host_tests.ps1` | Registers `menu_swf`, `menu_swf_avm`, `menu_swf_display`, `menu_swf_display_list`, `menu_swf_shape`, `menu_swf_tess`, `menu_swf_text`, `menu_swf_html`, `menu_swf_font_resolve`, `menu_swf_glyph`, `menu_swf_raster`, `menu_swf_atlas`, `menu_swf_batch`, `menu_swf_fill`, `menu_swf_gradient`, `menu_swf_mask_batch`, `menu_text_draw` and `menu_pipeline_e2e`; `menu_bsa` now links `menu_swf.c` |
 | `tests/menu_indexed_draw_smoke.c` | Core recording backend: exact compact vertices/indices, >4,095-index batch, 32-bit and 65,536-vertex fallbacks, named expansion limit and DevCaps 0x00082000 |
@@ -103,7 +104,8 @@ Tag stream:
 * `tag_count`: all tags, including nested sprite tags;
 * `top_level_tag_count`, `nested_tag_count`;
 * counts for `DefineShape` (codes 2/22/32/83), `DefineFont2` (48),
-  `DefineFont3` (75), `DefineSprite` (39), `PlaceObject2` (26),
+  `DefineFont3` (75), `DefineText`/`DefineText2` (11/33),
+  `DefineEditText` (37), `DefineSprite` (39), `PlaceObject2` (26),
   `PlaceObject3` (70), `ShowFrame` (1), `DoAction` (12),
   `ExportAssets` (56), `ImportAssets`/`ImportAssets2` (57/71),
   `DefineFontName` (88), `DefineBitsLossless` (20/36) and
@@ -284,9 +286,10 @@ Read-only from `F:\Skyrim\Data` (`Update.bsa` winner):
 
 ```text
 real: Update.bsa StartMenu.swf 1186 tags (236 top, 950 nested), shapes=27
-      fonts2=0 fonts3=1 fontnames=1 sprites=71 place2=326 place3=21
-      show=428 doaction=53 export=47 import=2 lossless=0 jpeg=0
-      names=52/52 first_show=234 frame_header=13 tag_bytes=144607 trailing=0
+      fonts2=0 fonts3=1 text=0 edit_text=22 fontnames=1 sprites=71
+      place2=326 place3=21 show=428 doaction=53 export=47 import=2
+      lossless=0 jpeg=0 names=52/52 first_show=234 frame_header=13
+      tag_bytes=144607 trailing=0
 ```
 
 Interpretation:
@@ -491,6 +494,10 @@ zero-triangle result.
 * A known empty glyph keeps its placement/advance and emits no triangles.  An
   unknown code keeps a placement, reports `glyph_index =
   MENU_SWF_TEXT_MISSING_GLYPH`, emits no triangles and advances by zero.
+  `DefineEditText` is stricter: a missing glyph is a named `NOTIMPL` and clears
+  partial output instead of silently collapsing the field.  GFx HTML labels in
+  the variable-name slot are not password-masked; ordinary password fields still
+  require a real `*` glyph.
 * Limits: 4,096 characters/glyphs, 262,144 vertices, 786,432 indices and
   262,144 triangles, plus the tess scratch limits.  Caller or hard capacity
   overflow is a named `E_BUDGET`.
@@ -528,8 +535,9 @@ any compatible `MenuSwfTessMesh`) into a caller-owned A8 coverage buffer:
   `MENU_SWF_RASTER_ERR_SCALE`.
 * The target is validated before any write: zero size, `stride < width` or a
   NULL pixel buffer is `ERR_TOO_SMALL`; dimensions over 4096, stride over
-  1 MiB, more than 1,536 triangles or transformed coordinates over the safe
+  1 MiB, more than 4,096 triangles or transformed coordinates over the safe
   range are `ERR_OVERFLOW`.  Non-finite matrix terms are `ERR_NAN`.
+  The 4,096-triangle cap accepts the complex real Futura `g` (2,184 triangles).
 * The buffer is cleared (width bytes per row, honouring stride) and only
   `width x height` is written.  The result reports the used rectangle
   (`x1`/`y1` exclusive), coverage sum, covered-pixel count, maximum coverage
@@ -838,10 +846,11 @@ its NUL at tag end.  Trailing bytes are reported explicitly.
 `menu_swf_text_edit_runs()` parses the same source into `MenuSwfTextRun`
 records.  For the measured GFx convention the payload lives in the
 variable-name slot and its first opening `<` is omitted; the parser normalizes
-that one case.  Supported tags are `<font color="#RRGGBB" size="N" face="...">`,
-`<b>`, `<i>`, `<u>`, `<br>`, `<p align=...>` and `<li>`; entities are
-`amp/lt/gt/quot/apos/nbsp`.  Runs retain colour, size, face, bold/italic/
-underline and alignment.  Unknown tags are skipped while their inner text is
+that one case.  Supported tags are `<font color="#RRGGBB" size="N" face="..."
+letterSpacing="N" kerning="0|1">`, `<b>`, `<i>`, `<u>`, `<br>`,
+`<p align=...>` and `<li>`; entities are `amp/lt/gt/quot/apos/nbsp`.  Runs retain
+colour, size, face, bold/italic/underline, alignment, 16.16 letter spacing and
+the kerning enable flag.  Unknown tags are skipped while their inner text is
 preserved and counted; malformed tags and unknown entities are named refusals.
 Face names are metadata only (no face-to-font match in this layer).  The plain
 extractor decodes the same entities and refuses unsupported ones.
@@ -850,10 +859,16 @@ extractor decodes the same entities and refuses unsupported ones.
 pixel style and matching font id.  It applies bounds/margins, first-line indent,
 font height/leading, explicit Multiline newlines, greedy WordWrap, Left/Right/
 Center/Justify (extra space after spaces on non-final lines), kerning and
-advances.  Password text becomes `*` only when the font has that glyph,
-otherwise named `NOTIMPL`; unknown font id is named `ARGUMENT`; output capacity
-and line/glyph limits are named `BUDGET`.  Empty text emits zero glyphs/vertices
-and one empty line while preserving the transformed edit bounds.  HTML runs are
+advances.  HTML `letterSpacing` participates in measurement, wrapping and pen
+advance; `kerning="0"` disables font pairs.  Cross-run kerning uses the resolved
+font of the incoming glyph.  Password text becomes `*` only when the font has
+that glyph, otherwise named `NOTIMPL`.  The retail GFx HTML-label convention
+(variable-name payload with omitted leading `<`) is treated as authored rich
+text and is not password-masked; this prevents the StartMenu `Password` bit from
+turning every label into `*`.  A missing glyph is a named `NOTIMPL` and clears
+partial output.  Unknown font id is named `ARGUMENT`; output capacity and
+line/glyph limits are named `BUDGET`.  Empty text emits zero glyphs/vertices and
+one empty line while preserving the transformed edit bounds.  HTML runs are
 laid out in order: a run's `size` scales advances and glyph outlines relative
 to the edit font height, line ascent/height use the largest run, alignment comes
 from the run/paragraph state, and every glyph/vertex carries the run's ARGB.
@@ -862,9 +877,10 @@ from the run/paragraph state, and every glyph/vertex carries the run's ARGB.
 Measured real `Update.bsa` StartMenu:
 
 ```text
-DefineEditText definitions=22 ids=22
+DefineText=0 DefineText2=0 DefineEditText definitions=22 ids=22
 HTML-flagged definitions=22; payloads=4 (3 nonempty + 1 empty <p>)
-HTML runs=3 tags=14 unknown=0 colours=3 sizes=3 faces=3 entities=0
+HTML runs=3 tags=14 unknown_tags=0 colours=3 sizes=3 faces=3 entities=0
+letterSpacing attrs=3 kerning attrs=3 unknown attrs=0
 id=82  "$Loading extra content."                 23 chars
 id=86  "$Loading downloadable content..."        32 chars
 id=95  "Start a New Game?"                       17 chars
@@ -876,8 +892,19 @@ font source=Skyrim - Interface.bsa!interface/fonts_en.swf bytes=417809 fallback=
 candidate DefineFont3 ids=1,3,5,7,9,11,13,15,19,23 (10 stored)
 skipped DefineFont3 ids=17 (Falmer, 28 glyphs, 621 kerning),
                       21 (Mage Script, 29 glyphs, 621 kerning)
-resolved records=0; resolved real-text glyphs=0; real-text vertices added=0
+resolved records=57; substituted records=57; layout records=3
+real glyphs=72 missing=0 outline vertices=106836 indices=160182 triangles=53394
+text atlas=512x512 placed=65 empty=7 occupied=3542 used_height=20
+text batch quads=65 vertices=260 indices=390
 ```
+
+The authored strings above are the complete non-empty static text census.
+There are **no standalone `New`, `Continue`, `Load`, `Options` or `Quit` labels**
+in this SWF; `New` occurs only inside `Start a New Game?`.  Main-menu choices are
+not present as static `DefineText`/`DefineEditText` strings in this movie.  The
+authored `$` prefixes are preserved by the plain-text path.  `DefineText` and
+`DefineText2` are counted by the tag summary but have no decoder; the measured
+count is zero, so this does not block the real StartMenu path.
 
 Both imported fonts come from `gfxfontlib.swf`.  That URL is absent from
 `Update.bsa`, `Skyrim - Interface.bsa` and loose `Data/Interface`.  The fallback
@@ -885,16 +912,16 @@ Both imported fonts come from `gfxfontlib.swf`.  That URL is absent from
 `97e45bbdfe5e030ec48f652204686862b3791dcf69b1e43151330cb2c838f331`) and
 contains 12 DefineFont3 definitions.  Ten fit the 256-glyph/256-kerning summary
 limits; ids 17 and 21 each have 621 kerning records and are explicitly skipped.
-The usable ids are 1/3/5/7/9/11/13/15/19/23, so **neither imported id 34 nor 41
-is present**.  All 57 records therefore receive the exact named refusal
-`imported font id 34/41 is not present in Skyrim - Interface.bsa!interface/fonts_en.swf`
-with symbol/URL context.
+The usable ids are 1/3/5/7/9/11/13/15/19/23, so neither imported id 34 nor 41 is
+present.  The shipped fontconfig aliases resolve them to real faces id 3 and 1;
+all 57 display-list records log that substitution.
 
-The local StartMenu font id 1 `Futura Condensed` (243 glyphs) and fallback
-same/similar-name fonts such as ids 1/3/5 are **not** substituted.  The e2e has
-an exact-id resolved-text path into layout/tessellation/COM, but the retail
-census does not exercise it; measured resolved real-text output remains zero.
-The existing local-font `!` remains the raster/atlas/batch/COM control.
+`menu_font_resolve` now exercises the complete real-label CPU path: resolved
+layout/tessellation, per-glyph A8 rasterisation, one deterministic atlas and one
+compact text batch.  The old 3,024-vertex / 4,320-index result was password-mask
+`*` geometry, not the authored labels.  The e2e COM test still submits its fixed
+shape+local-`!` control batch; the 65 real label quads are measured separately
+and are not yet wired into that COM frame.
 
 ## 16. Tests
 
@@ -910,13 +937,12 @@ Result: `menu_swf_batch` **21 checks, 0 failures**; `menu_swf_fill` **34
 checks, 0 failures**; `menu_swf_mask_batch` **13 checks, 0 failures**;
 `menu_swf_atlas` **27
 checks, 0 failures**; `menu_swf_raster` **44 checks, 0 failures**;
-`menu_swf_text` **76 checks, 0 failures**; `menu_swf_html` **31 checks, 0
-failures**; `menu_swf_tess` **47 checks, 0
-failures**; `menu_swf_shape` **28 checks, 0 failures**; `menu_swf_clip` **17
-checks, 0 failures**; `menu_swf_display_list` **15 checks, 0 failures**;
-`menu_swf_display` **38 checks, 0 failures**; `menu_swf` **95 checks, 0
-failures**; `menu_swf_avm` **26 checks, 0 failures**; `menu_bsa` **277 checks,
-0 failures**.
+`menu_swf_text` **79 checks, 0 failures**; `menu_swf_html` **35 checks, 0
+failures**; `menu_swf_tess` **47 checks, 0 failures**; `menu_swf_shape` **28
+checks, 0 failures**; `menu_swf_clip` **17 checks, 0 failures**;
+`menu_swf_display_list` **15 checks, 0 failures**; `menu_swf_display` **38
+checks, 0 failures**; `menu_swf` **99 checks, 0 failures**; `menu_swf_avm`
+**26 checks, 0 failures**; `menu_bsa` **277 checks, 0 failures**.
 
 Real read-only:
 
@@ -931,13 +957,32 @@ Result: `menu_swf_batch` **34 checks, 0 failures**; `menu_swf_fill` **45
 checks, 0 failures**; `menu_swf_mask_batch` **20 checks, 0 failures**;
 `menu_swf_atlas` **37
 checks, 0 failures**; `menu_swf_raster` **60 checks, 0 failures**;
-`menu_swf_text` **93 checks, 0 failures**; `menu_swf_html` **58 checks, 0
-failures**; `menu_swf_tess` **55 checks, 0
-failures**; `menu_swf_shape` **40 checks, 0 failures**; `menu_swf_clip` **24
-checks, 0 failures**; `menu_swf_display_list` **23 checks, 0 failures**;
-`menu_swf_display` **57 checks, 0 failures**; `menu_swf` **114 checks, 0
-failures**; `menu_swf_avm` **35 checks, 0 failures**; `menu_bsa` **286 checks,
-0 failures**.
+`menu_swf_text` **96 checks, 0 failures**; `menu_swf_html` **62 checks, 0
+failures**; `menu_swf_tess` **55 checks, 0 failures**; `menu_swf_shape` **40
+checks, 0 failures**; `menu_swf_clip` **24 checks, 0 failures**;
+`menu_swf_display_list` **23 checks, 0 failures**; `menu_swf_display` **57
+checks, 0 failures**; `menu_swf` **119 checks, 0 failures**; `menu_swf_avm`
+**35 checks, 0 failures**; `menu_bsa` **286 checks, 0 failures**.
+
+Text-closure regression (2026-11-27, real data, `HOST_CLANG_JOBS=6`):
+
+```powershell
+$env:SKYRIM_N3DS_REAL_DATA='F:\Skyrim\Data'
+powershell -ExecutionPolicy Bypass -File tools/run_host_tests.ps1 -SkipPython `
+  -Only menu_swf,menu_swf_text,menu_swf_html,menu_font_resolve,menu_swf_glyph,menu_swf_raster,menu_swf_atlas,menu_swf_batch
+```
+
+```text
+menu_swf 119; menu_swf_text 96; menu_swf_html 62; menu_font_resolve 40
+menu_swf_glyph 8; menu_swf_raster 60; menu_swf_atlas 37; menu_swf_batch 34
+com PASS; menu_text_draw PASS; menu_pipeline_e2e 74; menu_text_plan_draw PASS
+wall: 11.225 s (8 C targets) + 12.312 s (4 COM/e2e targets)
+```
+
+The source-only worktree has no `staged/fpu.c`; the four COM/e2e targets were
+run through a temporary `C:` harness whose `source`/`tests` junctions point at
+this worktree and whose read-only `staged` junction points at the main tree.
+Neither tree was modified by that run.
 
 Synthetic coverage includes FWS and CWS with identical summaries, short and
 long tag headers, a recursive DefineSprite, ExportAssets, ImportAssets,
@@ -1177,8 +1222,10 @@ Verification:
    create/upload an A8 atlas and draw the combined shape/control-text batch;
    actual Azahar A8 sampling/pixels are still pending.  There is no persistent
    texture/glyph cache, `fonts_console.swf` is not merged, and richer shaping
-   (ligatures, bidi, multi-font fallback), letter-spacing/class spans and text
-   metrics beyond advance+kerning remain.
+   (ligatures, bidi, multi-font fallback), class spans and text metrics beyond
+   advance+kerning+letter-spacing remain.  The 65 real label quads are built on
+   CPU but are not yet wired into the COM frame; a `DefineText` decoder is also
+   absent (the measured StartMenu has zero such tags).
 4. **NIF/DDS/shaders** — exported DDS/NIF assets, ETC1 conversion, logo/fog
    meshes and their shader closure.
 5. **Draw path** — the isolated ARM StartMenu runner now reaches the real PICA
@@ -1478,8 +1525,8 @@ StartMenu mesh; that remains a GFx submission/closure issue.
 
 **Scissor is now real.** `SetScissorRect` + `D3DRS_SCISSORTESTENABLE` program
 `C3D_SetScissor(GPU_SCISSOR_NORMAL,...)` before every PICA draw. The rectangle
-is mapped with `d9_scissor_window_rect()` � the inverse of the same clip
-permutation the vertices use � so it behaves for both the rotated screen target
+is mapped with `d9_scissor_window_rect()` — the inverse of the same clip
+permutation the vertices use — so it behaves for both the rotated screen target
 and `orient_clip()`-permuted explicit/retained targets, and for the SR scaled
 target. Because every `C3D_SetViewport`/`C3D_FrameDrawOn` resets PICA scissor to
 `DISABLE`, the state is re-issued per draw. A full-surface rectangle pushes

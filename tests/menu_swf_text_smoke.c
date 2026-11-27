@@ -568,6 +568,15 @@ static void test_synthetic(void) {
           "empty glyph placement");
 
     /* Named overflow refusals. */
+    MenuSwfTextStyle overflow = style;
+    overflow.tx = INT32_MAX;
+    fixture_init(&f, &m);
+    st = menu_swf_text_layout(file, flen, font, "A", 1, &overflow, &m, reason,
+                              sizeof reason);
+    check(st == MENU_SWF_ERR_BUDGET && strstr(reason, "overflow") &&
+              m.glyph_count == 0 && m.vertex_count == 0,
+          "text transform overflow is named and clears partial output");
+
     fixture_init(&f, &m);
     m.vertex_capacity = 2;
     st = menu_swf_text_layout(file, flen, font, "A", 1, &style, &m, reason,
@@ -861,6 +870,16 @@ static void test_edit_text(void) {
               mesh.glyphs[0].code == 'A' && mesh.glyphs[1].code == 'V',
           "DefineEditText GFx HTML variable payload");
 
+    MenuSwfEditText gfx_password = html;
+    gfx_password.password = 1;
+    strcpy(gfx_password.variable_name, "p>AV</p>");
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &gfx_password, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_OK && mesh.glyph_count == 2 &&
+              mesh.glyphs[0].code == 'A' && mesh.glyphs[1].code == 'V',
+          "GFx HTML label is not collapsed by the retail Password flag");
+
     MenuSwfEditText empty = parsed;
     empty.initial_text[0] = 0;
     empty.initial_text_length = 0;
@@ -891,6 +910,16 @@ static void test_edit_text(void) {
                                    &mesh, reason, sizeof reason);
     check(st == MENU_SWF_ERR_ARGUMENT && strstr(reason, "font id"),
           "unknown DefineEditText font id is named");
+
+    MenuSwfEditText missing = parsed;
+    memcpy(missing.initial_text, "Z", 2);
+    missing.initial_text_length = 1;
+    fixture_init(&fixture, &mesh);
+    st = menu_swf_text_layout_edit(file, file_len, font, &missing, &style,
+                                   &mesh, reason, sizeof reason);
+    check(st == MENU_SWF_ERR_NOTIMPL && strstr(reason, "no glyph for code 90") &&
+              mesh.glyph_count == 0 && mesh.vertex_count == 0,
+          "missing DefineEditText glyph is a named refusal, not a collapsed field");
 
     fixture_init(&fixture, &mesh);
     mesh.glyph_capacity = 0;

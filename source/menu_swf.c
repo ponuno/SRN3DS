@@ -611,6 +611,12 @@ static MenuSwfStatus parse_tag_stream(const uint8_t *body, size_t body_len,
         case 26:
             ++s->place_object2;
             break;
+        case 11: case 33:
+            ++s->define_text;
+            break;
+        case 37:
+            ++s->define_edit_text;
+            break;
         case 39: {
             ++s->define_sprite;
             if (len < 4) {

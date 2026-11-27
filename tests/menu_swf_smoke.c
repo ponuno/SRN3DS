@@ -193,6 +193,9 @@ static size_t build_body(uint8_t *body, size_t cap) {
     at = put_tag(body, cap, at, 57, payload, (uint32_t)len, 0);
     len = build_font_name(payload, sizeof payload);
     at = put_tag(body, cap, at, 88, payload, (uint32_t)len, 0);
+    at = put_tag(body, cap, at, 11, payload, 4, 0);       /* DefineText */
+    at = put_tag(body, cap, at, 33, payload, 4, 0);       /* DefineText2 */
+    at = put_tag(body, cap, at, 37, payload, 4, 0);       /* DefineEditText */
     at = put_tag(body, cap, at, 2, payload, 70, 0);       /* long DefineShape */
     at = put_tag(body, cap, at, 1, NULL, 0, 0);           /* ShowFrame #1 */
     at = put_tag(body, cap, at, 0, NULL, 0, 0);           /* End */
@@ -203,13 +206,15 @@ static void check_fixture_summary(const MenuSwfSummary *s, const char *scope) {
     char what[160];
 #define CHECK_S(cond, text) \
     do { snprintf(what, sizeof what, "%s: %s", scope, text); check((cond), what); } while (0)
-    CHECK_S(s->tag_count == 17, "tag count");
-    CHECK_S(s->top_level_tag_count == 15, "top-level tag count");
+    CHECK_S(s->tag_count == 20, "tag count");
+    CHECK_S(s->top_level_tag_count == 18, "top-level tag count");
     CHECK_S(s->nested_tag_count == 2, "nested tag count");
     CHECK_S(s->frame_header_bytes == 5, "frame header bytes");
     CHECK_S(s->define_shape == 2, "DefineShape count");
     CHECK_S(s->define_font2 == 0, "DefineFont2 count");
     CHECK_S(s->define_font3 == 1, "DefineFont3 count");
+    CHECK_S(s->define_text == 2, "DefineText/DefineText2 count");
+    CHECK_S(s->define_edit_text == 1, "DefineEditText count");
     CHECK_S(s->define_sprite == 1, "DefineSprite count");
     CHECK_S(s->place_object2 == 1, "PlaceObject2 count");
     CHECK_S(s->place_object3 == 1, "PlaceObject3 count");
@@ -554,18 +559,19 @@ static void test_real(const char *data_dir) {
     check(st == MENU_SWF_OK, "real StartMenu summary");
     if (st == MENU_SWF_OK) {
         printf("real: %s StartMenu.swf %u tags (%u top, %u nested), "
-               "shapes=%u fonts2=%u fonts3=%u fontnames=%u sprites=%u "
-               "place2=%u place3=%u show=%u doaction=%u export=%u import=%u "
-               "lossless=%u jpeg=%u names=%u/%u first_show=%d "
-               "frame_header=%u tag_bytes=%llu trailing=%u\n",
+               "shapes=%u fonts2=%u fonts3=%u text=%u edit_text=%u "
+               "fontnames=%u sprites=%u place2=%u place3=%u show=%u "
+               "doaction=%u export=%u import=%u lossless=%u jpeg=%u "
+               "names=%u/%u first_show=%d frame_header=%u tag_bytes=%llu "
+               "trailing=%u\n",
                used, s.tag_count, s.top_level_tag_count, s.nested_tag_count,
-               s.define_shape, s.define_font2, s.define_font3,
-               s.define_font_name, s.define_sprite, s.place_object2,
-               s.place_object3, s.show_frame, s.do_action, s.export_assets,
-               s.import_assets, s.define_bits_lossless, s.define_bits_jpeg,
-               s.name_count, s.name_total, s.first_show_frame,
-               s.frame_header_bytes, (unsigned long long)s.tag_stream_bytes,
-               s.trailing_bytes);
+               s.define_shape, s.define_font2, s.define_font3, s.define_text,
+               s.define_edit_text, s.define_font_name, s.define_sprite,
+               s.place_object2, s.place_object3, s.show_frame, s.do_action,
+               s.export_assets, s.import_assets, s.define_bits_lossless,
+               s.define_bits_jpeg, s.name_count, s.name_total,
+               s.first_show_frame, s.frame_header_bytes,
+               (unsigned long long)s.tag_stream_bytes, s.trailing_bytes);
         check(s.header.format == MENU_SWF_CWS && s.header.version == 10 &&
                   s.header.declared_bytes == 144628u &&
                   s.header.file_bytes == 60284u,
@@ -579,6 +585,8 @@ static void test_real(const char *data_dir) {
         check(s.export_assets >= 1u, "real ExportAssets found");
         check(s.define_font3 >= 1u || s.define_font_name >= 1u,
               "real font definition found");
+        check(s.define_text == 0u && s.define_edit_text == 22u,
+              "real StartMenu has no DefineText and 22 DefineEditText tags");
         check(s.import_assets >= 1u, "real ImportAssets found");
         check(s.define_sprite >= 71u, "real DefineSprite found");
         check(s.name_total >= 47u, "real external/font names found");
