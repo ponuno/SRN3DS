@@ -37,7 +37,7 @@
 
 | Пробел | Доказательство / где | Кто / что нужно | Размер |
 |---|---|---|---|
-| GFx запрашивает NPOT render-target textures (ровно 3 отказа `CreateTexture: render-target textures must be power-of-two 8..1024` в обоих логах); `create_target()` отвергает NPOT раньше `target_viewport_scaled`, нет UV sub-rect для сэмплируемого target | `MENU_SHADER_RUNTIME.md` §1.7 | NPOT-логический target: POT-хранилище + sub-rect scaling; маски GFx требуют RT. **См. противоречие №1 ниже** | — |
+| GFx запрашивает NPOT render-target textures (ровно 3 отказа `CreateTexture: render-target textures must be power-of-two 8..1024` в старых логах); NPOT-логический target теперь реализован POT-хранилищем + sub-rect scaling | `MENU_SHADER_RUNTIME.md` §1.7; `STATUS_2026-11-27.md` §Update (late evening); `docs/NPOT_RENDER_TARGETS.md` | Сделано `b5abe8f`: `pot_pad`/`storage_w/h` в `source/d3d9_core.c`, UV-масштаб и sub-rect readback. Противоречие №1 снято | — |
 
 ## 4. Мир: шейдеры
 
@@ -134,6 +134,8 @@
 ## Противоречия и расхождения между отчётами
 
 Зафиксированы как факты; ни одна из сторон не выбрана в качестве «правильной».
+Разрешения, внесённые 2026-11-27 в ветке `portlog-doc`, перечислены после таблицы
+(сняты №1, №2 и №4).
 
 | # | Расхождение | Сторона A | Сторона B |
 |---|---|---|---|
@@ -145,6 +147,21 @@
 | 6 | Число заблокированных world VS | `WORLD_SHADER_CLOSURE.md` §2f: «13 of the 17 world VS rows» заблокированы skinned-fetch | Там же перечислено 6 blit + 6 lighting + 2 wide = 14; при этом identity-bank ровно у одной wide-строки (`lit.vs.b3a9babe`), вторая — 4-bone `skin.vs.8513aaac`. Внутренняя несогласованность |
 | 7 | Достигнута ли StartMenu | `MENU_CRASH_HANDOFF.md` §Not achieved: «StartMenu/SWF open, 0x8779d0 type-0 dispatch, GFx Draw*: 0» | Тот же файл §Root cause found: прогон проходит дальше `0x5fc640`; `STATUS_2026-11-27.md` §Where the real exe is now: StartMenu create и Present достигнуты. Ранний раздел handoff устарел |
 | 8 | `0xb7f450` | `MENU_CRASH_HANDOFF.md` §Fixed 0x429872: «Next independent blocker: 0xb7f450 unknown function/import», не в `functions.json` | `STATUS_2026-11-27.md` §Fixed on this path: discovery gaps `0xb7f450`, `0xb779c0` добавлены, контейнер пересобран. Handoff устарел |
+
+### Разрешено 2026-11-27 (ветка `portlog-doc`)
+
+* №1: `MENU_SHADER_RUNTIME.md` §1.7 приведено к факту — NPOT offscreen RT
+  реализован (`b5abe8f`): `source/d3d9_core.c` (`pot_pad`, `storage_w/h`) и
+  `docs/NPOT_RENDER_TARGETS.md`. Три `D3DERR_NOTAVAILABLE` в старых логах —
+  исторические; `STATUS_2026-11-27.md` остаётся фактической стороной.
+* №2: `WORLD_SHADER_CLOSURE.md` §2c сверено с `source/d3d9_pica_vs.h/.c`:
+  attr ids 5/6/7, D3D usage 3/6/7; `D9SkinVertex` имеет `tx/bx`,
+  `fetch_plain()` декодирует TANGENT0/BINORMAL0. Причина «нет поля» в
+  сертификаторе устарела; 4 verdict'а в `wide_vs_certification.json` требуют
+  повторного прогона — **требует проверки**.
+* №4: `MENU_SHADER_RUNTIME.md` §4.1 и `WORLD_SHADER_CLOSURE.md` §1: 128 —
+  меню-side обзор общих `docs` + pack catalogs; 18 — мир, каталог пяти мировых
+  паков. Разные каталоги/области аудита, не две оценки одного множества.
 
 ## Уточнения, чтобы не принять за пробел
 
@@ -158,7 +175,7 @@
 1. **Снять stall загрузки меню** — семафор `0x50c`, 64 KiB `[io] read`, watchdog (`STATUS_2026-11-27.md` §Open blockers #1). Без этого не воспроизводится ни первый GFx-draw, ни путь в мир. Готовое направление — `menu-io-stall`.
 2. **Первый GFx-draw + его доказательство** — runtime PICA-программа вместо `none` и gate `N3DS_SHADER_DRAW_TRACE` (`STATUS_2026-11-27.md` §Open blockers #2; `WORLD_SHADER_CLOSURE.md` §2f), плюс нескинный fetch/pack в `d3d9_core.c`, без которого 13 из 17 world VS отказывает ядро (`WORLD_SHADER_CLOSURE.md` §2f). Это один и тот же момент «план → реальный draw» для меню и мира.
 3. **Бэкенд varyings и явные precondition'ы материала** — `color0`/`color1` и дополнительные texcoord в PICA VS + `d9_menu_shader_note_preconditions()` для `normal`/`tangent`/c8 (`MENU_SHADER_RUNTIME.md` §1.1, §1.3, §3). Снимает refusal у logo/copy/fog/tint и у 46 выбранных VS; caps не трогаются.
-4. **NPOT offscreen RT для GFx-масок** — три отказа `CreateTexture` в обоих логах (`MENU_SHADER_RUNTIME.md` §1.7). Перед работой нужно снять противоречие №1: STATUS уже заявляет POT-storage с логическим sub-rect. Это последний известный непройденный RT-блокер меню.
+4. **NPOT offscreen RT для GFx-масок** — противоречие №1 снято: `MENU_SHADER_RUNTIME.md` §1.7 теперь совпадает со STATUS и кодом (`b5abe8f`, POT-хранилище + логический sub-rect, `docs/NPOT_RENDER_TARGETS.md`). Три отказа в старых логах исторические; это больше не открытый RT-блокер.
 5. **Мировой PS-пул: `def` fold (M) → COLOR1-drop с измеренной ошибкой → software PS fallback (L)** — ровно тот порядок работы, который указан в `WORLD_SHADER_CLOSURE.md` §2g; плюс 32 chunks зависимого чтения из §2d и 5×10 `lighting.approx.*` из §2e. Даёт наибольший выигрыш по частоте после уже закрытых 18 draw-путей.
 
 Следующий эшелон (не в топ-5, но обязателен для железа): профиль 120/24 и cell-пики памяти (`MEMORY_BUDGET_178.md` §6, §8), стейджинг `Saves` (`SAVE_LOADER.md` §4), `operator new`/`delete` для Papyrus (`PAPYRUS_AUDIT.md` §4 п.1).

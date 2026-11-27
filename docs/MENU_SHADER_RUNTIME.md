@@ -297,15 +297,17 @@ The real run logs were checked for `CreateRenderTarget`, `CreateTexture`
 What is already supported: one-level, `D3DPOOL_DEFAULT`,
 `D3DUSAGE_RENDERTARGET`, `A8R8G8B8`/`X8R8G8B8`; the texture is sampleable and
 bindable as a target; `StretchRect` handles same-format surface blits; depth
-attachments are supported for explicit targets.  What is missing is a
-non-power-of-two logical target.  `Target` already separates logical `w/h`
-from native `nw/nh` and `apply_target_viewport()` already has a
-`target_viewport_scaled` path, but `create_target()` rejects NPOT before that
-path, and a padded POT storage view would need UV sub-rect scaling for the
-sampled target.  That is not implemented in this change; the three requests
-stay named `D3DERR_NOTAVAILABLE` refusals.  **Offscreen RTs are required for
-the GFx masks; this is the next RT task, not a shader task.**  No `DevCaps`
-field is changed by that gap.
+attachments are supported for explicit targets.  The NPOT logical target is
+**implemented** (commit `b5abe8f`): `d9_create_render_texture()` in
+`source/d3d9_core.c` creates a `Target` with `pot_pad` and records
+`storage_w/storage_h` on the sampling texture; `apply_target_viewport()` uses
+the logical size, and the draw/readback paths scale normalized UVs to the
+logical sub-rect.  The contract (e.g. 400x240 → 512x256, 2x2/1x1 → 8x8,
+sub-rect `StretchRect`/`GetRenderTargetData`) is in
+`docs/NPOT_RENDER_TARGETS.md`.  The three `D3DERR_NOTAVAILABLE` lines quoted
+above are historical, from `last_run.log`/`slice_b7c`; they are not the current
+code path (`STATUS_2026-11-27.md` records the refusals as gone).  No `DevCaps`
+field is changed by this fix.
 
 ## 4. Tests
 
@@ -399,3 +401,10 @@ Targeted run in this worktree (`com`, `render_texture`, `rt_readback`,
 C tests plus **menu_vs_family PASS** and **menu_closure 279 checks, 0
 failures**.  `tools/shaders/runtime_audit.py` reports 128 draw-enabled plans,
 128 runtime paths and 30 valid PICA VS programs (0 unmatched).
+
+Scope note: the 128/128/30 figure is the menu-side closure view from the
+shared `docs` + pack catalog audit.  `WORLD_SHADER_CLOSURE.md` §1 quotes a
+different catalog: `tools/shaders/world_runtime_audit.py` scopes to the five
+world packs (18 world draw paths; the global census report there says 95
+draw-enabled).  These are different catalogs/scopes, not two counts of the
+same set.

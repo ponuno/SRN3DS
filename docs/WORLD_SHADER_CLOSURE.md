@@ -58,6 +58,13 @@ partition their census exactly. The global report is unchanged at
 `6,659 hashes / 6,542 translated / 95 draw-enabled / 22 refused`; eight
 census hashes moved from `translated` to `draw-enabled`.
 
+Scope note: these 95 draw-enabled / 18 world runtime paths come from the
+world-pack-only audit (`tools/shaders/world_runtime_audit.py`).  The
+128 draw-enabled / 128 runtime paths / 30 PICA VS quoted in
+`MENU_SHADER_RUNTIME.md` §4.1 are the menu-side closure view of the shared
+`docs` + pack catalogs (`tools/shaders/runtime_audit.py`).  Different catalogs
+and scopes; neither number replaces the other.
+
 ### Runtime rows (the only world draws that claim a path)
 
 | Plan | Kind | Path | Proof |
@@ -169,14 +176,26 @@ runtime path:
 | Blocker | Programs | Exact cause |
 |---|---:|---|
 | `ps_reads_color1` | 6 | paired PS samples COLOR1; PICA TEV has one primary colour and the VS packs/drops it |
-| `vs_attr_source_unsupported` | 4 | reads TANGENT/BINORMAL; `D9SkinVertex` has no source field for them |
+| `vs_attr_source_unsupported` | 4 | stale certifier verdict (4 rows still in `wide_vs_certification.json`): it flags every VS reading TANGENT0/BINORMAL0 (D3D usage 6/7); its stated reason "`D9SkinVertex` has no source field" no longer matches the code (see below) |
 | `ps_not_runtime` | 3 | paired PS is refused or draw 0 (`bda33984`, `8fce433c`) |
 | `no_ps_partner` | 2 | no PS chunk shares the technique key |
 
-The normal/tangent/binormal enum now exists (`D9_PICA_VS_ATTR_NORMAL/TANGENT/
-BINORMAL`, usage indices 3/6/7, `MAX_ATTRS` 16), so the old
-`vs_input_not_loadable` blocker is gone; the remaining blockers are PS-side or
-the missing tangent/binormal vertex source. None of the 15 is draw-enabled.
+Verified against `source/d3d9_pica_vs.h` / `d3d9_pica_vs.c` at this base:
+`D9_PICA_VS_ATTR_NORMAL = 5`, `TANGENT = 6`, `BINORMAL = 7` are **attribute ids**
+(alongside POSITION 0, BLENDWEIGHT 1, BLENDINDICES 2, TEXCOORD 3, COLOR 4;
+`D9_PICA_VS_MAX_ATTRS = 16`).  `attr_usage()` maps them to D3D usage 3/6/7,
+`d9_pica_vs_declare()` matches declaration elements by that usage, and
+`attr_source()` reads `D9SkinVertex.nx` / `.tx` / `.bx`.  `D9SkinVertex` now has
+`tx,ty,tz` and `bx,by,bz` (`source/d3d9_vertex.h`), and `fetch_plain()` in
+`source/d3d9_core.c` decodes TANGENT0/BINORMAL0 on the non-skinned PICA VS
+fetch path; the skinned fetch still leaves those three floats zero.  So the old
+`vs_input_not_loadable` blocker is gone.  The four `vs_attr_source_unsupported`
+verdicts still committed in `source/shader_packs/wide_vs_certification.json`
+come from `tools/vs_wide_certify.py`, which rejects every VS with usage 6/7 and
+repeats the old "no source field" reason; that reason is stale relative to the
+code.  The committed `ok: 0` has not been re-derived here — **требует проверки**
+(re-run the certifier/runtime audit after its source check is reconciled).
+None of the 15 is draw-enabled in the committed record.
 
 ## 2d. PS dependent read (`06aa117c`/`14db34d7`) design
 
