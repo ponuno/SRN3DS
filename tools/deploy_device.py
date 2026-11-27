@@ -39,7 +39,7 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 
-from skyrim import bsa, dds  # noqa: E402
+from skyrim import bsa, bsa_write, dds  # noqa: E402
 from skyrim import data_overlay  # noqa: E402
 
 try:  # executed as ``python tools/deploy_device.py``
@@ -58,6 +58,11 @@ KEEP_AS_IS = {"bc1": "DXT1", "bc2": "DXT3", "bc3": "DXT5"}
 
 OFFICIAL_PLUGINS = {"skyrim.esm", "update.esm", "dawnguard.esm",
                     "dragonborn.esm", "hearthfires.esm"}
+
+# Files that must stay outside a cooked archive: plugins are loaded by name,
+# configuration is read as text, and the intro is our own .bkr transcode.
+COOK_SKIP_EXT = {".esm", ".esp", ".esl", ".ini", ".txt", ".bik", ".bkr"}
+COOK_DEFAULT_CAP = 1800 * 1024 * 1024
 
 # Files that must exist on the device and are not part of the asset overlay.
 INI_NAMES = ("Skyrim.ini", "SkyrimPrefs.ini", "Plugins.txt", "loadorder.txt")
@@ -269,6 +274,26 @@ def plan_report(overlay, args) -> dict:
             mod_assets += 1
             mod_bytes += row["stored_bytes"]
     cores = core_files(overlay, args)
+    cooked = None
+    if args.pack == "cooked":
+        refusals: List[dict] = []
+        entries = cook_entries(winners, archives, max_dim, refusals)
+        by_group = Counter(entry["group"] for entry in entries)
+        by_group_bytes = Counter()
+        for entry in entries:
+            by_group_bytes[entry["group"]] += entry["estimate"]
+        cap = args.max_archive_mb * 1024 * 1024
+        cooked = {
+            "cap_bytes": cap,
+            "archives_estimate": sum(
+                1 for _ in _batches(entries, cap)),
+            "files": len(entries),
+            "bytes_estimate": sum(entry["estimate"] for entry in entries),
+            "groups": {name: {"files": by_group[name],
+                              "bytes": by_group_bytes[name]}
+                       for name in sorted(by_group)},
+            "refused": len(refusals),
+        }
     return {
         "schema": SCHEMA,
         "command": "plan",
@@ -281,12 +306,13 @@ def plan_report(overlay, args) -> dict:
                    "from_mods": mod_assets, "mod_bytes": mod_bytes},
         "textures": _budget(textures, winners, archives),
         "core": cores["report"],
+        "cooked": cooked,
         "refusals": [row for row in textures if row["action"] == "refuse"][:50],
         "texture_rows": textures if args.full_rows else None,
     }
 
 
-def core_files(overlay, args) -> dict:
+def core_files(overlay, args, include_archives: bool = True) -> dict:
     data_root = overlay.data_root
     root = os.path.dirname(os.path.abspath(data_root))
     entries = []
@@ -307,7 +333,7 @@ def core_files(overlay, args) -> dict:
                 break
     if args.ir:
         _add_core(entries, "ir/tesv.irc", args.ir, required=False)
-    if not getattr(args, "skip_archives", False):
+    if not getattr(args, "skip_archives", False) and include_archives:
         for mount in overlay.archives:
             if os.path.isfile(mount.host_path):
                 _add_core(entries, "Data/" + mount.name,
@@ -339,7 +365,7 @@ def _add_core(entries: List[dict], device_path: str, host_path: str,
 # Staging
 
 
-def _write_rgba8_dds(path: str, levels: List[Tuple[int, int, bytes]]) -> int:
+def _rgba8_dds_bytes(levels: List[Tuple[int, int, bytes]]) -> bytes:
     width, height = levels[0][0], levels[0][1]
     flags = 0x1 | 0x2 | 0x4 | 0x8 | 0x1000 | (0x20000 if len(levels) > 1 else 0)
     header = struct.pack(
@@ -349,15 +375,21 @@ def _write_rgba8_dds(path: str, levels: List[Tuple[int, int, bytes]]) -> int:
         struct.pack("<II4s5I", 32, 0x41, b"\0\0\0\0", 32,
                     0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000),
         0x1000, 0, 0, 0, 0)
-    payload = b"".join(level[2] for level in levels)
+    return header + b"".join(level[2] for level in levels)
+
+
+def _write_rgba8_dds(path: str, levels: List[Tuple[int, int, bytes]]) -> int:
+    blob = _rgba8_dds_bytes(levels)
     with open(path, "wb") as handle:
-        handle.write(header)
-        handle.write(payload)
-    return len(header) + len(payload)
+        handle.write(blob)
+    return len(blob)
 
 
-def convert_texture(asset, row, archives, out_root: str, max_dim: int) -> dict:
+def texture_payload(asset, row, archives, max_dim: int) -> Tuple[bytes, str]:
+    """Return the device bytes for one DDS plus the container name."""
     data = _read_all(asset, archives)
+    if row["action"] == "keep":
+        return data, "copied"
     width, height, rgba = dds.decode_dds(data, 0)
     target_w, target_h = width, height
     if width & (width - 1) or height & (height - 1):
@@ -369,27 +401,202 @@ def convert_texture(asset, row, archives, out_root: str, max_dim: int) -> dict:
         rgba = mod_optimize.resize_rgba(rgba, width, height, target_w, target_h)
         width, height = target_w, target_h
     levels = mod_optimize._mip_chain(rgba, width, height)
-    rel = asset.virtual_path.replace("\\", os.sep).lstrip(os.sep)
-    out_path = os.path.join(out_root, "Data", rel)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     if row["action"] == "bc1":
         has_alpha = any(rgba[i] < 255 for i in range(3, len(rgba), 4))
         if not has_alpha:
-            size = mod_optimize.write_bc1_dds(out_path, levels)
-            container = "dds-bc1"
-        else:
-            size = _write_rgba8_dds(out_path, levels)
-            container = "dds-rgba8"
-    else:
-        size = _write_rgba8_dds(out_path, levels)
-        container = "dds-rgba8"
-    digest = hashlib.sha256(open(out_path, "rb").read()).hexdigest()
-    return {"path": asset.virtual_path, "output": out_path, "bytes": size,
+            return mod_optimize.bc1_dds_bytes(levels), "dds-bc1"
+    return _rgba8_dds_bytes(levels), "dds-rgba8"
+
+
+def convert_texture(asset, row, archives, out_root: str, max_dim: int) -> dict:
+    payload, container = texture_payload(asset, row, archives, max_dim)
+    rel = asset.virtual_path.replace("\\", os.sep).lstrip(os.sep)
+    out_path = os.path.join(out_root, "Data", rel)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as handle:
+        handle.write(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    return {"path": asset.virtual_path, "output": out_path, "bytes": len(payload),
             "container": container, "sha256": digest,
             "source": {"kind": asset.kind, "plugin": asset.plugin,
                        "archive": asset.archive, "width": row.get("width"),
                        "height": row.get("height"), "format": row.get("format")},
             "action": row["action"]}
+
+
+# ---------------------------------------------------------------------------
+# Cooked archives
+
+
+def _group_of(virtual_path: str) -> str:
+    parts = virtual_path.replace("/", "\\").split("\\")
+    if len(parts) < 2:
+        return "root"
+    group = parts[0].lower()
+    return group if group not in ("", ".") else "root"
+
+
+def cook_entries(winners, archives, max_dim: int,
+                 refusals: List[dict]) -> List[dict]:
+    """Everything a cooked archive would contain, with an estimated size."""
+    entries = []
+    for key in sorted(winners):
+        asset = winners[key]
+        ext = os.path.splitext(key)[1]
+        if ext in COOK_SKIP_EXT or key.startswith("video\\"):
+            continue
+        if key.endswith(".dds"):
+            prefix = _read_prefix(asset, archives, DDS_HEADER_BYTES)
+            row = classify_texture(prefix, _asset_size(asset, archives), max_dim)
+            if row["action"] == "refuse":
+                refusals.append({"path": asset.virtual_path,
+                                 "reason": row["reason"],
+                                 "plugin": asset.plugin})
+                continue
+            if row["action"] == "keep":
+                estimate = _asset_size(asset, archives)
+            else:
+                bpp = 4 if row["action"] == "bc1" else 32
+                estimate = int(row["width"] * row["height"] * bpp / 8 * 1.34)
+        else:
+            row = {"action": "copy", "reason": "non-texture"}
+            estimate = _asset_size(asset, archives)
+        entries.append({"asset": asset, "row": row, "estimate": estimate,
+                        "group": _group_of(asset.virtual_path)})
+    return entries
+
+
+def _batches(entries: List[dict], cap: int):
+    batch: List[dict] = []
+    size = 0
+    for entry in entries:
+        if batch and size + entry["estimate"] > cap:
+            yield batch
+            batch, size = [], 0
+        batch.append(entry)
+        size += entry["estimate"]
+    if batch:
+        yield batch
+
+
+def _write_cooked_ini(out_data: str, source: str, names: List[str]) -> str:
+    lines: List[str] = []
+    if source and os.path.isfile(source):
+        with open(source, "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().replace("\r\n", "\n").split("\n")
+    value = ", ".join(names)
+    out: List[str] = []
+    replaced = False
+    seen_archive = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            seen_archive = stripped.lower() == "[archive]"
+        low = stripped.lower()
+        if low.startswith("sresourcearchivelist2"):
+            out.append("sResourceArchiveList2=")
+            continue
+        if low.startswith("sresourcearchivelist="):
+            out.append("sResourceArchiveList=" + value)
+            replaced = True
+            continue
+        out.append(line)
+    if not replaced:
+        if not seen_archive:
+            out.append("[Archive]")
+        out.append("sResourceArchiveList=" + value)
+    text = "\n".join(out).rstrip("\n") + "\n"
+    path = os.path.join(out_data, "Skyrim.ini")
+    with open(path, "w", encoding="utf-8", newline="\r\n") as handle:
+        handle.write(text)
+    return path
+
+
+def stage_cooked(overlay, args) -> dict:
+    winners, stats = resolve_winners(overlay)
+    archives = _archive_by_host(overlay)
+    max_dim = _max_dim_for(args.resize)
+    os.makedirs(args.out, exist_ok=True)
+    cores = core_files(overlay, args, include_archives=False)
+    copied = []
+    for entry in cores["entries"]:
+        if entry.get("missing"):
+            continue
+        dest = os.path.join(args.out, entry["device_path"].replace("/", os.sep))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copyfile(entry["host_path"], dest)
+        copied.append({"path": entry["device_path"], "bytes": entry["bytes"],
+                       "sha256": hashlib.sha256(open(dest, "rb").read()).hexdigest(),
+                       "class": "core"})
+    refusals: List[dict] = []
+    entries = cook_entries(winners, archives, max_dim, refusals)
+    cap = args.max_archive_mb * 1024 * 1024
+    archive_rows = []
+    file_rows = []
+    data_dir = os.path.join(args.out, "Data")
+    os.makedirs(data_dir, exist_ok=True)
+    parts: Dict[str, int] = {}
+    for batch in _batches(entries, cap):
+        group = batch[0]["group"]
+        parts[group] = parts.get(group, 0) + 1
+        part = parts[group]
+        name = "Skyrim - Cooked %s%s.bsa" % (
+            group, "" if part == 1 else " %d" % part)
+        rows: List[dict] = []
+
+        def payloads(batch=batch, rows=rows):
+            for entry in batch:
+                asset, row = entry["asset"], entry["row"]
+                try:
+                    if row["action"] == "copy":
+                        payload, container = _read_all(asset, archives), "copied"
+                    else:
+                        payload, container = texture_payload(
+                            asset, row, archives, max_dim)
+                except (OSError, bsa.BsaError, dds.DdsError, DeployError) as exc:
+                    refusals.append({"path": asset.virtual_path,
+                                     "reason": "conversion failed: %s" % exc,
+                                     "plugin": asset.plugin})
+                    continue
+                rows.append({"path": asset.virtual_path, "bytes": len(payload),
+                             "sha256": hashlib.sha256(payload).hexdigest(),
+                             "container": container,
+                             "source": {"kind": asset.kind,
+                                        "plugin": asset.plugin,
+                                        "archive": asset.archive}})
+                yield asset.virtual_path, payload
+
+        result = bsa_write.write_bsa_stream(
+            os.path.join(data_dir, name), payloads(), compressed=False)
+        archive_rows.append({"name": name, "files": len(rows),
+                             "bytes": result["bytes"],
+                             "sha256": hashlib.sha256(
+                                 open(result["path"], "rb").read()).hexdigest()})
+        file_rows.extend(rows)
+    if not archive_rows:
+        raise DeployError("cooked stage produced no archives")
+    ini_source = ""
+    for entry in cores["entries"]:
+        if entry["device_path"].lower() == "data/skyrim.ini":
+            ini_source = entry["host_path"]
+            break
+    _write_cooked_ini(data_dir, ini_source,
+                      [row["name"] for row in archive_rows])
+    manifest = {
+        "schema": SCHEMA, "command": "stage", "cooked": True,
+        "data_root": overlay.data_root, "out_root": os.path.abspath(args.out),
+        "resize": args.resize, "load_order": overlay.load_report,
+        "resolve": stats, "core": cores["report"],
+        "archives": archive_rows, "files": file_rows,
+        "refused": refusals,
+        "bytes": sum(row["bytes"] for row in copied)
+        + sum(row["bytes"] for row in archive_rows),
+    }
+    with open(os.path.join(args.out, "deploy_manifest.json"), "w",
+              encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=1, sort_keys=True)
+        handle.write("\n")
+    return manifest
 
 
 def stage(overlay, args) -> dict:
@@ -490,12 +697,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         p.add_argument("--full-rows", action="store_true")
         p.add_argument("--skip-archives", action="store_true",
                        help="do not copy the mounted BSA files")
+        p.add_argument("--pack", choices=("none", "cooked"), default="none",
+                       help="cooked writes only winning assets into new archives")
+        p.add_argument("--max-archive-mb", type=int, default=1800,
+                       help="split cooked archives at this size")
     args = parser.parse_args(argv)
     try:
         with data_overlay.DataOverlay(args.data or None,
                                       plugins_path=args.plugins,
                                       loadorder_path=args.loadorder) as overlay:
-            report = (stage(overlay, args) if args.command == "stage"
+            report = (stage_cooked(overlay, args)
+                      if args.command == "stage" and args.pack == "cooked"
+                      else stage(overlay, args) if args.command == "stage"
                       else plan_report(overlay, args))
     except (data_overlay.OverlayError, DeployError, bsa.BsaError,
             dds.DdsError, OSError) as exc:
@@ -505,6 +718,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         view = {key: value for key, value in report.items()
                 if key != "texture_rows"}
         print(json.dumps(view, indent=2, sort_keys=True))
+    elif args.pack == "cooked":
+        print(json.dumps({k: report[k] for k in
+                          ("schema", "out_root", "cooked", "core")},
+                         indent=2, sort_keys=True))
+        print("archives=%d files=%d refused=%d"
+              % (len(report["archives"]), len(report["files"]),
+                 len(report["refused"])))
     else:
         print(json.dumps({k: report[k] for k in
                           ("schema", "out_root", "core", "kept_in_archives",

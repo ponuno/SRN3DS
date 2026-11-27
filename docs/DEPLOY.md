@@ -98,7 +98,40 @@ measured policy keeps 18,524 of 18,714 textures untouched.
 
 The single refusal is `textures\effects\noisevolume.dds` (R8 volume noise).
 
-## 5. Limits / next steps
+## 5. Cooked archives (`--pack cooked`)
+
+`--pack cooked` replaces the whole-BSA copy with new archives that contain
+**only the winning assets**, already converted:
+
+* winners are grouped by their top-level directory (`textures`, `meshes`,
+  `sound`, `scripts`, …);
+* a group larger than `--max-archive-mb` (default 1800) is split into
+  `Skyrim - Cooked <group> 2.bsa`, …;
+* plugins, `*.ini`, `*.txt`, `*.bik` and `*.bkr` stay outside the archive;
+* archives are written **uncompressed** — on ARM11 the CPU is more expensive
+  than SD read time;
+* `Data\Skyrim.ini` is rewritten with
+  `sResourceArchiveList=<cooked archives>` and an empty
+  `sResourceArchiveList2`;
+* the original vanilla BSAs are not copied at all.
+
+Measured with `plan --pack cooked` on the reference install: **70,001 files /
+4.16 GB / 3 archives / 1 refusal**. Groups: meshes 1.57 GB, textures 1.39 GB,
+sound 0.86 GB, grass 0.16 GB, music 0.10 GB, everything else < 50 MB.
+
+The writer is `skyrim.bsa_write.write_bsa_stream`: payloads are staged in a
+temporary file and only metadata stays in RAM, so a multi-gigabyte archive does
+not need a matching Python heap. It emits the same v104 layout as `write_bsa`.
+
+Trade-offs:
+
+* changing the load order or a mod requires a **re-cook** on the PC;
+* a per-file patch can still be dropped as a loose overlay — the runtime
+  overlay lets loose files win;
+* the C mount list must read the archive names from the INI (or a manifest);
+  until it does, the cooked tree is a file-layer artifact only.
+
+## 6. Limits / next steps
 
 * **BSAs are copied whole.** Overridden vanilla entries still occupy space
   (only 127 in the reference install). A cooked single-archive mode that writes

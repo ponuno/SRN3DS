@@ -16,7 +16,9 @@ front of each payload exactly like the retail archives.
 from __future__ import annotations
 
 import os
+import shutil
 import struct
+import tempfile
 import zlib
 from dataclasses import dataclass
 from typing import Iterable, List, Mapping, Sequence, Tuple, Union
@@ -155,3 +157,111 @@ def write_bsa(path: str, files: Union[Mapping[str, bytes], Sequence[Tuple[str, b
         "data_start": data_start,
         "names_point_to": list(i.name for i in items),
     }
+
+
+@dataclass
+class _StreamItem:
+    folder: str
+    name: str
+    size: int
+    offset: int  # relative to the data section
+
+
+def write_bsa_stream(path: str, files: Iterable[Tuple[str, bytes]],
+                     *, version: int = 104, compressed: bool = False,
+                     embed_names: bool = False, level: int = 9) -> dict:
+    """Write an archive without holding every payload in memory.
+
+    Payloads are staged in a temporary file, metadata stays in RAM, then the
+    final index is written and the staged data is copied through.  This is the
+    writer the device staging uses for multi-gigabyte cooked archives; the
+    on-disk layout is identical to :func:`write_bsa`.
+    """
+    if version not in (104, 105):
+        raise BsaWriteError("only v104/v105 output is supported (got %d)" % version)
+    items: List[_StreamItem] = []
+    staged = tempfile.TemporaryFile(prefix="bsa_stream_")
+    try:
+        cursor = 0
+        for name, payload in files:
+            folder, base = _normalize(name)
+            # Validate the embedded name before staging any bytes.
+            if embed_names:
+                full = (folder + "\\" + base) if folder else base
+                raw = full.encode("cp1252")
+                if not raw or len(raw) > 255:
+                    raise BsaWriteError("embedded name %r is not encodable" % full)
+            chunks = []
+            if embed_names:
+                full = (folder + "\\" + base) if folder else base
+                raw = full.encode("cp1252")
+                chunks.append(bytes([len(raw)]) + raw)
+            if compressed:
+                chunks.append(struct.pack("<I", len(payload)))
+                chunks.append(zlib.compress(payload, level))
+            else:
+                chunks.append(payload)
+            stored = b"".join(chunks)
+            staged.write(stored)
+            items.append(_StreamItem(folder, base, len(stored), cursor))
+            cursor += len(stored)
+        if not items:
+            raise BsaWriteError("refusing to write an empty archive")
+
+        items.sort(key=lambda item: (item.folder.lower(), item.name.lower()))
+        folders: List[str] = []
+        by_folder: List[List[_StreamItem]] = []
+        for item in items:
+            if not folders or folders[-1].lower() != item.folder.lower():
+                folders.append(item.folder)
+                by_folder.append([])
+            by_folder[-1].append(item)
+        if len(folders) != len({f.lower() for f in folders}):
+            raise BsaWriteError("folder names collide case-insensitively")
+
+        flags = FLAG_DIRECTORY_NAMES | FLAG_FILE_NAMES
+        if compressed:
+            flags |= FLAG_COMPRESSED
+        if embed_names:
+            flags |= FLAG_EMBED_NAMES
+
+        total_folder_names = sum(len(f.encode("cp1252")) + 1 for f in folders)
+        total_file_names = sum(len(i.name.encode("cp1252")) + 1 for i in items)
+        directory_size = HEADER_SIZE + 16 * len(folders)
+        for folder, group in zip(folders, by_folder):
+            directory_size += 1 + len(folder.encode("cp1252")) + 1
+            directory_size += 16 * len(group)
+        data_start = directory_size + total_file_names
+
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(struct.pack(
+                "<4s8I", MAGIC, version, HEADER_SIZE, flags, len(folders),
+                len(items), total_folder_names, total_file_names, 0))
+            for folder, group in zip(folders, by_folder):
+                handle.write(struct.pack("<QII", 0, len(group), 0))
+            for folder, group in zip(folders, by_folder):
+                raw = folder.encode("cp1252") + b"\x00"
+                handle.write(bytes([len(raw)]) + raw)
+                for item in group:
+                    handle.write(struct.pack(
+                        "<QII", 0, item.size, data_start + item.offset))
+            for item in items:
+                handle.write(item.name.encode("cp1252") + b"\x00")
+            staged.seek(0)
+            shutil.copyfileobj(staged, handle, length=4 * 1024 * 1024)
+        total = data_start + cursor
+        if os.path.getsize(path) != total:
+            raise BsaWriteError("streamed archive size mismatch")
+        return {
+            "path": os.path.abspath(path),
+            "version": version,
+            "compressed": compressed,
+            "embed_names": embed_names,
+            "folders": len(folders),
+            "files": len(items),
+            "bytes": total,
+            "data_start": data_start,
+        }
+    finally:
+        staged.close()

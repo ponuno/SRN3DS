@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 import deploy_device as deploy  # noqa: E402
-from skyrim import bsa_write, dds  # noqa: E402
+from skyrim import bsa, bsa_write, dds  # noqa: E402
 
 
 def tes4_header(masters=()):
@@ -134,6 +134,44 @@ def main():
             100, 0)
         assert rgb["action"] == "bc1", rgb
         checks += 3
+
+        # Cooked mode: winners only, no original BSA, INI points at cooked.
+        cooked_out = root / "cooked"
+        rc = deploy.main(["stage", "--data", str(root / "Data"),
+                          "--tesv", str(root / "TESV.exe"),
+                          "--out", str(cooked_out), "--pack", "cooked"])
+        assert rc == 0, rc
+        assert not (cooked_out / "Data" / "Skyrim - Textures.bsa").exists()
+        archive_paths = sorted((cooked_out / "Data").glob("Skyrim - Cooked*.bsa"))
+        assert archive_paths, "no cooked archive written"
+        found = {}
+        for path in archive_paths:
+            with bsa.BsaArchive(str(path)) as archive:
+                for entry in archive.list_files():
+                    found[entry.path.lower()] = archive.read_file(entry.path)
+        assert "textures\\arch\\keep_dxt1.dds" in found, sorted(found)
+        assert "textures\\arch\\plain_rgb.dds" in found
+        assert "textures\\arch\\bad_bc5.dds" not in found
+        assert "meshes\\loose.nif" in found
+        assert dds.parse_dds(found["textures\\arch\\plain_rgb.dds"]).kind == "bc1"
+        ini = (cooked_out / "Data" / "Skyrim.ini").read_text(encoding="utf-8")
+        assert "sResourceArchiveList=" in ini and "Skyrim - Cooked" in ini, ini
+        cooked_manifest = json.loads(
+            (cooked_out / "deploy_manifest.json").read_text(encoding="utf-8"))
+        assert cooked_manifest["cooked"] is True
+        assert any(row["path"].lower().endswith("bad_bc5.dds")
+                   for row in cooked_manifest["refused"])
+        checks += 8
+
+        rc = deploy.main(["plan", "--data", str(root / "Data"),
+                          "--tesv", str(root / "TESV.exe"),
+                          "--pack", "cooked", "--json", str(root / "cooked_plan.json")])
+        assert rc == 0, rc
+        cooked_plan = json.loads((root / "cooked_plan.json").read_text(
+            encoding="utf-8"))
+        assert cooked_plan["cooked"]["files"] == 3, cooked_plan["cooked"]
+        assert cooked_plan["cooked"]["archives_estimate"] >= 1
+        checks += 2
 
     print("deploy_device_test: %d checks OK" % checks)
     return 0

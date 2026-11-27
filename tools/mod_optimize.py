@@ -184,11 +184,16 @@ def _dds_header_bc1(width: int, height: int, levels: int) -> bytes:
     return header
 
 
-def write_bc1_dds(path: str, levels: Sequence[Tuple[int, int, bytes]]) -> int:
+def bc1_dds_bytes(levels: Sequence[Tuple[int, int, bytes]]) -> bytes:
     width, height = levels[0][0], levels[0][1]
     blob = bytearray(_dds_header_bc1(width, height, len(levels)))
     for w, h, rgba in levels:
         blob += encode_bc1(rgba, w, h)
+    return bytes(blob)
+
+
+def write_bc1_dds(path: str, levels: Sequence[Tuple[int, int, bytes]]) -> int:
+    blob = bc1_dds_bytes(levels)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "wb") as handle:
         handle.write(blob)
