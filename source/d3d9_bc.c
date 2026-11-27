@@ -2,9 +2,19 @@
 #include "d3d9_core.h"
 #include <string.h>
 
+/* BC7 only: unmodified single-header decoder, MIT/Unlicense.  The header
+ * implements every BC format; only bcdec_bc7 is called here, so silence the
+ * unused-function warnings from the other entry points. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#define BCDEC_STATIC
+#define BCDEC_IMPLEMENTATION
+#include "../third_party/bcdec/bcdec.h"
+#pragma GCC diagnostic pop
+
 unsigned d9_bc_block_bytes(unsigned f){
     if(f==D9_DXT1||f==D9_ATI1||f==D9_BC4U)return 8;
-    if(f==D9_DXT3||f==D9_DXT5||f==D9_ATI2||f==D9_BC5U)return 16;
+    if(f==D9_DXT3||f==D9_DXT5||f==D9_ATI2||f==D9_BC5U||f==D9_BC7)return 16;
     return 0;
 }
 unsigned d9_rgb24_pitch(unsigned w){return (w*3u+3u)&~3u;}
@@ -36,6 +46,21 @@ int d9_abgr8_to_bgra8(void *dst,size_t dst_bytes,const void *src,size_t src_pitc
                       size_t src_bytes,unsigned w,unsigned h){
     return unpack_rows(dst,dst_bytes,src,src_pitch,src_bytes,w,h,4u);
 }
+int d9_l8_to_bgra8(void *dst,size_t dst_bytes,const void *src,size_t src_pitch,
+                   size_t src_bytes,unsigned w,unsigned h){
+    if(!dst||!src||!w||!h||src_pitch<w||dst_bytes<(size_t)w*h*4u||
+       (h>1u&&src_pitch>(SIZE_MAX-(size_t)w)/(h-1u))||
+       (size_t)(h-1u)*src_pitch+w>src_bytes)return D9_INVALID;
+    uint8_t *out=dst;const uint8_t *in=src;
+    for(unsigned y=0;y<h;++y){
+        for(unsigned x=0;x<w;++x){
+            uint8_t l=in[(size_t)y*src_pitch+x];
+            uint8_t *d=out+((size_t)y*w+x)*4u;
+            d[0]=l;d[1]=l;d[2]=l;d[3]=255;
+        }
+    }
+    return D9_OK;
+}
 static unsigned rd16(const uint8_t *p){return (unsigned)p[0]|(unsigned)p[1]<<8;}
 static void rgb565(uint8_t c[4],unsigned n){unsigned r=n>>11,g=(n>>5)&63,b=n&31;
     c[0]=(uint8_t)((r<<3)|(r>>2));c[1]=(uint8_t)((g<<2)|(g>>4));c[2]=(uint8_t)((b<<3)|(b>>2));c[3]=255;}
@@ -62,6 +87,11 @@ int d9_bc_decode_block(unsigned f,const uint8_t *b,size_t bytes,uint8_t rgba[64]
         /* BC4/ATI1 is one BC4 channel; D3D expands it to (R,0,0,1). */
         uint8_t r[16];bc4_block(b,r);
         for(unsigned i=0;i<16;++i){uint8_t *o=rgba+4*i;o[0]=r[i];o[1]=0;o[2]=0;o[3]=255;}
+        return D9_OK;
+    }
+    if(f==D9_BC7){
+        /* bcdec writes R,G,B,A per texel, which is already the d9 decode order. */
+        bcdec_bc7(b,rgba,16);
         return D9_OK;
     }
     const uint8_t *c=b+(f==D9_DXT1?0:8);unsigned c0=rd16(c),c1=rd16(c+2);uint8_t p[4][4];

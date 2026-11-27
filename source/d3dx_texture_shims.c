@@ -44,6 +44,7 @@
 #define D3DFMT_BC4U 0x55344342u
 #define D3DFMT_ATI2 0x32495441u
 #define D3DFMT_BC5U 0x55354342u
+#define D3DFMT_BC7 D9_BC7 /* internal id for DX10 DXGI 98/99 */
 
 /* DDS_HEADER flags/caps (the subset this parser gives meaning to). */
 #define DDSD_MIPMAPCOUNT 0x00020000u
@@ -173,20 +174,37 @@ static int parse_dds(const uint8_t *p,size_t n,DdsImage *out){
     if(rd32(p+76)!=32u)return -1;          /* DDS_PIXELFORMAT.dwSize */
     uint32_t pf_flags=rd32(p+80);
     uint32_t fourcc=rd32(p+84);
+    unsigned format=0;
+    size_t data_offset=128u;
     if((pf_flags&DDPF_FOURCC)&&fourcc==0x30315844u){ /* "DX10" */
         if(n<148){
             snprintf(g.dds_note,sizeof g.dds_note,"truncated DX10 header");
+            return -2;
+        }
+        uint32_t dxgi=rd32(p+128);
+        uint32_t array_size=rd32(p+140);
+        if(array_size>1u){
+            snprintf(g.dds_note,sizeof g.dds_note,
+                "DX10 DXGI format %u (%s) array size %lu is not implemented",
+                dxgi,dxgi_name(dxgi),(unsigned long)array_size);
+            return -2;
+        }
+        /* BC7_UNORM / BC7_UNORM_SRGB have identical bitstreams and 16-byte
+         * blocks; the internal id decodes through third_party/bcdec. */
+        if(dxgi==98u||dxgi==99u){
+            format=D3DFMT_BC7;
+            data_offset=148u;
         }else{
-            uint32_t dxgi=rd32(p+128);
             snprintf(g.dds_note,sizeof g.dds_note,
                 "DX10 DXGI format %u (%s) has no decoder in this bridge "
-                "(BC7 is not converted to ETC1/BC5)",
+                "(only BC7/DXGI 98/99 is decoded)",
                 dxgi,dxgi_name(dxgi));
+            return -2;
         }
-        return -2;
+    }else{
+        format=dds_format(pf_flags,fourcc,rd32(p+88),rd32(p+92),
+                          rd32(p+96),rd32(p+100),rd32(p+104));
     }
-    unsigned format=dds_format(pf_flags,fourcc,rd32(p+88),rd32(p+92),
-                               rd32(p+96),rd32(p+100),rd32(p+104));
     if(!format){
         snprintf(g.dds_note,sizeof g.dds_note,
                  (pf_flags&DDPF_FOURCC)?"unsupported FourCC 0x%08x":
@@ -207,7 +225,7 @@ static int parse_dds(const uint8_t *p,size_t n,DdsImage *out){
         if(!depth)depth=1;
     }
     out->width=width;out->height=height;out->depth=depth;out->mips=mips;
-    out->format=format;out->resource=resource;out->caps2=caps2;out->data_offset=128u;
+    out->format=format;out->resource=resource;out->caps2=caps2;out->data_offset=data_offset;
     return 0;
 }
 
@@ -215,13 +233,13 @@ static unsigned bc_bytes(unsigned format){
     if(format==D3DFMT_DXT1)return 8u;
     if(format==D3DFMT_ATI1||format==D3DFMT_BC4U)return 8u;
     if(format==D3DFMT_DXT3||format==D3DFMT_DXT5||
-       format==D3DFMT_ATI2||format==D3DFMT_BC5U)return 16u;
+       format==D3DFMT_ATI2||format==D3DFMT_BC5U||format==D3DFMT_BC7)return 16u;
     return 0;
 }
 /* R8G8B8/A8B8G8R8 are DDS source layouts: PICA has no 24-bit or BGR-first
  * sampler format, so every loader expands them to A8R8G8B8 on upload. */
 static int expand_source(unsigned format){
-    return format==D3DFMT_R8G8B8||format==D3DFMT_A8B8G8R8;
+    return format==D3DFMT_R8G8B8||format==D3DFMT_A8B8G8R8||format==D3DFMT_L8;
 }
 static int texture_format_supported(unsigned format){
     return bc_bytes(format)||format==D3DFMT_A8R8G8B8||format==D3DFMT_X8R8G8B8||
@@ -247,6 +265,7 @@ static const char *format_name(unsigned f){
     case D3DFMT_A1R5G5B5:return "A1R5G5B5";
     case D3DFMT_A4R4G4B4:return "A4R4G4B4";
     case D3DFMT_L8:return "L8";
+    case D3DFMT_BC7:return "BC7";
     default:return "unknown";
     }
 }
@@ -260,6 +279,9 @@ static int level_layout(unsigned format,unsigned w,unsigned h,size_t *pitch,size
     if(format==D3DFMT_R8G8B8){
         *pitch=(size_t)d9_rgb24_pitch(w);*bytes=*pitch*h;return 0;
     }
+    if(format==D3DFMT_L8){
+        *pitch=(size_t)w;*bytes=*pitch*h;return 0;
+    }
     return -1;
 }
 
@@ -269,8 +291,8 @@ static int parse_checked(const char *who,const uint8_t *p,size_t n,DdsImage *d){
     int rc=parse_dds(p,n,d);
     if(rc)
         reject("%s: %s (host shim supports legacy DXT1/3/5, ATI1/BC4, "
-               "ATI2/BC5, A8R8G8B8/X8R8G8B8, and R8G8B8/A8B8G8R8 DDS expanded "
-               "to A8R8G8B8)",who,
+               "ATI2/BC5, DX10 BC7, A8R8G8B8/X8R8G8B8, and "
+               "R8G8B8/A8B8G8R8/L8 DDS expanded to A8R8G8B8)",who,
                rc==-2&&g.dds_note[0]?g.dds_note:
                rc==-2?"unsupported DDS pixel format/header":"not a DDS file");
     return rc;
@@ -360,6 +382,8 @@ static int decode_uncompressed_level(unsigned format,const uint8_t *src,
         return d9_rgb24_to_bgra8(dst,dst_bytes,src,src_pitch,src_bytes,w,h);
     if(format==D3DFMT_A8B8G8R8)
         return d9_abgr8_to_bgra8(dst,dst_bytes,src,src_pitch,src_bytes,w,h);
+    if(format==D3DFMT_L8)
+        return d9_l8_to_bgra8(dst,dst_bytes,src,src_pitch,src_bytes,w,h);
     return -1;
 }
 
@@ -594,8 +618,8 @@ static uint32_t read_sandbox_file(const char *who,const char *guest_path,
  * buffering the whole file and keeps a correct header readable even when the
  * payload is larger than the 64 MiB texture-creation limit. */
 static uint32_t read_sandbox_header(const char *who,const char *guest_path,
-                                    uint8_t header[128]){
-    memset(header,0,128);
+                                    uint8_t header[148],size_t *got_out){
+    memset(header,0,148);
     char host[640];
     uint32_t path_hr=sandbox_host(who,guest_path,host);
     if(path_hr)return path_hr;
@@ -605,11 +629,13 @@ static uint32_t read_sandbox_header(const char *who,const char *guest_path,
                "(missing, unreadable, or not a regular file)",who,guest_path);
         return D3DXERR_INVALIDDATA;
     }
-    size_t got=fread(header,1,128u,f);
+    /* A DX10 DDS needs 148 bytes to name its DXGI format; a legacy file only
+     * has to provide 128.  Reading 148 is harmless for both. */
+    size_t got=fread(header,1,148u,f);
     int failed=ferror(f);
     fclose(f);
     if(failed){
-        reject("%s(\"%s\"): cannot read the 128-byte DDS header",who,guest_path);
+        reject("%s(\"%s\"): cannot read the DDS header",who,guest_path);
         return D3DXERR_INVALIDDATA;
     }
     if(got<128u){
@@ -617,6 +643,7 @@ static uint32_t read_sandbox_header(const char *who,const char *guest_path,
                "DDS header",who,guest_path,(unsigned long)got);
         return D3DXERR_INVALIDDATA;
     }
+    if(got_out)*got_out=got;
     return D3DX_OK;
 }
 
@@ -675,11 +702,11 @@ static void shim_get_image_info_file_a(CPU *c){
     if(read_guest_path(A(0),path,"D3DXGetImageInfoFromFileA")){
         RET(D3DX_D3DERR_INVALIDCALL,2);
     }
-    uint8_t header[128];
-    uint32_t hr=read_sandbox_header("D3DXGetImageInfoFromFileA",path,header);
+    uint8_t header[148];size_t header_bytes=0;
+    uint32_t hr=read_sandbox_header("D3DXGetImageInfoFromFileA",path,header,&header_bytes);
     if(hr)RET(hr,2);
     DdsImage d;
-    if(parse_checked("D3DXGetImageInfoFromFileA",header,sizeof header,&d))
+    if(parse_checked("D3DXGetImageInfoFromFileA",header,header_bytes,&d))
         RET(D3DXERR_INVALIDDATA,2);
     write_image_info(info,&d,"D3DXGetImageInfoFromFileA");
     g.last_error[0]=0;
@@ -801,7 +828,7 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
     }
     int expand=expand_source(d->format);
     unsigned storage_format=expand?D3DFMT_A8R8G8B8:d->format;
-    unsigned edge=d->width,w=edge,h=edge,max_mips=1;
+    unsigned edge=d->width;
     if(edge>1024u||(edge&(edge-1u))){
         reject("%s: cube edge %u is not a power of two up to 1024",who,edge);
         return D3DX_D3DERR_NOTAVAILABLE;
@@ -810,12 +837,12 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
         reject("%s: compressed cube edge %u is below the 8x8 floor",who,edge);
         return D3DX_D3DERR_NOTAVAILABLE;
     }
-    if(!bc_bytes(d->format)&&edge<8u){
-        reject("%s: uncompressed cube edge %u is below the backend's 8x8 PICA floor; "
-               "the 1x1 A8B8G8R8 eye cube in the UBE corpus is refused by name",
-               who,edge);
-        return D3DX_D3DERR_NOTAVAILABLE;
-    }
+    /* PICA cannot create a cube below 8x8.  The only sub-8 uncompressed asset
+     * in the corpus is the 1x1 UBE eye cube; replicate each source texel to
+     * an 8x8 face (edge=8) so a constant-colour cube still samples correctly.
+     * The replicate scale is 8/edge for every level. */
+    int pad=!bc_bytes(d->format)&&edge<8u;
+    unsigned storage_edge=pad?8u:edge,w=edge,h=edge,max_mips=1;
     while(w>1||h>1){if(w>1)w>>=1;if(h>1)h>>=1;++max_mips;}
     if(d->mips<1u||d->mips>max_mips){
         reject("%s: %u cube mip levels do not fit edge %u",who,d->mips,edge);
@@ -835,8 +862,8 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
         return D3DXERR_INVALIDDATA;
     }
     uint32_t cube=0;
-    uint32_t hr=d9_com_host_create_cube_texture(device,edge,d->mips,0,storage_format,
-                                                pool,&cube);
+    uint32_t hr=d9_com_host_create_cube_texture(device,storage_edge,d->mips,0,
+                                                storage_format,pool,&cube);
     if(hr){
         reject("%s: %s",who,d9_com_last_diagnostic());
         return hr;
@@ -849,7 +876,7 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
             if(level_layout(d->format,w,h,&pitch,&bytes)){
                 d9_com_host_release(cube);return D3DX_D3DERR_NOTAVAILABLE;
             }
-            uint8_t *expanded=NULL;
+            uint8_t *expanded=NULL,*scaled=NULL;
             const void *upload=p+offset;
             size_t upload_pitch=pitch,upload_bytes=bytes;
             if(expand){
@@ -868,9 +895,28 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
                 }
                 upload=expanded;upload_pitch=(size_t)w*4u;upload_bytes=(size_t)expanded_bytes;
             }
+            if(pad){
+                unsigned side=storage_edge>>level;if(!side)side=1;
+                unsigned scale=side/w;if(!scale)scale=1;
+                uint64_t scaled_bytes=(uint64_t)side*side*4u;
+                scaled=malloc((size_t)scaled_bytes);
+                if(!scaled){
+                    free(expanded);d9_com_host_release(cube);
+                    reject("%s: out of host memory to pad face %u level %u",
+                           who,face,level);
+                    return D3DX_D3DERR_OUTOFVIDEOMEMORY;
+                }
+                const uint8_t *src=upload;
+                for(unsigned y=0;y<side;++y)
+                    for(unsigned x=0;x<side;++x)
+                        memcpy(scaled+((size_t)y*side+x)*4u,
+                               src+((size_t)(y/scale)*w+(x/scale))*4u,4u);
+                upload=scaled;upload_pitch=(size_t)side*4u;
+                upload_bytes=(size_t)scaled_bytes;
+            }
             hr=d9_com_host_upload_cube_face_level(cube,face,level,upload,upload_pitch,
                                                   upload_bytes);
-            free(expanded);
+            free(scaled);free(expanded);
             if(hr){
                 reject("%s: face %u level %u upload failed (%s)",who,face,level,
                        d9_com_last_diagnostic());
@@ -881,8 +927,9 @@ static uint32_t create_cube_from_dds(const char *who,uint32_t device,const uint8
         }
     }
     *out=cube;
-    fprintf(stderr,"[d3dx] %s: %ux%u cube %s%s, 6 faces x %u level(s)\n",
-            who,edge,edge,format_name(d->format),expand?" expanded to A8R8G8B8":"",d->mips);
+    fprintf(stderr,"[d3dx] %s: %ux%u cube %s%s%s, 6 faces x %u level(s)\n",
+            who,edge,edge,format_name(d->format),expand?" expanded to A8R8G8B8":"",
+            pad?" padded to 8x8":"",d->mips);
     return D3DX_OK;
 }
 

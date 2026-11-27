@@ -21,7 +21,10 @@ enum {D9_TRIANGLELIST=4,D9_TRIANGLESTRIP=5,D9_TRIANGLEFAN=6,D9_A8R8G8B8=21,D9_X8
 enum {D9_DXT1=0x31545844u,D9_DXT3=0x33545844u,D9_DXT5=0x35545844u,
       /* ATI2 is the same bitstream as BC5U; both are two BC4 channels (X,Y).
        * ATI1/BC4U are the single-channel variant (8-byte blocks). */
-      D9_ATI1=0x31495441u,D9_BC4U=0x55344342u,D9_ATI2=0x32495441u,D9_BC5U=0x55354342u};
+      D9_ATI1=0x31495441u,D9_BC4U=0x55344342u,D9_ATI2=0x32495441u,D9_BC5U=0x55354342u,
+      /* BC7 has no D3D9 enum.  The DX10 DDS header carries DXGI 98/99; the
+       * bridge maps it to this internal id and decodes it with third_party/bcdec. */
+      D9_BC7=0x37434244u};
 enum {D9_POOL_DEFAULT=0,D9_POOL_MANAGED=1,D9_POOL_SYSTEMMEM=2};
 enum {D9_USAGE_RENDERTARGET=1};
 enum {D9_TEX_ETC1=0,D9_TEX_ETC1A4=1};

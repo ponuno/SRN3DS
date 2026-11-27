@@ -46,6 +46,15 @@ static void decoder(void){uint8_t rgba[64],b[16]={0};
     assert(d9_bc_decode_block(D9_BC4U,bc5,7,rgba)==D9_INVALID);
     assert(!d9_texture_layout(64,64,D9_ATI2,&pitch,&bytes)&&pitch==256&&bytes==4096);
     assert(!d9_texture_layout(64,64,D9_ATI1,&pitch,&bytes)&&pitch==128&&bytes==2048);
+    /* BC7 is 16-byte blocks and enters the same pow2 layout. */
+    assert(d9_bc_block_bytes(D9_BC7)==16);
+    assert(!d9_texture_layout(8,8,D9_BC7,&pitch,&bytes)&&pitch==32&&bytes==64);
+    {uint8_t rgba[64];memset(rgba,0xcc,sizeof rgba);
+     const uint8_t block[16]={0};
+     assert(!d9_bc_decode_block(D9_BC7,block,sizeof block,rgba));
+     assert(d9_bc_decode_block(D9_BC7,block,15,rgba)==D9_INVALID);
+     /* Every texel is decoded, even for the all-zero (reserved-mode) block. */
+     for(unsigned i=0;i<64;++i)assert(rgba[i]!=0xcc);}
 }
 
 static void uncompressed(void){
@@ -77,6 +86,16 @@ static void uncompressed(void){
     static const uint8_t expect[8]={30,20,10,40, 3,2,1,4};
     assert(!memcmp(bgra,expect,sizeof expect));
     assert(d9_abgr8_to_bgra8(bgra,sizeof bgra,abgr,7,sizeof abgr,2,1)==D9_INVALID);
+
+    /* L8: one byte per texel, replicated to RGB with opaque alpha; the source
+     * row pitch may carry padding and must be honoured. */
+    const uint8_t l8[6]={1,2,9, 3,4,9};
+    uint8_t l8out[16];memset(l8out,0,sizeof l8out);
+    assert(!d9_l8_to_bgra8(l8out,sizeof l8out,l8,3,sizeof l8,2,2));
+    static const uint8_t l8expect[16]={1,1,1,255,2,2,2,255,3,3,3,255,4,4,4,255};
+    assert(!memcmp(l8out,l8expect,sizeof l8expect));
+    assert(d9_l8_to_bgra8(l8out,sizeof l8out,l8,1,sizeof l8,2,2)==D9_INVALID);
+    assert(d9_l8_to_bgra8(l8out,15,l8,3,sizeof l8,2,2)==D9_INVALID);
 }
 
 static void show(const char *text){puts(text);}

@@ -233,6 +233,25 @@ int main(void){
     uint32_t cube=create_cube(&h,dds,bytes);
     check_a8_cube(&h,cube,8,2,0x20);
     assert(call(&h,cube,10,NULL,0)==5); /* D3DRTYPE_CUBETEXTURE */
+    /* 1x1 A8R8G8B8 cube (the size class of the UBE eye cube): padded to the
+     * backend's 8x8 floor by replicating the single texel over every face. */
+    {size_t n=a8_cube(dds,1,1,0x70);
+     uint32_t c=create_cube(&h,dds,n);
+     assert(call(&h,c,13,NULL,0)==1);
+     uint32_t desc[]={0,OUT};assert(call(&h,c,17,desc,2)==HR_OK);
+     assert(rd(&h,OUT+24)==8&&rd(&h,OUT+28)==8);
+     for(unsigned face=0;face<6;++face){
+         uint32_t surface=cube_surface(&h,c,face,0);
+         uint32_t lock[]={OUT,0,0};assert(call(&h,surface,13,lock,3)==HR_OK);
+         uint32_t pitch=rd(&h,OUT),ptr=rd(&h,OUT+4);
+         assert(pitch==32);
+         const uint32_t *px=guest_ptr(&h.memory,ptr,(size_t)pitch*8);assert(px);
+         for(unsigned i=0;i<64;++i)
+             assert(px[i]==(0xff000000u|((face+1u)<<16)|0x70u));
+         assert(call(&h,surface,14,NULL,0)==HR_OK);
+         assert(call(&h,surface,2,NULL,0)==0);
+     }
+     assert(call(&h,c,2,NULL,0)==0);}
     /* Direct IDirect3DCubeTexture9::LockRect/UnlockRect too. */
     {uint32_t args[]={0,0,OUT,0,0};
      assert(call(&h,cube,19,args,5)==HR_OK);

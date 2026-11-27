@@ -173,7 +173,7 @@ is pushed right before `Pool`.
 | `D3DFMT_DXT1/3/5` | `'DXT1/3/5'` | not on this path | accepted by layout, **decoded** by `d9_bc_to_pica` |
 | `ATI2` / `BC5U` | `'ATI2'`/`'BC5U'` | no retail/mod file measured | accepted, decoded to R,G / B=0,A=255; see `docs/TEXTURE_FORMATS.md` |
 | `ATI1` / `BC4U` | `'ATI1'`/`'BC4U'` | 7 UBE tint masks (mod) | accepted, decoded to R / G=B=0,A=255 |
-| `BC7` (DX10 DXGI 98/99) | DX10 header | 120 UBE 2.0 files | **refused by name**: no BC7 decoder; not converted |
+| `BC7` (DX10 DXGI 98/99) | DX10 header | 120 UBE 2.0 files | **works**: vendored `bcdec`, decoded to PICA RGBA8 at upload (no BC7 → ETC1 conversion) |
 | `D24S8` (depth) | `0x4b` | `0xf82616` | format ok, **Lockable=1 now creates a CPU D24S8 shadow** (FIXED) |
 
 Important nuance: `0xf8205d`…`0xf83b28` is a **fallback chain**, not four
@@ -206,7 +206,12 @@ The 24-bit corpus is handled at the D3DX layer, not by `CreateTexture`
 R,G,B,A are repacked to B,G,R,A.  Mips, cube faces and volume slices are
 converted independently.  `CheckDeviceFormat` reports both as source-only
 with the named "expanded to A8R8G8B8" reason.  Remaining: the 1x1 A8B8G8R8
-UBE eye cube (backend cube floor is 8x8), the L8 retail volume, and BC7.
+UBE eye cube used to hit the backend's 8x8 floor; it is now padded by
+replicating the 1x1 texel over 8x8 faces.  The retail L8 `noisevolume.dds`
+volume expands per slice/mip to A8R8G8B8.  DX10 BC7 (120 UBE files) decodes
+through vendored `bcdec`.  Direct `CreateTexture(R8G8B8/A8B8G8R8)` stays
+source-only, and the 15 measured menu call sites never request those formats
+(only A8/A8L8/A4R4G4B4/A8R8G8B8 above).
 
 `CreateTexture` with `w<8||h<8` requires RGBA8/XRGB8
 (`d9_create_texture_ex`).  **CreateTexture is now legal inside
@@ -353,7 +358,7 @@ refusal with a non-`S_OK` HRESULT.
 | `CreateTexture DXT1/3/5` | **OK** (decode) | needs pow2 ≥8, ≤1024 | P2 | already decodes in `d9_bc_to_pica`; add a test for 2 mips |
 | `CreateTexture ATI2/BC5U (BC5)` | **OK** (decode) | needs pow2 ≥8, ≤1024; two BC4 channels, B=0/A=255 | P2 | corpus has no ATI2; synthetic block test only |
 | `CreateTexture ATI1/BC4U (BC4)` | **OK** (decode) | needs pow2 ≥8, ≤1024; single channel to R | P2 | 7 UBE tint masks |
-| `CreateTexture BC7 (DX10)` | **REF** | no BC7 decoder; `DX10` header rejected as `D3DXERR_INVALIDDATA` with the DXGI name | P3 | real decoder or mod-side re-export |
+| `CreateTexture BC7 (DX10)` | **OK** (decode) | DXGI 98/99, 16-byte blocks decoded by vendored `bcdec`; pow2 ≥8 | P3 | 4x4 `eye01_sk.dds` remains below the 8x8 floor |
 | `CreateTexture A8` | **OK** | `GPU_A8`, 1 B/px | — | — |
 | `CreateVertexBuffer/IndexBuffer` (DYNAMIC, DEFAULT, FVF 0) | **OK** | — | — | — |
 | `SetIndices` + `SetStreamSource` (16-bit) | **OK** | — | — | — |

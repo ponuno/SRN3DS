@@ -12,6 +12,10 @@ int d9_rgb24_to_bgra8(void *dst,size_t dst_bytes,const void *src,size_t src_pitc
  * (B,G,R,A), swapping the R and B bytes. */
 int d9_abgr8_to_bgra8(void *dst,size_t dst_bytes,const void *src,size_t src_pitch,
                       size_t src_bytes,unsigned w,unsigned h);
+/* Expand one linear L8 level to A8R8G8B8: L is replicated into R,G,B and
+ * alpha becomes opaque (D3D9 L8 sampling rule). */
+int d9_l8_to_bgra8(void *dst,size_t dst_bytes,const void *src,size_t src_pitch,
+                   size_t src_bytes,unsigned w,unsigned h);
 /* One 4x4 block, row-major RGBA8888 output. */
 int d9_bc_decode_block(unsigned format,const uint8_t *block,size_t bytes,uint8_t rgba[64]);
 /* Decode directly to PICA tiled ABGR storage, without a full linear RGBA intermediate. */

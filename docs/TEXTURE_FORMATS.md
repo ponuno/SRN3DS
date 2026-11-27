@@ -1,8 +1,10 @@
 # Texture formats needed by the world (retail corpus + installed mods)
 
 Status: **measurement + format support note**, 2026-11-27. No frame is
-claimed. `DevCaps` is unchanged (`0x00082000`). R8G8B8 and A8B8G8R8 are now
-decoded (see §2a); BC7, the L8 volume and the 1x1 eye cube remain open.
+claimed. `DevCaps` is unchanged (`0x00082000`). R8G8B8, A8B8G8R8, L8,
+DX10 BC7 and the 1x1 eye cube are now handled; only direct
+`CreateTexture(R8G8B8/A8B8G8R8)` remains source-only, and the measured menu
+call sites prove the engine does not use that path.
 
 The question is which DDS pixel formats the bridge must recognise for the
 retail game and for what is actually installed, not which formats D3D9 in
@@ -56,18 +58,22 @@ cube). Volume: exactly one, the retail L8 `noisevolume.dds`.
 * **BC4/ATI1 is present (7 UBE tint masks)**; it is the single-channel half of
   BC5 and is now decoded too.
 * **BC7 is present only in UBE 2.0 (120 files, eyes/body/head/paint/nails).**
-  These are DX10-header assets with no BC7 decoder in this tree. They are
-  refused by name; see section 4.
+  The DX10 DXGI 98/99 formats are decoded with the vendored MIT/Unlicense
+  `bcdec` header; no conversion to ETC1/BC5 is attempted. See §4.
 * **Uncompressed 24-bit RGB (247 files) is now supported by the D3DX shim.**
   Retail usage is limited (189 files, all 256x256 1-mip tint masks in
   `Skyrim - Textures.bsa`); every file expands to A8R8G8B8 on upload with
   A=255. See §2a.
 * **A8B8G8R8 (13 mod files, UBE 2.0)** is likewise expanded on upload, with
   the B/R bytes swapped from the DDS R,G,B,A memory order. See §2a.
-* **The L8 volume** is the only volume format in the corpus; the volume loader
-  still handles only BC/RGBA/expanded formats, not L8. Open.
-* **The 1x1 A8B8G8R8 UBE eye cube** is refused by name: the PICA/backend cube
-  floor is 8x8 and no 1x1 cube padding exists. Open.
+* **The L8 volume** is the only volume format in the corpus. The volume
+  loader now sizes L8 at one byte per texel and expands each depth slice and
+  mip to A8R8G8B8 (`L,L,L,255`) on upload; the real 128x128x128
+  `noisevolume.dds` (8 mips) loads. See §2b.
+* **The 1x1 A8B8G8R8 UBE eye cube** is now padded: the loader creates an
+  8x8 cube (the backend floor) and replicates each source texel over its
+  8/edge block for every level and face, so the constant-colour eye cube
+  samples correctly. See §2c.
 
 ## 2a. 24-bit and BGR-first DDS loaders (closed)
 
@@ -98,8 +104,41 @@ Verified on the real corpus, not guessed:
 formats: `CreateTexture(R8G8B8/A8B8G8R8)` is not implemented (the bridge has
 no 24-bit/BGR-first guest layout). The answer is
 `D3DERR_NOTAVAILABLE` with the reason "expanded to A8R8G8B8 by the D3DX
-texture loader". This is honest: the game reaches these files through D3DX,
-not through `CreateTexture`.
+texture loader". This is not a guess: the deduplicated `CreateTexture`
+call-site census in `docs/GFX_COMPAT.md` §3/§4 records only `A8` (0x1c),
+`A8L8` (0x33), `A4R4G4B4` (0x1a) and `A8R8G8B8` (0x15) as immediates at the
+15 menu call sites; no `R8G8B8` (0x14) or `A8B8G8R8` (0x20) request exists.
+Both corpus formats reach the bridge only through the D3DX file loaders.
+
+## 2b. L8 volume (closed)
+
+`level_layout(D3DFMT_L8)` is one byte per texel with `pitch = w`. The D3DX
+volume loader already walks mips and depth slices; each slice now goes through
+`d9_l8_to_bgra8`, which writes `B=G=R=L, A=255` into the bridge's A8R8G8B8
+store (`storage_format` is A8R8G8B8, reported by `GetLevelDesc`). This keeps
+the PICA path unchanged: there is no L8 sampler format to plumb through the
+BC/RGBA upload code, and D3D9 L8 sampling semantics are exactly the expanded
+value.
+
+The real retail file is 128x128x128 with 8 mips: header flags
+`0x820007`, `DDPF_LUMINANCE`, bits=8, `R=0xff`, caps2 `0x200000` (volume),
+depth 128. `tests/d3dx_volume_texture_smoke.c` creates a synthetic 4x4x2 L8
+volume with two mips and asserts the level-0 and level-1 locked texels;
+`tests/d3dx_texture_shims_smoke.c` copies the real `noisevolume.dds` into the
+sandbox and loads it through `D3DXCreateVolumeTextureFromFileA`, checking
+8 levels, 128^3 dimensions, a 512-byte row / 65,536-byte slice pitch and
+that the whole first slice is opaque `L,L,L`.
+
+## 2c. 1x1 eye cube (closed by padding)
+
+`create_cube_from_dds` still refuses compressed cubes below 8x8, but an
+uncompressed edge of 1, 2 or 4 is padded to 8. The created cube reports
+edge 8; for every face and level the source `w x w` level is replicated by
+`8/edge` into the destination `side x side` level, so every texel in a face
+is the same colour the original cube would sample. The UBE eye cube is 1x1
+A8B8G8R8; it is expanded to A8R8G8B8 first, then replicated. Tests cover a
+synthetic 1x1 A8B8G8R8 cube (six distinct face colours, all 64 pixels per
+face equal) and a 1x1 A8R8G8B8 cube.
 
 Tests: `tests/bc_shader_smoke.c` checks the 24-bit row pitch (17->52, 16->48),
 both byte orders, and truncated/undersized input; `tests/d3dx_texture_shims_smoke.c`
@@ -139,21 +178,31 @@ channel independence, B/A fill, block-size validation and the 8/16-byte
 layouts. `tests/d3dx_texture_shims_smoke.c` creates a 16x16 ATI2 DDS and
 checks the 16-byte block layout survives `LockRect`.
 
-## 4. BC7: honest named refusal
+## 4. BC7: decoded (closed)
 
-BC7 is real in the installed corpus, so it is not silently downgraded and not
-guessed as BC3:
+BC7 is real in the installed corpus, so it is decoded rather than downgraded:
 
-* The host DDS parser rejects the DX10 header and names the exact cause:
-  `BC7 (DXGI format 98) is not supported by this pipeline: there is no BC7
-  decoder or BC7-to-ETC1 conversion` (`tools/skyrim/dds.py`).
-* The D3DX shim rejects it as `D3DXERR_INVALIDDATA` with
-  `DX10 DXGI format 98 (BC7_UNORM) has no decoder in this bridge (BC7 is not
-  converted to ETC1/BC5)`.
-* No BC7 → ETC1/BC5 conversion is attempted. A correct BC7 decoder is a
-  substantial (8 modes, partitions, endpoint/weight grids) piece of work and
-  PICA has no BC7 hardware; the honest options are a real decoder later or a
-  documented mod-side re-export to DXT5/BC5.
+* `third_party/bcdec/bcdec.h` (v0.985, unmodified, dual MIT/Unlicense,
+  copyright Sergii Kudlai) supplies `bcdec_bc7`; see
+  `third_party/bcdec/LICENSE` and `README.md`.
+* `source/d3d9_bc.c` defines `D9_BC7` (internal id `0x37434244`, no D3D9
+  enum), adds it to `d9_bc_block_bytes` as 16 bytes, and routes only BC7
+  through `bcdec_bc7`. BC1/2/3/4/5 keep the existing hand-written decoder so
+  their byte-exact tests do not change.
+* The D3DX DDS parser accepts a DX10 header with DXGI 98 (BC7_UNORM) or 99
+  (BC7_UNORM_SRGB), consumes the 20-byte DX10 header (`data_offset=148`), and
+  rejects other DXGI formats/array sizes by name. The path export reads 148
+  header bytes so image info works for DX10 files too.
+* Upload stores the BC7 blocks in the CPU level, then the existing
+  `d9_bc_to_pica` path decodes them to PICA-tiled RGBA8 at publication. PICA
+  has no BC7 hardware, so no BC7 → ETC1/BC5 conversion is attempted or
+  claimed.
+
+Tests: the D3DX shim creates a synthetic 8x8 DX10 BC7 texture, loads the real
+UBE `eye01_m.dds` (128x128, 8 mips) through `D3DXCreateTextureFromFileInMemory`
+and decodes blocks from the real `eye01.dds` base-colour file. The 120-file
+BC7 count remains a census fact, not a claim that all 120 were individually
+decoded in CI.
 
 ## 5. Float render targets / `R16F`, `A16B16G16R16F`
 
@@ -186,11 +235,11 @@ fallback is a probe, not a capability.
 
 | Gap | Why it remains |
 | --- | --- |
-| L8 volume (1 retail file) | volume upload only implements block/RGBA/expanded formats |
-| BC7 (120 mod files) | named refusal; requires a real BC7 decoder or re-export |
-| 1x1 A8B8G8R8 eye cube (1 UBE file) | backend cube floor is 8x8; no 1x1 cube padding/upscale path |
-| Direct `CreateTexture` R8G8B8/A8B8G8R8 | source-only formats: D3DX loaders expand them, direct storage is not implemented and `CheckDeviceFormat` says so |
+| Direct `CreateTexture` R8G8B8/A8B8G8R8 | D3DX loaders expand them; direct storage is not implemented. The measured 15 menu `CreateTexture` sites request only A8/A8L8/A4R4G4B4/A8R8G8B8 (`GFX_COMPAT.md` §4), so this is a latent, unreached path. `CheckDeviceFormat` keeps the named NOTAVAILABLE answer. |
+| BC7 below 8x8 (1 UBE file: `eye01_sk.dds`, 4x4) | the shared compressed-texture floor is 8x8; a 4x4 BC7 is still refused by name. Only the 1x1 *uncompressed* cube is padded. |
 | True float RT | impossible on PICA200; LDR fallback stays measurement-only |
 
-**Closed by this change:** R8G8B8 (247 files: 189 retail + 58 mod) and
-A8B8G8R8 2D/cube>=8 (13 mod files) load through the D3DX shim into A8R8G8B8.
+**Closed by the texture-leftovers change:** L8 volume (real 128^3 retail
+`noisevolume.dds`), DX10 BC7 (120 UBE files, real samples tested), and the
+1x1 A8B8G8R8 UBE eye cube (padded to 8x8). Earlier: R8G8B8 (247 files: 189
+retail + 58 mod) and A8B8G8R8 2D/cube>=8 (13 mod files).

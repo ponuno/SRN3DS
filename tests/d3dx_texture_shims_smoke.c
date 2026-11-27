@@ -62,6 +62,7 @@
 #define FMT_DXT1 0x31545844u
 #define FMT_ATI2 0x32495441u
 #define FMT_DX10 0x30315844u
+#define FMT_BC7 0x37434244u /* internal D9_BC7 */
 
 static void wr32(uint8_t *p,uint32_t v){
     p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);p[2]=(uint8_t)(v>>16);p[3]=(uint8_t)(v>>24);
@@ -213,7 +214,7 @@ static int sandbox_write_oversize(const char *name,const uint8_t *header,size_t 
     if(fclose(f))ok=0;return ok?0:-1;
 }
 static void sandbox_remove(void){
-    static const char *const files[]={"menu.dds","dxt1.dds","bad.dds","cube.dds",
+    static const char *const files[]={"menu.dds","dxt1.dds","bad.dds","cube.dds","noisevolume.dds",
                                       "volume.dds","huge.dds",
                                       "Data/Textures/menu.dds"};
     for(unsigned i=0;i<sizeof files/sizeof files[0];++i){
@@ -253,18 +254,64 @@ static void real_sample(Harness *h,const char *path,unsigned want_w,unsigned wan
     uint32_t tex=rd(h,OUT);assert(tex);
     uint32_t lock[]={0,OUT2,0,0};
     assert(call(h,tex,19,lock,4)==HR_OK);
-    size_t expect_pitch=(size_t)want_w*4u;
+    int block=want_fmt==FMT_BC7;
+    size_t expect_pitch=block?(size_t)((want_w+3u)/4u)*16u:(size_t)want_w*4u;
     assert(rd(h,OUT2)==expect_pitch);
-    const uint8_t *px=guest_ptr(&h->memory,rd(h,OUT2+4),expect_pitch*want_h);
+    size_t expect_bytes=block?expect_pitch*((want_h+3u)/4u):expect_pitch*want_h;
+    const uint8_t *px=guest_ptr(&h->memory,rd(h,OUT2+4),expect_bytes);
     assert(px);
-    size_t nonzero=0;for(size_t i=0;i<expect_pitch*want_h;++i)nonzero+=(px[i]!=0);
+    size_t nonzero=0;for(size_t i=0;i<expect_bytes;++i)nonzero+=(px[i]!=0);
     assert(nonzero);
     uint32_t level=0;assert(call(h,tex,20,&level,1)==HR_OK);
     assert(call(h,tex,2,NULL,0)==0);
     fprintf(stderr,"[d3dx] real %ux%u fmt %u sample loaded: %lu/%lu nonzero bytes\n",
             want_w,want_h,want_fmt,(unsigned long)nonzero,
-            (unsigned long)(expect_pitch*want_h));
+            (unsigned long)expect_bytes);
     guest_unmap(&h->memory,base);
+}
+
+/* Real retail L8 volume: 128x128x128, 8 mips.  The file is copied into the
+ * sandbox and loaded through the path export, so the 2.4 MiB payload never
+ * has to fit the small guest arena.  Depth slices and mips are checked through
+ * LockBox; the 4 MiB null budget is raised for this one harness because the
+ * expanded A8R8G8B8 store plus its GPU accounting is ~19 MiB. */
+static void real_l8_volume(Harness *h,const char *path){
+    FILE *f=fopen(path,"rb");
+    if(!f){fprintf(stderr,"[d3dx] real L8 volume absent, skipped: %s\n",path);return;}
+    if(fseek(f,0,SEEK_END)||ftell(f)<=0){fclose(f);return;}
+    long n=ftell(f);if(fseek(f,0,SEEK_SET)){fclose(f);return;}
+    uint8_t *data=malloc((size_t)n);assert(data);
+    assert(fread(data,1,(size_t)n,f)==(size_t)n);fclose(f);
+    assert(!sandbox_write("noisevolume.dds",data,(size_t)n));
+    free(data);
+    set_guest_path(h,"noisevolume.dds");
+    uint32_t gi[]={DATA,INFO};
+    assert(shim_call(h,"D3DXGetImageInfoFromFileA",gi,2)==HR_OK);
+    assert(rd(h,INFO+0)==128&&rd(h,INFO+4)==128&&rd(h,INFO+8)==128);
+    assert(rd(h,INFO+12)==8&&rd(h,INFO+16)==50u&&rd(h,INFO+20)==4u);
+    uint32_t cv[]={h->device,DATA,OUT};
+    assert(shim_call(h,"D3DXCreateVolumeTextureFromFileA",cv,3)==HR_OK);
+    uint32_t volume=rd(h,OUT);assert(volume);
+    uint32_t desc[]={0,OUT2};assert(call(h,volume,17,desc,2)==HR_OK);
+    assert(rd(h,OUT2+0)==FMT_A8R8G8B8);
+    assert(rd(h,OUT2+16)==128&&rd(h,OUT2+20)==128&&rd(h,OUT2+24)==128);
+    /* One slice, not all 128 (a full level would need an 8.4 MiB lock span). */
+    int32_t box[6]={0,0,0,128,128,1};
+    assert(!guest_write(&h->memory,SCRATCH+0x3000,box,sizeof box));
+    uint32_t lock[]={0,OUT2,SCRATCH+0x3000,0};
+    assert(call(h,volume,19,lock,4)==HR_OK);
+    assert(rd(h,OUT2)==512u&&rd(h,OUT2+4)==65536u);
+    const uint8_t *px=guest_ptr(&h->memory,rd(h,OUT2+8),65536u);assert(px);
+    size_t nonzero=0;
+    for(size_t i=0;i<65536u;i+=4){
+        assert(px[i]==px[i+1]&&px[i]==px[i+2]&&px[i+3]==255);
+        nonzero+=(px[i]!=0);
+    }
+    assert(nonzero);
+    uint32_t un[]={0};assert(call(h,volume,20,un,1)==HR_OK);
+    assert(call(h,volume,2,NULL,0)==0);
+    fprintf(stderr,"[d3dx] real L8 volume 128x128x128 loaded; first slice %lu/%lu "
+            "nonzero luminance texels\n",(unsigned long)nonzero,16384ul);
 }
 
 int main(void){
@@ -272,6 +319,11 @@ int main(void){
     guest_init(&h.memory,2u<<20);
     assert(!guest_map(&h.memory,0x10000000,0x4000)&&!guest_map(&h.memory,SCRATCH,0x4000));
     assert(!d9_com_init(&h.memory,NULL));
+#ifdef _WIN32
+    /* Measurement harness only: the real 128^3 L8 volume expands to a 9.6 MiB
+     * CPU store plus the same GPU accounting, above the 4 MiB null default. */
+    assert(_putenv_s("TESV_D3D9_BUDGET_MB","64")==0);
+#endif
     assert(!d9_null_register());
     const char *tmp=getenv("TEMP");if(!tmp||!*tmp)tmp=getenv("TMP");assert(tmp&&*tmp);
     char host_check[640];
@@ -502,16 +554,19 @@ int main(void){
      uint32_t cc[]={h.device,DATA,(uint32_t)n,OUT};
      assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cc,4)==HR_OK);
      assert(rd(&h,OUT));assert(call(&h,rd(&h,OUT),2,NULL,0)==0);}
-    /* The real UBE eye cube is 1x1 A8B8G8R8; the backend floor is 8x8, so this
-     * is a named refusal rather than a generic backend failure. */
+    /* The real UBE eye cube is 1x1 A8B8G8R8.  The backend floor is 8x8, so the
+     * loader pads it: all six 8x8 faces replicate the one source texel. */
     {size_t n=dds_header(ddsbuf,1,1,1,0x41u,0,32,0x000000ffu,0x0000ff00u,
                          0x00ff0000u,0xff000000u,0xfe00u,1);
      for(size_t k=0;k<6u*4u;++k)ddsbuf[n+k]=0;n+=6u*4u;
      assert(!guest_write(&h.memory,DATA,ddsbuf,n));
      uint32_t cc[]={h.device,DATA,(uint32_t)n,OUT};
      assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
-     assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cc,4)==HR_NOTAVAILABLE);
-     assert(rd(&h,OUT)==0&&strstr(d3dx_texture_shims_last_error(),"8x8"));}
+     assert(shim_call(&h,"D3DXCreateCubeTextureFromFileInMemory",cc,4)==HR_OK);
+     uint32_t cube=rd(&h,OUT);assert(cube);
+     uint32_t desc[]={0,OUT2};assert(call(&h,cube,17,desc,2)==HR_OK);
+     assert(rd(&h,OUT2+24)==8&&rd(&h,OUT2+28)==8);
+     assert(call(&h,cube,2,NULL,0)==0);}
     {size_t n=dds_header(ddsbuf,8,8,1,0x40u,0,24,0x00ff0000u,0x0000ff00u,
                          0x000000ffu,0,0x00200000u,2);
      size_t plane=d9_rgb24_pitch(8)*8u;
@@ -521,16 +576,21 @@ int main(void){
      assert(shim_call(&h,"D3DXCreateVolumeTextureFromFileInMemory",vc,4)==HR_OK);
      assert(rd(&h,OUT));assert(call(&h,rd(&h,OUT),2,NULL,0)==0);}
 
-    /* 4a2. DX10 BC7 is refused by name, not guessed. */
+    /* 4a2. DX10 BC7_UNORM is decoded (vendored bcdec).  Header + 4 zero
+     * blocks: image info reports the internal BC7 id and creation succeeds. */
     {size_t n=dds_header(ddsbuf,8,8,1,0x4u,FMT_DX10,0,0,0,0,0,0,1);
      wr32(ddsbuf+128,98);wr32(ddsbuf+132,3);wr32(ddsbuf+136,0);
      wr32(ddsbuf+140,1);wr32(ddsbuf+144,0);n+=20;
+     memset(ddsbuf+n,0,64);n+=64;
      assert(!guest_write(&h.memory,DATA,ddsbuf,n));
      uint32_t b7[]={DATA,(uint32_t)n,INFO};
      assert(!guest_write32(&h.memory,INFO,0xdeadbeefu));
-     assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",b7,3)==HR_INVALIDDATA);
-     assert(rd(&h,INFO)==0&&strstr(d3dx_texture_shims_last_error(),"BC7"));
-     assert(strstr(d3dx_texture_shims_last_error(),"no decoder"));}
+     assert(shim_call(&h,"D3DXGetImageInfoFromFileInMemory",b7,3)==HR_OK);
+     assert(rd(&h,INFO)==8&&rd(&h,INFO+4)==8&&rd(&h,INFO+16)==FMT_BC7);
+     uint32_t ct7[]={h.device,DATA,(uint32_t)n,OUT};
+     assert(!guest_write32(&h.memory,OUT,0xdeadbeefu));
+     assert(shim_call(&h,"D3DXCreateTextureFromFileInMemory",ct7,4)==HR_OK);
+     assert(rd(&h,OUT));assert(call(&h,rd(&h,OUT),2,NULL,0)==0);}
     /* 4b. A 4x4 DXT1 is valid metadata but below the bridge's 8x8 compressed
      * floor: creation is a named NOTAVAILABLE before any resource exists. */
     dds_a8=make_dxt1_dds(ddsbuf,4,4,0x50);
@@ -846,6 +906,40 @@ int main(void){
      real_sample(&h,r8,256,256,FMT_R8G8B8);}
     real_sample(&h,"E:\\SkyrimMods\\mods\\UBE 2.0\\textures\\!COR\\Eyes_ILV\\eye01_outer_m.dds",
                 16,16,FMT_A8B8G8R8);
+    /* One of the 120 UBE 2.0 BC7 files (DXGI 98, 128x128, 8 mips). */
+    {const char *bc7=getenv("SKYRIM_BC7_SAMPLE");
+     if(!bc7||!*bc7)
+         bc7="E:\\SkyrimMods\\mods\\UBE 2.0\\textures\\!COR\\Eyes_ILV\\eye01_m.dds";
+     real_sample(&h,bc7,128,128,FMT_BC7);
+     /* Decode the first real 16-byte BC7 block through the bridge decoder. */
+     /* A second real file with colour (eye01.dds, 1024x1024 base colour);
+      * eye01_m.dds is a black-with-alpha mask. */
+     const char *bc7color=getenv("SKYRIM_BC7_COLOR_SAMPLE");
+     if(!bc7color||!*bc7color)
+         bc7color="E:\\SkyrimMods\\mods\\UBE 2.0\\textures\\!COR\\Eyes_ILV\\eye01.dds";
+     FILE *f=fopen(bc7color,"rb");
+     if(f){
+         uint8_t file[65536];
+         size_t got=fread(file,1,sizeof file,f);
+         fclose(f);
+         assert(got>148u);
+         int found=0;
+         for(size_t off=148u;off+16u<=got&&!found;off+=16u){
+             uint8_t rgba[64];
+             assert(d9_bc_decode_block(D9_BC7,file+off,16,rgba)==D9_OK);
+             int opaque=0,color=0;
+             for(unsigned i=0;i<16;++i){
+                 opaque+=rgba[i*4+3]==255;
+                 color+=rgba[i*4+0]||rgba[i*4+1]||rgba[i*4+2];
+             }
+             found=opaque>0&&color>0;
+         }
+         assert(found);
+     }
+     const char *l8=getenv("SKYRIM_L8_VOLUME");
+     if(!l8||!*l8)
+         l8="E:\\Skyrim_N3DS_build\\assets\\textures\\format_samples\\noisevolume.dds";
+     real_l8_volume(&h,l8);}
 
     assert(call(&h,h.device,2,NULL,0)==0);
     assert(call(&h,h.factory,2,NULL,0)==0);

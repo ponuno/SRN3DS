@@ -113,6 +113,23 @@ static size_t a8_volume(uint8_t *b,unsigned w,unsigned h,unsigned depth,unsigned
     }
     return off;
 }
+static size_t l8_volume(uint8_t *b,unsigned w,unsigned h,unsigned depth,unsigned mips,
+                        unsigned seed){
+    memset(b,0,128);memcpy(b,"DDS ",4);wr32(b+4,124);
+    uint32_t flags=0x1u|0x2u|0x4u|0x1000u|0x800u|DDSD_DEPTH;
+    if(mips>1)flags|=0x20000u;
+    wr32(b+8,flags);wr32(b+12,h);wr32(b+16,w);wr32(b+24,depth);
+    if(mips>1)wr32(b+28,mips);
+    wr32(b+76,32);wr32(b+80,0x20000u);wr32(b+88,8);wr32(b+92,0xffu);
+    wr32(b+108,0x1000u|(mips>1?0x400008u:0u));wr32(b+112,VOLUME_CAPS);
+    size_t off=128;unsigned vw=w,vh=h,vd=depth;
+    for(unsigned level=0;level<mips;++level){
+        for(unsigned z=0;z<vd;++z)for(unsigned y=0;y<vh;++y)for(unsigned x=0;x<vw;++x)
+            b[off++]=(uint8_t)(seed+level*0x40u+z*0x10u+y*4u+x);
+        if(vw>1)vw>>=1;if(vh>1)vh>>=1;if(vd>1)vd>>=1;
+    }
+    return off;
+}
 static size_t dxt1_volume(uint8_t *b,unsigned w,unsigned h,unsigned depth,unsigned mips){
     size_t off=vol_header(b,w,h,depth,mips,FMT_DXT1,VOLUME_CAPS);
     unsigned vw=w,vh=h,vd=depth;
@@ -209,6 +226,29 @@ int main(void){
      uint32_t get[]={0,OUT};assert(call(&h,h.device,64,get,2)==HR_OK&&rd(&h,OUT)==volume);
      assert(call(&h,rd(&h,OUT),2,NULL,0)>=1);
      uint32_t unbind[]={0,0};assert(call(&h,h.device,65,unbind,2)==HR_OK);}
+    assert(call(&h,volume,2,NULL,0)==0);
+
+    /* L8 volume: one byte per texel in the file, expanded to A8R8G8B8 on
+     * upload (L,L,L,255).  4x4x2 with two mips exercises both depth slices
+     * and the level-1 2x2x1 slice. */
+    bytes=l8_volume(dds,4,4,2,2,0x30);volume=create_volume(&h,dds,bytes);
+    {uint32_t d[]={0,DESC};assert(call(&h,volume,17,d,2)==HR_OK);
+     assert(rd(&h,DESC+0)==FMT_A8R8G8B8);
+     assert(rd(&h,DESC+16)==4&&rd(&h,DESC+20)==4&&rd(&h,DESC+24)==2);}
+    {uint32_t args[]={0,LOCKED,0,0};assert(call(&h,volume,19,args,4)==HR_OK);
+     uint32_t rowpitch=rd(&h,LOCKED),slicepitch=rd(&h,LOCKED+4),bits=rd(&h,LOCKED+8);
+     assert(rowpitch==16&&slicepitch==64);
+     const uint32_t *px=guest_ptr(&h.memory,bits,(size_t)slicepitch*2);assert(px);
+     assert(px[0]==0xff303030u);
+     assert(px[slicepitch/4]==0xff404040u);
+     assert(px[15]==0xff3f3f3fu); /* x=3,y=3,z=0 -> 0x30+3+12 */
+     uint32_t un[]={0};assert(call(&h,volume,20,un,1)==HR_OK);}
+    {uint32_t args[]={1,LOCKED,0,0};assert(call(&h,volume,19,args,4)==HR_OK);
+     uint32_t rowpitch=rd(&h,LOCKED),slicepitch=rd(&h,LOCKED+4),bits=rd(&h,LOCKED+8);
+     assert(rowpitch==8&&slicepitch==16);
+     const uint32_t *px=guest_ptr(&h.memory,bits,(size_t)slicepitch);assert(px);
+     assert(px[0]==0xff707070u); /* level 1: seed+0x40 */
+     uint32_t un[]={0};assert(call(&h,volume,20,un,1)==HR_OK);}
     assert(call(&h,volume,2,NULL,0)==0);
 
     /* 4x4x2 DXT1 volume, two mips: all slices present and decoded. */
