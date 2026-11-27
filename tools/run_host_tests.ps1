@@ -547,6 +547,16 @@ Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "te
 # Havok SSE/x87 extension forms, differential AOT vs IR over the self-authored
 # corpus.  Deliberately independent of the D3DX pilot fixture so it always runs.
 Add-Test "ir_havok_ext" $liftCommon ($legacySources + @("tests/ir_havok_ext_smoke.c", "tests/ir_aot_fixture.c")) @()
+# Retail Havok world/body/add/step diagnostic.  The container is read-only;
+# the matching PE supplies .text/.rdata/.data, while the test synthesizes the
+# writable Havok globals, TLS and allocators.  It asserts the current no-solver
+# result (translation unchanged), not a gravity integration.
+$havokIrc = if ($TesvIrc) { $TesvIrc } else { "E:\census_ir2\ir_container\tesv.irc" }
+if ((Test-Path $TesvExe) -and (Test-Path $havokIrc)) {
+    Add-Test "havok_world" $liftCommon ($legacySources + @("tests/havok_world_smoke.c")) @($havokIrc, $TesvExe)
+} else {
+    Write-Log "havok_world: skipped (matching TESV.exe or tesv.irc absent)"
+}
 # Straight-line runs longer than the uint8 IR block count must split, not fault.
 Add-Test "ir_long_block" $liftCommon ($legacySources + @("tests/ir_long_block_smoke.c")) @()
 Add-Test "ir_cache_flush" $liftCommon ($legacySources + @("tests/ir_cache_flush_smoke.c")) @()
