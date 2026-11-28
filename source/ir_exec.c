@@ -231,19 +231,36 @@ static void startup_block_probe(CPU *c,const IrExecBlock *b){
                     (unsigned)b->x86_len,tid);
         }
     }
-    if(b->start<=0x6f4045u&&0x6f4045u<end){
+    if(b->start<=0x8c71e0u&&0x8c71e0u<end){
         static int once;
         if(!once){once=1;
             unsigned n=g_ip_ring[slot].count;
-            fprintf(stderr,"[ring] 6f4045 eax=%08x esp=%08x tid=%u n=%u:",
-                    (unsigned)c->r[0],(unsigned)c->r[4],tid,n);
+            fprintf(stderr,"[ring] 8c71e0 eax=%08x esp=%08x ret=%08x tid=%u n=%u:",
+                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)startup_rd32(c->r[4]),
+                    tid,n);
             for(unsigned i=0;i<n;++i){
                 unsigned k=(g_ip_ring[slot].next-n+i)&(IP_RING-1u);
                 fprintf(stderr," %08x",(unsigned)g_ip_ring[slot].ip[k]);
             }
-            fprintf(stderr,"\n[ip] 6f4045 eax=%08x esp=%08x blk=%08x+%u tid=%u\n",
-                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)b->start,
-                    (unsigned)b->x86_len,tid);
+            fprintf(stderr,"\n");
+        }
+    }
+    if(b->start<=0x6f4045u&&0x6f4045u<end){
+        static int once;
+        if(!once){once=1;
+            unsigned n=g_ip_ring[slot].count;
+            fprintf(stderr,"[ring] 6f4045 eax=%08x esp=%08x ret=%08x tid=%u n=%u:",
+                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)startup_rd32(c->r[4]),
+                    tid,n);
+            for(unsigned i=0;i<n;++i){
+                unsigned k=(g_ip_ring[slot].next-n+i)&(IP_RING-1u);
+                fprintf(stderr," %08x",(unsigned)g_ip_ring[slot].ip[k]);
+            }
+            fprintf(stderr,"\n[ip] 6f4045 eax=%08x esp=%08x ret=%08x blk=%08x+%u tid=%u\n",
+                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)startup_rd32(c->r[4]),
+                    (unsigned)b->start,(unsigned)b->x86_len,tid);
+            extern void win32_thread_dump_all(const char *tag) __attribute__((weak));
+            if(win32_thread_dump_all)win32_thread_dump_all("6f4045");
         }
     }
     if(b->start<=0x69dda4u&&0x69dda4u<end){

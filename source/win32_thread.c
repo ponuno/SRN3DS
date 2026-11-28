@@ -314,6 +314,14 @@ static void dump_thread(const char *role, W32Thread *t) {
     }
     fputc('\n', stderr);
 }
+void win32_thread_dump_all(const char *tag) {
+    fprintf(stderr, "[threads] %s live=%u current=%lu\n",
+            tag ? tag : "", win32_thread_live_count(),
+            (unsigned long)(cur ? cur->id : 0));
+    if (scheduler_up) dump_thread("main", &main_thread);
+    for (unsigned i = 0; i < MAX_THREADS; ++i)
+        if (threads[i].state != ST_FREE) dump_thread("thread", &threads[i]);
+}
 static void hang_dump(unsigned elapsed, const char *why, int is_hang) {
     fprintf(stderr, "[hang] %s: %s for %lu ms "
                     "(TESV_HANG_WATCHDOG_MS=%u); dumping every guest thread\n",

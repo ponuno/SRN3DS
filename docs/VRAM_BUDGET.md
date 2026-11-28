@@ -385,3 +385,32 @@ WinMain's `0x69de54`.  Singleton 0 follows because `0x876f60` is never called.
 Next: identify the caller of `0x8c71e0`/`0x8c7212` and why the pump is started
 directly, and confirm whether `0x69de08`/`0x69de54` are ever reached (both have
 `[ipc]` probes and neither fired).
+
+## Threadprobe: the main thread runs 0x8c71e0; the WinMain gate is absent
+
+At the loading pump:
+
+```
+[ring] 8c71e0 eax=008c71e0 esp=1007fc48 ret=00a5d46c tid=1 n=16:
+  00a4baf9 00a4e2f0 00a4e2fa 00a4e300 008972f0 00897300 00897304 008c71a0
+  008c71b7 008c71bb 00a5e130 00a5e140 00a5e14e 008c71c9 008c71d2 008c71e0
+[ring] 6f4045 eax=1ce12000 esp=1ce0ff88 ret=ff010028 tid=9:
+  006f44a7 .. 006f4031 008c71e0 008c71f7 008c71fb 00a5e180 00a5e1c4
+  008c7209 008c7212 006f4045
+[threads] 6f4045 live=10 current=9
+```
+
+* **tid=1 (main) is ready and is the one executing `0x8c71e0`**, return
+  `0xa5d46c`; its ring is the `0xa4baf9 -> 0xa4e2f0.. -> 0x8972f0.. ->
+  0x8c71a0.. -> 0xa5e130.. -> 0x8c71c9..` loop.  The main CPU snapshot is
+  empty (`start=0 esp=0`), so the ring is the only PC evidence.
+* tid=9 is running `0xa4b4a0`/`0x6f4045` (`irc_depth=3`, esp `1ce0ff88`).
+* tid=8 is blocked on `0x504` (`0xa5ac42`); tid=10 sleeps 1 ms at
+  `0xb9ef30`; tid=11 is ready waiting on `0x537` (`0xa4e30f`); tid=2..7 are
+  GFx pool workers at `0xa5b000`.
+* No `[ipc]`/`[menu]` for `0x6982c0`, `0x69de08` or `0x69de54`.
+
+So the device main thread is not blocked: it runs an alternate loop that
+enters the pump through `0x8c71e0` and never calls WinMain's menu gate.
+Next: identify `0xa5d46c` (return from `0x8c71e0`) and the entry that starts
+this loop; that will show how to route it through `0x876f60`.

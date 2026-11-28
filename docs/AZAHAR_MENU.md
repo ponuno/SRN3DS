@@ -333,3 +333,13 @@ hook.  `[ring] 6f4045` (tid 9) shows
 `[ipc] 6982c0`.  The device pump is started from `0x8c71xx`, not WinMain's
 `0x69de54`; the startup gate is not executed.  Next: trace `0x8c71e0`'s caller
 and whether `0x69de08`/`0x69de54` are reached.
+
+## 2026-11-28 threadprobe: main thread drives 0x8c71e0
+
+`[ring] 8c71e0` (tid=1, ret=0xa5d46c) shows the main loop
+`a4baf9 -> a4e2f0.. -> 8972f0.. -> 8c71a0.. -> a5e130.. -> 8c71c9..e0`.
+`[ring] 6f4045` (tid=9) shows `8c71e0..8c7212 -> 6f4045`.
+`[threads]`: main ready (no CPU snapshot), tid8 blocked on 504, tid9 running,
+tid10 Sleep 1 ms, tid11 ready on 537, tid2..7 GFx pool.  No `6982c0`/
+`69de08`/`69de54`.  The main thread is not blocked; it runs an alternate
+loop that bypasses WinMain's menu gate.  Next: `0xa5d46c` and the loop entry.
