@@ -64,6 +64,34 @@ typedef struct {
     IrcSlot *slot;
 } IrcExecFrame;
 
+/* Resident index entry: 16 bytes instead of the 40-byte on-disk record.
+ *
+ * `record_offset` is not stored. The packer writes records contiguously in
+ * index order, each 8-byte aligned, so the offset of entry i is
+ * data_offset + the running sum of align8(record_size) over decoded entries
+ * before i. Opening verifies that invariant against the on-disk offsets
+ * (a container that is not contiguous is refused with N3DS_IRC_ERR_INDEX_BOUNDS),
+ * and a checkpoint every N3DS_IRC_IDX_STRIDE entries bounds a derivation to at
+ * most STRIDE-1 additions. `block_count`/`insn_count` are read from the
+ * CRC-verified record header when a record is loaded, so the index does not
+ * duplicate them. Measured on the 90,903-entry tesv.irc: 3,636,120 B index ->
+ * 1,454,448 B + 22,728 B checkpoints. */
+#define N3DS_IRC_IDX_SIZE_BITS 22u
+#define N3DS_IRC_IDX_SIZE_MASK ((1u << N3DS_IRC_IDX_SIZE_BITS) - 1u)
+#define N3DS_IRC_IDX_FLAGS_SHIFT N3DS_IRC_IDX_SIZE_BITS
+#define N3DS_IRC_IDX_FLAGS_MASK 0x3fu
+#define N3DS_IRC_IDX_STATUS_SHIFT (N3DS_IRC_IDX_FLAGS_SHIFT + 6u)
+#define N3DS_IRC_IDX_STATUS_MASK 0x7u
+#define N3DS_IRC_IDX_STRIDE 16u
+#define N3DS_IRC_IDX_ENTRY_BYTES 16u
+
+typedef struct {
+    uint32_t addr;
+    uint32_t end;
+    uint32_t record_crc32;
+    uint32_t size_flags;
+} IrcIdxEntry;
+
 struct N3dsIrc {
     FILE *f;
     uint64_t file_size;
@@ -74,7 +102,9 @@ struct N3dsIrc {
     uint32_t data_crc;
     uint32_t data_offset;
     uint32_t data_bytes;
-    N3dsIrcEntry *index;
+    IrcIdxEntry *index;
+    uint32_t *offsets;      /* checkpoint every N3DS_IRC_IDX_STRIDE entries */
+    uint32_t offset_count;
     uint32_t preentry_bloom[32];
     uint32_t preentry_count;
 
@@ -157,6 +187,7 @@ static uint64_t irc_now_ns(void) {
 }
 
 static size_t irc_align4(size_t v) { return (v + 3u) & ~(size_t)3u; }
+static size_t irc_align8(size_t v) { return (v + 7u) & ~(size_t)7u; }
 
 const char *n3ds_irc_strstatus(int status) {
     switch (status) {
@@ -201,13 +232,47 @@ unsigned n3ds_irc_decoded_count(const N3dsIrc *irc) { return irc ? irc->ndec : 0
 uint32_t n3ds_irc_file_flags(const N3dsIrc *irc) { return irc ? irc->file_flags : 0; }
 uint64_t n3ds_irc_file_size(const N3dsIrc *irc) { return irc ? irc->file_size : 0; }
 uint64_t n3ds_irc_index_size(const N3dsIrc *irc) {
-    return irc && irc->index ? (uint64_t)irc->nfun * N3DS_IRC_INDEX_ENTRY : 0;
+    if (!irc || !irc->index) return 0;
+    return (uint64_t)irc->nfun * N3DS_IRC_IDX_ENTRY_BYTES +
+           (uint64_t)irc->offset_count * sizeof(uint32_t);
 }
 uint32_t n3ds_irc_index_crc32(const N3dsIrc *irc) { return irc ? irc->index_crc : 0; }
 uint32_t n3ds_irc_data_crc32(const N3dsIrc *irc) { return irc ? irc->data_crc : 0; }
 
-int n3ds_irc_lookup(const N3dsIrc *irc, uint32_t addr, N3dsIrcEntry *out) {
-    if (!irc || !irc->index || !out) return N3DS_IRC_ERR_ARG;
+/* Absolute file offset of index `ordinal`'s record. Records are contiguous and
+ * 8-byte aligned; the checkpoint table makes this at most STRIDE-1 adds. */
+static uint32_t irc_record_offset(const N3dsIrc *irc, uint32_t ordinal) {
+    uint32_t base = ordinal & ~(N3DS_IRC_IDX_STRIDE - 1u);
+    uint32_t off = irc->offsets[base / N3DS_IRC_IDX_STRIDE];
+    for (uint32_t i = base; i < ordinal; ++i) {
+        off += irc->index[i].size_flags & N3DS_IRC_IDX_SIZE_MASK;
+        off = (uint32_t)irc_align8(off);
+    }
+    return off;
+}
+
+/* Expand one compact entry into the public 40-byte view. `record_offset` is
+ * derived; block_count/insn_count live in the record header (validated on
+ * load) and are reported as 0 here. */
+static void irc_entry_expand(const N3dsIrc *irc, uint32_t ordinal,
+                             N3dsIrcEntry *out) {
+    memset(out, 0, sizeof *out);
+    const IrcIdxEntry *e = &irc->index[ordinal];
+    uint32_t sf = e->size_flags;
+    out->addr = e->addr;
+    out->end = e->end;
+    out->record_crc32 = e->record_crc32;
+    out->record_size = sf & N3DS_IRC_IDX_SIZE_MASK;
+    out->flags = (sf >> N3DS_IRC_IDX_FLAGS_SHIFT) & N3DS_IRC_IDX_FLAGS_MASK;
+    out->decode_status =
+        (uint16_t)((sf >> N3DS_IRC_IDX_STATUS_SHIFT) & N3DS_IRC_IDX_STATUS_MASK);
+    if (out->record_size) out->record_offset = irc_record_offset(irc, ordinal);
+}
+
+/* Binary search over the compact addr column, with the lookup statistics of the
+ * public API. Returns the ordinal of the exact entry, or -1. This is the hot
+ * path: it never derives a record offset. */
+static int irc_lookup_index(const N3dsIrc *irc, uint32_t addr, uint32_t *out) {
     HP_START(hp_t0);
     N3dsIrc *m = (N3dsIrc *)irc;
     m->st.lookups++;
@@ -220,26 +285,35 @@ int n3ds_irc_lookup(const N3dsIrc *irc, uint32_t addr, N3dsIrcEntry *out) {
     if (lo >= irc->nfun || irc->index[lo].addr != addr) {
         m->st.lookup_misses++;
         HP_ADD(HP_LOOKUP, hp_t0);
-        return N3DS_IRC_ERR_NOT_FOUND;
+        return -1;
     }
-    *out = irc->index[lo];
+    *out = lo;
     m->st.lookup_hits++;
     HP_ADD(HP_LOOKUP, hp_t0);
+    return 0;
+}
+
+int n3ds_irc_lookup(const N3dsIrc *irc, uint32_t addr, N3dsIrcEntry *out) {
+    if (!irc || !irc->index || !out) return N3DS_IRC_ERR_ARG;
+    uint32_t ordinal = 0;
+    if (irc_lookup_index(irc, addr, &ordinal) != 0) return N3DS_IRC_ERR_NOT_FOUND;
+    irc_entry_expand(irc, ordinal, out);
     return N3DS_IRC_OK;
 }
 
 int n3ds_irc_has_preentry(const N3dsIrc *irc, uint32_t addr) {
-    if (!irc || !irc->preentry_count) return 0;
+    if (!irc || !irc->index || !irc->preentry_count) return 0;
     unsigned bit = (addr * 2654435761u) & 1023u;
     if (!(irc->preentry_bloom[bit >> 5] & (1u << (bit & 31u)))) return 0;
-    N3dsIrcEntry e;
-    return n3ds_irc_lookup(irc, addr, &e) == N3DS_IRC_OK &&
-           (e.flags & N3DS_IRC_FN_PREENTRY) != 0;
+    uint32_t ordinal = 0;
+    if (irc_lookup_index(irc, addr, &ordinal) != 0) return 0;
+    return ((irc->index[ordinal].size_flags >> N3DS_IRC_IDX_FLAGS_SHIFT) &
+            N3DS_IRC_FN_PREENTRY) != 0;
 }
 
 int n3ds_irc_entry_at(const N3dsIrc *irc, unsigned ordinal, N3dsIrcEntry *out) {
     if (!irc || !irc->index || !out || ordinal >= irc->nfun) return N3DS_IRC_ERR_ARG;
-    *out = irc->index[ordinal];
+    irc_entry_expand(irc, ordinal, out);
     return N3DS_IRC_OK;
 }
 
@@ -249,46 +323,63 @@ static int irc_read_exact(FILE *f, void *buf, size_t bytes) {
     return fread(buf, 1, bytes, f) == bytes ? 0 : -1;
 }
 
+/* Parse the 40-byte on-disk index into the 16-byte resident form. The on-disk
+ * record offsets are checked against the derived contiguous chain and then
+ * dropped; a container whose records are not laid out contiguously in index
+ * order is refused explicitly instead of silently reading the wrong bytes. */
 static int irc_parse_index(N3dsIrc *irc, const uint8_t *raw, size_t bytes) {
     if (bytes != (size_t)irc->nfun * N3DS_IRC_INDEX_ENTRY) return N3DS_IRC_ERR_INDEX_BOUNDS;
-    irc->index = (N3dsIrcEntry *)calloc(irc->nfun ? irc->nfun : 1, sizeof *irc->index);
+    irc->index = (IrcIdxEntry *)calloc(irc->nfun ? irc->nfun : 1, sizeof *irc->index);
     if (!irc->index) return N3DS_IRC_ERR_CACHE;
+    irc->offset_count = irc->nfun / N3DS_IRC_IDX_STRIDE + 1u;
+    irc->offsets = (uint32_t *)calloc(irc->offset_count, sizeof *irc->offsets);
+    if (!irc->offsets) return N3DS_IRC_ERR_CACHE;
+    uint32_t run = irc->data_offset;
+    unsigned decoded = 0;
     for (uint32_t i = 0; i < irc->nfun; ++i) {
         const uint8_t *p = raw + (size_t)i * N3DS_IRC_INDEX_ENTRY;
-        N3dsIrcEntry *e = &irc->index[i];
-        e->addr = irc_rd32(p + 0);
-        e->end = irc_rd32(p + 4);
-        e->flags = irc_rd32(p + 8);
-        e->decode_status = irc_rd16(p + 12);
-        e->block_count = irc_rd16(p + 14);
-        e->insn_count = irc_rd32(p + 16);
-        e->record_offset = irc_rd32(p + 20);
-        e->record_size = irc_rd32(p + 24);
-        e->record_crc32 = irc_rd32(p + 28);
-        e->reserved[0] = irc_rd32(p + 32);
-        e->reserved[1] = irc_rd32(p + 36);
+        uint32_t addr = irc_rd32(p + 0);
+        uint32_t end = irc_rd32(p + 4);
+        uint32_t flags = irc_rd32(p + 8);
+        uint16_t decode_status = irc_rd16(p + 12);
+        uint32_t record_offset = irc_rd32(p + 20);
+        uint32_t record_size = irc_rd32(p + 24);
+        uint32_t record_crc32 = irc_rd32(p + 28);
 
-        if (i && irc->index[i - 1].addr >= e->addr) return N3DS_IRC_ERR_INDEX_BOUNDS;
-        if (e->end <= e->addr) return N3DS_IRC_ERR_INDEX_BOUNDS;
-        if (e->decode_status > N3DS_IRC_DEC_UNKNOWN) return N3DS_IRC_ERR_INDEX_BOUNDS;
-        int decoded = (e->flags & N3DS_IRC_FN_DECODED) != 0;
-        if (decoded) {
-            if (e->record_size < N3DS_IRC_RECORD_HEADER) return N3DS_IRC_ERR_INDEX_BOUNDS;
-            if ((e->record_size & 7u) != 0) return N3DS_IRC_ERR_INDEX_BOUNDS;
-            if (e->record_offset & 7u) return N3DS_IRC_ERR_INDEX_BOUNDS;
-            if (irc->data_offset > e->record_offset) return N3DS_IRC_ERR_INDEX_BOUNDS;
-            if (e->record_size > irc->data_bytes) return N3DS_IRC_ERR_INDEX_BOUNDS;
-            if (e->record_offset - irc->data_offset > irc->data_bytes - e->record_size)
+        if (!(i % N3DS_IRC_IDX_STRIDE)) irc->offsets[i / N3DS_IRC_IDX_STRIDE] = run;
+        if (i && irc->index[i - 1].addr >= addr) return N3DS_IRC_ERR_INDEX_BOUNDS;
+        if (end <= addr) return N3DS_IRC_ERR_INDEX_BOUNDS;
+        if (flags & ~(uint32_t)(N3DS_IRC_FN_DECODED | N3DS_IRC_FN_AOT |
+                                N3DS_IRC_FN_FORCED | N3DS_IRC_FN_COMPLETE |
+                                N3DS_IRC_FN_INVALID | N3DS_IRC_FN_PREENTRY))
+            return N3DS_IRC_ERR_INDEX_BOUNDS;
+        if (decode_status > N3DS_IRC_DEC_UNKNOWN) return N3DS_IRC_ERR_INDEX_BOUNDS;
+        int is_decoded = (flags & N3DS_IRC_FN_DECODED) != 0;
+        if (is_decoded) {
+            if (record_size < N3DS_IRC_RECORD_HEADER) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if ((record_size & 7u) != 0) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if (record_offset != run) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if (record_size > irc->data_bytes) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if (record_offset - irc->data_offset > irc->data_bytes - record_size)
                 return N3DS_IRC_ERR_INDEX_BOUNDS;
-            if (e->decode_status != N3DS_IRC_DEC_OK) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if (decode_status != N3DS_IRC_DEC_OK) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if (record_size > N3DS_IRC_IDX_SIZE_MASK) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            run = (uint32_t)irc_align8((size_t)record_offset + record_size);
+            decoded++;
         } else {
-            if (e->record_size != 0) return N3DS_IRC_ERR_INDEX_BOUNDS;
-            if (e->decode_status == N3DS_IRC_DEC_OK) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if (record_size != 0 || record_offset != 0) return N3DS_IRC_ERR_INDEX_BOUNDS;
+            if (decode_status == N3DS_IRC_DEC_OK) return N3DS_IRC_ERR_INDEX_BOUNDS;
         }
+        IrcIdxEntry *e = &irc->index[i];
+        e->addr = addr;
+        e->end = end;
+        e->record_crc32 = record_crc32;
+        e->size_flags = record_size |
+                        ((flags & N3DS_IRC_IDX_FLAGS_MASK) << N3DS_IRC_IDX_FLAGS_SHIFT) |
+                        (((uint32_t)decode_status & N3DS_IRC_IDX_STATUS_MASK)
+                         << N3DS_IRC_IDX_STATUS_SHIFT);
     }
-    unsigned decoded = 0;
-    for (uint32_t i = 0; i < irc->nfun; ++i)
-        decoded += (irc->index[i].flags & N3DS_IRC_FN_DECODED) != 0;
+    if (run != irc->data_offset + irc->data_bytes) return N3DS_IRC_ERR_INDEX_BOUNDS;
     if (decoded != irc->ndec) return N3DS_IRC_ERR_INDEX_BOUNDS;
     return N3DS_IRC_OK;
 }
@@ -381,7 +472,9 @@ N3dsIrc *n3ds_irc_open_ex(const char *path, int *status) {
     memset(irc->preentry_bloom, 0, sizeof irc->preentry_bloom);
     irc->preentry_count = 0;
     for (uint32_t i = 0; i < irc->nfun; ++i) {
-        if (!(irc->index[i].flags & N3DS_IRC_FN_PREENTRY)) continue;
+        uint32_t flags = (irc->index[i].size_flags >> N3DS_IRC_IDX_FLAGS_SHIFT) &
+                         N3DS_IRC_IDX_FLAGS_MASK;
+        if (!(flags & N3DS_IRC_FN_PREENTRY)) continue;
         unsigned bit = (irc->index[i].addr * 2654435761u) & 1023u;
         irc->preentry_bloom[bit >> 5] |= 1u << (bit & 31u);
         irc->preentry_count++;
@@ -402,6 +495,7 @@ fail:
     if (irc) {
         if (irc->f) fclose(irc->f);
         free(irc->index);
+        free(irc->offsets);
         free(irc->slots);
         free(irc);
     }
@@ -465,6 +559,7 @@ void n3ds_irc_close(N3dsIrc *irc) {
     n3ds_irc_cache_clear(irc);
     free(irc->slots);
     free(irc->index);
+    free(irc->offsets);
     if (irc->f) fclose(irc->f);
     free(irc);
 }
@@ -498,9 +593,11 @@ static int irc_make_room(N3dsIrc *irc, size_t need) {
     }
 }
 
-static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_t *data) {
+static int irc_validate_record(N3dsIrc *irc, const IrcIdxEntry *idx, uint32_t flags,
+                               const uint8_t *data, uint32_t *block_count) {
     (void)irc;
-    if (e->record_size < N3DS_IRC_RECORD_HEADER) return N3DS_IRC_ERR_RECORD_BAD;
+    uint32_t record_size = idx->size_flags & N3DS_IRC_IDX_SIZE_MASK;
+    if (record_size < N3DS_IRC_RECORD_HEADER) return N3DS_IRC_ERR_RECORD_BAD;
     uint32_t magic = irc_rd32(data + 0);
     uint16_t version = irc_rd16(data + 4);
     uint32_t entry = irc_rd32(data + 8);
@@ -512,13 +609,18 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
     uint32_t stream_bytes = irc_rd32(data + 32);
 
     if (magic != IRC_RECORD_MAGIC || version != N3DS_IRC_VERSION) return N3DS_IRC_ERR_RECORD_BAD;
-    if (entry != e->addr || end != e->end) return N3DS_IRC_ERR_RECORD_BAD;
-    if (blocks != e->block_count || insns != e->insn_count) return N3DS_IRC_ERR_RECORD_BAD;
+    if (entry != idx->addr || end != idx->end) return N3DS_IRC_ERR_RECORD_BAD;
+    /* The index no longer duplicates the block/instruction counts; they come
+     * from this (CRC-verified) header, so only their structural sanity is
+     * checked here. */
+    if (!blocks || !insns) return N3DS_IRC_ERR_RECORD_BAD;
+    if (blocks > (record_size - N3DS_IRC_RECORD_HEADER) / N3DS_IRC_BLOCK_ENTRY)
+        return N3DS_IRC_ERR_RECORD_BAD;
     if (blocks_off != N3DS_IRC_RECORD_HEADER) return N3DS_IRC_ERR_RECORD_BAD;
     if (block_bytes != blocks * N3DS_IRC_BLOCK_ENTRY) return N3DS_IRC_ERR_RECORD_BAD;
-    if ((uint64_t)blocks_off + block_bytes > e->record_size) return N3DS_IRC_ERR_RECORD_BAD;
+    if ((uint64_t)blocks_off + block_bytes > record_size) return N3DS_IRC_ERR_RECORD_BAD;
     size_t stream_begin = irc_align4((size_t)blocks_off + block_bytes);
-    if (stream_begin > e->record_size || stream_bytes > e->record_size - stream_begin)
+    if (stream_begin > record_size || stream_bytes > record_size - stream_begin)
         return N3DS_IRC_ERR_RECORD_BAD;
 
     int saw_entry = 0;
@@ -534,13 +636,13 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
             return N3DS_IRC_ERR_RECORD_BAD;
         /* Cold blocks may precede the callable entry. The first sorted block
          * defines the frame's lower bound; the exact entry must still exist. */
-        if (start == e->addr) saw_entry = 1;
-        if (start < e->addr) saw_preentry = 1;
-        if (start >= e->end || !x86_len || !count || !words)
+        if (start == idx->addr) saw_entry = 1;
+        if (start < idx->addr) saw_preentry = 1;
+        if (start >= idx->end || !x86_len || !count || !words)
             return N3DS_IRC_ERR_RECORD_BAD;
-        if ((uint64_t)start + x86_len > e->end) return N3DS_IRC_ERR_RECORD_BAD;
+        if ((uint64_t)start + x86_len > idx->end) return N3DS_IRC_ERR_RECORD_BAD;
         if (off & 3u) return N3DS_IRC_ERR_RECORD_BAD;
-        if (off < stream_begin || (uint64_t)off + (uint64_t)words * 4u > e->record_size)
+        if (off < stream_begin || (uint64_t)off + (uint64_t)words * 4u > record_size)
             return N3DS_IRC_ERR_RECORD_BAD;
         /* The final word of a block is usually an address or immediate word,
          * not a core opcode, so there is no cheap last-word opcode check. The
@@ -553,14 +655,20 @@ static int irc_validate_record(N3dsIrc *irc, const N3dsIrcEntry *e, const uint8_
      * container tier, so accept it instead of invalidating old packs; it just
      * does not get the pre-entry dispatch preference. The reverse mismatch is
      * a real inconsistency: a flagged entry must contain its cold block. */
-    if ((e->flags & N3DS_IRC_FN_PREENTRY) != 0 && !saw_preentry)
+    if ((flags & N3DS_IRC_FN_PREENTRY) != 0 && !saw_preentry)
         return N3DS_IRC_ERR_RECORD_BAD;
+    *block_count = blocks;
     return N3DS_IRC_OK;
 }
 
-static int irc_load_entry(N3dsIrc *irc, const N3dsIrcEntry *e, IrcSlot **out) {
-    if (!irc || !e || !out) return N3DS_IRC_ERR_ARG;
-    IrcSlot *s = irc_find_slot(irc, e->addr);
+static int irc_load_slot(N3dsIrc *irc, uint32_t ordinal, const IrcIdxEntry *idx,
+                         IrcSlot **out) {
+    if (!irc || !idx || !out) return N3DS_IRC_ERR_ARG;
+    uint32_t flags = (idx->size_flags >> N3DS_IRC_IDX_FLAGS_SHIFT) & N3DS_IRC_IDX_FLAGS_MASK;
+    uint32_t status = (idx->size_flags >> N3DS_IRC_IDX_STATUS_SHIFT) &
+                      N3DS_IRC_IDX_STATUS_MASK;
+    uint32_t record_size = idx->size_flags & N3DS_IRC_IDX_SIZE_MASK;
+    IrcSlot *s = irc_find_slot(irc, idx->addr);
     if (s) {
         s->tick = ++irc->tick;
         irc->st.cache_hits++;
@@ -568,38 +676,39 @@ static int irc_load_entry(N3dsIrc *irc, const N3dsIrcEntry *e, IrcSlot **out) {
         return N3DS_IRC_OK;
     }
     irc->st.cache_misses++;
-    if (!(e->flags & N3DS_IRC_FN_DECODED) || e->decode_status != N3DS_IRC_DEC_OK ||
-        !e->record_size) {
+    if (!(flags & N3DS_IRC_FN_DECODED) || status != N3DS_IRC_DEC_OK || !record_size) {
         irc->st.invalid_entries++;
         return N3DS_IRC_ERR_UNDECODED;
     }
     irc->st.load_attempts++;
-    int rc = irc_make_room(irc, e->record_size);
+    int rc = irc_make_room(irc, record_size);
     if (rc != N3DS_IRC_OK) return rc;
-    uint8_t *data = (uint8_t *)malloc(e->record_size);
+    uint8_t *data = (uint8_t *)malloc(record_size);
     if (!data) return N3DS_IRC_ERR_CACHE;
+    uint32_t record_offset = irc_record_offset(irc, ordinal);
 
     uint64_t t0 = irc_now_ns();
-    if (fseek(irc->f, (long)e->record_offset, SEEK_SET)) {
+    if (fseek(irc->f, (long)record_offset, SEEK_SET)) {
         free(data);
         irc->st.io_errors++;
         irc->st.load_ns += irc_now_ns() - t0;
         return N3DS_IRC_ERR_RECORD_IO;
     }
-    size_t got = fread(data, 1, e->record_size, irc->f);
-    if (got != e->record_size) {
+    size_t got = fread(data, 1, record_size, irc->f);
+    if (got != record_size) {
         free(data);
         irc->st.short_reads++;
         irc->st.load_ns += irc_now_ns() - t0;
         return N3DS_IRC_ERR_RECORD_SHORT;
     }
-    if (n3ds_irc_crc32(data, e->record_size) != e->record_crc32) {
+    if (n3ds_irc_crc32(data, record_size) != idx->record_crc32) {
         free(data);
         irc->st.crc_errors++;
         irc->st.load_ns += irc_now_ns() - t0;
         return N3DS_IRC_ERR_RECORD_CRC;
     }
-    rc = irc_validate_record(irc, e, data);
+    uint32_t blocks = 0;
+    rc = irc_validate_record(irc, idx, flags, data, &blocks);
     if (rc != N3DS_IRC_OK) {
         free(data);
         irc->st.record_errors++;
@@ -611,17 +720,17 @@ static int irc_load_entry(N3dsIrc *irc, const N3dsIrcEntry *e, IrcSlot **out) {
     for (unsigned i = 0; i < irc->slot_cap; ++i) {
         if (irc->slots[i].used) continue;
         s = &irc->slots[i];
-        s->addr = e->addr;
-        s->end = e->end;
-        s->size = e->record_size;
-        s->block_count = e->block_count;
+        s->addr = idx->addr;
+        s->end = idx->end;
+        s->size = record_size;
+        s->block_count = blocks;
         s->data = data;
         s->tick = ++irc->tick;
         s->pins = 0;
         s->used = 1;
-        irc->cache_bytes += e->record_size;
+        irc->cache_bytes += record_size;
         irc->st.loads++;
-        irc->st.load_bytes += e->record_size;
+        irc->st.load_bytes += record_size;
         {
             unsigned nrec = 0;
             for (unsigned k = 0; k < irc->slot_cap; ++k) nrec += irc->slots[k].used != 0;
@@ -635,21 +744,22 @@ static int irc_load_entry(N3dsIrc *irc, const N3dsIrcEntry *e, IrcSlot **out) {
     return N3DS_IRC_ERR_CACHE;
 }
 
-int n3ds_irc_load(N3dsIrc *irc, uint32_t addr) {
-    N3dsIrcEntry e;
-    int rc = n3ds_irc_lookup(irc, addr, &e);
-    if (rc != N3DS_IRC_OK) return rc;
+static int irc_load_addr(N3dsIrc *irc, uint32_t addr) {
+    uint32_t ordinal = 0;
+    if (!irc || !irc->index) return N3DS_IRC_ERR_ARG;
+    if (irc_lookup_index(irc, addr, &ordinal) != 0) return N3DS_IRC_ERR_NOT_FOUND;
     IrcSlot *s = NULL;
-    rc = irc_load_entry(irc, &e, &s);
-    return rc;
+    return irc_load_slot(irc, ordinal, &irc->index[ordinal], &s);
 }
 
+int n3ds_irc_load(N3dsIrc *irc, uint32_t addr) { return irc_load_addr(irc, addr); }
+
 int n3ds_irc_pin(N3dsIrc *irc, uint32_t addr) {
-    N3dsIrcEntry e;
-    int rc = n3ds_irc_lookup(irc, addr, &e);
-    if (rc != N3DS_IRC_OK) return rc;
+    if (!irc || !irc->index) return N3DS_IRC_ERR_ARG;
+    uint32_t ordinal = 0;
+    if (irc_lookup_index(irc, addr, &ordinal) != 0) return N3DS_IRC_ERR_NOT_FOUND;
     IrcSlot *s = NULL;
-    rc = irc_load_entry(irc, &e, &s);
+    int rc = irc_load_slot(irc, ordinal, &irc->index[ordinal], &s);
     if (rc != N3DS_IRC_OK) return rc;
     s->pins++;
     irc->st.pins++;
@@ -787,9 +897,10 @@ static int irc_exec_common(N3dsIrc *irc, CPU *c, uint32_t addr, int allow_aot,
         irc->st.aot_preempted++;
         return N3DS_IRC_TIER_AOT;
     }
-    N3dsIrcEntry e;
-    int rc = n3ds_irc_lookup(irc, addr, &e);
-    if (rc != N3DS_IRC_OK) {
+    uint32_t ordinal = 0;
+    int rc = irc_lookup_index(irc, addr, &ordinal);
+    if (rc != 0) {
+        rc = N3DS_IRC_ERR_NOT_FOUND;
         if (fault) {
             char what[128];
             snprintf(what, sizeof what, "IR container: function %08lx is not indexed",
@@ -798,13 +909,18 @@ static int irc_exec_common(N3dsIrc *irc, CPU *c, uint32_t addr, int allow_aot,
         }
         return rc;
     }
-    if (!(e.flags & N3DS_IRC_FN_DECODED) || e.decode_status != N3DS_IRC_DEC_OK || !e.record_size) {
+    const IrcIdxEntry *idx = &irc->index[ordinal];
+    uint32_t flags = (idx->size_flags >> N3DS_IRC_IDX_FLAGS_SHIFT) & N3DS_IRC_IDX_FLAGS_MASK;
+    uint32_t status = (idx->size_flags >> N3DS_IRC_IDX_STATUS_SHIFT) &
+                      N3DS_IRC_IDX_STATUS_MASK;
+    if (!(flags & N3DS_IRC_FN_DECODED) || status != N3DS_IRC_DEC_OK ||
+        !(idx->size_flags & N3DS_IRC_IDX_SIZE_MASK)) {
         irc->st.invalid_entries++;
         if (fault) {
             char what[160];
             snprintf(what, sizeof what,
                      "IR container: function %08lx is not decoded (%s)",
-                     (unsigned long)addr, n3ds_irc_decode_status_name(e.decode_status));
+                     (unsigned long)addr, n3ds_irc_decode_status_name(status));
             rt_unimpl(c, addr, what);
         }
         return N3DS_IRC_ERR_UNDECODED;
@@ -814,7 +930,7 @@ static int irc_exec_common(N3dsIrc *irc, CPU *c, uint32_t addr, int allow_aot,
         return N3DS_IRC_ERR_NESTING;
     }
     IrcSlot *slot = NULL;
-    rc = irc_load_entry(irc, &e, &slot);
+    rc = irc_load_slot(irc, ordinal, idx, &slot);
     if (rc != N3DS_IRC_OK) {
         if (fault) {
             char what[160];
@@ -830,7 +946,7 @@ static int irc_exec_common(N3dsIrc *irc, CPU *c, uint32_t addr, int allow_aot,
     g_irc_frames[g_irc_frame_count].slot = slot;
     g_irc_frame_count++;
 
-    irc_run(c, addr, e.end);
+    irc_run(c, addr, idx->end);
 
     g_irc_frame_count--;
     slot->pins--;

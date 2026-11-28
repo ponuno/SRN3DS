@@ -141,12 +141,15 @@ set at the main menu, 5 MiB window). That is what makes `120x24` possible: the
 2.6x the measured need.
 
 `guest_budget` is only a cap on guest pages: the host-side structures live in
-the *same* 120 MiB newlib heap. At menu time the measured residents are roughly
-4 MiB IRC record cache + 3.5 MiB IRC index + 2.5 MiB BSA resident + 2 MiB stream
-cache + 4 MiB decoded-IR cache ≈ 16 MiB, so 44.4 + 16 ≈ 61 MiB of 120 MiB. The
-log tells the two failure kinds apart: `newlib_free`/`malloc` failure with low
-`guest_used` is a host-resident problem, while `guest_backing_failures` with
-`guest_used` near `guest_limit` is the guest cap.
+the *same* newlib heap. At menu time the measured residents are roughly
+1.41 MiB IRC index (compact, was 3.5) + <=0.17 MiB IRC record cache (2 MiB cap,
+256 records) + 2.5 MiB BSA resident + 2 MiB stream cache + 4.75 MiB decoded-IR
+cache (4 MiB arena + slot table) = about 10.8 MiB. With the measured 44.4 MiB of
+guest pages that is ~55 MiB of 120 MiB. The log tells the two failure kinds
+apart: `newlib_free`/`malloc` failure with low `guest_used` is a host-resident
+problem, while `guest_backing_failures` with `guest_used` near `guest_limit` is
+the guest cap. The levers are `N3DS_IRC_CACHE_BYTES`, the IR decode cap
+(`N3DS_IR_CACHE_MB`) and the BSA/stream limits.
 
 The paging window itself is a knob: `N3DS_TEXT_WINDOW_MB` (default `5`) sizes
 the evictable read-only window in MiB; `0` disables paging and maps the whole

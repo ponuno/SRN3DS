@@ -94,7 +94,23 @@ int main(void) {
     if (n3ds_ir_fetch_block(&c, BASE, BASE + sizeof img, &again))
         return fail("fetch after leave");
 
-    printf("ir cache flush smoke: PASS (%llu flushes, live block preserved)\n",
-           (unsigned long long)st.flushes);
+    /* Resident accounting: live_bytes is what newlib holds, and it must be
+     * exactly arena + slots + retired (the old counter accumulated decoded
+     * bytes and reported more than the arena could ever hold). */
+    n3ds_ir_cache_stats(&st);
+    if (st.live_bytes != st.arena_bytes + st.slot_bytes + st.retired_bytes)
+        return fail("live bytes are not arena+slots+retired");
+    if (st.arena_bytes != (1u << 16))
+        return fail("arena bytes do not match the requested cap");
+    if (!st.slot_bytes)
+        return fail("slot bytes not reported");
+    if (st.bytes > st.arena_bytes)
+        return fail("live decoded bytes exceed the arena");
+
+    printf("ir cache flush smoke: PASS (%llu flushes, live block preserved, "
+           "live=%llu arena=%llu slots=%llu retired=%llu)\n",
+           (unsigned long long)st.flushes, (unsigned long long)st.live_bytes,
+           (unsigned long long)st.arena_bytes, (unsigned long long)st.slot_bytes,
+           (unsigned long long)st.retired_bytes);
     return 0;
 }

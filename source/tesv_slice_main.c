@@ -132,7 +132,9 @@ static void mem_refresh(void *ctx) {
     mem_stats_set_guest(b->memory.used, b->memory.limit, b->memory.count);
     IrCacheStats ir = {0};
     n3ds_ir_cache_stats(&ir);
-    mem_stats_set_irdecode(ir.bytes, ir.blocks);
+    mem_stats_set_irdecode_detail(ir.live_bytes, ir.blocks, ir.arena_bytes,
+                                  ir.slot_bytes, ir.retired_bytes,
+                                  ir.budget_bytes);
     N3dsIrcStats irc = {0};
     if (n3ds_lift_container_stats(&irc) == 0)
         mem_stats_set_irc_detail(n3ds_lift_container_index_bytes(),
@@ -371,7 +373,22 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
         printf("cecdc0 source probe: refused; guest run not started\n");
         goto out;
     }
-    if (n3ds_ir_cache_init(4u << 20) != 0) printf("IR cache: 4 MiB allocation failed; using default\n");
+    /* Decoded-IR arena size. 4 MiB is the measured default; the accounting
+     * reports the real footprint (arena + slot table + any retired arena), so
+     * N3DS_IR_CACHE_MB is the number a profile chooses, not the raw arena. */
+    {
+        size_t ir_mib = 4;
+        const char *e = getenv("N3DS_IR_CACHE_MB");
+        if (e && *e) {
+            unsigned long v = strtoul(e, NULL, 10);
+            if (v >= 1 && v <= 32) ir_mib = (size_t)v;
+            else printf("IR cache: N3DS_IR_CACHE_MB='%s' ignored (1..32)\n", e);
+        }
+        if (n3ds_ir_cache_init(ir_mib << 20) != 0)
+            printf("IR cache: %zu MiB allocation failed; using default\n", ir_mib);
+        else
+            printf("IR cache: %zu MiB arena (N3DS_IR_CACHE_MB)\n", ir_mib);
+    }
     /* Every guest region, the bound container index and the IR cache exist at
      * this point; this is the measured starting point of the run. */
     mem_stats_snapshot("init", NULL);
@@ -385,10 +402,16 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
     hprof_dump();
     rt_prof_enable(0);
     n3ds_ir_cache_stats(&ir_stats);
-    printf("IR cache: blocks=%llu bytes=%llu hits=%llu misses=%llu evicted=%llu\n",
+    printf("IR cache: blocks=%llu bytes=%llu hits=%llu misses=%llu evicted=%llu "
+           "live=%llu arena=%llu slots=%llu retired=%llu budget=%llu\n",
            (unsigned long long)ir_stats.blocks, (unsigned long long)ir_stats.bytes,
            (unsigned long long)ir_stats.hits, (unsigned long long)ir_stats.misses,
-           (unsigned long long)ir_stats.evicted);
+           (unsigned long long)ir_stats.evicted,
+           (unsigned long long)ir_stats.live_bytes,
+           (unsigned long long)ir_stats.arena_bytes,
+           (unsigned long long)ir_stats.slot_bytes,
+           (unsigned long long)ir_stats.retired_bytes,
+           (unsigned long long)ir_stats.budget_bytes);
     printf("run rc=%d status=%lu message=%s\n", r, (unsigned long)status, b.message);
     printf("first fault: %s\n", n3ds_lift_fault());
     {

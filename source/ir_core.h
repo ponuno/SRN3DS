@@ -155,7 +155,18 @@ uint32_t n3ds_ir_end(uint32_t addr);
 int n3ds_ir_cache_init(size_t bytes);
 void n3ds_ir_cache_reset(void);
 typedef struct {
-    uint64_t blocks, bytes, hits, misses, flushes, evicted;
+    uint64_t blocks;      /* cumulative blocks decoded since init */
+    uint64_t bytes;       /* live decoded bytes in the arena */
+    uint64_t hits, misses, flushes, evicted;
+    /* Resident footprint, measured, not inferred: the arena is the configured
+     * budget rounded up to a power of two, the slot table is 12 bytes per
+     * open-addressed slot, and a retired arena is one the cache had to keep
+     * alive because a suspended guest thread still executes a block in it. */
+    uint64_t budget_bytes;   /* requested bytes (before power-of-two rounding) */
+    uint64_t arena_bytes;
+    uint64_t slot_bytes;
+    uint64_t retired_bytes;
+    uint64_t live_bytes;     /* arena + slot + retired == newlib footprint */
 } IrCacheStats;
 void n3ds_ir_cache_stats(IrCacheStats *out);
 

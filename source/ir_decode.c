@@ -921,6 +921,7 @@ typedef struct {
 
 static uint8_t *g_arena;
 static size_t g_cap, g_used;
+static size_t g_budget;
 static IrSlot *g_slots;
 static unsigned g_nslots;
 static IrCacheStats g_stats;
@@ -947,14 +948,28 @@ static void retired_free_all(void) {
     g_retired_n = 0;
 }
 
-/* Replace the current arena with fresh memory. Returns 0 on success. */
+static void cache_slot_clear(void);
+
+/* Replace the current arena with fresh memory. Returns 0 on success.
+ *
+ * Quiescent (no block is executing) is by far the common case: reuse the
+ * existing arena and slot table instead of allocating a new 4 MiB arena and
+ * freeing the old one. Every flush used to churn 2 allocations of cap and
+ * cap/64*12 bytes through newlib, which is exactly the kind of large
+ * alloc/free pair that fragments a nearly full heap. */
 static int arena_flush(void) {
+    if (n3ds_ir_blocks_live() == 0) {
+        retired_free_all();
+        /* Only the bytes actually written need clearing; the slot table and the
+         * block mirror are cleared with it. */
+        if (g_used) memset(g_arena, 0, g_used);
+        cache_slot_clear();
+        return 0;
+    }
     uint8_t *a = (uint8_t *)calloc(1, g_cap);
     IrSlot *s = (IrSlot *)calloc(g_nslots, sizeof *s);
     if (!a || !s) { free(a); free(s); return -1; }
-    if (n3ds_ir_blocks_live() == 0) {
-        retired_free_all();
-    } else if (g_retired_n < IR_RETIRED_ARENAS) {
+    if (g_retired_n < IR_RETIRED_ARENAS) {
         g_retired[g_retired_n].arena = g_arena;
         g_retired[g_retired_n].slots = g_slots;
         g_retired[g_retired_n].nslots = g_nslots;
@@ -985,10 +1000,20 @@ static void cache_slot_clear(void) {
 
 int n3ds_ir_cache_init(size_t bytes) {
     if (!bytes) bytes = N3DS_IR_DEFAULT_CACHE;
+    g_budget = bytes;
     size_t cap = 4096;
     while (cap < bytes && cap < (SIZE_MAX / 2)) cap <<= 1;
     unsigned nslots = 1024;
     while ((size_t)nslots * 2 < cap / 32 && nslots < (1u << 20)) nslots <<= 1;
+    /* Quiescent re-init with an identical geometry: keep the memory.  The
+     * device profile can re-assert the same N3DS_IR_CACHE_MB and pay nothing. */
+    if (g_arena && cap == g_cap && nslots == g_nslots) {
+        retired_free_all();
+        if (g_used) memset(g_arena, 0, g_used);
+        cache_slot_clear();
+        memset(&g_stats, 0, sizeof g_stats);
+        return 0;
+    }
     uint8_t *a = (uint8_t *)calloc(1, cap);
     IrSlot *s = (IrSlot *)calloc(nslots, sizeof *s);
     if (!a || !s) { free(a); free(s); return -1; }
@@ -1002,7 +1027,20 @@ int n3ds_ir_cache_init(size_t bytes) {
 
 void n3ds_ir_cache_reset(void) { cache_slot_clear(); }
 
-void n3ds_ir_cache_stats(IrCacheStats *out) { if (out) *out = g_stats; }
+void n3ds_ir_cache_stats(IrCacheStats *out) {
+    if (!out) return;
+    *out = g_stats;
+    out->bytes = g_used;
+    out->budget_bytes = g_budget;
+    out->arena_bytes = g_arena ? g_cap : 0;
+    out->slot_bytes = g_slots ? (uint64_t)g_nslots * sizeof(IrSlot) : 0;
+    uint64_t retired = 0;
+    for (unsigned i = 0; i < g_retired_n; ++i)
+        retired += g_retired[i].arena ? ((uint64_t)g_cap + (uint64_t)g_retired[i].nslots *
+                                         sizeof(IrSlot)) : 0;
+    out->retired_bytes = retired;
+    out->live_bytes = out->arena_bytes + out->slot_bytes + retired;
+}
 
 static IrSlot *slot_find(uint32_t start) {
     unsigned h = hash32(start) & (g_nslots - 1);
@@ -1059,7 +1097,6 @@ static const IrBlockHeader *cache_decode(CPU *c, uint32_t start, uint32_t func_e
                     g_used = off + total;
                     *stream_words = (uint32_t)words;
                     g_stats.blocks++;
-                    g_stats.bytes += total;
                     return h;
                 }
                 /* index full: treat like an arena flush */

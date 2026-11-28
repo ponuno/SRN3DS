@@ -59,8 +59,9 @@ guest pages:
 
 | Consumer | Size | Source |
 |---|---:|---|
-| IRC index (90,900 functions × 40 B) | **3.5 MiB** | `tesv.irc` header: `nfun=90900`, `entry_bytes=40` |
-| IRC record cache | **4 MiB** (64 records) | `source/ir_container.h`: `N3DS_IRC_DEFAULT_CACHE_BYTES (4u<<20)`, `..._RECORDS 64`; slice calls `n3ds_ir_cache_init(4u<<20)` at `tesv_slice_main.c:176` |
+| IRC index, compact (90,903 functions × 16 B + 22,728 B checkpoints) | **1,477,176 B (1.409 MiB)** | was 3,636,120 B (40 B/function); `source/ir_container.c`, measured on the 90,903-entry `tesv.irc` |
+| IRC record cache | **cap 2 MiB, 256 records** | `source/ir_container.h`: `N3DS_IRC_DEFAULT_CACHE_BYTES (2u<<20)`; the slice sets 256 records (`N3DS_IRC_INTEGRATION_RECORDS`), `N3DS_IRC_CACHE_BYTES`/`_RECORDS` override both. Live set is record-count bound: 256 records x 688.6 B mean record = 182,522 B |
+| Decoded-IR arena (`N3DS_IR_CACHE_MB`, default 4) | **4,980,736 B live at 4 MiB** | arena 4,194,304 + slot table 786,432, reported by `n3ds_ir_cache_stats().live_bytes` |
 | BSA overlay index (13 archives, measured on `E:\harness_skyrim`) | **1.96 MiB index** (was ~17.5) | `bsa_index` / `bsa_resident_stats`: 2,054,436 B index, 425,984 B page cache (13 × 32 KiB), 12,272 B struct/context overhead; 2,492,692 B resident cold. Range cache is bounded at 8 MiB and measured separately |
 | Stream staged cache | **2 MiB** default | `STREAM_CACHE_LIMIT_DEFAULT`, reported as `stream_staged` |
 | Stream per-descriptor window | **256 KiB** default | `asset_stream.h:200` |
@@ -69,16 +70,79 @@ guest pages:
 | XAudio2 guest memory | 8 KiB (`XA_MEM_BYTES 0x2000`) + 64 KiB callback stack | `source/win32_xaudio2.c` |
 | `menu_frame` harness guest budget | 4 MiB (host harness only) | `source/menu_frame_main.c:280` |
 
-On-disk (SD, not RAM) for reference: `tesv.irc` is **64,445,696 B = 61.5 MiB**
-(index 3.5 MiB + records 58.0 MiB).
+On-disk (SD, not RAM) for reference: `tesv.irc` is **65,688,624 B = 62.65 MiB**
+(header 64 + index 3,636,120 + records 62,052,440; 90,903 functions, 90,110
+decoded, 793 explicit negatives; max record 112,096 B, max block count 1,292,
+max function span 11,849,979 B).
 
 The BSA index is no longer a resident name copy.  `source/bsa_reader.c` keeps a
 u32 open-addressed table + 8-bit tag, u32 name-block checkpoints every 16 names
 and a 20-byte folder locator; names and records live in the archive and are read
 through a bounded 32 KiB per-archive cache.  Measured 17.85 MiB -> 1.96 MiB
 index (+0.41 MiB cache): a 16.4 MiB saving with byte-for-byte lookup
-equivalence on 81,411 old-index results.  The IRC record cache remains fixed at
-4 MiB.
+equivalence on 81,411 old-index results.  The BSA index is left unchanged by the
+2026-11-28 IR pass; only its page/range caches are bounded.
+
+### What occupies newlib, measured (2026-11-28)
+
+Everything below is a `malloc`/`calloc` in the same 96 MiB application heap as
+the guest pages. Byte counts are exact; `newlib_*` is what `mallinfo()` reports
+on device.
+
+| Consumer | Bytes | Setting / where measured |
+|---|---:|---|
+| IRC index (compact) | **1,477,176** (1,454,448 entries + 22,728 checkpoints) | `n3ds_irc_index_size()`; was 3,636,120. Host, real `tesv.irc`, 90,903 functions |
+| IRC record cache (resident records) | **<= 182,522** at the mean record size, cap 2 MiB / 256 records | `n3ds_irc_stats().cache_bytes`; `N3DS_IRC_CACHE_BYTES`, `N3DS_IRC_CACHE_RECORDS` |
+| Decoded-IR cache at 4 MiB | **4,980,736** (4,194,304 arena + 786,432 slots) | `n3ds_ir_cache_stats().live_bytes`; `N3DS_IR_CACHE_MB=4` |
+| Decoded-IR cache at 2 MiB | **2,293,760** (2,097,152 + 196,608) | `N3DS_IR_CACHE_MB=2` |
+| Decoded-IR cache at 1 MiB | **1,146,880** (1,048,576 + 98,304) | `N3DS_IR_CACHE_MB=1` |
+| BSA index, 13 archives | **2,054,436** | `bsa_index`; unchanged |
+| BSA page cache, 13 archives | **425,984** | 32 KiB per open archive |
+| Stream staged cache | **65,536** after one prefetch (cap 2 MiB) | `stream_staged` |
+
+`irdec_bytes` used to print **7.3 MB** while the limit was 4 MiB. Two causes,
+both fixed: the counter accumulated every decoded block and never subtracted a
+flush, and the real resident cost is arena **plus** the open-addressed slot
+table (786,432 B at 4 MiB) plus any *retired* arena that is kept alive while a
+suspended guest thread still executes a decoded block in it (0–4 of them, each
+another 4,980,736 B). `irdec_bytes` is now `live_bytes` and the split is printed
+as `irdec_arena_bytes`/`irdec_slot_bytes`/`irdec_retired_bytes`.
+
+Flush cost: a quiescent flush used to `calloc(4 MiB) + calloc(786 KiB)` and then
+free the old pair, on every arena wrap. It now memsets the used prefix of the
+existing arena and re-clears the slot table, so a full 4 MiB arena wrap performs
+zero heap operations. Only a flush with a live block (a cooperative guest thread
+suspended inside one) allocates a replacement and retires the old arena.
+
+Measured on this machine (host, 16 logical CPUs), 2026-11-28:
+
+* `tests/ir_container_integrity verify-all` over the real container: 90,903
+  functions, 90,110 decoded, **90,110 loaded, 0 bad, 0 short, 0 CRC, 0 record
+  errors**, exactly 62,052,440 record bytes read. Each loaded record's header
+  must match the compact entry's `addr`/`end`, so the derived offsets are
+  equivalent to the on-disk ones for every record. The larger second pack
+  (`E:\Skyrim_N3DS_build\ir_container\tesv.irc`, 119,144,752 B) gives the same
+  result: 114,534 functions, 113,618 decoded, **113,618 loaded, 0 errors**, and
+  its index falls from 4,581,360 B to 1,861,180 B (measured by `open`).
+* `ir_cache_flush` asserts `live_bytes == arena + slot + retired` and that the
+  live decoded bytes never exceed the arena (this is the counter that used to
+  print 7.3 MB).
+* `irdec_bytes` at the defaults is now 4,980,736 (4 MiB arena) instead of a
+  cumulative number.
+* Lookup CPU: `n3ds_irc_lookup` over the real index, 818,127 lookups per pass,
+  3 runs each binary at `-O2`: **80.2/81.7/80.2 ns before** and
+  **80.2/82.1/81.5 ns after** — unchanged within noise, even though the public
+  entry view now derives `record_offset`. The dispatch path
+  (`irc_exec_common`) never derives it: `ir_container_growth` measured
+  **0.105 µs/invoke** over 200,000 cached invokes.
+
+**Not measured yet** (needs a device/menu route, and no default is changed on
+the strength of a guess): `mallinfo()` fragmentation before/after the menu, and
+the 4/2/1 MiB re-decode cost on the real menu path. `N3DS_IR_CACHE_MB=2` is
+therefore available but not the default; the numbers above let a route run
+compare the three footprints directly. The CPU cost of the compact index is one
+`>`/`+` per binary-search step (same number of steps, 16-byte stride instead of
+40) and at most 15 additions per *record load* — never per call.
 
 ### What is measured now
 
@@ -159,9 +223,9 @@ CPU budget inside newlib:
 | Item | Target MiB | Basis |
 |---|---:|---|
 | Guest physical memory | **92** | keep the current cap (engine pages + guest-side asset allocations) |
-| IRC index | 3.5 | 90,900 × 40 B |
-| IRC record cache | 4 | keep until miss rate is measured |
-| Decoded-IR cache | 4 | `n3ds_ir_cache_init(4u << 20)` |
+| IRC index | **1.409** | measured: 90,903 × 16 B + 22,728 B checkpoints = 1,477,176 B (was 3.5) |
+| IRC record cache | 2 | cap 2 MiB / 256 records; mean record 688.6 B -> 182,522 B at full |
+| Decoded-IR cache | 4 → **2** (choice) | `N3DS_IR_CACHE_MB`; footprint 2,293,760 B at 2 MiB, 4,980,736 B at 4 MiB |
 | Resident BSA index | **2** | met: **1.96** index measured on 13 archives (2,054,436 B); page cache 0.41, range cache ≤ 8 and 12 KiB overhead are separate |
 | Stream staged cache | 2 | default, measured live as `stream_staged` |
 | Other host allocations and temporary copies | 8.5 | D3D CPU copies, decode, metadata, load peaks — needs measurement |
@@ -226,8 +290,10 @@ not remove that deficit.
 3. **Make the BSA index file-backed or lazy.** 17.5 MiB is the largest single
    host allocation after the guest. Per-archive lazy index (open on first hit)
    or `MapViewOfFile`-style paging would cut it to <1 MiB resident.
-4. **Shrink the IRC cache** to 2 MiB, or make it adaptive. 4 MiB of decoded
-   blocks may be cheaper to re-read from SD than to keep.
+4. **Shrink the decoded-IR arena** with `N3DS_IR_CACHE_MB` (see below): the
+   4 MiB arena costs 4,980,736 B including its slot table. 2 MiB costs
+   2,293,760 B and 1 MiB costs 1,146,880 B; the choice is a measured
+   re-decode/flush trade, not an estimate.
 5. **Reduce the render-target set.** If the 5×1024 + 4×512 logical targets can
    share storage (they are never live simultaneously in the measured set),
    targeting 2 MiB instead of 4.5 frees half the linear heap.
@@ -266,6 +332,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
 
 ### Counters (`source/mem_stats.{h,c}`)
 
+Settings added by the 2026-11-28 IR pass (all optional, all default to the
+measured value):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `N3DS_IR_CACHE_MB` | **4** | decoded-IR arena size in MiB (1..32; `tesv_slice_main.c`). The resident cost is arena + slot table: 4 → 4,980,736 B, 2 → 2,293,760 B, 1 → 1,146,880 B |
+| `N3DS_IRC_CACHE_BYTES` | **2 MiB** | resident IRC record cache cap (`n3ds_lift_runtime.c`, `N3DS_IRC_DEFAULT_CACHE_BYTES`) |
+| `N3DS_IRC_CACHE_RECORDS` | **256** | record-count cap; the mean record is 688.6 B, so 256 records is 182,522 B |
+| `N3DS_MEM_PROBE_ALLOC` | on (`=0` disables) | the `newlib_largest` malloc probe in every snapshot |
+
 One line per snapshot, `key=value`, fixed order:
 
 | Prefix | Meaning |
@@ -273,11 +349,15 @@ One line per snapshot, `key=value`, fixed order:
 | `heap_mib`, `linear_mib`, `reserve_mib`, `guest_budget` | selected profile |
 | `guest_used`, `guest_peak`, `guest_limit`, `guest_regions` | guest pages from `GuestMemory` (peak tracked by the stats module) |
 | `newlib_used`, `newlib_peak`, `newlib_free`, `have_newlib` | `mallinfo()` on device; `have_newlib=0` on host |
+| `newlib_arena`, `newlib_free_chunks`, `newlib_keepcost`, `newlib_largest`, `newlib_probe_budget`, `have_newlib_shape` | `mallinfo()` shape plus the largest allocatable block (bounded `malloc` probe); `newlib_largest`/`newlib_probe_budget` measure fragmentation directly: `1 - newlib_largest/newlib_probe_budget` is the share of free bytes that cannot be used by one request |
 | `linear_live`, `linear_peak`, `linear_free`, `linear_min_free` | `linearSpaceFree()` sampled around every texture/target/arena create, delete and temporary upload; live bytes are observed deltas |
 | `linear_fail_n`, `linear_fail_bytes` | count and **requested size** of every failed `linearAlloc` / `C3D_*` request |
 | `vram_live`, `vram_peak`, `vram_free`, `vram_min_free`, `vram_fail_*` | same for `vramSpaceFree()`, only the `onVram=true` paths |
 | `arenas_bytes`, `arena_vertex/colour/cube/index/skin/srquad` | actual bytes: 16384×20, 65536×40, 16384×40, 262144×2, 4096×80, 6×36 |
-| `irc_bytes`, `irc_records`, `irdec_bytes`, `irdec_blocks` | live IRC index/record cache (`n3ds_lift_container_stats`) and decoded-IR cache (`n3ds_ir_cache_stats`) |
+| `irc_bytes`, `irc_records`, `irdec_bytes`, `irdec_blocks` | live IRC index/record cache (`n3ds_lift_container_stats`) and decoded-IR cache footprint (`n3ds_ir_cache_stats().live_bytes`: arena + slot table + retired arenas) |
+| `irc_index_bytes`, `irc_cache_bytes` | container index (compact 16 B/function, see §4) and resident record bytes |
+| `irdec_arena_bytes`, `irdec_slot_bytes`, `irdec_retired_bytes`, `irdec_budget` | the three parts of `irdec_bytes` plus the requested arena size (`N3DS_IR_CACHE_MB`, default 4) |
+| `newlib_arena`, `newlib_free_chunks`, `newlib_keepcost`, `newlib_largest`, `newlib_probe_budget`, `have_newlib_shape` | `mallinfo()` shape on device; `newlib_largest` is a bounded `malloc` probe of the largest block the heap accepts right now (`N3DS_MEM_PROBE_ALLOC=0` disables the probe and the field then reads 0; `newlib_probe_budget` is the `fordblks` it searched) |
 | `bsa_resident`, `bsa_index`, `bsa_page_cache`, `bsa_range_cache`, `bsa_archives`, `bsa_mounted`, `have_bsa` | measured by `bsa_resident_stats()` over every archive the overlay opened; `have_bsa=1` iff `bsa_mounted>0` |
 | `stream_queued`, `stream_staged`, `stream_reads`, `stream_bytes`, `stream_misses`, `stream_demand_hits`, `stream_demand_bytes`, `stream_prefetch_demand_hits`, `stream_cancelled`, `stream_budget_denied` | `stream_stats_snapshot()` over the registered mount; see `docs/STREAMING.md` |
 | `tex_guest`, `tex_gpu`, `tex_*_peak`, `tex_guest_limit`, `tex_gpu_limit`, `tex_trims`, `tex_trim_evictions`, `tex_evictions_gpu` | `d9_texcache_set_limits()` policy and LRU counters |

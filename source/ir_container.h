@@ -21,6 +21,20 @@
  * a block that is not present in the loaded record faults instead of falling
  * back to the x86 decoder.
  *
+ * ---------------------------------------------------------- resident index
+ * The on-disk index is 40 bytes per function. The runtime does not keep it:
+ * each function becomes a 16-byte compact entry (addr, end, record_crc32 and a
+ * packed record_size/flags/decode_status word). Records are written
+ * contiguously in index order, each 8-byte aligned, so a record's file offset
+ * is derived from the running sum of the preceding record sizes (a checkpoint
+ * every 16 entries bounds that to 15 additions, and it only happens when a
+ * record is actually loaded). block_count/insn_count are read from the
+ * CRC-verified record header instead of being duplicated. Measured on
+ * tesv.irc (90,903 functions, 62,052,440 record bytes): the resident index
+ * drops from 3,636,120 B to 1,454,448 B + 22,728 B of checkpoints.
+ * A container whose records are not contiguous in index order is refused at
+ * open with N3DS_IRC_ERR_INDEX_BOUNDS rather than reading the wrong bytes.
+ *
  * The container is optional. A build without it keeps the current AOT + slice
  * IR behaviour. Opening a missing/corrupt container fails cleanly and leaves
  * the caller's existing tiers untouched.
@@ -47,7 +61,7 @@ extern "C" {
 #define N3DS_IRC_RECORD_HEADER  40u
 #define N3DS_IRC_BLOCK_ENTRY    20u
 
-#define N3DS_IRC_DEFAULT_CACHE_BYTES   (4u << 20)
+#define N3DS_IRC_DEFAULT_CACHE_BYTES   (2u << 20)
 #define N3DS_IRC_DEFAULT_CACHE_RECORDS 64u
 #define N3DS_IRC_MAX_EXEC_DEPTH        256u
 
@@ -67,8 +81,7 @@ enum {
 };
 
 /* Index entry flags. */
-enum {
-    N3DS_IRC_FN_DECODED  = 1u << 0,  /* record present and executable */
+enum {    N3DS_IRC_FN_DECODED  = 1u << 0,  /* record present and executable */
     N3DS_IRC_FN_AOT      = 1u << 1,  /* measured hot: AOT takes precedence */
     N3DS_IRC_FN_FORCED   = 1u << 2,  /* forced AOT (unsupported by v1/v2) */
     N3DS_IRC_FN_COMPLETE = 1u << 3,  /* every discovery leader decoded */
@@ -115,7 +128,10 @@ enum {
     N3DS_IRC_TIER_AOT = 1,
 };
 
-/* Public, host-endian view of one index entry. */
+/* Public, host-endian view of one index entry. Materialized from the 16-byte
+ * resident index on demand: block_count/insn_count are 0 here (they live in
+ * the record header, which is validated on load) and record_offset is derived
+ * for decoded entries. */
 typedef struct {
     uint32_t addr;          /* exact callable entry */
     uint32_t end;           /* exclusive extent used as the frame limit */

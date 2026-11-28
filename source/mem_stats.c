@@ -26,6 +26,11 @@ typedef struct {
 
     int have_newlib;
     size_t newlib_used, newlib_peak, newlib_free;
+    /* newlib heap shape: mallinfo() arena/uordblks/fordblks/keepcost/ordblks and
+     * the largest single allocation the heap accepts right now (probed). */
+    int have_newlib_shape;
+    uint64_t newlib_arena, newlib_free_chunks, newlib_keepcost;
+    uint64_t newlib_largest, newlib_probe_budget;
 
     MemStatsSpaceProbes probes;
     MemStatsRefresh refresh;
@@ -50,6 +55,7 @@ typedef struct {
     uint64_t irc_bytes, irc_records;
     uint64_t irc_index_bytes, irc_cache_bytes;
     uint64_t irdec_bytes, irdec_blocks;
+    uint64_t irdec_arena, irdec_slots, irdec_retired, irdec_budget;
     uint64_t bsa_resident;
     uint64_t bsa_index, bsa_page_cache, bsa_range_cache;
     unsigned bsa_archives, bsa_mounted;
@@ -210,6 +216,18 @@ void mem_stats_set_newlib(size_t used, size_t free_bytes)
     if (used > g.newlib_peak) g.newlib_peak = used;
 }
 
+void mem_stats_set_newlib_shape(uint64_t arena, uint64_t free_chunks,
+                                uint64_t keepcost, uint64_t largest,
+                                uint64_t probe_budget)
+{
+    g.have_newlib_shape = 1;
+    g.newlib_arena = arena;
+    g.newlib_free_chunks = free_chunks;
+    g.newlib_keepcost = keepcost;
+    g.newlib_largest = largest;
+    g.newlib_probe_budget = probe_budget;
+}
+
 void mem_stats_note_arena(const char *name, size_t bytes)
 {
     if (!name || !*name) return;
@@ -248,6 +266,18 @@ void mem_stats_set_irdecode(uint64_t bytes, uint64_t blocks)
 {
     g.irdec_bytes = bytes;
     g.irdec_blocks = blocks;
+}
+
+void mem_stats_set_irdecode_detail(uint64_t live_bytes, uint64_t blocks,
+                                   uint64_t arena_bytes, uint64_t slot_bytes,
+                                   uint64_t retired_bytes, uint64_t budget_bytes)
+{
+    g.irdec_bytes = live_bytes;
+    g.irdec_blocks = blocks;
+    g.irdec_arena = arena_bytes;
+    g.irdec_slots = slot_bytes;
+    g.irdec_retired = retired_bytes;
+    g.irdec_budget = budget_bytes;
 }
 
 void mem_stats_set_bsa(uint64_t resident_bytes, unsigned archives) {
@@ -434,11 +464,53 @@ size_t mem_stats_parse_limit(const char *text, int *ok)
     return (size_t)value;
 }
 
+/* Largest single allocation the heap accepts right now.
+ *
+ * mallinfo() has no "largest free chunk" field, so this probes: a bounded
+ * binary search on malloc(size)/free(size). Each probe splits the best-fitting
+ * chunk and returns it immediately, so the free list is unchanged afterwards
+ * (the two halves coalesce again). Only run when a snapshot is being written
+ * (300 frames by default) or when N3DS_MEM_PROBE_ALLOC=0 disables it. */
+#ifndef MEM_STATS_LARGEST_STEP
+#define MEM_STATS_LARGEST_STEP 4096u
+#endif
+
+static size_t largest_free_probe(size_t upper)
+{
+    if (!upper) return 0;
+    size_t lo = 0, hi = upper;
+    while (hi - lo > MEM_STATS_LARGEST_STEP) {
+        size_t mid = lo + (hi - lo) / 2;
+        void *p = malloc(mid);
+        if (p) { lo = mid; free(p); }
+        else hi = mid;
+    }
+    return lo;
+}
+
+static int probe_alloc_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *s = getenv("N3DS_MEM_PROBE_ALLOC");
+        cached = !(s && *s == '0' && !s[1]);
+    }
+    return cached;
+}
+
 static void refresh_newlib(void)
 {
 #ifdef __3DS__
     struct mallinfo mi = mallinfo();
     mem_stats_set_newlib((size_t)mi.uordblks, (size_t)mi.fordblks);
+    if (probe_alloc_enabled())
+        mem_stats_set_newlib_shape((uint64_t)mi.arena, (uint64_t)mi.ordblks,
+                                   (uint64_t)mi.keepcost,
+                                   (uint64_t)largest_free_probe((size_t)mi.fordblks),
+                                   (uint64_t)mi.fordblks);
+    else
+        mem_stats_set_newlib_shape((uint64_t)mi.arena, (uint64_t)mi.ordblks,
+                                   (uint64_t)mi.keepcost, 0, (uint64_t)mi.fordblks);
 #endif
 }
 
@@ -472,6 +544,14 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
     APPEND(" newlib_used=%llu newlib_peak=%llu newlib_free=%llu have_newlib=%d",
            (unsigned long long)g.newlib_used, (unsigned long long)g.newlib_peak,
            (unsigned long long)g.newlib_free, g.have_newlib);
+    APPEND(" newlib_arena=%llu newlib_free_chunks=%llu newlib_keepcost=%llu "
+           "newlib_largest=%llu newlib_probe_budget=%llu have_newlib_shape=%d",
+           (unsigned long long)g.newlib_arena,
+           (unsigned long long)g.newlib_free_chunks,
+           (unsigned long long)g.newlib_keepcost,
+           (unsigned long long)g.newlib_largest,
+           (unsigned long long)g.newlib_probe_budget,
+           g.have_newlib_shape);
     APPEND(" linear_live=%llu linear_peak=%llu linear_free=%llu "
            "linear_min_free=%llu linear_fail_n=%llu linear_fail_bytes=%llu "
            "linear_probe=%d vram_probe=%d",
@@ -498,6 +578,8 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
                (unsigned long long)g.arena[i].bytes);
     APPEND(" irc_bytes=%llu irc_index_bytes=%llu irc_cache_bytes=%llu "
            "irc_records=%llu irdec_bytes=%llu irdec_blocks=%llu "
+           "irdec_arena_bytes=%llu irdec_slot_bytes=%llu "
+           "irdec_retired_bytes=%llu irdec_budget=%llu "
            "bsa_resident=%llu bsa_index=%llu bsa_page_cache=%llu "
            "bsa_range_cache=%llu bsa_archives=%u bsa_mounted=%u have_bsa=%d",
            (unsigned long long)g.irc_bytes,
@@ -505,6 +587,10 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
            (unsigned long long)g.irc_cache_bytes,
            (unsigned long long)g.irc_records,
            (unsigned long long)g.irdec_bytes, (unsigned long long)g.irdec_blocks,
+           (unsigned long long)g.irdec_arena,
+           (unsigned long long)g.irdec_slots,
+           (unsigned long long)g.irdec_retired,
+           (unsigned long long)g.irdec_budget,
            (unsigned long long)g.bsa_resident,
            (unsigned long long)g.bsa_index,
            (unsigned long long)g.bsa_page_cache,

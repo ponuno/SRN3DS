@@ -102,6 +102,12 @@ void mem_stats_sample_guest(size_t used, unsigned regions);
 void mem_stats_set_alloc(const MemStatsAlloc *stats);
 void mem_stats_set_swap(const MemStatsSwap *stats);
 void mem_stats_set_newlib(size_t used, size_t free_bytes);
+/* mallinfo() shape plus the largest single allocation the heap accepts right
+ * now.  `probe_budget` is the fordblks the probe searched (0 = not probed).
+ * Host builds never call this: the fields stay 0 with have_newlib_shape=0. */
+void mem_stats_set_newlib_shape(uint64_t arena, uint64_t free_chunks,
+                                uint64_t keepcost, uint64_t largest,
+                                uint64_t probe_budget);
 void mem_stats_note_arena(const char *name, size_t bytes);
 void mem_stats_set_irc(uint64_t bytes, uint64_t records);
 /* Total = index + resident cache bytes.  The split is logged so an "irc_bytes"
@@ -109,6 +115,11 @@ void mem_stats_set_irc(uint64_t bytes, uint64_t records);
 void mem_stats_set_irc_detail(uint64_t index_bytes, uint64_t cache_bytes,
                               uint64_t cache_records);
 void mem_stats_set_irdecode(uint64_t bytes, uint64_t blocks);
+/* Resident decoded-IR footprint: arena + slot table + retired arenas, all
+ * measured by n3ds_ir_cache_stats().  `live_bytes` is the newlib cost. */
+void mem_stats_set_irdecode_detail(uint64_t live_bytes, uint64_t blocks,
+                                   uint64_t arena_bytes, uint64_t slot_bytes,
+                                   uint64_t retired_bytes, uint64_t budget_bytes);
 /* `resident_bytes` is measured (bsa_resident_bytes() summed over open archives),
  * never an estimate.  This compatibility overload takes `archives` as both the
  * configured and mounted count; prefer mem_stats_set_bsa_detail() when the
