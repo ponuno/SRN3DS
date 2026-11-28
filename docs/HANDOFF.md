@@ -39,18 +39,26 @@ The section below describes 2026-11-27 and is kept for history. This one is curr
   inside that switch**, not a separate function: it arrives with `ptr=0`, the
   StartMenu movie itself is loaded (`[movie+0x10]=1`), and the global fader
   `[0x1b10dcc]+0x28` is **0**, so the fade case skips and no indexed menu frame
-  is drawn. A host-only experiment (`N3DS_MENU_FADE_FALLBACK=1`) routes the
-  menu's own loaded movie into that message; it was not yet measured with
-  enough CPU to reach the menu.
-- **Device menu path is the load pump, not the gate.** On Azahar the last
-  checkpoints are `00a4b500` (VMInitThread) → `[bink] _BinkSetSoundSystem` →
-  `[menu] enter 00a5d370 from=006f4045` (`mode=2/2 inload=1`), `singleton=0`,
-  `release h=50c` once (thread 10), `release h=504` never, no guest faults.
-  A hardcoded block-IP probe for `0x69dda4`, `0x69ddf5` and `0x6982c0` did not
-  fire in either IR executor, so the next step is a positive control
-  (`0xa4b500`/`0x6f4045`) plus a last-16-block ring to name the path that
-  actually reaches the pump. `docs/AZAHAR_MENU.md` and `docs/VRAM_BUDGET.md`
-  carry the current tables.
+  is drawn. Routing the type-1 movie into the type-0 message was tried and is
+  wrong: the handler calls that pointer as a function and the run faults with
+  `unknown indirect function` at the movie address. The real FaderMenu/fader
+  object is still missing; that is the draw wall.
+- **Device menu path.** The gate `0x6982c0` is in the AOT table
+  (`tesv_ir_table.c`), so IR probes cannot see it. The main thread (tid=1) is
+  `ready` and executes the **load loop** `0x8c71e0`; `release h=50c` happens
+  once (thread 10), `release h=504` never. Under Azahar the VM-init handoff
+  (`0x50c`) alone takes **~12–13 minutes**; a 500 s run with the gate removed
+  from the AOT table only reaches `VMInitThread`, so the IR gate path is still
+  unproven. `docs/AZAHAR_MENU.md` and `docs/VRAM_BUDGET.md` carry the tables.
+- **Startup-menu experiment (not shipped, branch `startup-patch` `bb1da34`).**
+  A two-byte image patch in `pe_image.c` replaces the `je load-path` at
+  `0x69ddf9` with NOPs and excludes WinMain (`0x69d1d0`) plus the gate from the
+  AOT lookup, so the patched image would run through the IR container. The
+  patch applies (`[patch] image patch 0069ddf9: 2 byte(s) applied`), but the
+  resulting IR-WinMain route faults at `0009007d` (`0xac6580`/`ir_ip=0xc389d3`)
+  after the character/menu background textures load, and no `00876f60` is
+  reached. Do not merge without fixing that IR-container path; the shipping CIA
+  stays `96x24_memgate`.
 - **Memory work landed** (all measured, no `DevCaps` change):
   - pageable read-only `.text` in a bounded window (`N3DS_TEXT_WINDOW_MB`,
     default 5): guest 57.2 → 44.4 MiB, +2.8% time.
