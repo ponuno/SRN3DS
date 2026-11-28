@@ -224,13 +224,25 @@ Measured with `vrampage` (sha256 `E735655A…`, 96x8 + pageable `.text`
 
 ## What is left
 
-* **Null PC after deeper menu init.** `vrampage` reaches
-  `0x0086f067`/`0x00892da0`/`0x00898430` and then jumps to PC 0
-  (`unmapped Read32 @ 0x07FFFFB8`), with no named guest fault. This is after
-  the VRAM and guest-RAM walls, so the next step is to distinguish a paged
-  `.text` window miss from an indirect call through a zeroed guest pointer:
-  run once with `N3DS_TEXT_WINDOW_MB=0` (paging off) and once with `8` via
-  `sdmc:/Skyrim_N3DS.cfg`, and compare the last `[menu] enter` and PC.
+* **PC 0 was main-stack exhaustion, not paging.** A/B with the rebuilt binary:
+  `N3DS_TEXT_WINDOW_MB=0` (paging off) ends at the same `[menu] enter
+  00a5eaa0 from=00a60c3e` and the same first fault as the default 5 MiB
+  window: `unmapped Write32 ... @ 0x07FFFF94 at PC 0x0010F8C0`, Thread ID 1,
+  R1=0x1007F148. The later `Read32 @ 0x07FFFFB8 at PC 0` is the secondary
+  report. The write is the `push {r4,r5,r6,lr}` prologue of `n3ds_guest_ptr`
+  at `SP=0x07FFFFA4`, i.e. below the `0x08000000` stack base.
+* The cause was libctru's weak `__stacksize__ = 0x8000` (32 KiB): `initSystem`
+  does `SP = base + __stacksize__`. `source/n3ds_boot.c` now defines a strong
+  128 KiB `__stacksize__` (3DS only). The `stack128` run has **no PC 0** and
+  goes further: `logo02_d.dds`/`logo02_n.dds`, menu entries from
+  `0x0087b597` and `0x0089775e`, then a clean **guest backing OOM** at
+  `0x640625d0` (`guest_used=71,162,696`, `newlib_free=183,272`,
+  `guest_backing_failures=1`, `linear_fail_n=0`, VRAM peak 5042/5888 KiB,
+  `[menu] enter 00876f60` still 0).
+* Next deficit: the guest backing budget is a few MiB short just before the
+  logo texture. Proposals without touching `DevCaps`: `N3DS_IRC_CACHE_BYTES=2M`
+  (or `1M`) frees 2–3 MiB of the newlib heap, `N3DS_TEXT_WINDOW_MB=3` frees
+  2 MiB of the page window, stream is already `N3DS_STREAM=0`.
 
 * **Resume at the previous native size only.** A suspended target is resumed in
   VRAM; if the budget is full at that moment the core returns a named
