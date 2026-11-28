@@ -324,3 +324,12 @@ produced zero `[ip]` lines while reaching `00a5d370 from=006f4045` with
 The probe strings are in the `.elf`, so the hook is built.  The gate is either
 not on this load path or is executed outside both executors.  Next: a positive
 control (`0xa4b500`/`0x6f4045`) plus a last-16-block ring at the pump.
+
+## 2026-11-28 ringprobe: positive control passes, gate never runs
+
+`[ipc] a4b500 from=00698299` + `[ip] a4b500 blk=a4b500+15` prove the block
+hook.  `[ring] 6f4045` (tid 9) shows
+`6f44a7..6f4031 -> 8c71e0..8c7212 -> 6f4045`; no `6982c0` in the ring and no
+`[ipc] 6982c0`.  The device pump is started from `0x8c71xx`, not WinMain's
+`0x69de54`; the startup gate is not executed.  Next: trace `0x8c71e0`'s caller
+and whether `0x69de08`/`0x69de54` are reached.

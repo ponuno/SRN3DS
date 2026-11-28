@@ -214,9 +214,38 @@ static void startup_cstr(uint32_t a,char *out,size_t cap){
  * function entries; 0x6982c0 and the branch at 0x69ddf5 are basic blocks
  * inside larger functions.  This hook runs on every IR/container block entry
  * and prints only when the block covers one of the three addresses. */
+#define IP_RING 16u
+static struct { uint32_t ip[IP_RING]; unsigned next,count; } g_ip_ring[8];
 static void startup_block_probe(CPU *c,const IrExecBlock *b){
     if(!c||!b||!b->x86_len)return;
+    unsigned tid=n3ds_ir_thread_id_hook?n3ds_ir_thread_id_hook():0u;
+    unsigned slot=tid&7u;
+    g_ip_ring[slot].ip[g_ip_ring[slot].next++&(IP_RING-1u)]=b->start;
+    if(g_ip_ring[slot].count<IP_RING)++g_ip_ring[slot].count;
     uint32_t end=b->start+b->x86_len;
+    if(b->start<=0xa4b500u&&0xa4b500u<end){
+        static int once;
+        if(!once){once=1;
+            fprintf(stderr,"[ip] a4b500 eax=%08x esp=%08x blk=%08x+%u tid=%u\n",
+                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)b->start,
+                    (unsigned)b->x86_len,tid);
+        }
+    }
+    if(b->start<=0x6f4045u&&0x6f4045u<end){
+        static int once;
+        if(!once){once=1;
+            unsigned n=g_ip_ring[slot].count;
+            fprintf(stderr,"[ring] 6f4045 eax=%08x esp=%08x tid=%u n=%u:",
+                    (unsigned)c->r[0],(unsigned)c->r[4],tid,n);
+            for(unsigned i=0;i<n;++i){
+                unsigned k=(g_ip_ring[slot].next-n+i)&(IP_RING-1u);
+                fprintf(stderr," %08x",(unsigned)g_ip_ring[slot].ip[k]);
+            }
+            fprintf(stderr,"\n[ip] 6f4045 eax=%08x esp=%08x blk=%08x+%u tid=%u\n",
+                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)b->start,
+                    (unsigned)b->x86_len,tid);
+        }
+    }
     if(b->start<=0x69dda4u&&0x69dda4u<end){
         static int once;
         if(!once){once=1;
@@ -256,6 +285,12 @@ static void startup_block_probe(CPU *c,const IrExecBlock *b){
     }
 }
 static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
+    if(target==0x6982c0u){static int once;if(!once){once=1;
+        fprintf(stderr,"[ipc] 6982c0 from=%08x esp=%08x\n",(unsigned)from,(unsigned)(c?c->r[4]:0));}}
+    if(target==0xa4b500u){static int once;if(!once){once=1;
+        fprintf(stderr,"[ipc] a4b500 from=%08x esp=%08x\n",(unsigned)from,(unsigned)(c?c->r[4]:0));}}
+    if(target==0x6f4045u){static int once;if(!once){once=1;
+        fprintf(stderr,"[ipc] 6f4045 from=%08x esp=%08x\n",(unsigned)from,(unsigned)(c?c->r[4]:0));}}
     HP_START(hp_t0);
     if (n3ds_rt_dispatch(c, target)) {
         HP_ADD(HP_DISPATCH, hp_t0);

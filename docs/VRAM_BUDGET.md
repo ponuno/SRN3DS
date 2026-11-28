@@ -363,3 +363,25 @@ executors.  No positive-control probe was run in this timebox; the next check
 is to add a probe for a known-executed block (`0xa4b500` or `0x6f4045`) and a
 16-entry last-block ring dumped at `0x6f4045`, to prove the hook fires and to
 name the block immediately before the gate.
+
+## Ringprobe: 0x6982c0 is never called on the device
+
+Positive control passed: `[ipc] a4b500 from=00698299` and
+`[ip] a4b500 ... blk=00a4b500+15 tid=1`, so the block hook is active in the
+executed tier.  The loading-pump block then produced:
+
+```
+[ring] 6f4045 eax=1ce12000 esp=1ce0ff88 tid=9 n=16:
+  006f44a7 006f44b4 006f44b9 006f4000 006f401d 006f4022 006f402f 006f4031
+  008c71e0 008c71f7 008c71fb 00a5e180 00a5e1c4 008c7209 008c7212 006f4045
+[ip] 6f4045 eax=1ce12000 esp=1ce0ff88 blk=006f4045+11 tid=9
+```
+
+There is **no `[ipc] 6982c0`**, no `[ip] 6982c0`, and no `6982c0` in the ring.
+So the device never calls the startup gate at all; the loading pump is driven
+from `0x8c71e0..0x8c7212` (main loop) and returns to `0x6f4045`, not through
+WinMain's `0x69de54`.  Singleton 0 follows because `0x876f60` is never called.
+
+Next: identify the caller of `0x8c71e0`/`0x8c7212` and why the pump is started
+directly, and confirm whether `0x69de08`/`0x69de54` are ever reached (both have
+`[ipc]` probes and neither fired).

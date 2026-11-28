@@ -679,6 +679,12 @@ static int container_ensure(CPU *c, int can_fault) {
  * An indexed-but-invalid or unreadable container entry faults explicitly; it
  * is never handed to the decoder to hide a container problem. */
 static int container_dispatch(CPU *c, uint32_t addr) {
+    if(addr==0x6982c0u){static int once;if(!once){once=1;
+        fprintf(stderr,"[ipc] container 6982c0 esp=%08x\n",(unsigned)(c?c->r[4]:0));}}
+    if(addr==0xa4b500u){static int once;if(!once){once=1;
+        fprintf(stderr,"[ipc] container a4b500 esp=%08x\n",(unsigned)(c?c->r[4]:0));}}
+    if(addr==0x6f4045u){static int once;if(!once){once=1;
+        fprintf(stderr,"[ipc] container 6f4045 esp=%08x\n",(unsigned)(c?c->r[4]:0));}}
     if (!guest_code_target(addr)) {
         trace_indirect_fault(c, addr);
         rt_unimpl(c, addr, "call target outside any guest code module");
