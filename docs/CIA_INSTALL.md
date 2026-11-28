@@ -179,11 +179,12 @@ artifact was replaced; `build_96x24aot/` and
 `dist\Skyrim_N3DS_tesv_96x24aot\` are kept so the work can continue.
 
 A packaging probe shows the toolchain does **not** guard against this:
-`makerom` happily produced `work_96x24aot\probe_aot.cia` (56,523,200 B, sha256
-`0a66b90b…f505bca6`), whose exheader says `text addr 0x00100000, size
-0x0856BA48, StackSize 0x40000`. That title cannot allocate its heap and will
-`svcBreak` in `__system_allocateHeaps` like a 120x24 build; it is kept only as
-evidence, never install it.
+`makerom` happily produced `work_96x24aot\probe_aot.cia` (56,523,200 B), whose
+exheader says `text addr 0x00100000, size 0x0856BA48, StackSize 0x40000`. That
+title cannot allocate its heap and will `svcBreak` in
+`__system_allocateHeaps` like a 120x24 build; it is kept only as evidence, never
+install it. (Each makerom run embeds a fresh build id, so the probe's sha256
+changes between runs; the size does not.)
 
 What the numbers imply, in order of cost:
 
