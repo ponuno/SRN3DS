@@ -145,6 +145,12 @@ size_t n3ds_ir_encode_block(CPU *c, uint32_t start, uint32_t func_end,
  * table must outlive the session. Re-binding replaces the previous table. */
 int n3ds_ir_bind(const IrFnEntry *fns, unsigned count);
 int n3ds_ir_has(uint32_t addr);
+/* Optional guard extension: the lift runtime points this at the bound IR
+ * container so a record below the image windows (fixtures, low lifted
+ * functions) still counts as guest code.  NULL restores window-only rules.
+ * Defined in ir_core.c, not ir_exec.c: ir_container.c includes ir_exec.c. */
+extern int (*n3ds_ir_extra_code_target)(uint32_t);
+void n3ds_ir_set_extra_code_target(int (*fn)(uint32_t));
 /* Exclusive end of the IR function containing `addr`, or 0. */
 uint32_t n3ds_ir_end(uint32_t addr);
 

@@ -108,6 +108,12 @@ int n3ds_ir_bind(const IrFnEntry *fns, unsigned count) {
 
 int n3ds_ir_has(uint32_t addr) { return n3ds_ir_end(addr) != 0; }
 
+/* Shared with the guard in ir_exec.c (and its copy inside ir_container.c). */
+int (*n3ds_ir_extra_code_target)(uint32_t);
+void n3ds_ir_set_extra_code_target(int (*fn)(uint32_t)) {
+    n3ds_ir_extra_code_target = fn;
+}
+
 uint32_t n3ds_ir_end(uint32_t addr) {
     if (!g_fns) return 0;
     unsigned ci = (addr >> 2) & (IR_END_CACHE - 1);

@@ -166,28 +166,49 @@ static void trace_indirect_ir(CPU *c,uint32_t target,uint32_t from){
         }
     }
 }
+/* The indexed container owns its own address window: fixtures and some lifted
+ * functions live below the image base, and only the lift runtime can ask the
+ * bound container.  It installs this hook at bind time; slice-only harnesses
+ * see NULL and the fixed windows below are the whole answer.  The hook lives
+ * in ir_core.c because ir_container.c includes this file. */
+extern int (*n3ds_ir_extra_code_target)(uint32_t);
+
 /* Guest code lives in the TESV image or an imported DLL image, or is a
  * registered IR/AOT function (test fixtures and the container use separate
  * windows).  Host thunks are handled by n3ds_rt_dispatch before IR. */
 static int guest_code_target(uint32_t t) {
     /* Main image and imported modules share 0x00400000..0x0C000000 in the
      * pilot loader (Havok's synthetic stub is at 0x02000000).  The host app's
-     * own .data is below 0x00400000, so 0x003ba588 is still refused. */
+     * own .data is below 0x00400000, so 0x003ba588 is still refused unless the
+     * container really has a record there. */
     return (t >= 0x00400000u && t < 0x0C000000u) ||
            (t >= 0xfd000000u && t < 0xff200000u) ||
-           n3ds_ir_has(t);
+           n3ds_ir_has(t) ||
+           (n3ds_ir_extra_code_target && n3ds_ir_extra_code_target(t));
+}
+/* Bounded fixtures (pre-entry cold blocks, slice tests) map code in the first
+ * 64 KiB; a real x86 image never does.  Refusing those would turn the fixture's
+ * named "unknown function/import" into a guard fault, so the guard starts
+ * above them while still naming host/app pointers such as 0x003ba588 or a libc
+ * address from a corrupted free(). */
+static int refuse_target(uint32_t t) {
+    return t >= 0x00010000u && !guest_code_target(t);
 }
 static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
-    if (!guest_code_target(target)) {
-        fprintf(stderr, "[target] outside guest code: target=%08lx from=%08lx esp=%08lx\n",
-                (unsigned long)target, (unsigned long)from,
-                (unsigned long)(c ? c->r[4] : 0));
-        rt_unimpl(c, target, "call target outside any guest code module");
-    }
     HP_START(hp_t0);
     if (n3ds_rt_dispatch(c, target)) {
         HP_ADD(HP_DISPATCH, hp_t0);
         trace_indirect_ir(c, target, from);
+        /* Host thunks were handled above; a target the dispatcher does not
+         * know may still be guest code (fixtures, low lifted functions) This
+         * refusal comes after the dispatcher so a container-owned block is
+         * never mistaken for an app pointer. */
+        if (refuse_target(target)) {
+            fprintf(stderr, "[target] outside guest code: target=%08lx from=%08lx esp=%08lx\n",
+                    (unsigned long)target, (unsigned long)from,
+                    (unsigned long)(c ? c->r[4] : 0));
+            rt_unimpl(c, target, "call target outside any guest code module");
+        }
         rt_unimpl(c, target, indirect ? "unknown indirect function" : "unknown function/import");
     }
     HP_ADD(HP_DISPATCH, hp_t0);
@@ -1625,7 +1646,7 @@ static void dump_reg_objects(CPU *c) {
 }
 
 void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
-    if (!guest_code_target(addr)) {
+    if (refuse_target(addr)) {
         fprintf(stderr, "[target] outside guest code: target=%08lx esp=%08lx\n",
                 (unsigned long)addr, (unsigned long)(c ? c->r[4] : 0));
         rt_unimpl(c, addr, "call target outside any guest code module");
@@ -1649,7 +1670,7 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
         /* A block may set next=0 through a return/call with a zero target,
          * which bypasses dispatch().  Name it with the producing block and the
          * guest stack/registers before fetch decodes address 0. */
-        if (!guest_code_target(ip) &&
+        if (refuse_target(ip) &&
             !(func_end && ip >= addr && ip < func_end)) {
             uint32_t ret = 0;
             const uint8_t *rp = n3ds_guest_ptr(c->r[4], 4);
@@ -1702,7 +1723,7 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
 }
 
 void n3ds_ir_call(CPU *c, uint32_t addr) {
-    if (!guest_code_target(addr)) {
+    if (refuse_target(addr)) {
         fprintf(stderr, "[target] outside guest code: target=%08lx esp=%08lx\n",
                 (unsigned long)addr, (unsigned long)(c ? c->r[4] : 0));
         rt_unimpl(c, addr, "call target outside any guest code module");

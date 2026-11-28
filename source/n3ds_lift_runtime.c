@@ -477,14 +477,21 @@ static int container_dispatch(CPU *c, uint32_t addr);
 static int container_aot_pred(void *user, uint32_t addr);
 static void trace_indirect_fault(CPU *c, uint32_t target);
 
-/* Guest code lives only in the main image (0x00400000..0x02000000) or an
- * imported DLL image (0x08000000..0x0C000000).  A call/return target outside
- * both is a host/app pointer or corrupted guest data; handing it to the IR
- * container would decode the 3dsx's own bytes as x86 and report a bogus
- * opcode instead of naming the bad indirect target. */
+/* Guest code lives only in the main image (0x00400000..0x02000000), an
+ * imported DLL image (0x08000000..0x0C000000), a record the bound container
+ * really has, or a page the guest actually mapped (slice-only fixtures and the
+ * pre-entry probe map their image low in guest RAM).  A call/return target
+ * none of those claim is a host/app pointer or corrupted guest data; handing
+ * it to the IR container would decode the 3dsx's own bytes as x86 and report a
+ * bogus opcode instead of naming the target. */
 static int guest_code_target(uint32_t a) {
-    return (a >= 0x00400000u && a < 0x0C000000u) ||
-           (a >= 0xfd000000u && a < 0xff200000u);
+    if ((a >= 0x00400000u && a < 0x0C000000u) ||
+        (a >= 0xfd000000u && a < 0xff200000u)) return 1;
+    if (memory && guest_range_mapped(memory, a, 1)) return 1;
+    if (!container_ensure(NULL, 0)) return 0;
+    N3dsIrcEntry e;
+    if (n3ds_irc_lookup(ir_container, a, &e) == N3DS_IRC_OK) return 1;
+    return n3ds_irc_has_preentry(ir_container, a);
 }
 
 static int env_flag(const char *name, int dflt) {
@@ -614,6 +621,9 @@ static int container_ensure(CPU *c, int can_fault) {
     n3ds_irc_set_aot_predicate(ic, container_aot_pred, NULL);
     ir_container = ic;
     ir_container_state = 1;
+    /* Let the slice executor's guard ask the container too; a record below the
+     * image base is code even though the fixed windows do not cover it. */
+    n3ds_ir_set_extra_code_target(guest_code_target);
     fprintf(stderr, "IR container: %u functions (%u decoded) from %s, "
                     "cache %lu B / %u records\n",
             n3ds_irc_function_count(ic), n3ds_irc_decoded_count(ic),
@@ -695,6 +705,7 @@ void n3ds_lift_release(void){
     if(!active){
         if(ir_container){n3ds_irc_close(ir_container);ir_container=NULL;}
         ir_container_state=0;
+        n3ds_ir_set_extra_code_target(NULL);
         memory=NULL;modules=NULL;module_count=0;
     }
 }
