@@ -475,6 +475,17 @@ static void container_read_env(void);
 static int container_ensure(CPU *c, int can_fault);
 static int container_dispatch(CPU *c, uint32_t addr);
 static int container_aot_pred(void *user, uint32_t addr);
+static void trace_indirect_fault(CPU *c, uint32_t target);
+
+/* Guest code lives only in the main image (0x00400000..0x02000000) or an
+ * imported DLL image (0x08000000..0x0C000000).  A call/return target outside
+ * both is a host/app pointer or corrupted guest data; handing it to the IR
+ * container would decode the 3dsx's own bytes as x86 and report a bogus
+ * opcode instead of naming the bad indirect target. */
+static int guest_code_target(uint32_t a) {
+    return (a >= 0x00400000u && a < 0x02000000u) ||
+           (a >= 0x08000000u && a < 0x0C000000u);
+}
 
 static int env_flag(const char *name, int dflt) {
     const char *s = getenv(name);
@@ -616,6 +627,11 @@ static int container_ensure(CPU *c, int can_fault) {
  * An indexed-but-invalid or unreadable container entry faults explicitly; it
  * is never handed to the decoder to hide a container problem. */
 static int container_dispatch(CPU *c, uint32_t addr) {
+    if (!guest_code_target(addr)) {
+        trace_indirect_fault(c, addr);
+        rt_unimpl(c, addr, "call target outside any guest code module");
+        return -1;
+    }
     if (!container_ensure(c, 1)) return 1;
     int rc = n3ds_irc_exec_status(ir_container, c, addr, 1);
     if (rc == N3DS_IRC_TIER_CONTAINER) return 0;

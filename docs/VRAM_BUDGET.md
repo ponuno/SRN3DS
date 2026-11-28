@@ -224,6 +224,31 @@ Measured with `vrampage` (sha256 `E735655A…`, 96x8 + pageable `.text`
 
 ## What is left
 
+* Swap A/B: `N3DS_SWAP=0` cannot reach the corruption point — without swap the
+  same path exhausts guest backing at 71.16 MiB first, so the swap hypothesis
+  cannot be isolated by turning it off. Additional eviction (`target=32`,
+  `text=2`) is the next A/B.
+* The `SetDepthStencilSurface` mismatch is now named with sizes:
+  **depth `512x1024` vs active target `400x240`**. The game sets a
+  512x1024 depth while the back buffer is current; that points at our
+  current-RT lifetime: `destroy_target_slot()` clears `d->target` when the
+  guest releases the current target, while D3D9 keeps it referenced until the
+  next `SetRenderTarget`. The 3D path then runs with the wrong target/depth.
+* The bad EIP `0x003ba588` is not rejected by `container_dispatch` (the guard
+  installed there never fires), so the IR AOT executor decodes an entry for
+  that address directly. `0x003ba588` is below the TESV image base
+  (`0x00400000`) and inside the 3dsx `.data`, i.e. a host/app pointer, not
+  guest code.
+* Azahar's `_free_r` fault walks a "chunk" whose contents are the string
+  `"Data..."` (`0x61746144`, `0x6C616972`) at unaligned addresses such as
+  `0x0E428E86`: a host `free()` is receiving a guest/interior pointer, likely
+  a path string from the BSA overlay path (`win32_bsa_overlay` /
+  `menu_bsa_runtime`). This is the next root to chase; it is independent of
+  VRAM and swap.
+* `[menu] enter 00876f60` is still 0; the run reaches the 3D path with
+  `512x1024` depth surfaces and a long series of refused depth binds.
+
+
 * **Compressed swap is active and removes the OOM.** The previous 32 KiB-stack
   binary predated `8b533c0`, so swap was not in it, and the cfg keys were not
   in the allowlist. Both are fixed; `vramswap` was built from current main and

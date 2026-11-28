@@ -4768,8 +4768,10 @@ int d9_set_depth_surface(D9Device *d,D9Handle h){
         unsigned w=0,height=0;
         if(logical_dims(d,&w,&height)||s->w!=w||s->h!=height){
             if(backend_embeds_depth(d)){
-                set_diagnosis(d,"SetDepthStencilSurface: the depth-stencil size does not "
-                                "match the active render target's embedded depth attachment");
+                snprintf(d->diagnosis,sizeof d->diagnosis,
+                         "SetDepthStencilSurface: depth %ux%u does not match the %ux%u "
+                         "active target's embedded depth attachment",
+                         s->w,s->h,w,height);
                 return D9_INVALID;
             }
             snprintf(d->diagnosis,sizeof d->diagnosis,

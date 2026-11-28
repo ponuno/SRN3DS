@@ -30,6 +30,7 @@ static const char *const supported_keys[] = {
     "N3DS_SWAP",
     "N3DS_SWAP_BUDGET_MB",
     "N3DS_GUEST_TARGET_MB",
+    "N3DS_INDIRECT_TRACE",
     "TESV_MEMPROBE",
 };
 
