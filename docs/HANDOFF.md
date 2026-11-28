@@ -32,10 +32,12 @@ The section below describes 2026-11-27 and is kept for history. This one is curr
 - **`main` is green**: `tools\run_host_tests.ps1` reports 219+ passed, 0 failed.
   The MMX IR container is canonical: `E:\census_ir2\ir_container\tesv.irc`
   (90 110 decoded, SHA-256 `4DD060A5…0C12`; backup `.pre_mmx` beside it).
-- **Menu progress.** The real exe now creates the window, runs WinMain's frame
-  pump, loads menu assets and reaches the 3D menu path. Known checkpoints seen
-  on Azahar: `00892da0`, `00898430`, `00a5eaa0 from=00a60c3e`. `00876f60`
-  (StartMenu create) has **not** been reached yet; no menu frame is claimed.
+- **Menu creation is proven on the host.** The WinMain gate now falls through
+  (`[menu] enter 00876f60 from=0069de0f`, then `00876fc0` → `00876b90`), the
+  singleton is non-zero (`[menustate] singleton=41f8eaf0 view=...`) and the GFx
+  message switch `008779d0` runs every frame. The remaining menu blocker is the
+  **draw**: `00877a50` (FadeInMenu) is not called yet, so no indexed menu frame
+  is claimed.
 - **Memory work landed** (all measured, no `DevCaps` change):
   - pageable read-only `.text` in a bounded window (`N3DS_TEXT_WINDOW_MB`,
     default 5): guest 57.2 → 44.4 MiB, +2.8% time.
@@ -51,19 +53,23 @@ The section below describes 2026-11-27 and is kept for history. This one is curr
   - main-thread stack: libctru's 32 KiB overflowed in the menu path; strong
     `__stacksize__ = 128 KiB` in `source/n3ds_boot.c` (`.3dsx`; the CIA
     exheader already used 256 KiB).
-- **Device artifact**: `E:\cia_menu\Skyrim_N3DS_tesv_120x24_stack.cia`
-  (1 577 920 B, SHA-256 `47dbfc60…0EA4`, title `000400000F0D5900`, 178 MB /
-  804 MHz, profile 120x24). Install instructions: `docs/CIA_INSTALL.md`.
-  The older `Skyrim_N3DS_tesv_120x24.cia` is pre-stack-fix and marked invalid.
-- **Current blocker (menu).** The game sets `SetDepthStencilSurface(512x1024)`
-  before switching to the 512x1024 target, while the 400x240 back buffer is
-  current. We rejected it, the guest continued with a half-applied state and
-  then called a null function pointer:
-  `Guest fault at 00000000: IR: unsupported opcode in decoded stream`.
-  A host-heap corruption symptom (`Data...` in a heap chunk, `_free_r` walking
-  guest addresses) is being investigated with an ownership guard
-  (`source/mem_guard.c` on the `vram-budget` branch). Fix in flight: accept and
-  defer depth validation to `SetRenderTarget`/draw, log target switches.
+- **Device artifact**: `E:\cia_menu\Skyrim_N3DS_tesv_96x24_memgate.cia`
+  (1 580 992 B, SHA-256 `d4ceddc4…683e`, title `000400000F0D5900`, 178 MB /
+  804 MHz, profile **96x24**, guest budget 92 MiB). Also published at
+  `artifacts/cia/Skyrim_N3DS_tesv_96x24_memgate.cia` with the device
+  `Skyrim_N3DS.cfg`. Install instructions: `docs/CIA_INSTALL.md`.
+  **120x24 never booted**: libctru's application heap area is
+  `0x08000000..0x0E000000` (96 MiB), so a 120 MiB `__ctru_heap_size` aborts in
+  `__system_allocateHeaps` (`svcBreak`) before `main`. `build.ps1` has 96x24 and
+  `tesv_slice_main.c` rejects `__3DS__ && TESV_HEAP_MIB > 96` at compile time.
+- **Two device gates closed.** (a) On the 3DS there is no Bink decoder, so
+  `BinkOpen` now returns a valid **empty clip** (0x0, one frame, no-op copies)
+  instead of NULL; the intro state finishes and StartMenu is created. (b) The
+  PC minimum-config check calls `GlobalMemoryStatusEx` from `0x00a48a5d` and
+  requires a 512 MiB commit limit; only that call is answered with 512 MiB
+  (`[mem] startup minimum-config check: ... compat`), every other query stays
+  honest and the 92 MiB guest budget is enforced. `TESV_MEMPROBE` is not needed
+  and remains measurement-only.
 - **Fast loop**: `tools\fast_slice.ps1` (auto-stop on fault/draw, stderr
   aware). Worktrees need `tools\prepare_worktree.ps1` (junctions `staged`,
   `pilot_out_mult`, `.venv`); without the D3DX pilot table the slice faults at
