@@ -4,6 +4,15 @@
 #include <stdarg.h>
 #include <string.h>
 
+#ifdef __3DS__
+/* libctru's 3dsx crate ships a weak 32 KiB main-thread stack.  The menu path's
+ * lifted call chain (n3ds_guest_ptr, TEV/menu helpers) overflows it: the first
+ * Azahar fault was a push at SP 0x07FFFFA4 just below the 0x08000000 stack
+ * top, i.e. stack exhaustion, not a guest/VRAM fault.  A strong definition is
+ * read by 3dsxtool/libctru when sizing the main thread stack. */
+unsigned int __stacksize__ = 128u * 1024u;
+#endif
+
 static int error(BootSession *b,const char *fmt,...){va_list a;va_start(a,fmt);vsnprintf(b->message,sizeof b->message,fmt,a);va_end(a);return -1;}
 void n3ds_boot_init(BootSession *b,size_t budget){memset(b,0,sizeof *b);guest_init(&b->memory,budget);}
 void n3ds_boot_set_unresolved_traps(BootSession *b,int enabled){
