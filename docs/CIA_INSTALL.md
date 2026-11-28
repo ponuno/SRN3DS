@@ -77,19 +77,36 @@ build. `build.ps1` performs a clean build by default; `-NoClean` is only safe
 when the profile macros are unchanged (it is what was used for the re-link after
 the two `n3ds_env_cfg` allowlist keys were added).
 
-### Delivered artifact (2026-11-28, worktree `cia-final` @ `dc8e0fa`)
+### Delivered artifact (2026-11-28, worktree `cia-final` @ `b3915c5`)
 
 | profile | CIA | bytes | sha256 |
 |---|---|---:|---|
-| **120x24** | `E:\cia_menu\Skyrim_N3DS_tesv_120x24.cia` | 1,566,656 | `6cb076b18f61700975a5ef9f7086ad7c5c965b18ee91fc1ffb0e0c53f4e2e0bf` |
+| **120x24 + stack** | `E:\cia_menu\Skyrim_N3DS_tesv_120x24_stack.cia` | 1,577,920 | `47dbfc60c1d420f24f1846ff3f0a361cb051c602cb2fc97b87a03bd9d4e60ea4` |
 
 ELF: `dist\Skyrim_N3DS_tesv_120x24\Skyrim_N3DS_tesv_120x24.elf`
-(12,342,544 B, sha256 `f61c65996c009f4fc9a905adcd08f3fdcb78f5db2a3a0a203887bf6a8c0d1358`).
+(12,977,888 B, sha256 `97d9a72a5dee28b97aaa43dd4f0b1ea42c8453b74877a4927f44f96cec47ac02`).
 `build_manifest.json` records `mem_profile=120x24`,
 `defines=-DTESV_HEAP_MIB=120 -DTESV_LINEAR_MIB=24`, and the generator hash of
 `live_arm_check2\gen`. The CIA reports title ID `000400000F0D5900` and
 `SystemModeExt=178MB CpuSpeed=804MHz EnableL2Cache=true` (checked by
-`build_cia.ps1`; see `work_120x24\cia_info.txt`).
+`build_cia.ps1`; see `work_120x24_stack\cia_info.txt`).
+
+> **Do not install `E:\cia_menu\Skyrim_N3DS_tesv_120x24.cia`
+> (`6cb076b1…3f4e2e0bf`).** It was built before the main-thread stack fix and has
+> no `__stacksize__` symbol; the menu path overflows the 32 KiB crate default
+> there (`push` with SP just below the stack top). `…_stack.cia` is the only
+> valid 120x24 artifact.
+
+Stack, now part of the build:
+
+* `source/n3ds_boot.c` defines a strong `__stacksize__ = 128 KiB` for
+  `__3DS__`. In this ELF the symbol is at `0x003ba000` (`.data`, 4 bytes) and
+  its value is **`0x00020000`** (128 KiB), not the 32 KiB `0x8000` default.
+* `tools/cia/template.rsf` sets `StackSize: 0x40000`, so the packaged CIA's
+  exheader carries a **256 KiB** main-thread stack (`exheader+0x1C =
+  0x00040000`, verified by reading the built CIA). On a console title the
+  exheader value is what the loader honours; the ELF symbol governs the
+  `.3dsx` path. Both are now large enough for the menu call chain.
 
 Build-time evidence in this ELF (checked with `arm-none-eabi-nm` and string
 search): paging (`pe_image_load`, `pe_image_touch_report`, `guest_range_mapped`,
@@ -427,6 +444,7 @@ Distinguishing failure modes:
 |---|---|---|
 | `[mem] FATAL: guest budget arithmetic failed` | profile macros inconsistent | rebuild; do not flash |
 | `App region: 96 MiB` | CIA without 178 MB extheader | reinstall with the RSF |
+| Azahar/hardware fault with `SP` just below the stack top (e.g. `push` at `0x07FFFFA4`), no `[mem]` OOM line | 32 KiB main-thread stack, i.e. a pre-`b3915c5` build | install `Skyrim_N3DS_tesv_120x24_stack.cia`; check `__stacksize__` = `0x20000` in the ELF |
 | `newlib_free` near 0 / `malloc` failed, low `guest_used` | host residents in the 120 MiB newlib heap | lower `N3DS_IRC_CACHE_BYTES` (2 MiB), then `N3DS_TEX_GUEST_LIMIT=8M` |
 | `guest_backing_failures` > 0, `guest_used` ≈ 116 MiB | guest page cap | lower `N3DS_TEXT_WINDOW_MB` (4, then 3); check `guest_used` in the next snapshot |
 | `linear_fail_n>0` / `linear_fail_bytes=…` | 24 MiB linear heap bound | lower `N3DS_TARGET_VRAM_LIMIT`, then `N3DS_TEX_GPU_LIMIT` |
@@ -451,5 +469,9 @@ code ran; `init` is the first line that can show the paged `guest_used`.
 - `120x24` is chosen from the post-paging 44.4 MiB host guest working set, not
   from a hardware run. Both fixes are verified as linked and active, not as
   pixels: read `guest_used` and `linear_fail_*` on the device.
+- The menu call chain needs the raised main-thread stack. The CIA gets 256 KiB
+  from the exheader (`StackSize: 0x40000`); a `.3dsx` gets 128 KiB from the
+  `__stacksize__` symbol. A build without either overflows at the first deep
+  menu call and looks like a guest fault near the stack top, not OOM.
 - No `DevCaps`, pixel or frame claim. Screenshots are only real emulator or
   hardware output.
