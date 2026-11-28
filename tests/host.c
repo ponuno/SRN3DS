@@ -36,20 +36,27 @@ int main(int argc, char **argv) {
     assert(make_fixture(path)==0);
     GuestMemory m;guest_init(&m,0x6000);
     GuestImage im;uint32_t val;
-    assert(pe_image_load(&m,path,0x800000,&im)==0 && m.used==0x3000);
+    assert(pe_image_load(&m,path,0x800000,&im)==0);
+    /* Paged image: reserved pages are charged, not the whole SizeOfImage. */
+    assert(m.used < 0x3000);
     assert(im.entry==0x801000 && guest_read32(&m,0x801000,&val)==0 && val==0x801234);
     assert(guest_read32(&m,0x801300,&val)==0 && val==0);
-    assert(pe_image_load(&m,path,0x800000,&im)==PE_MEMORY && m.used==0x3000);
-    assert(pe_image_load(&m,path,0,&im)==0 && m.used==0x6000);
+    assert(pe_image_load(&m,path,0x800000,&im)==PE_MEMORY);
+    assert(pe_image_load(&m,path,0,&im)==0);
     assert(guest_read32(&m,0x401000,&val)==0 && val==0x401234);
-    assert(pe_image_load(&m,path,0x900000,&im)==PE_MEMORY);
+    {   /* A budget smaller than the page tables rejects the image. */
+        GuestMemory small; guest_init(&small,0x40);
+        assert(pe_image_load(&small,path,0x900000,&im)==PE_MEMORY);
+        guest_destroy(&small);
+    }
     guest_destroy(&m);
-    /* A truncated section must fail without leaving a mapped region. */
+    /* A truncated section must fail without leaving a mapped slab or region. */
     FILE *f=fopen(path,"r+b");assert(f);
     unsigned char offset[4]={0xff,0xff,0xff,0x7f};
     assert(fseek(f,0x98+224+20,SEEK_SET)==0 && fwrite(offset,1,4,f)==4 && fclose(f)==0);
     guest_init(&m,0x6000);
     assert(pe_image_load(&m,path,0,&im)==PE_FORMAT && m.used==0 && m.count==0);
+    for (unsigned i=0;i<GUEST_MAX_SLABS;++i) assert(m.slabs[i].state==NULL);
     guest_destroy(&m);
     assert(remove(path)==0);
     puts("PE mapping, zero fill, relocation & budget tests passed");

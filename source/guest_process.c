@@ -61,7 +61,7 @@ int guest_process_init(GuestProcess *p,GuestMemory *m,const PeModule *modules,si
     for(size_t i=0;i<n;++i){
         const GuestImage *im=modules[i].image;
         if(!im||!modules[i].dll||!*modules[i].dll||strlen(modules[i].dll)>63||!im->size||
-           (uint64_t)im->base+im->size>(UINT64_C(1)<<32)||!guest_ptr(m,im->base,im->size))return -1;
+           (uint64_t)im->base+im->size>(UINT64_C(1)<<32)||!guest_range_mapped(m,im->base,im->size))return -1;
         for(size_t j=0;j<i;++j)if(modules[j].image->base==im->base)return -1;
         int rc=tls_plan(m,im,&plans[i]);if(rc<0)return -1;if(!rc){offsets[i]=UINT32_MAX;continue;}
         uint32_t align=plans[i].align;total=(total+align-1)&~(align-1);offsets[i]=total;
