@@ -144,7 +144,7 @@ static void menu_trace(CPU *c,uint32_t addr){
         0x00876f60u,0x00876fc0u,0x00876b90u,0x00a60c80u,0x00a60c10u,
         0x00a5eaa0u,0x00a5ed20u,0x008779d0u,0x00877a50u,0x008765f0u,0x00876bf0u,
         0x00876a50u,0x00a64ba0u,0x00a64940u,0x00401710u,0x006f3f9du,0x006f3fd8u,
-        0x006f3fe8u,0x0069df7eu,0x0069dfe7u,0x0069e015u};
+        0x006f3fe8u,0x0069df7eu,0x0069dfe7u,0x0069e015u,0x004310c0u};
     unsigned i,n=sizeof va/sizeof va[0];
     for(i=0;i<n&&va[i]!=addr;++i);
     if(i==n)return;

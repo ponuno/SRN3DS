@@ -295,3 +295,31 @@ Earlier findings kept for context:
   and reported false target/IR failures; a fresh cache is green. Python
   tests are unavailable in this environment (missing `capstone`, LLVM
   `clang.exe`, `tex3ds.exe`).
+
+## Device menu gate after b03c33c
+
+`b03c33c` makes `BinkOpen` return a valid one-frame empty clip when the
+platform has no decoder.  On Azahar the device still does not reach StartMenu:
+
+* `_BinkOpen` is never called.  The only Bink line is
+  `_BinkSetSoundSystem@8: Bink sound is not implemented`; no `empty clip`.
+* `[menu] enter 00876f60/00876fc0/00876b90` = 0; `[menustate] singleton=0`,
+  `view=0`; the run advances to `frame=114360+` in `mode=2/2 inload=1`
+  (`00a5d370 from=006f4045`, the loading pump), then the wall timeout ends it.
+* `sIntroSequence` was tried empty and `BGS_Logo.bik`, with
+  `bPreloadIntroSequence=0/1`; the `[ini]` trace confirms the values reach the
+  engine, but the branch does not change.  `sStartingCell/World/X/Y` are all
+  empty (`""` default).
+* Renaming the guest `Skyrim/binkw32.dll` did not change it: the engine still
+  never calls the shim's `_BinkOpen`.
+
+So the startup probe `0x6982c0` still returns 0 and WinMain takes
+`0x69de54` (load path) instead of `0x69de08` (menu).  Singleton 0 is a
+consequence: its only writer `0x876b90` at `0x876bd7` is behind the menu call.
+The empty-clip fix cannot help until the guest actually opens the movie.
+
+Next: log at `0x69dda4`/`0x69ddf5` the three probe settings
+(`[0x1272fb4]`, `[0x1272fd8]`, `[0x1272fe4]`), `AL` and the out object; and
+check whether the engine resolves `binkw32.dll!_BinkOpen@8` to the guest DLL
+body instead of the host shim.  The host success requires the probe to return
+1 first.

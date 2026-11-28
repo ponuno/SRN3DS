@@ -296,3 +296,13 @@ a bootstrap refusal.
   edits are inside the `__3DS__` main/run path, so the host build and the
   full host suite are unchanged. The host suite was **not re-run** in this
   timebox; run `tools\run_host_tests.ps1` before merging.
+
+## 2026-11-28: device still takes the load branch after the empty-clip fix
+
+`b03c33c` gives `BinkOpen` an empty finished clip on a decoder-less platform.
+Azahar does not call `_BinkOpen` at all (only `_BinkSetSoundSystem`); the run
+stays in the `mode=2/2` loading pump with `singleton=0`, `view=0` and never
+enters `00876f60`.  Empty and `BGS_Logo.bik` intro values, and removing the
+guest `binkw32.dll`, all produce the same branch.  The next gate is the
+startup probe `0x6982c0` at `0x69ddf5`; log its `AL`, out object and the
+`0x1272fb4/0x1272fd8/0x1272fe4` settings there.
