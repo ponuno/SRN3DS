@@ -74,9 +74,40 @@ static int at(FILE *f, uint32_t pos, void *buf, size_t n) {
  * never evicted; the window only bounds read-only code and resource pages. */
 typedef struct {
     FILE *f;
-    uint32_t hdr, nsections;
+    uint32_t hdr, nsections, base;
     struct { uint32_t va, bytes, off, extent, writable; } sec[96];
 } PeProvider;
+
+/* Port compatibility patches applied when a read-only image page is filled.
+ * The startup branch in WinMain (0x69ddf9, `je load-path`) chooses between the
+ * main menu and the PC start-cell/save probe.  This port only supports the main
+ * menu, and on device that probe can take the load path; replace the branch
+ * with two NOPs so the menu path is always taken.  The image itself is never
+ * modified on disk and every other byte is untouched. */
+typedef struct { uint32_t va; uint8_t old[4], now[4]; unsigned len; } PePatch;
+static const PePatch g_pe_patches[] = {
+    {0x0069ddf9u, {0x74, 0x59, 0, 0}, {0x90, 0x90, 0, 0}, 2},
+};
+static int pe_apply_patches(PeProvider *p, uint32_t rva, uint32_t n,
+                            uint8_t *dst) {
+    int applied = 0;
+    if (!p || p->base != 0x00400000u) return 0;
+    for (unsigned i = 0; i < sizeof g_pe_patches / sizeof g_pe_patches[0]; ++i) {
+        const PePatch *q = &g_pe_patches[i];
+        uint32_t qrva = q->va - p->base;
+        if (qrva < rva || qrva + q->len > rva + n) continue;
+        uint8_t *at = dst + (qrva - rva);
+        if (memcmp(at, q->old, q->len)) continue;
+        memcpy(at, q->now, q->len);
+        static unsigned logged;
+        if (logged < 8) { ++logged;
+            fprintf(stderr, "[patch] image patch %08lx: %u byte(s) applied "
+                            "(startup always takes the main-menu path)\n",
+                    (unsigned long)q->va, q->len); }
+        applied = 1;
+    }
+    return applied;
+}
 
 static int pe_fill(void *ctx, uint64_t offset, uint8_t *dst, size_t n,
                    size_t *got) {
@@ -96,6 +127,7 @@ static int pe_fill(void *ctx, uint64_t offset, uint8_t *dst, size_t n,
         if (at(p->f, p->sec[i].off + (uint32_t)(a - s0), dst + (a - r0),
                (size_t)(b - a))) return -1;
     }
+    pe_apply_patches(p, rva, (uint32_t)n, dst);
     *got = n;
     return 0;
 }
@@ -188,7 +220,7 @@ int pe_image_load(GuestMemory *m, const char *path, uint32_t want_base, GuestIma
     mapped=1;
     PeProvider *prov=(PeProvider *)calloc(1,sizeof *prov);
     if (!prov) { rc=PE_MEMORY; goto done; }
-    prov->f=f; prov->hdr=hdr; prov->nsections=im.sections;
+    prov->f=f; prov->hdr=hdr; prov->nsections=im.sections; prov->base=im.base;
     /* Reject overlapping section footprints and build the page provider. */
     uint32_t starts[96], sizes[96];
     for (unsigned i=0;i<im.sections;++i) {
