@@ -3460,6 +3460,21 @@ static void s_GlobalMemoryStatusEx(CPU *c){
                            "(measurement only, not a shippable value)\n");
         }
     }
+    /* Skyrim's PC minimum-configuration check calls GlobalMemoryStatusEx from
+     * 0x00a48a5d and requires a 512 MiB commit limit (RAM + page file).  This
+     * port has no page file and 92 MiB of guest pages, so answer that single
+     * call with the PC-shaped value and leave every later query honest.  This
+     * is a compatibility shim for a PC check, not a memory promise: guest
+     * allocations still fail honestly at the budget. */
+    if(c && M32(c->r[4]) == 0x00a48a63u){
+        commit_total=commit_avail=UINT64_C(512)<<20;
+        static int startup_logged;
+        if(!startup_logged){
+            startup_logged=1;
+            fprintf(stderr,"[mem] startup minimum-config check: 512 MiB commit reported "
+                           "(compat; the real guest budget is still enforced)\n");
+        }
+    }
     M64(p+24)=commit_total;M64(p+32)=commit_avail;
     M64(p+40)=UINT64_C(0x7ffeffff);M64(p+48)=avail;
     {
