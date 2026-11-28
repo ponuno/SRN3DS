@@ -144,6 +144,11 @@ typedef struct {
      * logical size and sampling/copying addresses the sub-rect.  Zero for the
      * historical exact/bounded (down-scaled) targets. */
     int pot_pad;
+    /* D3D9 keeps the device's current render target alive after the guest
+     * releases it: the dimensions still validate SetDepthStencilSurface until
+     * the next SetRenderTarget.  A retired slot keeps its native and id (so it
+     * cannot be reused) until that switch. */
+    int retired;
     /* VRAM budget bookkeeping.  vram_bytes is the charged colour storage plus
      * any attached depth attachment while the native is resident; a suspended
      * target keeps its handle and views but owns no GPU storage. */
@@ -2353,6 +2358,12 @@ static int apply_target_viewport(D9Device *d,Target *t){
 }
 int d9_set_render_target(D9Device *d,D9Handle h){
     if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
+    /* A released current target stays current until this switch; release its
+     * storage only now that it has been replaced. */
+    if(d->target&&d->target!=h){
+        Target *old=target(d,d->target);
+        if(old&&old->retired)destroy_target_slot(d,old);
+    }
     /* Handle zero means the default back buffer: the retained target when
      * D3DPRESENTFLAG_LOCKABLE_BACKBUFFER created one, otherwise the screen. */
     Target *t=h?target(d,h):(d->back_target?target(d,d->back_target):NULL);
@@ -2587,6 +2598,11 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
     return D9_OK;
 }
 int d9_release_render_target(D9Device *d,D9Handle h){Target *t=target(d,h);if(!t||!d||d->scene||d->teardown||h==d->back_target||t->is_cube_face)return D9_INVALID;
+    /* D3D9 refcounts the device's current target.  The guest's Release drops
+     * its reference but the device keeps the surface current (and its logical
+     * size valid for SetDepthStencilSurface) until SetRenderTarget replaces
+     * it.  Retire instead of destroying now. */
+    if(d->target==h){t->retired=1;return D9_OK;}
     destroy_target_slot(d,t);return D9_OK;}
 int d9_backend_supports_lockable_back_buffer(const D9Backend *ops){
     return ops&&ops->target_create&&ops->target_delete&&ops->target_bind&&

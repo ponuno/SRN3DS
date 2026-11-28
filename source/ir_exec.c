@@ -167,6 +167,17 @@ static void trace_indirect_ir(CPU *c,uint32_t target,uint32_t from){
     }
 }
 static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
+    /* Guest code lives in the TESV image or an imported DLL image.  Anything
+     * else is a host/app pointer or corrupted guest data; decode it only to
+     * report a bogus opcode otherwise. */
+    if (!((target >= 0x00400000u && target < 0x02000000u) ||
+          (target >= 0x08000000u && target < 0x0C000000u) ||
+          (target >= 0xfd000000u && target < 0xff200000u))) {
+        fprintf(stderr, "[target] outside guest code: target=%08lx from=%08lx esp=%08lx\n",
+                (unsigned long)target, (unsigned long)from,
+                (unsigned long)(c ? c->r[4] : 0));
+        rt_unimpl(c, target, "call target outside any guest code module");
+    }
     HP_START(hp_t0);
     if (n3ds_rt_dispatch(c, target)) {
         HP_ADD(HP_DISPATCH, hp_t0);
@@ -1590,6 +1601,13 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
 /* ---------------------------------------------------------------- entry */
 
 void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
+    if (!((addr >= 0x00400000u && addr < 0x02000000u) ||
+          (addr >= 0x08000000u && addr < 0x0C000000u) ||
+          (addr >= 0xfd000000u && addr < 0xff200000u))) {
+        fprintf(stderr, "[target] outside guest code: target=%08lx esp=%08lx\n",
+                (unsigned long)addr, (unsigned long)(c ? c->r[4] : 0));
+        rt_unimpl(c, addr, "call target outside any guest code module");
+    }
     Flags f = {0};
     uint32_t ip = addr;
     uint32_t prev_end = n3ds_ir_cur_func_end;
@@ -1639,6 +1657,13 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
 }
 
 void n3ds_ir_call(CPU *c, uint32_t addr) {
+    if (!((addr >= 0x00400000u && addr < 0x02000000u) ||
+          (addr >= 0x08000000u && addr < 0x0C000000u) ||
+          (addr >= 0xfd000000u && addr < 0xff200000u))) {
+        fprintf(stderr, "[target] outside guest code: target=%08lx esp=%08lx\n",
+                (unsigned long)addr, (unsigned long)(c ? c->r[4] : 0));
+        rt_unimpl(c, addr, "call target outside any guest code module");
+    }
     uint32_t end = n3ds_ir_end(addr);
     if (!end) rt_unimpl(c, addr, "unknown function/import");
     n3ds_ir_run(c, addr, end);

@@ -161,6 +161,9 @@ static int target_viewport_scaled(void *ctx, unsigned logical_w,
 static int target_has_depth(void *ctx, void *native) {
     (void)ctx; Node *n = native; return n ? n->has_depth : 0;
 }
+static int depth_clear(void *ctx, unsigned flags, uint32_t depth_stencil) {
+    (void)ctx; (void)flags; (void)depth_stencil; return 0;
+}
 static int target_depth_attach(void *ctx, void *native) {
     Ctx *c = ctx; Node *n = native;
     if (!n || n->has_depth) return 0;
@@ -194,6 +197,7 @@ static const D9Backend ops_full = {
     .target_viewport_scaled = target_viewport_scaled,
     .target_has_depth = target_has_depth,
     .target_depth_attach = target_depth_attach,
+    .depth_clear = depth_clear,
     .target_create_linear = target_create_linear,
     .target_suspend = target_suspend,
     .target_resume = target_resume,
@@ -307,6 +311,7 @@ static void test_four_512_with_back_buffer(void) {
     }
     assert(c.binds >= 3);
     assert(c.resumes == 1);
+    assert(d9_set_render_target(d, 0) == D9_OK); /* leave the RT current */
     for (unsigned i = 0; i < 3; ++i)
         assert(d9_release_texture(d, tex[i]) == D9_OK);
     assert(c.vram_used == 1u << 20); /* only the retained back buffer remains */
@@ -523,6 +528,50 @@ static void test_downscale_fallback(void) {
     puts("E: downscale to 128x128 PO2 storage under VRAM pressure PASS");
 }
 
+/* A released current target stays current until the next SetRenderTarget: the
+ * device keeps the D3D reference, so its logical size still validates a
+ * matching depth surface.  After the switch the old depth is rejected. */
+static void test_released_current_target_is_retired(void) {
+    env_set("N3DS_TARGET_VRAM_LIMIT", "5M");
+    env_set("N3DS_TARGET_POOL_ENTRIES", "0");
+    env_set("TESV_D3D9_TARGET_NATIVE_MAX", "512");
+    Ctx c; memset(&c, 0, sizeof c);
+    c.vram_limit = 8u << 20;
+    D9Device *d = d9_create_device(&ops_full, &c, 32u << 20);
+    assert(d);
+    assert(d9_set_back_buffer_info_ex(d, 400, 240, D9_A8R8G8B8, 1) == D9_OK);
+    frame(d, 0);
+
+    D9Handle rt = 0;
+    assert(d9_create_render_target(d, 512, 512, D9_A8R8G8B8, 0, &rt) == D9_OK);
+    assert(d9_set_render_target(d, rt) == D9_OK);
+    unsigned deletes = c.deletes;
+    assert(d9_release_render_target(d, rt) == D9_OK);
+    /* Still current, still valid for its 512x512 depth. */
+    assert(d9_get_render_target(d) == rt);
+    assert(c.deletes == deletes);
+    D9Handle dep512 = 0, dep400 = 0, dep512b = 0;
+    assert(d9_create_depth_surface(d, 512, 512, D9_D24S8, 0, 0, 0, &dep512) == D9_OK);
+    assert(d9_set_depth_surface(d, dep512) == D9_OK);
+    assert(d9_set_depth_surface(d, 0) == D9_OK);
+
+    /* Switching away retires the storage; the old depth no longer matches. */
+    assert(d9_set_render_target(d, 0) == D9_OK);
+    assert(d9_get_render_target(d) == 0);
+    assert(c.deletes == deletes + 1);
+    assert(d9_set_depth_surface(d, dep512) == D9_INVALID);
+
+    assert(d9_create_depth_surface(d, 400, 240, D9_D24S8, 0, 0, 0, &dep400) == D9_OK);
+    assert(d9_set_depth_surface(d, dep400) == D9_OK);
+    assert(d9_create_depth_surface(d, 512, 512, D9_D24S8, 0, 0, 0, &dep512b) == D9_OK);
+    assert(d9_set_depth_surface(d, dep512b) == D9_INVALID);
+    assert(d9_release_depth_surface(d, dep512) == D9_OK);
+    assert(d9_release_depth_surface(d, dep400) == D9_OK);
+    assert(d9_release_depth_surface(d, dep512b) == D9_OK);
+    assert(d9_destroy_device_ex(d) == 0);
+    puts("G: released current RT stays current until SetRenderTarget, then depth is rejected PASS");
+}
+
 int main(void) {
     test_four_512_with_back_buffer();
     test_eviction_and_current_rt();
@@ -530,6 +579,7 @@ int main(void) {
     test_named_refusal();
     test_sampleable_eviction_and_resume();
     test_downscale_fallback();
+    test_released_current_target_is_retired();
     env_set("N3DS_TARGET_VRAM_LIMIT", NULL);
     env_set("N3DS_TARGET_POOL_ENTRIES", NULL);
     env_set("TESV_D3D9_TARGET_NATIVE_MAX", NULL);

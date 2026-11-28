@@ -294,6 +294,7 @@ int main(void) {
         }
         assert(np.last_u[1] > eu - 1e-5f && np.last_v[2] > ev - 1e-5f);
         assert(d9_end_scene(dnp) == D9_OK);
+        assert(d9_set_render_target(dnp, 0) == D9_OK); /* not current when released */
         assert(d9_release_texture(dnp, rt) == D9_OK);
     }
     assert(np.target_deletes == 5);

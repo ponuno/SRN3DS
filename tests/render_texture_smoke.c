@@ -100,6 +100,7 @@ static void core_render_texture(void) {
 
     /* Releasing the texture releases exactly one backing target. */
     assert(d9_null_stats()->target_creates == 3);
+    assert(d9_set_render_target(d, 0) == D9_OK); /* not the current target */
     assert(d9_release_texture(d, tex) == D9_OK);
     assert(d9_null_stats()->target_deletes == 3);
     assert(d9_set_render_target(d, tgt) == D9_INVALID);

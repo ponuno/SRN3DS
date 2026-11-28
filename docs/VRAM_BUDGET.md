@@ -224,6 +224,51 @@ Measured with `vrampage` (sha256 `E735655A…`, 96x8 + pageable `.text`
 
 ## What is left
 
+* **`003ba588` is gone.** After the AOT/thunk-range guard the run no longer
+  jumps to the 3dsx `.data`; the new first fault is a **call to 0x00000000**
+  (`IR: unsupported opcode in decoded stream`) on thread id 9
+  (`start=00a4b4a0`). Azahar then reports
+  `unmapped Read32 @ 0x6BDD7F82 at PC 0x0028D598` (libc) and a GPU write to
+  `0x21A80048` during teardown. So the corrupted pointer is still produced,
+  but it is now a null function pointer instead of an app address.
+* **Retire did not change the depth mismatch.** `SetDepthStencilSurface`
+  still reports `depth 512x1024` against the `400x240` back buffer hundreds of
+  times, so the engine sets a 512x1024 depth while the back buffer is current
+  for another reason (order of SetDepth/SetRenderTarget or a failed
+  SetRenderTarget), not because the current RT was released. The retire path
+  itself is covered by `vram_budget` G.
+* **Host `free` corruption is not in the BSA overlay.** No `free`/`realloc`
+  exists in `win32_bsa_overlay`/`menu_bsa_runtime`. The libc fault walking a
+  chunk full of `Data...` string bytes, plus the GPU address violation, point
+  at host-heap corruption from writing through a stale host pointer (swap
+  recycled block is the leading suspect). Next: heap-ownership guard around
+  free/realloc plus a `N3DS_SWAP=0` run on a profile that can reach the same
+  point.
+* `[menu] enter 00876f60` is still 0; last entries `00892da0`, `00898430`.
+
+
+* **Current-RT lifetime fixed.** `d9_release_render_target` no longer destroys
+  the device's current target: it sets `Target.retired` and keeps the slot,
+  id and native alive until `SetRenderTarget` replaces it, matching D3D9's
+  device reference. Test `vram_budget` G pins it: after releasing the current
+  512x512 target a 512x512 depth surface is still accepted; after
+  `SetRenderTarget(0)` the same depth is `D9_INVALID` and the native is freed
+  on that switch.
+* **AOT target guard.** `ir_exec` now rejects call/return targets outside the
+  guest code/thunk ranges (`0x00400000..0x02000000`, `0x08000000..0x0C000000`,
+  `0xfd000000..0xff200000` for the COM/win32 thunks) with
+  `call target outside any guest code module` and a `[target] target= from=
+  esp=` line. The first build's guard was too narrow and rejected legitimate
+  `0xff000094` thunk calls at boot; the ranges above include them.
+* **Guest pointer reaching host `free` is not in the BSA overlay.**
+  `win32_bsa_overlay`/`menu_bsa_runtime` contain no `free`/`realloc` at all.
+  Azahar's `_free_r` walk over a chunk containing `Data...` therefore points
+  at host-heap corruption from writing through a stale host pointer (swap's
+  safe-point rule is the prime suspect: a recycled page block reused as a path
+  string), not at a direct `free(guest_ptr)` in the overlay. A hardening check
+  needs a host-heap ownership test before free/realloc; that is the next item.
+
+
 * Swap A/B: `N3DS_SWAP=0` cannot reach the corruption point — without swap the
   same path exhausts guest backing at 71.16 MiB first, so the swap hypothesis
   cannot be isolated by turning it off. Additional eviction (`target=32`,
