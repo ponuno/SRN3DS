@@ -5,6 +5,12 @@ that boots the real `TESV.exe` under the lifted x86 runtime on a New 3DS. It
 does not claim a playable frame. The CIA contains locally generated code derived
 from the owner's game files; do not distribute it.
 
+Current artifact: **120x24** profile (newlib 120 MiB / linear 24 MiB) with both
+memory fixes enabled — the global 6 MiB VRAM budget and the pageable read-only
+`.text` window. The guest working set on the host is **44.4 MiB** (was 57.2 MiB
+before paging), so this profile fits the guest budget with large headroom and
+still leaves a 24 MiB linear heap.
+
 ## 1. Why a CIA and not a `.3dsx`
 
 The slice needs the New 3DS **178 MiB application region**, 804 MHz and the L2
@@ -26,19 +32,26 @@ UniqueId        : 0xF0D59   -> title ID 000400000F0D5900
 ## 2. Build
 
 ```powershell
-# from the worktree root; needs staged/ and pilot_out_mult/ (build artifacts)
+# from the worktree root; staged/ and pilot_out_mult/ must exist (they are
+# shared, git-ignored inputs: tools\prepare_worktree.ps1 junctions them in)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
     -Mode tesv `
     -TesvGen E:\Skyrim_N3DS_build\live_arm_check2\gen `
-    -MemProfile 136x8 `
+    -MemProfile 120x24 `
     -TesvArmSteps 2000000000 `
-    -Isolated cia136 -Jobs 8
+    -Opt -O2 `
+    -Isolated 120x24 -Jobs 8
 
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_cia.ps1 `
-    -Elf dist\Skyrim_N3DS_tesv_cia136\Skyrim_N3DS_tesv_cia136.elf `
-    -Out E:\cia_menu\Skyrim_N3DS_tesv_136x8.cia `
-    -WorkDir E:\cia_menu\work_136x8
+    -Elf dist\Skyrim_N3DS_tesv_120x24\Skyrim_N3DS_tesv_120x24.elf `
+    -Out E:\cia_menu\Skyrim_N3DS_tesv_120x24.cia `
+    -WorkDir E:\cia_menu\work_120x24
 ```
+
+`pilot_out_mult\D3DXMatrixMultiply\gen` is picked up automatically by the
+`TESV_SLICE` OFILES block when present (the lifted D3DX bodies must be
+dispatchable on device); `staged/` provides `lift.py`/`fpu.c` and the Win32
+shims. Both are linked from the worktree via junctions, not copies.
 
 Two generated tables are viable:
 
@@ -60,27 +73,45 @@ menu needs roughly 2e9 blocks; the host run stops at
 `pilot basic-block budget exceeded` with 2e9 and 4e9 as well, so 2e9 is the
 documented measurement value, not a limit that makes the menu finish.
 `make` does not track `DEFINES`, so changing `-MemProfile` requires a clean
-build. The three delivered profiles were produced by rebuilding only
-`tesv_slice_main.o` in a copied object directory (no other object reads the
-profile macros); `build.ps1` itself still performs a clean build by default.
+build. `build.ps1` performs a clean build by default; `-NoClean` is only safe
+when the profile macros are unchanged (it is what was used for the re-link after
+the two `n3ds_env_cfg` allowlist keys were added).
 
-### Delivered artifacts (2026-11-27, worktree `azahar-menu` @ 82d84dd)
+### Delivered artifact (2026-11-28, worktree `cia-final` @ `dc8e0fa`)
 
 | profile | CIA | bytes | sha256 |
 |---|---|---:|---|
-| **136x8** | `E:\cia_menu\Skyrim_N3DS_tesv_136x8.cia` | 1,552,832 | `15e06bb0e2352ece455388cf9ac11831499d79188ab652dcbe37eb95c1270525` |
+| **120x24** | `E:\cia_menu\Skyrim_N3DS_tesv_120x24.cia` | 1,566,656 | `6cb076b18f61700975a5ef9f7086ad7c5c965b18ee91fc1ffb0e0c53f4e2e0bf` |
+
+ELF: `dist\Skyrim_N3DS_tesv_120x24\Skyrim_N3DS_tesv_120x24.elf`
+(12,342,544 B, sha256 `f61c65996c009f4fc9a905adcd08f3fdcb78f5db2a3a0a203887bf6a8c0d1358`).
+`build_manifest.json` records `mem_profile=120x24`,
+`defines=-DTESV_HEAP_MIB=120 -DTESV_LINEAR_MIB=24`, and the generator hash of
+`live_arm_check2\gen`. The CIA reports title ID `000400000F0D5900` and
+`SystemModeExt=178MB CpuSpeed=804MHz EnableL2Cache=true` (checked by
+`build_cia.ps1`; see `work_120x24\cia_info.txt`).
+
+Build-time evidence in this ELF (checked with `arm-none-eabi-nm` and string
+search): paging (`pe_image_load`, `pe_image_touch_report`, `guest_range_mapped`,
+`guest_slab_set_window`), VRAM accounting (`d9_target_stats`,
+`d9_citro_vram_stats`, literal `[d3d9-vram] budget …`), the device config read
+(`n3ds_env_cfg_load`/`n3ds_env_cfg_parse_stream`) and the strings
+`N3DS_TEXT_WINDOW_MB`, `N3DS_VRAM_LIMIT`, `N3DS_TARGET_VRAM_LIMIT`.
+
+Previous profiles (2026-11-27, worktree `azahar-menu` @ `82d84dd`, **no paging,
+no VRAM budget** — kept only for comparison, all three are superseded):
+
+| profile | CIA | bytes | sha256 |
+|---|---|---:|---|
+| 136x8 | `E:\cia_menu\Skyrim_N3DS_tesv_136x8.cia` | 1,552,832 | `15e06bb0e2352ece455388cf9ac11831499d79188ab652dcbe37eb95c1270525` |
 | 132x12 | `E:\cia_menu\Skyrim_N3DS_tesv_132x12.cia` | 1,552,832 | `d656dc0f64845f1fd2065b02c3bab39b0a08168172acc37a52631c15cb22cc4b` |
 | 128x16 | `E:\cia_menu\Skyrim_N3DS_tesv_128x16.cia` | 1,552,832 | `7215c9ffd8f1d95e8cddcbdb43b588e5caf1e0ffefafaa5c60c16512a0138b04` |
 
-All three report title ID `000400000F0D5900` and exheader
-`SystemModeExt=178MB CpuSpeed=804MHz EnableL2Cache=true`. The profile macros
-baked into each object are recorded in `build_manifest.json`
-(`defines=-DTESV_HEAP_MIB=… -DTESV_LINEAR_MIB=…`).
-
 Whether both heaps are actually created is only observable on device: the first
-`Skyrim_N3DS_mem.log` lines must say `heap_mib=… linear_mib=… have_newlib=1`
-and the console prints `[mem] profile …`. No hardware run was available while
-building this, so the table is arithmetic + build evidence, not a boot result.
+`Skyrim_N3DS_mem.log` lines must say `heap_mib=120 linear_mib=24 have_newlib=1`
+and the console prints `[mem] profile 120x24 …`. No hardware run was available
+while building this, so the profile is arithmetic + build evidence, not a boot
+result.
 
 The IR container is opened at `sdmc:/Skyrim/ir/tesv.irc` (override
 `N3DS_IRC_PATH`). Use the MMX container
@@ -90,52 +121,56 @@ rebuild, so trust the file size).
 
 ## 3. Memory profile
 
-The device envelope is `heap + linear + 34 MiB non-heap <= 178 MiB`.
+The device envelope is `heap + linear + 34 MiB non-heap <= 178 MiB`. VRAM is a
+separate pool: the New 3DS has 10 MiB of physical VRAM but only **6 MiB are
+usable** by an application, and the Citro3D backend keeps 256 KiB of slack, so
+the enforced cap is 5.75 MiB (section 5).
 
 | profile | newlib heap | linear | guest budget | region sum | verdict |
 |---|---:|---:|---:|---:|---|
-| 128x16 | 128 | 16 | 124 | 178 | guest peak 129.4 > 124 — expect guest OOM |
-| 132x12 | 132 | 12 | 128 | 178 | 1.4 MiB short of the measured peak |
-| **136x8** | **136** | **8** | **132** | **178** | 2.6 MiB guest headroom; tight linear |
+| 96x8 | 96 | 8 | 92 | 138 | `.3dsx`-era region: guest OOM at 78 MiB used |
+| 136x8 | 136 | 8 | 132 | 178 | superseded: 8 MiB linear refuses menu targets |
+| **120x24** | **120** | **24** | **116** | **178** | current: 44.4 MiB guest used, 24 MiB linear |
 
-Measured host guest peak is **129.4 MiB**, so only `136x8` leaves guest
-headroom. The price is an 8 MiB linear heap. Arenas alone take ~4.35 MiB, so the
-menu's render targets/textures can hit `linear_fail_n > 0`. That is visible in
-`Skyrim_N3DS_mem.log` (`linear_fail_n`, `linear_fail_bytes`, `alloc_failures`).
-If it binds, the next candidates are `132x12` (12 MiB linear, 128 MiB guest) and
-`128x16` (16 MiB linear, 124 MiB guest), both of which need the guest peak
-reduced first. The SD config described in section 5 can lower texture-cache
-pressure without a rebuild, but it cannot enlarge the compiled 8 MiB linear
-heap.
+Before paging, the measured host guest peak was 129.4 MiB and only `136x8` fit,
+at the price of an 8 MiB linear heap (arenas alone take ~4.35 MiB, so
+`linear_fail_n` rose). Paging the read-only image text in a bounded window cut
+the guest working set to **44.4 MiB** (3.18 MiB `.text` + 0.87 MiB `.rdata` hot
+set at the main menu, 5 MiB window). That is what makes `120x24` possible: the
+24 MiB linear heap now holds the render targets and the 116 MiB guest budget is
+2.6x the measured need.
 
 `guest_budget` is only a cap on guest pages: the host-side structures live in
-the *same* newlib heap. At menu time the measured residents are roughly 4 MiB
-IRC record cache + 3.5 MiB IRC index + 2.5 MiB BSA resident + 2 MiB stream
-cache + 4 MiB decoded-IR cache ≈ 16 MiB. With 129.4 MiB of guest pages that is
-~145 MiB, more than the 136 MiB heap, so `136x8` may still fail on `malloc`
-before or during StartMenu even though the guest cap alone fits. The log tells
-the two apart: `newlib_free`/`malloc` failure with low `guest_used` is a host
-resident problem, while `guest_backing_failures` with `guest_used` near
-`guest_limit` is the guest cap. The levers are the IRC cache
-(`N3DS_IRC_CACHE_BYTES`), the BSA/stream limits and, as a last resort, dropping
-`Skyrim - Meshes.bsa`/`- Textures.bsa` from the card.
+the *same* 120 MiB newlib heap. At menu time the measured residents are roughly
+4 MiB IRC record cache + 3.5 MiB IRC index + 2.5 MiB BSA resident + 2 MiB stream
+cache + 4 MiB decoded-IR cache ≈ 16 MiB, so 44.4 + 16 ≈ 61 MiB of 120 MiB. The
+log tells the two failure kinds apart: `newlib_free`/`malloc` failure with low
+`guest_used` is a host-resident problem, while `guest_backing_failures` with
+`guest_used` near `guest_limit` is the guest cap.
+
+The paging window itself is a knob: `N3DS_TEXT_WINDOW_MB` (default `5`) sizes
+the evictable read-only window in MiB; `0` disables paging and maps the whole
+image. Lowering it shrinks `guest_used` further at the cost of more page faults
+per frame, so it is the first lever when the guest budget is the binding limit.
 
 Expected boot lines on device:
 
 ```
-[mem] profile 136x8 MiB (newlib/linear): heap=136 MiB linear=8 MiB reserve=4 MiB guest_budget=132 MiB
+[mem] profile 120x24 MiB (newlib/linear): heap=120 MiB linear=24 MiB reserve=4 MiB guest_budget=116 MiB
 App region: 178 MiB, free <N> MiB
 ```
 
 If `App region` is not 178, the CIA was installed with the wrong memory mode;
-reinstall it (a `.3dsx` cannot reach 178).
+reinstall it (a `.3dsx` cannot reach 178; it is limited to a 92 MiB region, where
+the guest already reached 78 MiB used before OOM).
 
 ## 4. SD card layout
 
 Root: `sdmc:/Skyrim/`.
 
 ```
-sdmc:/Skyrim_N3DS.cfg                      optional (runtime env-style settings, section 5)
+sdmc:/Skyrim_N3DS.cfg                      recommended (runtime settings, section 5)
+sdmc:/Skyrim/tesv_d3d9_budget.txt                      2 B   (texture-cache MiB, see below)
 sdmc:/Skyrim/TESV.exe                       17,462,064 B   (required)
 sdmc:/Skyrim/Skyrim.ini                          < 200 B   (required, see below)
 sdmc:/Skyrim/ir/tesv.irc                 65,688,624 B      (required, MMX container)
@@ -161,6 +196,18 @@ archives explicitly instead. `Update.bsa` supplies the effective
 
 Do **not** copy `Data/Video/*`; the intro is skipped by the INI below. Do not
 copy `Skyrim - Sounds.bsa` / `Voices*.bsa` for a menu run.
+
+`sdmc:/Skyrim/tesv_d3d9_budget.txt` is a one-line file holding the texture-cache
+budget in MiB; the launcher reads it before graphics init and exports it as
+`TESV_D3D9_BUDGET_MB`. The 4 MiB compiled default is too small for the real menu
+path, so write:
+
+```
+32
+```
+
+The first character must be `1`–`9`, otherwise the line is ignored and the
+compiled default stays. No trailing spaces or units.
 
 Minimal `sdmc:/Skyrim/Skyrim.ini`:
 
@@ -194,12 +241,15 @@ The default path is `sdmc:/Skyrim_N3DS.cfg`. An env-aware launcher may override
 it with its first `main` argument, or with `TESV_CFG`; argument takes precedence.
 `TESV_CFG` itself must be set by the launcher, not by this file.
 
-Minimal/recommended file:
+Recommended file for the 120x24 CIA:
 
 ```cfg
-# Skyrim N3DS device runtime settings
+# Skyrim N3DS device runtime settings (120x24 profile)
 N3DS_TEX_GPU_LIMIT=6M
 N3DS_TEX_GUEST_LIMIT=16M
+N3DS_VRAM_LIMIT=6M
+N3DS_TARGET_VRAM_LIMIT=4352K
+N3DS_TEXT_WINDOW_MB=5
 N3DS_STREAM=0
 
 # Optional overrides (uncomment to use):
@@ -222,17 +272,28 @@ and the file, the launcher supplies these defaults:
 * `N3DS_TEX_GPU_LIMIT=6M`: the texture cache's GPU allocation budget stays
   within the PICA200's 6 MiB VRAM instead of competing without a cap with render
   targets and depth buffers.
-* `N3DS_TEX_GUEST_LIMIT=16M`: a conservative guest-side texture-cache cap for
-  the measured ~29 MiB host texture working set. It reduces unbounded guest/
-  host growth under the 136x8 profile's tight heaps; it is a starting value,
-  not a claim of a measured optimum.
+* `N3DS_TEX_GUEST_LIMIT=16M`: guest-side texture-cache cap for the measured
+  ~29 MiB host texture working set; a starting value, not a measured optimum.
+* `N3DS_VRAM_LIMIT=6M`: the global VRAM budget enforced by the Citro3D backend
+  (6 MiB usable minus 256 KiB slack = 5.75 MiB). Every on-VRAM allocation —
+  LCD render target, 2D colour/depth, SR storage, cube-face depth views — is
+  charged here, and a refusal is logged by name.
+* `N3DS_TARGET_VRAM_LIMIT=4352K`: the render-target share of that budget (4.25
+  MiB), enough for the four 512x512 menu targets plus the retained back
+  buffer/depth, the LCD target and the transient targets.
+* `N3DS_TEXT_WINDOW_MB=5`: evictable window for the read-only part of
+  `TESV.exe` (`.text` + `.rdata`), sized for the 3.18 + 0.87 MiB hot set. `0`
+  maps the whole image and brings back the 129.4 MiB-era guest peak.
 * `N3DS_STREAM=0`: the menu route does not need the cooked cell stream. Keeping
   it off avoids opening `stream_index.bin` and allocating its staging/cache
   structures. Set it to `1` only with a valid index and data directory.
 
+The first four keys are applied before `d9_citro_open()`, the paging window
+before `guest_init()` maps the image, so no key needs a rebuild to take effect.
+
 Every applied config/default key is written as `[cfg] KEY=VALUE` to stderr and
 `sdmc:/Skyrim_N3DS_stderr.log`. Check those lines after launch to confirm the
-file was read.
+file was read; `[cfg] … ignored` means a key is not in the allowlist below.
 
 ### Supported keys
 
@@ -240,6 +301,9 @@ file was read.
 |---|---|---|
 | `N3DS_TEX_GPU_LIMIT` | `6M` | texture-cache GPU bytes; plain bytes or `K`/`M`/`G` suffix |
 | `N3DS_TEX_GUEST_LIMIT` | `16M` | texture-cache guest bytes; same suffix format |
+| `N3DS_VRAM_LIMIT` | `6M` | global Citro3D VRAM budget; `0` is not valid and falls back to `6M` |
+| `N3DS_TARGET_VRAM_LIMIT` | `4352K` | render-target slice of the VRAM budget; `0` disables the target cap |
+| `N3DS_TEXT_WINDOW_MB` | `5` | pageable read-only image window in MiB; `0` = whole image resident |
 | `N3DS_STREAM` | `0` | `1` enables cooked cell streaming; `0` disables it |
 | `N3DS_STREAM_INDEX` | `sdmc:/Skyrim/stream_index.bin` | stream index path when enabled |
 | `N3DS_STREAM_DATA` | `sdmc:/Skyrim/Data` | archive data directory when enabled |
@@ -256,24 +320,40 @@ The allowlist deliberately excludes `TESV_D3D9_CAPS_PROBE`,
 probe/capability flags. This config cannot change `DevCaps`; it stays
 `0x00082000` without the separate probe flag files below.
 
+`N3DS_TEXT_WINDOW_MB` and `N3DS_TARGET_VRAM_LIMIT` are new in this build. Both
+were environment-only before, which is unreachable on a CIA; they are now in the
+allowlist (`source/n3ds_env_cfg.c`) and covered by `tests/device_cfg_smoke.c`.
+
 ### Changing limits without rebuilding
 
 Edit `sdmc:/Skyrim_N3DS.cfg` in a text editor and relaunch the CIA. The file is
-read once at startup, so no CIA rebuild is needed. For example, if the memory
-log shows texture-cache pressure, try guest limits `12M` or `8M` while keeping
-the GPU limit at or below `6M`:
+read once at startup, so no CIA rebuild is needed. Lower texture limits can
+reduce cache growth, but they do not add linear heap; the compiled split
+(`120x24`) only changes with `-MemProfile` and a rebuild.
 
 ```cfg
 N3DS_TEX_GPU_LIMIT=6M
 N3DS_TEX_GUEST_LIMIT=12M
+N3DS_VRAM_LIMIT=6M
+N3DS_TARGET_VRAM_LIMIT=4352K
+N3DS_TEXT_WINDOW_MB=5
 N3DS_STREAM=0
 ```
 
-Lower texture limits can reduce cache growth, but they do not add linear heap.
-If `linear_fail_n` keeps rising, non-evictable render targets or the compiled
-8 MiB linear heap are still the limit; a different memory profile requires a
-rebuild. Do not “fix” OOM by enabling `TESV_MEMPROBE`: its 512 MiB value is
-intentionally false and only useful for a controlled measurement.
+**If the run ends in an out-of-memory line**, read `Skyrim_N3DS_mem.log` first
+and act on the counter that actually moved:
+
+| log evidence | what ran out | first lever |
+|---|---|---|
+| `newlib_free` near 0, low `guest_used` | host residents in the 120 MiB newlib heap | `N3DS_IRC_CACHE_BYTES=2097152`, then `N3DS_TEX_GUEST_LIMIT=8M`; drop `Skyrim - Textures.bsa` from card + INI as a last resort |
+| `guest_backing_failures` > 0 with `guest_used` near `guest_limit` (116 MiB) | guest page cap | `N3DS_TEXT_WINDOW_MB=4` (then `3`) shrinks the resident read-only image; verify `guest_used` fell in the next snapshot |
+| `linear_fail_n` / `linear_fail_bytes` rising | 24 MiB linear heap (arenas, targets, textures) | lower `N3DS_TARGET_VRAM_LIMIT` to `3840K`, then `N3DS_TEX_GPU_LIMIT=4M`; check whether named `[d3d9-vram] … refused` lines appear |
+| `[d3d9-vram] … refused: live … > … usable` | the 5.75 MiB device VRAM cap | lower `N3DS_TARGET_VRAM_LIMIT` (targets dominate); `N3DS_VRAM_LIMIT` must stay `6M` |
+| `vram_fail_n` > 0 but no `linear_fail_n` | citro3d's own pool probe, not the app budget | usually harmless; compare `vram_live` with the target cap |
+
+Any single change is one relaunch, so change one key at a time. Do not “fix” OOM
+by enabling `TESV_MEMPROBE`: its 512 MiB value is intentionally false and only
+useful for a controlled measurement.
 
 Probe/flag files (measurement only, never ship):
 
@@ -290,12 +370,13 @@ them; do not create them for a real StartMenu run.
 1. Install the CIA with FBI/GM9 (or Azahar `File -> Install CIA`). The title
    must show as using the New 3DS / 178 MiB mode; a title installed without the
    RSF memory mode will report `App region: 96 MiB` or fail to allocate heaps.
-2. Copy `sdmc:/Skyrim` as in section 4. FAT32, no junction points.
-3. Create `sdmc:/Skyrim_N3DS.cfg` using the example in section 5. It is
-   optional; without it the launcher still applies the `6M`/`16M`/stream-off
-   defaults.
+2. Copy `sdmc:/Skyrim` as in section 4 plus `sdmc:/Skyrim_N3DS.cfg` and
+   `sdmc:/Skyrim/tesv_d3d9_budget.txt` (contents `32`). FAT32, no junction
+   points.
+3. Without the cfg the launcher still applies `6M`/`16M`/`6M`/`4352K`/`5`/
+   stream-off defaults, but the budget file is needed for the menu path.
 4. Launch from the home menu. The top screen shows the diagnostic console.
-5. Confirm `[cfg] ...` lines in `sdmc:/Skyrim_N3DS_stderr.log`, then wait. The
+5. Confirm `[cfg] …` lines in `sdmc:/Skyrim_N3DS_stderr.log`, then wait. The
    host needs ~228 s to the menu load stall; on hardware, allow **15–25
    minutes** before calling it stuck. Watch `sdmc:/Skyrim_N3DS_mem.log` (append,
    flushed every line) rather than the scrolling console.
@@ -305,8 +386,11 @@ them; do not create them for a real StartMenu run.
 `Skyrim_N3DS_tesv.log` (guest stdout/stderr) must contain, in order:
 
 ```
-[mem] profile 136x8 MiB ...
+[mem] profile 120x24 MiB (newlib/linear): heap=120 MiB linear=24 MiB reserve=4 MiB guest_budget=116 MiB
 App region: 178 MiB, free ...
+[d3d9-vram] budget 5888 KiB (N3DS_VRAM_LIMIT, 256 KiB slack)
+[probe] TESV_D3D9_BUDGET_MB=32 from flag file
+mem tag=init ... guest_budget=121634816 guest_used=... linear_mib=24
 [menu] enter 00876f60                 StartMenu create
 [menu] enter 00876b90                 ctor
 [menu] enter 00a60c80 / 00a60c10      Menu::CreateMovie / path builder
@@ -315,6 +399,18 @@ CreateVertexShader / CreatePixelShader counts > 0
 BeginScene=… Present=… Clear=…
 DrawIndexedPrimitive=…                menu draw (the current wall)
 ```
+
+The checkpoint lines before `[menu] enter` are the fix checkpoints:
+
+* `[mem] profile 120x24 … guest_budget=116` proves the profile macros reached
+  `tesv_slice_main.o` and the heap arithmetic held.
+* `[d3d9-vram] budget 5888 KiB` proves the new VRAM accounting is linked and
+  the global cap is active (6 MiB − 256 KiB slack).
+* `[probe] TESV_D3D9_BUDGET_MB=32 from flag file` proves
+  `sdmc:/Skyrim/tesv_d3d9_budget.txt` was read.
+* `mem tag=init … guest_used=…` (the first `init` snapshot in
+  `Skyrim_N3DS_mem.log`) proves paging: `guest_used` must be well below the
+  pre-paging 57.2 MiB, i.e. in the ~44 MiB range as the image is faulted in.
 
 Known-good host counts at this point: 874/874 engine VS `S_OK`, 368
 declarations, 40/40 GFx PS `S_OK`, 2 `BeginScene`/`EndScene`/`Present`, then
@@ -328,25 +424,29 @@ Distinguishing failure modes:
 |---|---|---|
 | `[mem] FATAL: guest budget arithmetic failed` | profile macros inconsistent | rebuild; do not flash |
 | `App region: 96 MiB` | CIA without 178 MB extheader | reinstall with the RSF |
-| `alloc_failures` / `guest_backing_failures` / `guest ... failed` | guest pages or host residents exhausted (129.4 MiB peak > 132 budget) | stop; lower `N3DS_TEX_GUEST_LIMIT`/IRC cache in the SD config, reduce guest peak, or move to 132x12/128x16 after trimming |
-| `linear_fail_n>0` / `linear_fail_bytes=…` | 8 MiB linear heap bound first | lower texture limits in the SD config; if non-evictable targets still bind, rebuild 132x12 and trim guest |
+| `newlib_free` near 0 / `malloc` failed, low `guest_used` | host residents in the 120 MiB newlib heap | lower `N3DS_IRC_CACHE_BYTES` (2 MiB), then `N3DS_TEX_GUEST_LIMIT=8M` |
+| `guest_backing_failures` > 0, `guest_used` ≈ 116 MiB | guest page cap | lower `N3DS_TEXT_WINDOW_MB` (4, then 3); check `guest_used` in the next snapshot |
+| `linear_fail_n>0` / `linear_fail_bytes=…` | 24 MiB linear heap bound | lower `N3DS_TARGET_VRAM_LIMIT`, then `N3DS_TEX_GPU_LIMIT` |
+| `[d3d9-vram] … refused` / `vram_fail_n` | 5.75 MiB device VRAM cap | lower `N3DS_TARGET_VRAM_LIMIT`; keep `N3DS_VRAM_LIMIT=6M` |
+| `[cfg] … ignored` for a key you set | key not in the allowlist (typo, or probe flag) | use a key from the table in section 5 |
 | no `[cfg] KEY=VALUE` lines | config missing or key already present in launcher env | check `sdmc:/Skyrim_N3DS.cfg`, path override and stderr log |
 | `pilot basic-block budget exceeded` | 2e9 blocks consumed | expected ceiling; not OOM |
 | `Guest fault at <addr>` in the log | real guest bug at that VA | report address + `irc_fn` + last call |
 
-`Skyrim_N3DS_mem.log` snapshots (`boot`, `arenas`, `start`, `exit`,
+`Skyrim_N3DS_mem.log` snapshots (`boot`, `arenas`, `start`, `init`, `exit`,
 `alloc_fail`) carry `heap_mib`, `linear_mib`, `guest_used/peak/limit`,
 `newlib_free`, `linear_free/linear_min_free`, `linear_fail_n/bytes`,
 `vram_*`, `irc_*`, `bsa_*`, `stream_*`, `tex_*` and `os_region_*`. The first
 `boot` and `arenas` lines prove whether both heaps were created before any guest
-code ran.
+code ran; `init` is the first line that can show the paged `guest_used`.
 
 ## 8. Limits
 
 - StartMenu creation and `Present` are the measured frontier; a GFx menu draw
   and a visible menu are not claimed.
 - The 2e9 step budget does not complete the menu on the host.
-- `136x8` is chosen by arithmetic (guest needs 129.4 MiB), not by a hardware
-  run. The linear heap risk is real and must be read from `linear_fail_*`.
+- `120x24` is chosen from the post-paging 44.4 MiB host guest working set, not
+  from a hardware run. Both fixes are verified as linked and active, not as
+  pixels: read `guest_used` and `linear_fail_*` on the device.
 - No `DevCaps`, pixel or frame claim. Screenshots are only real emulator or
   hardware output.

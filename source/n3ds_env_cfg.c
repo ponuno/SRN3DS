@@ -12,6 +12,11 @@ static const char *const supported_keys[] = {
     "N3DS_TEX_GPU_LIMIT",
     "N3DS_TEX_GUEST_LIMIT",
     "N3DS_VRAM_LIMIT",
+    /* Read-only .text paging window (pe_image.c) and the render-target share of
+     * the VRAM budget (d3d9_core.c).  A CIA has no shell, so these knobs are
+     * only reachable from the allowlisted file. */
+    "N3DS_TEXT_WINDOW_MB",
+    "N3DS_TARGET_VRAM_LIMIT",
     "N3DS_STREAM",
     "N3DS_STREAM_INDEX",
     "N3DS_STREAM_DATA",

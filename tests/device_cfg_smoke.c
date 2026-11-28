@@ -60,17 +60,21 @@ int main(void) {
         "  N3DS_TEX_GPU_LIMIT = 4M  \n"
         "N3DS_TEX_GUEST_LIMIT=\"12M\"\n"
         "N3DS_STREAM = '1'\n"
+        "N3DS_TEXT_WINDOW_MB=4\n"
+        "N3DS_TARGET_VRAM_LIMIT=4352K\n"
         "N3DS_TEX_GPU_LIMIT = 6M ; duplicate: last wins\n"
         "N3DS_IRC_PATH = \"sdmc:/Skyrim/ir/custom file.irc\" # trailing comment\n"
         "N3DS_MEM_EVERY=\n"
         "UNKNOWN_DEVICE_CFG_KEY=ignored\n"
         "TESV_D3D9_CAPS_PROBE=1\n"
         "malformed line\n";
-    assert(n3ds_env_cfg_parse(text, &cfg, &ignored) == 5);
+    assert(n3ds_env_cfg_parse(text, &cfg, &ignored) == 7);
     assert(ignored == 3);
     assert(!strcmp(n3ds_env_cfg_get(&cfg, "N3DS_TEX_GPU_LIMIT"), "6M"));
     assert(!strcmp(n3ds_env_cfg_get(&cfg, "N3DS_TEX_GUEST_LIMIT"), "12M"));
     assert(!strcmp(n3ds_env_cfg_get(&cfg, "N3DS_STREAM"), "1"));
+    assert(!strcmp(n3ds_env_cfg_get(&cfg, "N3DS_TEXT_WINDOW_MB"), "4"));
+    assert(!strcmp(n3ds_env_cfg_get(&cfg, "N3DS_TARGET_VRAM_LIMIT"), "4352K"));
     assert(!strcmp(n3ds_env_cfg_get(&cfg, "N3DS_IRC_PATH"),
                    "sdmc:/Skyrim/ir/custom file.irc"));
     assert(!strcmp(n3ds_env_cfg_get(&cfg, "N3DS_MEM_EVERY"), ""));
