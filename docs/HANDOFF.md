@@ -25,7 +25,54 @@ Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
   on Azahar. Never claim a frame/pixel result without it.
 - `docs/PORT_LOG.md` is append-only, numbered rows. Add one row per landed layer.
 
-## Current state (2026-11-27, `main`)
+## Current state (2026-11-28, `main`)
+
+The section below describes 2026-11-27 and is kept for history. This one is current.
+
+- **`main` is green**: `tools\run_host_tests.ps1` reports 219+ passed, 0 failed.
+  The MMX IR container is canonical: `E:\census_ir2\ir_container\tesv.irc`
+  (90 110 decoded, SHA-256 `4DD060A5…0C12`; backup `.pre_mmx` beside it).
+- **Menu progress.** The real exe now creates the window, runs WinMain's frame
+  pump, loads menu assets and reaches the 3D menu path. Known checkpoints seen
+  on Azahar: `00892da0`, `00898430`, `00a5eaa0 from=00a60c3e`. `00876f60`
+  (StartMenu create) has **not** been reached yet; no menu frame is claimed.
+- **Memory work landed** (all measured, no `DevCaps` change):
+  - pageable read-only `.text` in a bounded window (`N3DS_TEXT_WINDOW_MB`,
+    default 5): guest 57.2 → 44.4 MiB, +2.8% time.
+  - compressed guest swap (vendored LZ4, safe-point eviction only, COW for
+    file-backed pages): guest 44.4 → 35.3 MiB, 3.21× compression, +1.6% time.
+    Device (`swap48`): `swap_out=920`, resident exactly 48 MiB, live ratio
+    13.45×, no swap failures.
+  - global 6 MiB VRAM budget (`N3DS_VRAM_LIMIT`, enforced 5.75 MiB; the 3DS
+    reserves 4 of the 10 MiB): evict → downscale → linear → named refusal.
+    `[d3d9-vram]` peak 5042/5888 KiB, 8 evictions, 0 refusals.
+  - compact IRC index (16 B/entry, 3.64 → 1.48 MB), IRC record cap 2 MB, decode
+    cache accounting fixed (4.98 MB real), churn removed.
+  - main-thread stack: libctru's 32 KiB overflowed in the menu path; strong
+    `__stacksize__ = 128 KiB` in `source/n3ds_boot.c` (`.3dsx`; the CIA
+    exheader already used 256 KiB).
+- **Device artifact**: `E:\cia_menu\Skyrim_N3DS_tesv_120x24_stack.cia`
+  (1 577 920 B, SHA-256 `47dbfc60…0EA4`, title `000400000F0D5900`, 178 MB /
+  804 MHz, profile 120x24). Install instructions: `docs/CIA_INSTALL.md`.
+  The older `Skyrim_N3DS_tesv_120x24.cia` is pre-stack-fix and marked invalid.
+- **Current blocker (menu).** The game sets `SetDepthStencilSurface(512x1024)`
+  before switching to the 512x1024 target, while the 400x240 back buffer is
+  current. We rejected it, the guest continued with a half-applied state and
+  then called a null function pointer:
+  `Guest fault at 00000000: IR: unsupported opcode in decoded stream`.
+  A host-heap corruption symptom (`Data...` in a heap chunk, `_free_r` walking
+  guest addresses) is being investigated with an ownership guard
+  (`source/mem_guard.c` on the `vram-budget` branch). Fix in flight: accept and
+  defer depth validation to `SetRenderTarget`/draw, log target switches.
+- **Fast loop**: `tools\fast_slice.ps1` (auto-stop on fault/draw, stderr
+  aware). Worktrees need `tools\prepare_worktree.ps1` (junctions `staged`,
+  `pilot_out_mult`, `.venv`); without the D3DX pilot table the slice faults at
+  `0x802fa80`, which is a build artifact, not a guest gap.
+- **World**: stream index schema 2 covers exteriors; compressed BSA ranges
+  work; Havok gravity runs in a host harness (world/body/context/queue/
+  integrate). World shader runtime paths are 18/691 — the honest backlog.
+
+## Older state (2026-11-27, `main`)
 
 - **Paths.** The game install lives at `E:\SteamLibrary\steamapps\common\Skyrim`;
   the host runs the decrypted exe `E:\skyr\TESV.exe` (entry `0xb568a1`; the Steam
