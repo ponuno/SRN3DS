@@ -32,12 +32,25 @@ The section below describes 2026-11-27 and is kept for history. This one is curr
 - **`main` is green**: `tools\run_host_tests.ps1` reports 219+ passed, 0 failed.
   The MMX IR container is canonical: `E:\census_ir2\ir_container\tesv.irc`
   (90 110 decoded, SHA-256 `4DD060A5…0C12`; backup `.pre_mmx` beside it).
-- **Menu creation is proven on the host.** The WinMain gate now falls through
+- **Menu creation is proven on the host.** The WinMain gate falls through
   (`[menu] enter 00876f60 from=0069de0f`, then `00876fc0` → `00876b90`), the
   singleton is non-zero (`[menustate] singleton=41f8eaf0 view=...`) and the GFx
-  message switch `008779d0` runs every frame. The remaining menu blocker is the
-  **draw**: `00877a50` (FadeInMenu) is not called yet, so no indexed menu frame
-  is claimed.
+  message switch `008779d0` runs every frame. `FadeInMenu` is **message type 0
+  inside that switch**, not a separate function: it arrives with `ptr=0`, the
+  StartMenu movie itself is loaded (`[movie+0x10]=1`), and the global fader
+  `[0x1b10dcc]+0x28` is **0**, so the fade case skips and no indexed menu frame
+  is drawn. A host-only experiment (`N3DS_MENU_FADE_FALLBACK=1`) routes the
+  menu's own loaded movie into that message; it was not yet measured with
+  enough CPU to reach the menu.
+- **Device menu path is the load pump, not the gate.** On Azahar the last
+  checkpoints are `00a4b500` (VMInitThread) → `[bink] _BinkSetSoundSystem` →
+  `[menu] enter 00a5d370 from=006f4045` (`mode=2/2 inload=1`), `singleton=0`,
+  `release h=50c` once (thread 10), `release h=504` never, no guest faults.
+  A hardcoded block-IP probe for `0x69dda4`, `0x69ddf5` and `0x6982c0` did not
+  fire in either IR executor, so the next step is a positive control
+  (`0xa4b500`/`0x6f4045`) plus a last-16-block ring to name the path that
+  actually reaches the pump. `docs/AZAHAR_MENU.md` and `docs/VRAM_BUDGET.md`
+  carry the current tables.
 - **Memory work landed** (all measured, no `DevCaps` change):
   - pageable read-only `.text` in a bounded window (`N3DS_TEXT_WINDOW_MB`,
     default 5): guest 57.2 → 44.4 MiB, +2.8% time.
