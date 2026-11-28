@@ -34,6 +34,14 @@ The global D3D9 capability report is unchanged (`DevCaps = 0x00082000`); no
 pixels or sizes are fabricated by the empty clip (nothing reaches the
 framebuffer).
 
+## `Skyrim_N3DS.cfg` — device runtime settings
+
+Copy [`Skyrim_N3DS.cfg`](Skyrim_N3DS.cfg) to `sdmc:/Skyrim_N3DS.cfg`. It holds
+the 96x24 VRAM/texture/paging limits from `docs/CIA_INSTALL.md` §5; the file is
+read once at launch, so editing it needs no rebuild. The swap keys are commented
+out because the device build already defaults to compressed swap on (32 MiB
+budget, 32 MiB resident target).
+
 ## Removed: `Skyrim_N3DS_tesv_120x24_menu.cia`
 
 The previous artifact used a 120 MiB newlib heap. It **crashes on hardware
