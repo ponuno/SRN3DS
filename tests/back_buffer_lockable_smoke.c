@@ -174,7 +174,9 @@ static void depth_flow(Harness *h,uint32_t device){
     uint32_t bad[8]={512,256,D9_D24S8,0,0,0,OUT2,0};
     assert(call(h,device,29,bad,8)==0); /* any pow2 8..1024 descriptor exists */
     uint32_t d512=rd(h,OUT2);assert(d512);
-    assert(call(h,device,39,(uint32_t[]){d512},1)==0x8876086cu); /* active back buffer is 400x240 */
+    /* A size mismatch is accepted and queued for the target that owns it. */
+    assert(call(h,device,39,(uint32_t[]){d512},1)==0);
+    assert(call(h,device,39,(uint32_t[]){0},1)==0); /* unbind */
     assert(unref(h,d512)==0);
     bad[0]=400;bad[1]=240;bad[2]=80; /* D16 */
     assert(call(h,device,29,bad,8)==0x8876086au&&rd(h,OUT2)==0);

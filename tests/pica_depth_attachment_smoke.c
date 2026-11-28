@@ -2,11 +2,11 @@
  *
  * PICA colour targets are created with a DEPTH24_STENCIL8 attachment, so a D3D9
  * depth-stencil surface is a size descriptor: a matching SetDepthStencilSurface
- * is a no-op S_OK and a mismatch is D3DERR_INVALIDCALL naming the embedded
- * attachment.  Clear(Z) must still reach the backend depth clear with the
- * packed 24-bit depth/8-bit stencil value.  The null-backend shape without the
- * embedded-depth callback keeps the old separate-object semantics: match S_OK,
- * undersized depth D3DERR_INVALIDCALL.  DevCaps stay 0x00082000. */
+ * is a no-op S_OK and a mismatch is queued until the target of that size is
+ * selected (with a named diagnostic).  Clear(Z) must still reach the backend
+ * depth clear with the packed 24-bit depth/8-bit stencil value.  The
+ * null-backend shape without the embedded-depth callback keeps the same
+ * deferred semantics.  DevCaps stay 0x00082000. */
 #include "d3d9_core.h"
 #include "d3d9_null.h"
 #include "d3d9_adapter.h"
@@ -67,12 +67,16 @@ int main(void) {
     assert(clear_calls == 1 && last_clear_flags == 2);
     assert(last_clear_value == packed_z(0.5f, 0));
 
-    /* Mismatch is a named INVALIDCALL and leaves the binding unchanged. */
+    /* Mismatch is queued for the target that owns it, with a named diagnostic;
+     * the active target still clears through its embedded attachment. */
     int rc = d9_set_depth_surface(d, depth8);
-    assert(rc == D9_INVALID);
+    assert(rc == D9_OK);
     assert(embedded_queries > 0);
-    assert(strstr(d9_last_draw_diagnostic(d), "embedded depth") != NULL);
-    assert(d9_get_depth_surface(d) == depth16);
+    assert(strstr(d9_last_draw_diagnostic(d), "queued") != NULL);
+    assert(d9_get_depth_surface(d) == depth8);
+    assert(!d9_clear_depth(d, 2, 0.25f, 0));
+    assert(clear_calls == 2 && last_clear_flags == 2);
+    assert(last_clear_value == packed_z(0.25f, 0));
 
     D9Caps9 caps;
     assert(!d9_adapter_caps(0, 1, &caps));
@@ -87,13 +91,13 @@ int main(void) {
     D9Handle ptarget = 0, p16 = 0, p8 = 0;
     setup(p, &ptarget, &p16, &p8);
     assert(!d9_set_depth_surface(p, p16));
-    assert(d9_set_depth_surface(p, p8) == D9_INVALID);
-    assert(strstr(d9_last_draw_diagnostic(p), "does not match") != NULL);
-    assert(d9_get_depth_surface(p) == p16);
+    assert(d9_set_depth_surface(p, p8) == D9_OK);
+    assert(strstr(d9_last_draw_diagnostic(p), "queued") != NULL);
+    assert(d9_get_depth_surface(p) == p8);
     assert(!d9_end_scene(p));
     d9_destroy_device(p);
 
-    puts("PICA embedded depth: matching descriptor S_OK, mismatch INVALIDCALL, "
-         "Clear(Z) reaches backend, undersized depth rejected, caps unchanged PASS");
+    puts("PICA embedded depth: matching descriptor S_OK, mismatch queued until "
+         "the matching target, Clear(Z) reaches backend, caps unchanged PASS");
     return 0;
 }

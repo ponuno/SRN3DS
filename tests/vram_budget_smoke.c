@@ -559,12 +559,27 @@ static void test_released_current_target_is_retired(void) {
     assert(d9_set_render_target(d, 0) == D9_OK);
     assert(d9_get_render_target(d) == 0);
     assert(c.deletes == deletes + 1);
-    assert(d9_set_depth_surface(d, dep512) == D9_INVALID);
+    /* A mismatched depth is remembered, not refused; it is not attached to the
+     * 400x240 back buffer. */
+    assert(d9_set_depth_surface(d, dep512) == D9_OK);
+    assert(d9_get_depth_surface(d) == dep512);
 
     assert(d9_create_depth_surface(d, 400, 240, D9_D24S8, 0, 0, 0, &dep400) == D9_OK);
     assert(d9_set_depth_surface(d, dep400) == D9_OK);
     assert(d9_create_depth_surface(d, 512, 512, D9_D24S8, 0, 0, 0, &dep512b) == D9_OK);
-    assert(d9_set_depth_surface(d, dep512b) == D9_INVALID);
+    assert(d9_set_depth_surface(d, dep512b) == D9_OK);
+
+    /* Depth set before its target: queued on the 400x240 back buffer, then
+     * applied when the matching 512x512 target is selected. */
+    assert(d9_set_depth_surface(d, dep512b) == D9_OK);
+    assert(d9_get_depth_surface(d) == dep512b);
+    D9Handle rt2 = 0;
+    assert(d9_create_render_target(d, 512, 512, D9_A8R8G8B8, 0, &rt2) == D9_OK);
+    assert(d9_set_render_target(d, rt2) == D9_OK);
+    assert(d9_get_render_target(d) == rt2);
+    assert(strstr(d9_last_draw_diagnostic(d), "queued") != NULL);
+    assert(d9_set_render_target(d, 0) == D9_OK);
+    assert(d9_release_render_target(d, rt2) == D9_OK);
     assert(d9_release_depth_surface(d, dep512) == D9_OK);
     assert(d9_release_depth_surface(d, dep400) == D9_OK);
     assert(d9_release_depth_surface(d, dep512b) == D9_OK);

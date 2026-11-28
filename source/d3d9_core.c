@@ -231,6 +231,7 @@ struct D9Device {
     TargetPoolEntry target_pool[D9_TARGET_POOL_MAX];
     unsigned target_pool_count;
     Depth depths[MAX_DEPTHS];D9Handle depth;
+    uint32_t depth_mismatch_logged;
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
     /* Frame-scoped texture pinning.  Every bind takes a slot pin and every
@@ -2356,8 +2357,21 @@ static int apply_target_viewport(D9Device *d,Target *t){
     }
     return d->ops.target_viewport&&d->ops.target_viewport(d->ctx,t->w,t->h)?D9_BACKEND:D9_OK;
 }
+static int rt_trace_enabled(void){
+    static int v=-1;
+    if(v<0){const char *s=getenv("N3DS_RT_TRACE");v=(s&&*s&&strcmp(s,"0"))?1:0;}
+    return v;
+}
 int d9_set_render_target(D9Device *d,D9Handle h){
     if(!d||d->teardown||(h&&!target(d,h))||!d->ops.target_bind)return D9_INVALID;
+    /* Diagnostic: requested surface vs the current target/depth.  A guest that
+     * ignores a failed SetRenderTarget then sets a depth for the old size. */
+    if(rt_trace_enabled()){
+        Target *req=h?target(d,h):(d->back_target?target(d,d->back_target):NULL);
+        fprintf(stderr,"[rt] SetRenderTarget h=%u %ux%u current=%u depth=%u\n",
+                (unsigned)h,req?req->w:(d->back_w),req?req->h:(d->back_h),
+                (unsigned)d->target,(unsigned)d->depth);
+    }
     /* A released current target stays current until this switch; release its
      * storage only now that it has been replaced. */
     if(d->target&&d->target!=h){
@@ -2382,15 +2396,22 @@ int d9_set_render_target(D9Device *d,D9Handle h){
         else if(d->back_valid){nw=d->back_w;nh=d->back_h;}
         else return D9_INVALID;
         Depth *s=depth_slot(d,d->depth);
-        if(!s||((s->w!=nw||s->h!=nh)&&!backend_embeds_depth(d))){
-            snprintf(d->diagnosis,sizeof d->diagnosis,
-                     "SetRenderTarget: bound depth %ux%u does not match new target %ux%u",
-                     s?s->w:0,s?s->h:0,nw,nh);
-            return D9_INVALID;
-        }
-        if(t){
-            int drc=target_ensure_depth(d,t);
-            if(drc)return drc;
+        if(s&&s->w==nw&&s->h==nh){
+            if(t){
+                int drc=target_ensure_depth(d,t);
+                if(drc)return drc;
+            }
+        }else if(s){
+            /* The guest may set a depth before switching to its target, or
+             * keep an old depth while another target is active.  Keep the
+             * request, use the new target's embedded depth, and say so once
+             * per (depth,size) pair instead of failing the switch. */
+            if(d->depth_mismatch_logged!=((s->id*2654435761u)^((nw<<16)|nh))){
+                d->depth_mismatch_logged=(s->id*2654435761u)^((nw<<16)|nh);
+                fprintf(stderr,"[d3d9] SetRenderTarget: depth %ux%u with %ux%u target; "
+                        "using the target's embedded depth until a match arrives\n",
+                        s->w,s->h,nw,nh);
+            }
         }
     }
     void *native=t?t->native:NULL;
@@ -2400,6 +2421,15 @@ int d9_set_render_target(D9Device *d,D9Handle h){
         if(vrc)return vrc;
     }
     d->target=h;
+    if(rt_trace_enabled()){
+        Target *cur=h?target(d,h):(d->back_target?target(d,d->back_target):NULL);
+        fprintf(stderr,"[rt] SetRenderTarget ok current=%u %ux%u depth=%u%s\n",
+                (unsigned)d->target,cur?cur->w:d->back_w,cur?cur->h:d->back_h,
+                (unsigned)d->depth,
+                (d->depth&&cur&&depth_slot(d,d->depth)&&
+                 (depth_slot(d,d->depth)->w!=cur->w||depth_slot(d,d->depth)->h!=cur->h))
+                    ?" (depth queued)" : "");
+    }
     /* D3D9 resets the scissor rectangle to the whole render target when the
      * device or bound target changes; the enable switch is preserved. */
     {
@@ -4782,18 +4812,25 @@ int d9_set_depth_surface(D9Device *d,D9Handle h){
     if(h&&!s)return D9_INVALID;
     if(s){
         unsigned w=0,height=0;
+        /* The engine sets a render-target depth before switching to that
+         * target.  Remember the request; attach it when the target is switched
+         * (SetRenderTarget) or when the sizes already match. */
         if(logical_dims(d,&w,&height)||s->w!=w||s->h!=height){
-            if(backend_embeds_depth(d)){
-                snprintf(d->diagnosis,sizeof d->diagnosis,
-                         "SetDepthStencilSurface: depth %ux%u does not match the %ux%u "
-                         "active target's embedded depth attachment",
-                         s->w,s->h,w,height);
-                return D9_INVALID;
-            }
             snprintf(d->diagnosis,sizeof d->diagnosis,
-                     "SetDepthStencilSurface: depth %ux%u does not match render target %ux%u",
-                     s->w,s->h,w,height);
-            return D9_INVALID;
+                     "SetDepthStencilSurface: depth %ux%u queued while %ux%u is active; "
+                     "applied when the target matches",s->w,s->h,w,height);
+            uint32_t key=(s->id*2654435761u)^((w<<16)|height);
+            if(d->depth_mismatch_logged!=key){
+                d->depth_mismatch_logged=key;
+                fprintf(stderr,"[d3d9] %s\n",d->diagnosis);
+            }
+            d->depth=h;
+            /* The active target still needs its own attachment for clears and
+             * draws that happen before the guest switches targets. */
+            Target *t=d->target?target(d,d->target):
+                (d->back_target?target(d,d->back_target):NULL);
+            if(t){int drc=target_ensure_depth(d,t);if(drc)return drc;}
+            return D9_OK;
         }
         Target *t=d->target?target(d,d->target):
             (d->back_target?target(d,d->back_target):NULL);
@@ -4828,10 +4865,19 @@ int d9_clear_depth(D9Device *d,unsigned flags,float z,uint32_t stencil){
     if(!s)return D9_INVALID;
     unsigned w=0,h=0;
     if(logical_dims(d,&w,&h)||w!=s->w||h!=s->h){
-        snprintf(d->diagnosis,sizeof d->diagnosis,
-                 "Clear: depth %ux%u does not match render target %ux%u",
-                 s->w,s->h,w,h);
-        return D9_INVALID;
+        if(!backend_embeds_depth(d)){
+            snprintf(d->diagnosis,sizeof d->diagnosis,
+                     "Clear: depth %ux%u does not match render target %ux%u",
+                     s->w,s->h,w,h);
+            return D9_INVALID;
+        }
+        /* The guest queued a depth for a target it has not selected yet.  The
+         * active target owns its depth attachment, so clear through that. */
+        if(d->depth_mismatch_logged!=((s->id*2654435761u)^((w<<16)|h))){
+            d->depth_mismatch_logged=(s->id*2654435761u)^((w<<16)|h);
+            fprintf(stderr,"[d3d9] Clear: depth %ux%u queued for another target; "
+                    "using the %ux%u target's embedded depth\n",s->w,s->h,w,h);
+        }
     }
     Target *t=d->target?target(d,d->target):
         (d->back_target?target(d,d->back_target):NULL);

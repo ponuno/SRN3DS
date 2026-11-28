@@ -166,13 +166,19 @@ static void trace_indirect_ir(CPU *c,uint32_t target,uint32_t from){
         }
     }
 }
+/* Guest code lives in the TESV image or an imported DLL image, or is a
+ * registered IR/AOT function (test fixtures and the container use separate
+ * windows).  Host thunks are handled by n3ds_rt_dispatch before IR. */
+static int guest_code_target(uint32_t t) {
+    /* Main image and imported modules share 0x00400000..0x0C000000 in the
+     * pilot loader (Havok's synthetic stub is at 0x02000000).  The host app's
+     * own .data is below 0x00400000, so 0x003ba588 is still refused. */
+    return (t >= 0x00400000u && t < 0x0C000000u) ||
+           (t >= 0xfd000000u && t < 0xff200000u) ||
+           n3ds_ir_has(t);
+}
 static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
-    /* Guest code lives in the TESV image or an imported DLL image.  Anything
-     * else is a host/app pointer or corrupted guest data; decode it only to
-     * report a bogus opcode otherwise. */
-    if (!((target >= 0x00400000u && target < 0x02000000u) ||
-          (target >= 0x08000000u && target < 0x0C000000u) ||
-          (target >= 0xfd000000u && target < 0xff200000u))) {
+    if (!guest_code_target(target)) {
         fprintf(stderr, "[target] outside guest code: target=%08lx from=%08lx esp=%08lx\n",
                 (unsigned long)target, (unsigned long)from,
                 (unsigned long)(c ? c->r[4] : 0));
@@ -1600,10 +1606,26 @@ static int exec_block(CPU *c, const IrExecBlock *b, Flags *f,
 
 /* ---------------------------------------------------------------- entry */
 
+static void dump_reg_objects(CPU *c) {
+    static const char *names[6] = {"eax", "ebx", "ecx", "edx", "esi", "edi"};
+    static const unsigned idx[6] = {0, 3, 1, 2, 6, 7};
+    for (unsigned k = 0; k < 6; ++k) {
+        uint32_t v = c->r[idx[k]];
+        const uint8_t *p = n3ds_guest_ptr(v, 32);
+        if (!p) continue;
+        fprintf(stderr, "[target] [%s]=%08lx:", names[k], (unsigned long)v);
+        for (unsigned i = 0; i < 8; ++i) {
+            uint32_t w = (uint32_t)p[i * 4] | ((uint32_t)p[i * 4 + 1] << 8) |
+                         ((uint32_t)p[i * 4 + 2] << 16) |
+                         ((uint32_t)p[i * 4 + 3] << 24);
+            fprintf(stderr, " %08lx", (unsigned long)w);
+        }
+        fprintf(stderr, "\n");
+    }
+}
+
 void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
-    if (!((addr >= 0x00400000u && addr < 0x02000000u) ||
-          (addr >= 0x08000000u && addr < 0x0C000000u) ||
-          (addr >= 0xfd000000u && addr < 0xff200000u))) {
+    if (!guest_code_target(addr)) {
         fprintf(stderr, "[target] outside guest code: target=%08lx esp=%08lx\n",
                 (unsigned long)addr, (unsigned long)(c ? c->r[4] : 0));
         rt_unimpl(c, addr, "call target outside any guest code module");
@@ -1619,10 +1641,32 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
     n3ds_ir_cur_func_end = func_end;
     if (g_a43f_trace_on < 0) n3ds_a43f_trace_prime();
     int trace = g_a43f_trace_on;
+    uint32_t last_block = 0;
     n3ds_ir_note_pc(addr, c->r[4], c->r[1], c->r[0]);
     for (;;) {
         IrExecBlock b;
         g_ir_ip = ip;
+        /* A block may set next=0 through a return/call with a zero target,
+         * which bypasses dispatch().  Name it with the producing block and the
+         * guest stack/registers before fetch decodes address 0. */
+        if (!guest_code_target(ip) &&
+            !(func_end && ip >= addr && ip < func_end)) {
+            uint32_t ret = 0;
+            const uint8_t *rp = n3ds_guest_ptr(c->r[4], 4);
+            if (rp) ret = (uint32_t)rp[0] | ((uint32_t)rp[1] << 8) |
+                          ((uint32_t)rp[2] << 16) | ((uint32_t)rp[3] << 24);
+            fprintf(stderr,
+                    "[target] block outside guest code: ip=%08lx from_block=%08lx "
+                    "ret=%08lx esp=%08lx eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx "
+                    "esi=%08lx edi=%08lx ebp=%08lx\n",
+                    (unsigned long)ip, (unsigned long)last_block, (unsigned long)ret,
+                    (unsigned long)c->r[4], (unsigned long)c->r[0],
+                    (unsigned long)c->r[3], (unsigned long)c->r[1],
+                    (unsigned long)c->r[2], (unsigned long)c->r[6],
+                    (unsigned long)c->r[7], (unsigned long)c->r[5]);
+            dump_reg_objects(c);
+            rt_unimpl(c, ip, "call target outside any guest code module");
+        }
         /* Diagnostic: keep the fault dump's CPU pointing at the thread that is
          * actually executing. A cooperative yield resumes mid-function, so the
          * entry-time assignment alone goes stale. */
@@ -1647,6 +1691,7 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
         HP_ADD(HP_EXEC, hp_exec);
         if (done) { n3ds_ir_cur_func_end = prev_end; return; }
         if (trace) n3ds_a43f_trace_block(c, b.start, addr, next, 0);
+        last_block = b.start;
         ip = next;
         if (n3ds_ir_yield_hook && ++slice_yield_count >= N3DS_IR_YIELD_INTERVAL) {
             slice_yield_count = 0;
@@ -1657,9 +1702,7 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
 }
 
 void n3ds_ir_call(CPU *c, uint32_t addr) {
-    if (!((addr >= 0x00400000u && addr < 0x02000000u) ||
-          (addr >= 0x08000000u && addr < 0x0C000000u) ||
-          (addr >= 0xfd000000u && addr < 0xff200000u))) {
+    if (!guest_code_target(addr)) {
         fprintf(stderr, "[target] outside guest code: target=%08lx esp=%08lx\n",
                 (unsigned long)addr, (unsigned long)(c ? c->r[4] : 0));
         rt_unimpl(c, addr, "call target outside any guest code module");

@@ -222,6 +222,16 @@ int guest_swap_configure(GuestMemory *m) {
 }
 
 /* ---- block supply --------------------------------------------------------- */
+/* A block is popped from the pool and pushed back exactly once.  Keeping the
+ * pool itself duplicate-free is the cheap, accurate ownership check: a second
+ * push of the same pointer means two slabs believe they own it, which is the
+ * aliasing that corrupts guest data.  (A 128-entry "live" ring was wrong here:
+ * resident pages are thousands, so it wrapped and reported false positives.) */
+static int pool_contains(const struct GuestSwap *w, const uint8_t *p) {
+    for (uint32_t i = 0; i < w->pool_n; ++i)
+        if (w->pool[i] == p) return 1;
+    return 0;
+}
 uint8_t *guest_swap_block(GuestMemory *m) {
     struct GuestSwap *w = m && m->swap ? (struct GuestSwap *)m->swap : NULL;
     if (w && w->pool_n) return w->pool[--w->pool_n];
@@ -231,6 +241,12 @@ uint8_t *guest_swap_block(GuestMemory *m) {
 void guest_swap_recycle(GuestMemory *m, uint8_t *block) {
     if (!block) return;
     struct GuestSwap *w = m && m->swap ? (struct GuestSwap *)m->swap : NULL;
+    if (w && pool_contains(w, block)) {
+        ++w->st.fail_reissued;
+        fprintf(stderr, "[swap] block %p recycled twice; refusing duplicate\n",
+                (void *)block);
+        return;
+    }
     if (w && w->pool_n < w->pool_cap) { w->pool[w->pool_n++] = block; return; }
     free(block);
 }
@@ -396,7 +412,7 @@ void guest_swap_report(FILE *f, const GuestMemory *m) {
         ? (unsigned long long)((st.bytes_out * 100ull) / st.compressed_total) : 0;
     fprintf(f, "[swap] enabled=%d out=%llu in=%llu live=%llu/%llu ratio=%llu.%02llu "
                "resident=%llu target=%llu dropped=%llu fail(nomem=%llu budget=%llu "
-               "incompressible=%llu unsafe=%llu)\n",
+               "incompressible=%llu unsafe=%llu reissued=%llu)\n",
             st.enabled, (unsigned long long)st.pages_out,
             (unsigned long long)st.pages_in,
             (unsigned long long)st.compressed_live,
@@ -407,5 +423,6 @@ void guest_swap_report(FILE *f, const GuestMemory *m) {
             (unsigned long long)st.fail_no_memory,
             (unsigned long long)st.fail_budget,
             (unsigned long long)st.fail_incompressible,
-            (unsigned long long)st.fail_unsafe);
+            (unsigned long long)st.fail_unsafe,
+            (unsigned long long)st.fail_reissued);
 }

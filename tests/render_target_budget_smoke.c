@@ -242,7 +242,9 @@ int main(void) {
 
     for (unsigned i = 0; i < 9; ++i)
         assert(d9_release_render_target(d, set[i]) == D9_OK);
-    assert(c.vram_used == (size_t)512 * 256 * 4u * 2u);
+    /* The current (last) target is retired, not deleted, until the device is
+     * destroyed: its 512x256 storage still counts. */
+    assert(c.vram_used == (size_t)512 * 256 * 4u * 3u);
     assert(d9_destroy_device_ex(d) == 0);
     assert(c.vram_used == 0);
 

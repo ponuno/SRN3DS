@@ -238,7 +238,9 @@ int main(void) {
     check_target(d, 512, 1024, 512, 512);
 
     assert(d9_release_render_target(d, t1024) == D9_OK);
-    assert(c.deletes == 6); /* t1024, 512, explicit 512, 256, 1024x512, 512x1024 */
+    /* The last target is current ("retired"); the device delete happens when
+     * a later SetRenderTarget replaces it. */
+    assert(c.deletes == 5);
     assert(d9_destroy_device_ex(d) == 0);
 
     /* No scaled callback: a >512 target is refused by name; 512 still works. */
@@ -312,7 +314,9 @@ int main(void) {
     assert(d9_render_target_read(dn, tgt, row, sizeof row, 0, 0, 1024, 1)
            == D9_UNSUPPORTED);
     assert(d9_release_texture(dn, tex) == D9_OK);
-    assert(d9_null_stats()->target_deletes == 1);
+    /* tgt is the current target: release retires it; the device destroy below
+     * performs the actual backend delete. */
+    assert(d9_null_stats()->target_deletes == 0);
     assert(d9_destroy_device_ex(dn) == 0);
 
     /* Budget: five 1024 targets fit in a 5 MiB device by native accounting

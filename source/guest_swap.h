@@ -35,6 +35,7 @@ typedef struct {
     uint64_t fail_budget;      /* eviction skipped: compressed pool full     */
     uint64_t fail_incompressible; /* LZ4 did not shrink the page             */
     uint64_t fail_unsafe;      /* candidate shared a bridge / was pinned     */
+    uint64_t fail_reissued;    /* block handed out again while still live    */
     uint64_t resident_pages;   /* anonymous pages resident right now         */
     uint64_t target_pages;     /* configured resident ceiling                */
     uint64_t budget_bytes;     /* configured compressed-pool ceiling         */

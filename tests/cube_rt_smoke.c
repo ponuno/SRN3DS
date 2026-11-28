@@ -205,7 +205,9 @@ static void case_ldr(Harness *h) {
     assert(call(h, h->device, 38, (uint32_t[]){0, OUT}, 2) == HR_OK);
     got = rd(h, OUT); assert(got == s[1][0]);
     assert(call(h, got, 2, NULL, 0) >= 1);
-    assert(call(h, h->device, 37, (uint32_t[]){0, 0}, 2) == HR_INVALID);
+    /* The 32x32 depth is queued: switching to the 400x240 back buffer uses its
+     * embedded attachment instead of failing the switch. */
+    assert(call(h, h->device, 37, (uint32_t[]){0, 0}, 2) == HR_OK);
     assert(call(h, h->device, 39, (uint32_t[]){0}, 1) == HR_OK);
     assert(call(h, h->device, 37, (uint32_t[]){0, 0}, 2) == HR_OK);
     /* EndScene leaves the device in phase 2; Present returns it to phase 0 so

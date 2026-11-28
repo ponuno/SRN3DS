@@ -483,8 +483,8 @@ static void trace_indirect_fault(CPU *c, uint32_t target);
  * container would decode the 3dsx's own bytes as x86 and report a bogus
  * opcode instead of naming the bad indirect target. */
 static int guest_code_target(uint32_t a) {
-    return (a >= 0x00400000u && a < 0x02000000u) ||
-           (a >= 0x08000000u && a < 0x0C000000u);
+    return (a >= 0x00400000u && a < 0x0C000000u) ||
+           (a >= 0xfd000000u && a < 0xff200000u);
 }
 
 static int env_flag(const char *name, int dflt) {
@@ -1048,6 +1048,10 @@ void rt_unimpl(CPU *c,uint32_t addr,const char *what) {
     /* Measurement hook only: the fault text and longjmp below are unchanged. */
     if (memory) n3ds_mem_guest_sample(memory->used, (unsigned)memory->count);
     n3ds_mem_fault_sample();
+    /* Dump the wrapped-free history before unwinding: a corrupted host heap
+     * usually faults after the bad free already walked the chunk. */
+    extern void n3ds_mem_guard_dump(void) __attribute__((weak));
+    if (n3ds_mem_guard_dump) n3ds_mem_guard_dump();
     snprintf(fault,sizeof fault,"Guest fault at %08lx: %s",(unsigned long)addr,what?what:"unknown");
     fprintf(stderr,"%s\n",fault);if(active)longjmp(active->jb,1);abort();
 }

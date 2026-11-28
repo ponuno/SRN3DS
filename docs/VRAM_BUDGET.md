@@ -149,12 +149,12 @@ Run with the same inputs as `docs/AZAHAR_MENU.md`: virtual SD junction to
 `E:\azahar_sd\Skyrim`, caps probe flag, prefs 400x240, `d3dx9_42.dll`,
 `tesv_d3d9_budget.txt=32`, `tesv_trace.flag`.
 
-Measured with `vrambudget4` (sha256 `382C0A08…`, 96x8, `-ForceMemProbe`, caps
+Measured with `vrambudget4` (sha256 `382C0A08вЂ¦`, 96x8, `-ForceMemProbe`, caps
 probe, budget file 32):
 
-* `[d3d9-vram] closed: live 0 KiB peak 5102 KiB` — the backend's own global
+* `[d3d9-vram] closed: live 0 KiB peak 5102 KiB` вЂ” the backend's own global
   counter never exceeded the 5888 KiB enforced cap. The fourth 512x512 menu
-  target was **downscaled to 256x256** (`[d3d9-target] … downscaled`,
+  target was **downscaled to 256x256** (`[d3d9-target] вЂ¦ downscaled`,
   `vram 5102/5888 KiB`), saving 768 KiB against a full 512 target. Before the
   change the same set reached `vram free 274 KiB` inside the 10-MiB pool and
   the fourth target failed.
@@ -181,7 +181,7 @@ The device main therefore sets the target sub-budget to 4.25 MiB: the four
 MiB of the global cap stays for the LCD and smaller targets. That removed the
 original target #4 failure but not the later small-target refusals.
 
-Measured with `vrambudget6` (sha256 `BB078875…`, 96x8, `-ForceMemProbe`, caps
+Measured with `vrambudget6` (sha256 `BB078875вЂ¦`, 96x8, `-ForceMemProbe`, caps
 probe, budget file 32):
 
 * `[d3d9-vram] closed: live 0 KiB peak **5042 KiB**` against the 5888 KiB
@@ -202,7 +202,7 @@ probe, budget file 32):
   NULL 64x64 target; eviction moved it to 78.1 MiB and a clean guest-RAM
   exhaustion.
 
-Measured with `vrampage` (sha256 `E735655A…`, 96x8 + pageable `.text`
+Measured with `vrampage` (sha256 `E735655AвЂ¦`, 96x8 + pageable `.text`
 `f43a537`, `-ForceMemProbe`, caps probe, budget file 32):
 
 * VRAM is no longer the wall: peak `vram 5042/5888 KiB`, **8 evictions**,
@@ -224,135 +224,74 @@ Measured with `vrampage` (sha256 `E735655A…`, 96x8 + pageable `.text`
 
 ## What is left
 
-* **`003ba588` is gone.** After the AOT/thunk-range guard the run no longer
-  jumps to the 3dsx `.data`; the new first fault is a **call to 0x00000000**
-  (`IR: unsupported opcode in decoded stream`) on thread id 9
-  (`start=00a4b4a0`). Azahar then reports
-  `unmapped Read32 @ 0x6BDD7F82 at PC 0x0028D598` (libc) and a GPU write to
-  `0x21A80048` during teardown. So the corrupted pointer is still produced,
-  but it is now a null function pointer instead of an app address.
-* **Retire did not change the depth mismatch.** `SetDepthStencilSurface`
-  still reports `depth 512x1024` against the `400x240` back buffer hundreds of
-  times, so the engine sets a 512x1024 depth while the back buffer is current
-  for another reason (order of SetDepth/SetRenderTarget or a failed
-  SetRenderTarget), not because the current RT was released. The retire path
-  itself is covered by `vram_budget` G.
-* **Host `free` corruption is not in the BSA overlay.** No `free`/`realloc`
-  exists in `win32_bsa_overlay`/`menu_bsa_runtime`. The libc fault walking a
-  chunk full of `Data...` string bytes, plus the GPU address violation, point
-  at host-heap corruption from writing through a stale host pointer (swap
-  recycled block is the leading suspect). Next: heap-ownership guard around
-  free/realloc plus a `N3DS_SWAP=0` run on a profile that can reach the same
-  point.
-* `[menu] enter 00876f60` is still 0; last entries `00892da0`, `00898430`.
+Latest Azahar runs:
 
+* `depthdefer3` (2 MiB IR cache, sha256
+  `FDF60D166FFD5178327ABF1BB57A12B858961CA768C9FCDD05ABD1FADCA7D92F`)
+  reached the 3D path and stopped at the IR decode arena.
+* `depthdefer4` (same binary plus `N3DS_IR_CACHE_MB=6`, sha256
+  `AB5E195814E0735A67425940AA4A035016873FE2ADD9DA3B5FD2A308BE6D3305`)
+  ran the full 950 s wall budget with **no guest fault**: 452 menu entries,
+  4 `SetRenderTarget` calls (all back buffer 512x256), one queued depth, no
+  `00876f60`, no null call. The larger arena removed the decode-cache fault;
+  the run is simply slower and did not reach the target before the timeout.
 
-* **Current-RT lifetime fixed.** `d9_release_render_target` no longer destroys
-  the device's current target: it sets `Target.retired` and keeps the slot,
-  id and native alive until `SetRenderTarget` replaces it, matching D3D9's
-  device reference. Test `vram_budget` G pins it: after releasing the current
-  512x512 target a 512x512 depth surface is still accepted; after
-  `SetRenderTarget(0)` the same depth is `D9_INVALID` and the native is freed
-  on that switch.
-* **AOT target guard.** `ir_exec` now rejects call/return targets outside the
-  guest code/thunk ranges (`0x00400000..0x02000000`, `0x08000000..0x0C000000`,
-  `0xfd000000..0xff200000` for the COM/win32 thunks) with
-  `call target outside any guest code module` and a `[target] target= from=
-  esp=` line. The first build's guard was too narrow and rejected legitimate
-  `0xff000094` thunk calls at boot; the ranges above include them.
-* **Guest pointer reaching host `free` is not in the BSA overlay.**
-  `win32_bsa_overlay`/`menu_bsa_runtime` contain no `free`/`realloc` at all.
-  Azahar's `_free_r` walk over a chunk containing `Data...` therefore points
-  at host-heap corruption from writing through a stale host pointer (swap's
-  safe-point rule is the prime suspect: a recycled page block reused as a path
-  string), not at a direct `free(guest_ptr)` in the overlay. A hardening check
-  needs a host-heap ownership test before free/realloc; that is the next item.
+* **The depth mismatch is gone.** `SetDepthStencilSurface(512x1024)` is
+  accepted once while the 400x240 back buffer is current
+  (`queued while 400x240 is active`), and no
+  `does not match the ... active target` line appears. The repeated
+  INVALIDCALL failure the guest used to ignore is no longer produced.
+* **The null call is gone.** Up to the new blocker there is no
+  `[target] target=...` and no `Guest fault at 00000000`. `0x003ba588` and
+  the 3dsx `.data` decode are also absent.
+* **New blocker: the IR decode arena.** With 2 MiB, thread 9
+  (`start=00a4b4a0`) faults at `009e03f6` with
+  `IR: block does not fit the decode cache`, then `00644fc7`; a flush cannot
+  preserve every suspended block. At 6 MiB the fault is gone and the run
+  survives to the wall-clock timeout.
+* `[menu] enter 00876f60` is still 0; the 6 MiB run reaches 452 menu entries.
+  Last entries: `00892da0`, `00898430`, `00431b00`, `00a5d370`.
+* Swap: `out=921 in=3 live=279697/33554432 ratio=13.37`,
+  `resident=12288/12288`, `dropped=0`; every `fail_*` counter is 0.
+* Host `free` guard: 0 refusals once the check was limited to the heap range
+  and 8-byte alignment. `malloc_usable_size()` misjudged 1261 valid newlib
+  internal frees and stalled boot before any menu, so it is not used.
 
+What is fixed:
 
-* Swap A/B: `N3DS_SWAP=0` cannot reach the corruption point — without swap the
-  same path exhausts guest backing at 71.16 MiB first, so the swap hypothesis
-  cannot be isolated by turning it off. Additional eviction (`target=32`,
-  `text=2`) is the next A/B.
-* The `SetDepthStencilSurface` mismatch is now named with sizes:
-  **depth `512x1024` vs active target `400x240`**. The game sets a
-  512x1024 depth while the back buffer is current; that points at our
-  current-RT lifetime: `destroy_target_slot()` clears `d->target` when the
-  guest releases the current target, while D3D9 keeps it referenced until the
-  next `SetRenderTarget`. The 3D path then runs with the wrong target/depth.
-* The bad EIP `0x003ba588` is not rejected by `container_dispatch` (the guard
-  installed there never fires), so the IR AOT executor decodes an entry for
-  that address directly. `0x003ba588` is below the TESV image base
-  (`0x00400000`) and inside the 3dsx `.data`, i.e. a host/app pointer, not
-  guest code.
-* Azahar's `_free_r` fault walks a "chunk" whose contents are the string
-  `"Data..."` (`0x61746144`, `0x6C616972`) at unaligned addresses such as
-  `0x0E428E86`: a host `free()` is receiving a guest/interior pointer, likely
-  a path string from the BSA overlay path (`win32_bsa_overlay` /
-  `menu_bsa_runtime`). This is the next root to chase; it is independent of
-  VRAM and swap.
-* `[menu] enter 00876f60` is still 0; the run reaches the 3D path with
-  `512x1024` depth surfaces and a long series of refused depth binds.
+* `d9_release_render_target` retires the current target instead of destroying
+  it; the native is freed on the next `SetRenderTarget` (test `vram_budget`
+  G).
+* `d9_set_depth_surface` accepts a size mismatch, remembers the request
+  (`GetDepthStencilSurface` returns it) and applies it when
+  `SetRenderTarget` selects the matching target. Clears/draws before that
+  use the active target's embedded depth instead of failing.
+* `d9_set_render_target` no longer refuses a size-mismatched bound depth; it
+  keeps the request, uses the target's embedded depth and logs once per
+  `(depth,size)` pair. `N3DS_RT_TRACE=1` logs every request and successful
+  selection (`[rt] SetRenderTarget h=... / ok current=...`).
+* `ir_exec` rejects call targets outside the guest code and thunk ranges and
+  names a block that leaves them with `from_block`, `ret`, `esp`, all
+  registers and 8 dwords of each register that points into guest memory.
+* `source/mem_guard.c` (TESV device link only) wraps `free`/`realloc`,
+  refuses pointers outside `fake_heap_start..fake_heap_end` or unaligned,
+  and keeps the last 16 calls (pointer, size, caller, sp). `rt_unimpl` dumps
+  that ring before unwinding.
+* `guest_swap` counts duplicate pool recycles (`reissued` in the swap
+  report). The first version used a 128-entry live ring; with 12288 resident
+  pages it wrapped and produced 1705 false positives. The pool-duplicate
+  check replaces it, so a non-zero value is now real aliasing.
 
+Earlier findings kept for context:
 
-* **Compressed swap is active and removes the OOM.** The previous 32 KiB-stack
-  binary predated `8b533c0`, so swap was not in it, and the cfg keys were not
-  in the allowlist. Both are fixed; `vramswap` was built from current main and
-  ran with `N3DS_SWAP=1`, `N3DS_GUEST_TARGET_MB=48`,
-  `N3DS_SWAP_BUDGET_MB=32`, `N3DS_TEXT_WINDOW_MB=4`,
-  `N3DS_IRC_CACHE_BYTES=2M`, `N3DS_IR_CACHE_MB=2`.
-  Measured: `swap=1 swap_out=920 swap_in=2 swap_resident=12288
-  swap_target=12288 swap_compressed=279,789 swap_ratio_pct=1345
-  swap_fail_*=0` (48 MiB anonymous resident exactly at target, 13.45x live
-  ratio, no swap failures). `guest_used=66,706,539`, `newlib_free=27,529,108`
-  (was 183 KiB and OOM): the anonymous resident cap is 48 MiB, the remaining
-  ~15 MiB is file-backed image/paging and slab overhead, not swappable.
-* **New blocker after swap:** `Guest fault at 003ba588: IR: unsupported opcode
-  in decoded stream` on thread id 9 (`start=00a4b4a0`), then the same on the
-  main thread at `000000f9`. Azahar also shows `_free_r` touching guest
-  addresses (`0x0E428D9C`, `0x0E428E82`) during teardown, i.e. `free()` on a
-  value that looks like a guest pointer. Both are pointer/EIP corruption
-  symptoms after a long 3D path (many
-  `SetDepthStencilSurface: ... size does not match` lines), not OOM.
-  `[menu] enter 00876f60` is still 0; last entries are `00892da0`,
-  `00898430`, then `00a5eaa0 from=00a60c3e` twice.
-* Next: log the last indirect call target / free argument in the allowed
-  runtime files, and A/B with `N3DS_GUEST_TARGET_MB=32` plus
-  `N3DS_TEXT_WINDOW_MB=2` to see whether added eviction changes the corrupt
-  pointer. Do not change `DevCaps`.
-
-* **PC 0 was main-stack exhaustion, not paging.** A/B with the rebuilt binary:
-  `N3DS_TEXT_WINDOW_MB=0` (paging off) ends at the same `[menu] enter
-  00a5eaa0 from=00a60c3e` and the same first fault as the default 5 MiB
-  window: `unmapped Write32 ... @ 0x07FFFF94 at PC 0x0010F8C0`, Thread ID 1,
-  R1=0x1007F148. The later `Read32 @ 0x07FFFFB8 at PC 0` is the secondary
-  report. The write is the `push {r4,r5,r6,lr}` prologue of `n3ds_guest_ptr`
-  at `SP=0x07FFFFA4`, i.e. below the `0x08000000` stack base.
-* The cause was libctru's weak `__stacksize__ = 0x8000` (32 KiB): `initSystem`
-  does `SP = base + __stacksize__`. `source/n3ds_boot.c` now defines a strong
-  128 KiB `__stacksize__` (3DS only). The `stack128` run has **no PC 0** and
-  goes further: `logo02_d.dds`/`logo02_n.dds`, menu entries from
-  `0x0087b597` and `0x0089775e`, then a clean **guest backing OOM** at
-  `0x640625d0` (`guest_used=71,162,696`, `newlib_free=183,272`,
-  `guest_backing_failures=1`, `linear_fail_n=0`, VRAM peak 5042/5888 KiB,
-  `[menu] enter 00876f60` still 0).
-* Next deficit: the guest backing budget is a few MiB short just before the
-  logo texture. Proposals without touching `DevCaps`: `N3DS_IRC_CACHE_BYTES=2M`
-  (or `1M`) frees 2–3 MiB of the newlib heap, `N3DS_TEXT_WINDOW_MB=3` frees
-  2 MiB of the page window, stream is already `N3DS_STREAM=0`.
-
-* **Resume at the previous native size only.** A suspended target is resumed in
-  VRAM; if the budget is full at that moment the core returns a named
-  `D9_MEMORY` instead of downscaling the resumed storage.  Downscaling on
-  resume would change the sample UV sub-rect and is a separate change.
-* **Linear-heap render targets are impossible** (`framebuffer must live in
-  VRAM`), so the linear step is only a named diagnostic for targets; the real
-  recovery is eviction + downscale.  Sampling linear textures still works.
-* **Audit citro3d `vramFree` accounting.** At the pre-fix refusal the pool
-  reported 1042 KiB free while the RT-view failure was actually a linear
-  storage attempt (no VRAM reservation charged). That is now named, but a
-  physical New 3DS run is still needed to confirm allocation order and
-  fragmentation.
-* Downscale changes sampled resolution; with eviction available the menu set
-  should stay at 512 where the budget allows.
-* Physical New 3DS run still needed for real VRAM/linear headroom next to the
-  texture cache.
+* 128 KiB main stack (`source/n3ds_boot.c`) removed the PC 0 fault; the
+  guest then reached the logo/menu path (`0087b597`, `0089775e`).
+* `N3DS_SWAP=0` cannot reach this point: without swap the same path exhausts
+  guest backing at 71.16 MiB.
+* PICA colour targets own one embedded depth-stencil attachment; a D3D9
+  depth surface is a size/format descriptor, not extra VRAM.
+* Host suite: **185 passed, 0 failed** (`-SkipPython`, fresh
+  `HOST_OBJ_CACHE`). The first full run reused a stale shared object cache
+  and reported false target/IR failures; a fresh cache is green. Python
+  tests are unavailable in this environment (missing `capstone`, LLVM
+  `clang.exe`, `tex3ds.exe`).

@@ -242,18 +242,21 @@ int main(void) {
     assert(c.depth_clears == 1 && c.last_clear_flags == 2);
     assert(d9_end_scene(d) == D9_OK);
 
-    /* A size mismatch is still the embedded-depth named INVALIDCALL. */
+    /* A size mismatch is queued for the target that owns it; the active target
+     * keeps its embedded attachment and Get returns the request. */
     D9Handle depth128 = 0;
     assert(d9_create_depth_surface(d, 128, 128, D9_D24S8, 0, 0, 0,
                                    &depth128) == D9_OK);
-    assert(d9_set_depth_surface(d, depth128) == D9_INVALID);
-    expect_diag(d, "embedded depth");
-    assert(d9_get_depth_surface(d) == depth512);
+    assert(d9_set_depth_surface(d, depth128) == D9_OK);
+    assert(strstr(d9_last_draw_diagnostic(d), "queued") != NULL);
+    assert(d9_get_depth_surface(d) == depth128);
+    assert(d9_set_depth_surface(d, 0) == D9_OK);
+    assert(d9_release_depth_surface(d, depth128) == D9_OK);
 
     /* Releasing a target frees both its colour and attached depth bytes. */
-    assert(d9_set_depth_surface(d, 0) == D9_OK);
     assert(d9_release_render_target(d, t1) == D9_OK);
-    assert(c.vram_used == (size_t)512 * 256 * 4u * 2u);
+    /* t1 is current: release retires it, so its storage lives until destroy. */
+    assert(c.vram_used == (size_t)512 * 256 * 4u * 3u);
     assert(d9_destroy_device_ex(d) == 0);
     assert(c.vram_used == 0);
 

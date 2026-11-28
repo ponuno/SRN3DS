@@ -187,56 +187,46 @@ int main(void) {
     assert(got == d400);
     assert(unref(&h, got) == 2); /* binding + caller */
 
-    /* 2. 512x1024 depth against the 400x240 back buffer: D3DERR_INVALIDCALL,
-     *    named sizes, previous depth untouched, no retry/re-entry. */
+    /* 2. 512x1024 depth against the 400x240 back buffer: accepted and queued
+     *    for the target that owns it; the request is visible through Get. */
     uint32_t d512x1024 = make_depth(&h, device, 512, 1024, 0);
-    D9NullStats before = *d9_null_stats();
-    expect_hr(&h, device, 39, d512x1024, INVALIDCALL, "bind 512x1024 depth to 400x240");
-    assert(strstr(d9_com_last_diagnostic(), "512x1024") != NULL);
-    assert(strstr(d9_com_last_diagnostic(), "400x240") != NULL);
-    D9NullStats after = *d9_null_stats();
-    assert(after.depth_clears == before.depth_clears); /* failed bind did nothing */
+    expect_hr(&h, device, 39, d512x1024, 0, "queue 512x1024 depth on 400x240");
     got = get_depth(&h, device);
-    assert(got == d400); /* previous pair intact */
+    assert(got == d512x1024);
     assert(unref(&h, got) == 2);
-    assert(unref(&h, d512x1024) == 0); /* never retained by the failed bind */
 
     /* 3. Matching 512x1024 RT/depth pair after an explicit SetRenderTarget. */
     uint32_t rt512x1024 = make_rt(&h, device, 512, 1024);
     expect_hr(&h, device, 39, 0, 0, "unbind depth");
     expect_hr(&h, device, 37, rt512x1024, 0, "bind 512x1024 RT");
-    d512x1024 = make_depth(&h, device, 512, 1024, 0);
-    expect_hr(&h, device, 39, d512x1024, 0, "bind matching 512x1024 depth");
+    uint32_t d512x1024b = make_depth(&h, device, 512, 1024, 0);
+    expect_hr(&h, device, 39, d512x1024b, 0, "bind matching 512x1024 depth");
     got = get_depth(&h, device);
-    assert(got == d512x1024);
+    assert(got == d512x1024b);
     assert(unref(&h, got) == 2);
 
-    /* 4. Same-size-class but different extent: 512x512 vs 512x1024 is invalid. */
+    /* 4. Same-size-class but different extent: queued, previous pair intact. */
     uint32_t d512 = make_depth(&h, device, 512, 512, 0);
-    expect_hr(&h, device, 39, d512, INVALIDCALL, "bind 512x512 depth to 512x1024");
-    assert(strstr(d9_com_last_diagnostic(), "512x512") != NULL);
-    assert(strstr(d9_com_last_diagnostic(), "512x1024") != NULL);
+    expect_hr(&h, device, 39, d512, 0, "queue 512x512 depth for 512x1024");
     got = get_depth(&h, device);
-    assert(got == d512x1024);
-    assert(unref(&h, got) == 2);
-    assert(unref(&h, d512) == 0);
-
-    /* 5. 400x240 depth against the 512x1024 target is invalid too. */
-    expect_hr(&h, device, 39, d400, INVALIDCALL, "bind 400x240 depth to 512x1024");
-    got = get_depth(&h, device);
-    assert(got == d512x1024);
+    assert(got == d512);
     assert(unref(&h, got) == 2);
 
-    /* 6. Switching back to the back buffer under the bound 512x1024 depth is
-     *    refused as INVALIDCALL and leaves the 512x1024 target selected. */
-    expect_hr(&h, device, 37, 0, INVALIDCALL, "switch to 400x240 under 512x1024 depth");
-    assert(strstr(d9_com_last_diagnostic(), "does not match") != NULL);
+    /* 5. 400x240 depth against the 512x1024 target is queued too. */
+    expect_hr(&h, device, 39, d400, 0, "queue 400x240 depth on 512x1024");
+    got = get_depth(&h, device);
+    assert(got == d400);
+    assert(unref(&h, got) == 2);
+
+    /* 6. Switching back to the back buffer under the queued 512x1024 depth
+     *    succeeds and uses the back buffer's embedded depth. */
+    expect_hr(&h, device, 37, 0, 0, "switch to 400x240 under queued depth");
     got = get_target(&h, device);
-    assert(got == rt512x1024);
-    assert(unref(&h, got) == 2);
+    assert(got != rt512x1024);
+    (void)unref(&h, got); /* drop GetRenderTarget's reference */
 
     /* 7. Explicit unbind restores the back-buffer path and the 400x240 pair. */
-    expect_hr(&h, device, 39, 0, 0, "unbind 512x1024 depth");
+    expect_hr(&h, device, 39, 0, 0, "unbind queued depth");
     expect_hr(&h, device, 37, 0, 0, "switch to back buffer");
     expect_hr(&h, device, 39, d400, 0, "rebind 400x240 depth");
     got = get_depth(&h, device);
@@ -246,14 +236,13 @@ int main(void) {
     /* 8. Refcounts: unbind and release everything to zero. */
     expect_hr(&h, device, 39, 0, 0, "final depth unbind");
     assert(unref(&h, d400) == 0);
+    assert(unref(&h, d512) == 0);
     assert(unref(&h, d512x1024) == 0);
+    assert(unref(&h, d512x1024b) == 0);
     assert(unref(&h, rt512x1024) == 0);
 
-    /* This bridge returns INVALIDCALL for a rejected pair. */
-    assert(INVALIDCALL != NOTAVAILABLE);
-
     harness_stop(&h);
-    puts("PASS depth_target_matching: 400x240/512x1024 pairs, INVALIDCALL mismatch, "
+    puts("PASS depth_target_matching: 400x240/512x1024 pairs, queued mismatches, "
          "stable previous pair, refcounts");
     return 0;
 }

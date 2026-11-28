@@ -5,9 +5,11 @@
  * allocated.  Creation accepts pow2 8..1024, D24S8/D24X8, no MSAA; a
  * Lockable=1 descriptor owns a CPU D24S8 shadow for LockRect/UnlockRect while
  * binding still resolves to the target's embedded attachment.  The binding must
- * match the active target exactly, and switching targets under an
- * incompatible bound depth is a named refusal.  Clear(Z|STENCIL) reaches the
- * active target's attachment (the null backend records the exact packed value).
+ * match the active target exactly.  A depth whose size does not match the
+ * active target is queued (the engine sets the depth before switching targets)
+ * and applied when the matching target becomes current.  Clear(Z|STENCIL)
+ * reaches the active target's attachment (the null backend records the exact
+ * packed value).
  */
 #include "d3d9_com.h"
 #include "d3d9_adapter.h"
@@ -153,34 +155,38 @@ int main(void){
     assert(after.depth_clears==before.depth_clears+1);
     assert(after.last_depth_flags==7&&after.last_depth_clear==packed_z(0.5f,9));
 
-    /* 512x512 descriptor exists, but cannot bind to the 1024 target. */
+    /* 512x512 descriptor for the 1024 target is queued: the engine sets a
+     * depth before switching to the target that owns it.  Selecting the 512x512
+     * target then applies the request. */
     uint32_t d512s8=make_depth(&h,device,512,512,D9_D24S8,0,0,0,0);
-    assert(bind_depth(&h,device,d512s8,0x8876086cu));
-    assert(strstr(d9_com_last_diagnostic(),"does not match"));
-    got=get_depth(&h,device);assert(got==d1024s8);assert(unref(&h,got)==2);
-
-    /* Switching targets under an incompatible bound depth is refused, and the
-     * old target stays selected. */
-    uint32_t rt512=make_rt(&h,device,512,512);
-    assert(set_target(&h,device,rt512,0x8876086cu));
-    assert(strstr(d9_com_last_diagnostic(),"does not match"));
-    got=get_target(&h,device);assert(got==rt1024);assert(unref(&h,got)==2);
-    assert(set_target(&h,device,0,0x8876086cu)); /* back buffer is 400x240 */
-
-    /* Unbind, then the 512 target and its own descriptor work. */
-    assert(bind_depth(&h,device,0,0));
-    assert(call(&h,device,40,(uint32_t[]){OUT2},1)==0x88760866u); /* GetDepthStencilSurface: NOTFOUND */
-    assert(set_target(&h,device,rt512,0));
     assert(bind_depth(&h,device,d512s8,0));
+    got=get_depth(&h,device);assert(got==d512s8);
+    assert(unref(&h,got)==2); /* GetDepthStencilSurface retained it */
+
+    /* Switching to a target with a different size keeps the queued depth and
+     * uses the target's embedded attachment. */
+    uint32_t rt512=make_rt(&h,device,512,512);
+    assert(set_target(&h,device,rt512,0));
+    got=get_target(&h,device);assert(got==rt512);
+    assert(unref(&h,got)==2); /* GetRenderTarget retained it */
+    assert(set_target(&h,device,0,0)); /* back buffer is 400x240 */
+
+    /* Selecting the queued descriptor's 512 target applies it; the earlier
+     * switch to the 400x240 back buffer used the embedded attachment. */
+    assert(set_target(&h,device,rt512,0));
     before=*d9_null_stats();
     depth_frame(&h,device,0.25f,0,6);
     after=*d9_null_stats();
     assert(after.depth_clears==before.depth_clears+1);
     assert(after.last_depth_flags==6&&after.last_depth_clear==packed_z(0.25f,0));
 
-    /* D24X8 is the same attachment, reported as format 77. */
+    /* Unbind: GetDepthStencilSurface reports NOTFOUND, then the descriptor
+     * releases cleanly. */
     assert(bind_depth(&h,device,0,0));
+    assert(call(&h,device,40,(uint32_t[]){OUT2},1)==0x88760866u);
     assert(unref(&h,d512s8)==0);
+
+    /* D24X8 is the same attachment, reported as format 77. */
     uint32_t d1024x8=make_depth(&h,device,1024,1024,D9_D24X8,0,0,0,0);
     desc(&h,d1024x8,&fmt,&w,&height);
     assert(fmt==D9_D24X8&&w==1024&&height==1024);
@@ -238,8 +244,8 @@ int main(void){
     assert(call1(&h,device,7,CAPS9)==0&&rd(&h,CAPS9+28)==0x00082000u);
     assert(unref(&h,device)==0&&unref(&h,h.factory)==0);
     harness_stop(&h);
-    puts("depth-stencil descriptors: 1024 D24S8/D24X8 create+bind+clear, 512/1024 mismatch and "
-         "target-switch refusals, MSAA/lockable shadow/shared/bad sizes, 400x240 back buffer, "
-         "render-target texture binding and honest caps passed");
+    puts("depth-stencil descriptors: 1024 D24S8/D24X8 create+bind+clear, 512/1024 queued "
+         "depth applied on target switch, MSAA/lockable shadow/shared/bad sizes, 400x240 back "
+         "buffer, render-target texture binding and honest caps passed");
     return 0;
 }

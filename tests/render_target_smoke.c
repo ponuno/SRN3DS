@@ -120,12 +120,16 @@ int main(void){
     assert(d9_release_render_target(d,a)==D9_INVALID);
     assert(!d9_present(d));
     assert(!d9_release_render_target(d,a)&&d9_memory_used(d)==16*16*4);
-    assert(!d9_release_render_target(d,b)&&d9_memory_used(d)==0);
+    /* b is current: release retires it, storage stays until the switch. */
+    assert(!d9_release_render_target(d,b)&&d9_memory_used(d)==16*16*4);
     unsigned binds_before=sw.binds;
     assert(!d9_begin_scene(d,0xff0000ffu)&&!d9_present(d));
     assert(sw.binds==binds_before+1&&sw.active==NULL); /* selected-target release rebinds back buffer */
-    assert(sw.creates==2&&sw.deletes==2&&sw.clears==2&&sw.reads==6);
+    assert(d9_memory_used(d)<=16*16*4); /* retired storage is reclaimed at destroy */
+    /* Retiring b and rebinding the back buffer adds one back-buffer clear. */
+    assert(sw.creates==2&&sw.clears==3&&sw.reads==6);
     d9_destroy_device(d);
+    assert(sw.deletes==2); /* the retired target is deleted at device destroy */
 
     D9Device *small=d9_create_device(&ops,&sw,1024);assert(small);
     assert(!d9_create_render_target(small,16,16,D9_A8R8G8B8,1,&a));
