@@ -199,6 +199,14 @@ static void mem_refresh(void *ctx) {
     size_t region = osGetMemRegionSize(MEMREGION_APPLICATION);
     size_t used = osGetMemRegionUsed(MEMREGION_APPLICATION);
     mem_stats_set_os_region(region, used, region - used);
+    /* VRAM is a separate 6 MiB budget; the snapshot must use the backend's
+     * reservations, not the incremental free-pool deltas. */
+    {
+        size_t vl = 0, vp = 0, vlim = 0;
+        unsigned vf = 0;
+        d9_citro_vram_stats(&vl, &vp, &vlim, &vf);
+        mem_stats_set_vram(vl, vp, vlim);
+    }
 #endif
 }
 

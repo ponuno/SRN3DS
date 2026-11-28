@@ -621,8 +621,9 @@ void d9_volume_level_view_locked(D9Device *d,D9Handle h,int locked){
  * cost so it can act before an allocation fails and so every decision is
  * visible: evict an inactive target, fall back to linear-heap storage, then
  * shrink the PO2 storage, then refuse by name.  The current render target, the
- * retained back buffer, a target bound this frame and any target exposed as a
- * sampleable texture are never evicted. */
+ * retained back buffer and targets used in the current frame are never
+ * evicted; sampleable targets may be evicted because suspend keeps the D3D
+ * handle and the sample view alive and bind/draw resume the storage. */
 static void target_vram_charge(D9Device *d,size_t bytes){
     if(!d||!bytes)return;
     d->target_vram_live+=bytes;
@@ -636,12 +637,6 @@ static int target_vram_room(const D9Device *d,size_t bytes){
     if(!d)return 0;
     if(!d->target_vram_limit)return 1;
     return d->target_vram_live+bytes<=d->target_vram_limit;
-}
-static int target_sampled(const D9Device *d,D9Handle id){
-    if(!d||!id)return 0;
-    for(unsigned i=0;i<MAX_TEXTURES;++i)
-        if(d->textures[i].id&&d->textures[i].rt_target==id)return 1;
-    return 0;
 }
 static void target_pool_flush(D9Device *d,const char *why){
     if(!d||!d->target_pool_count||!d->ops.target_delete)return;
@@ -675,14 +670,14 @@ static int target_pool_take(D9Device *d,unsigned w,unsigned h,unsigned format,
     }
     return 0;
 }
-static unsigned target_evict(D9Device *d,size_t need){
+static unsigned target_evict(D9Device *d,size_t need,int force){
     if(!d||!d->ops.target_suspend||!d->target_vram_limit)return 0;
     /* Suspension destroys a render-target view; that is not allowed while a
      * frame is open.  Creation always runs outside BeginScene/EndScene, so the
      * only in-scene caller (rehydrating a target) never evicts. */
     if(d->scene)return 0;
     unsigned evicted=0;
-    while(!target_vram_room(d,need)){
+    while(force?evicted==0:!target_vram_room(d,need)){
         Target *victim=NULL;
         for(unsigned i=0;i<MAX_TARGETS;++i){
             Target *t=&d->targets[i];
@@ -693,7 +688,9 @@ static unsigned target_evict(D9Device *d,size_t need){
              * would need another VRAM allocation, so such targets are not
              * eviction candidates. */
             if(t->has_depth)continue;
-            if(target_sampled(d,t->id))continue;
+            /* Sampleable targets are evictable too: suspend keeps the handle
+             * and the sample view alive, and bind/draw resume it.  A target
+             * used in the current frame is excluded by the generation test. */
             if(!victim||t->last_use_gen<victim->last_use_gen)victim=t;
         }
         if(!victim)break;
@@ -726,7 +723,7 @@ static int target_activate(D9Device *d,Target *t){
     size_t bytes=(size_t)t->native_w*t->native_h*4u;
     if(!target_vram_room(d,bytes)&&!d->scene){
         target_pool_flush(d,"target pool flushed to rehydrate an evicted target");
-        target_evict(d,bytes);
+        target_evict(d,bytes,0);
     }
     if(!target_vram_room(d,bytes)){
         snprintf(d->diagnosis,sizeof d->diagnosis,
@@ -2027,7 +2024,7 @@ static int target_ensure_depth(D9Device *d,Target *t){
     size_t depth_bytes=(size_t)t->native_w*t->native_h*4u;
     if(t->resident&&!t->depth_charged&&!target_vram_room(d,depth_bytes)){
         target_pool_flush(d,"target pool flushed for a depth attachment");
-        target_evict(d,depth_bytes);
+        target_evict(d,depth_bytes,0);
     }
     if(t->resident&&!t->depth_charged&&!target_vram_room(d,depth_bytes)){
         snprintf(d->diagnosis,sizeof d->diagnosis,
@@ -2175,7 +2172,7 @@ static int create_target_sized(D9Device *d,unsigned w,unsigned h,
         for(int attempt=0;attempt<2&&!got;++attempt){
             if(!target_vram_room(d,cost)){
                 target_pool_flush(d,"target pool flushed under VRAM pressure");
-                if(!target_evict(d,cost))break;
+                if(!target_evict(d,cost,0))break;
             }
             if(!target_vram_room(d,cost))break;
             int rc=d->ops.target_create(d->ctx,cw,ch,format,&native);
@@ -2185,7 +2182,7 @@ static int create_target_sized(D9Device *d,unsigned w,unsigned h,
              * rounding, non-target VRAM).  A backend refusal is also a pressure
              * signal: evict one inactive target and retry the backend once. */
             if(attempt==0){
-                unsigned ev=target_evict(d,cost);
+                unsigned ev=target_evict(d,cost,1);
                 if(!ev)break;
             }
         }
@@ -2204,7 +2201,7 @@ static int create_target_sized(D9Device *d,unsigned w,unsigned h,
                 "(VRAM budget %zu KiB, live %zu KiB)\n",w,h,cw,ch,
                 d->target_vram_limit>>10,d->target_vram_live>>10);
         size_t cost=(size_t)cw*ch*4u;
-        if(!target_vram_room(d,cost)){target_pool_flush(d,"target pool flushed for a downscaled target");target_evict(d,cost);}
+        if(!target_vram_room(d,cost)){target_pool_flush(d,"target pool flushed for a downscaled target");target_evict(d,cost,0);}
         if(target_vram_room(d,cost)&&!d->ops.target_create(d->ctx,cw,ch,format,&native)&&native){got=1;break;}
         if(native){d->ops.target_delete(d->ctx,native);native=NULL;}
     }
@@ -2239,7 +2236,10 @@ static int create_target_sized(D9Device *d,unsigned w,unsigned h,
     D9Handle id=d->next++;*slot=(Target){id,w,h,cw,ch,format,lockable?1:0,bytes,native};
     slot->pot_pad=(cw>=w&&ch>=h&&(cw!=w||ch!=h))?1:0;
     slot->resident=1;
-    slot->last_use_gen=d->frame_generation;
+    /* Creation is not a use: a target that was never bound/sampled may be
+     * evicted even in the frame that created it.  bind/draw/texture bind set
+     * this to the current generation. */
+    slot->last_use_gen=0;
     slot->has_depth=pooled_depth?1:0;
     if(pooled_bytes){
         /* Already charged when the pool retained it. */
@@ -2900,6 +2900,13 @@ int d9_bind_texture(D9Device *d,unsigned stage,D9Handle h){
     if(h&&t->lost){
         set_diagnosis(d,"DEFAULT-pool texture was lost on Reset; release and recreate it");
         return D9_INVALID;
+    }
+    /* A render-target texture whose target was suspended must be rehydrated
+     * before it is sampled.  The texture keeps its stable sample view; only the
+     * target's GPU storage is re-created. */
+    if(h&&t->rt_target){
+        Target *rt=target(d,t->rt_target);
+        if(rt){int ar=target_activate(d,rt);if(ar)return ar;rt->last_use_gen=d->frame_generation;}
     }
     if(h&&!t->native&&!t->cpu_only&&!t->gpu_only&&t->pool==D9_POOL_MANAGED){
         int rr=rehydrate_texture(d,t);if(rr)return rr;
@@ -4206,6 +4213,20 @@ int d9_draw_plan_passes(D9Device *d,const struct D9ShaderPlan *plan,const D9Plan
     return rc;
 }
 static int draw(D9Device *d,unsigned type,int32_t base,unsigned start,unsigned primitives,int indexed,int limited,unsigned min,unsigned count,const UpSource *up){
+    /* Draw state (including bound textures) persists across frames, so a
+     * texture may still be bound while its target was evicted by a later
+     * create.  Rehydrate both stages before PICA samples them. */
+    for(unsigned st=0;st<2;++st){
+        D9Handle th=st?d->texture1:d->texture;
+        Texture *tx=th?texture(d,th):NULL;
+        if(!tx||!tx->rt_target)continue;
+        Target *rt=target(d,tx->rt_target);
+        if(rt&&!rt->resident){
+            int ar=target_activate(d,rt);
+            if(ar)return ar;
+            rt->last_use_gen=d->frame_generation;
+        }
+    }
     /* Indexed draws are not expanded up front any more: a 16-bit batch that the
      * compact menu-indexed path can carry goes straight to the backend, and a
      * batch it cannot carry is refused by name below.  Before this, an indexed

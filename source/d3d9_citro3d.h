@@ -27,3 +27,7 @@ typedef struct D9Citro D9Citro;
 D9Citro *d9_citro_open(void);
 void d9_citro_close(D9Citro *c);
 const D9Backend *d9_citro_backend(void);
+/* Global on-VRAM accounting: live/peak bytes charged by this backend,
+ * enforced limit (6 MiB minus 256 KiB slack unless N3DS_VRAM_LIMIT says
+ * otherwise) and the number of refused reservations. */
+void d9_citro_vram_stats(size_t *live,size_t *peak,size_t *limit,unsigned *refusals);

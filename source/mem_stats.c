@@ -282,6 +282,19 @@ void mem_stats_set_os_region(uint64_t size, uint64_t used, uint64_t free_bytes)
     g.os_free = free_bytes;
 }
 
+/* Replace the VRAM space counters with the backend's authoritative global
+ * accounting.  The incremental space_end/released path double-counts a
+ * suspend/resume or a release/re-create pair, so snapshots must not use it. */
+void mem_stats_set_vram(size_t live, size_t peak, size_t limit)
+{
+    if (peak < live) peak = live;
+    g.space_live[MEM_STATS_VRAM] = live;
+    g.space_peak[MEM_STATS_VRAM] = peak;
+    g.space_free[MEM_STATS_VRAM] = limit > live ? limit - live : 0;
+    g.space_min[MEM_STATS_VRAM] = g.space_free[MEM_STATS_VRAM];
+    g.have_space[MEM_STATS_VRAM] = 1;
+}
+
 void mem_stats_set_texcache(size_t guest_bytes, size_t gpu_bytes,
                             size_t guest_peak, size_t gpu_peak,
                             unsigned budget_trims,

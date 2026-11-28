@@ -113,6 +113,9 @@ void mem_stats_set_stream(unsigned queued, uint64_t staged_bytes,
                           uint64_t demand_bytes, uint64_t prefetch_demand_hits,
                           uint64_t cancelled, uint64_t budget_denied);
 void mem_stats_set_os_region(uint64_t size, uint64_t used, uint64_t free_bytes);
+/* Authoritative global VRAM accounting (backend's own reservations).  Peak and
+ * free are derived here so the periodic line cannot drift with suspend/resume. */
+void mem_stats_set_vram(size_t live, size_t peak, size_t limit);
 void mem_stats_set_texcache(size_t guest_bytes, size_t gpu_bytes,
                             size_t guest_peak, size_t gpu_peak,
                             unsigned budget_trims,

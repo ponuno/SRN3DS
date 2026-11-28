@@ -73,6 +73,14 @@ static void vram_release(size_t bytes){
     if(!bytes)return;
     g_vram.live=g_vram.live>bytes?g_vram.live-bytes:0;
 }
+/* Authoritative global accounting for the memory log and the exit summary. */
+void d9_citro_vram_stats(size_t *live,size_t *peak,size_t *limit,unsigned *refusals){
+    vram_init_once();
+    if(live)*live=g_vram.live;
+    if(peak)*peak=g_vram.peak;
+    if(limit)*limit=g_vram.limit>0x40000?g_vram.limit-0x40000:g_vram.limit;
+    if(refusals)*refusals=g_vram.failures;
+}
 
 #define FRAME_INDICES 262144u
 /* Verified PICA VS batches are bounded by the core's 4,096-vertex scratch and
@@ -1215,9 +1223,13 @@ static int target_create_impl(void *ctx,unsigned w,unsigned h,unsigned format,
     t->head.target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,-1);
     mem_stats_space_end(space,before,0,t->head.target!=NULL);
     if(!t->head.target){
-        fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed "
-                "(vram free %u KiB, accounted live %zu KiB)\n",w,h,
-                (unsigned)(vramSpaceFree()>>10),g_vram.live>>10);
+        if(!on_vram)
+            fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u linear storage cannot back a PICA "
+                    "render target (framebuffer must live in VRAM); use VRAM/downscale\n",w,h);
+        else
+            fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed "
+                    "(vram free %u KiB, accounted live %zu KiB)\n",w,h,
+                    (unsigned)(vramSpaceFree()>>10),g_vram.live>>10);
         before=mem_stats_space_begin(space);
         C3D_TexDelete(&t->tex);mem_stats_space_released(space,before);free(t);
         if(on_vram)vram_release(colour);

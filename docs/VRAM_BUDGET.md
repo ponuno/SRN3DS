@@ -53,13 +53,18 @@ In this order, each step with a named `[d3d9-target]` stderr line:
    takes the pooled native instead of allocating. Pooled bytes stay charged
    against the budget and are the first thing dropped under pressure.
 2. **Evict an inactive target.** Candidates are targets that are not the
-   current render target, not the retained back buffer, were not bound in the
-   current frame generation, are not referenced by a live sampleable
-   RT-texture, and have no depth attachment. `target_suspend` frees the
-   colour storage and the render-target view but keeps the D3D handle and the
-   sample view valid; `target_resume` re-creates them on the next
-   bind/read/write. Suspension is refused inside `BeginScene/EndScene`, so no
-   queued command can reference freed storage.
+   current render target, not the retained back buffer, were not bound or
+   sampled in the current frame generation, and have no depth attachment.
+   Creation alone is not a use (`last_use_gen=0`), so a target the guest
+   created but has not bound/sampled is evictable in the same frame.
+   Sampleable RT-textures are included: `target_suspend` frees the colour
+   storage and the render-target view but keeps the D3D handle and the sample
+   view valid, and `target_resume` re-creates the storage on the next bind,
+   `SetTexture` or draw (the draw path rehydrates a still-bound texture whose
+   target was evicted; draw state persists across frames).  Suspension is
+   refused inside `BeginScene/EndScene`, so no queued command can reference
+   freed storage.  A resume that no longer fits is a named refusal, not a
+   silent NULL.
 3. **Downscale PO2 storage.** Halve the native storage (512 -> 256 -> 128 ...,
    floor 64) and keep the logical surface through `target_viewport_scaled`.
    The guest still renders "512x512"; the image loses resolution. Counted as
@@ -68,10 +73,12 @@ In this order, each step with a named `[d3d9-target]` stderr line:
    exact refusal unless the variable is set, because a silently smaller target
    changes what the guest samples.
 4. **Linear heap.** `target_create_linear` allocates the chosen (possibly
-   downscaled) `C3D_Tex` with `onVram=false`. Sampling and rendering still
-   work; the cost moves from VRAM to the linear heap. In the 96x8 `.3dsx`
-   profile the linear heap is nearly full (`linear_fail_n>0`), so this is a
-   last resort there.
+   downscaled) `C3D_Tex` with `onVram=false`. Sampling works, but PICA
+   framebuffers must live in VRAM: for a render target the RT-view creation
+   fails, and the backend reports `linear storage cannot back a PICA render
+   target (framebuffer must live in VRAM)`. The core then refuses by name
+   instead of handing out a NULL. In the 96x8 `.3dsx` profile the linear heap
+   is also nearly full, so this is not a usable render-target path there.
 5. **Named refusal.** If no step applies the create fails with
    `CreateRenderTarget: backend could not allocate a WxH native target; target
    VRAM budget ... KiB (live ..., peak ...), evictions ..., linear fallbacks
@@ -96,8 +103,10 @@ pool_entries=... suspended=...`:
 | `pool_hits` / `pool_flushes` / `pool_entries` / `pool_bytes` | reuse pool |
 | `suspended_targets` | live handles currently without GPU storage |
 
-The existing `mem_stats` VRAM live/free lines still describe the backend
-accounting; these counters describe the policy decisions.
+The existing `mem_stats` VRAM live/free lines are now fed from this backend
+accounting on the device (`mem_stats_set_vram`): they no longer count a
+suspend/resume or release/re-create pair twice.  The `[d3d9-vram]` live/peak
+pair and the exit summary remain the primary evidence.
 
 ## Tests
 
@@ -114,7 +123,10 @@ accounting; these counters describe the policy decisions.
   (`pool_hits=1`), pooled bytes stay charged, teardown flushes the pool;
 * **D** with no eviction/linear/downscale available the refusal is named and
   counted (`alloc_failures=1`);
-* **E** downscale 512 -> 256 -> 128 is the last fallback and is counted.
+* **E** downscale 512 -> 256 -> 128 is the last fallback and is counted;
+* **F** a sampleable RT-texture target is evicted when inactive, rehydrated
+  when its texture is bound again, and eight evict/rehydrate cycles leave
+  `vram_live`/`vram_peak` unchanged (no counter drift).
 
 Host regressions re-run green: `render_target`, `render_target_bounded`,
 `render_target_budget`, `render_texture`, `render_texture_sample`,
@@ -169,25 +181,42 @@ The device main therefore sets the target sub-budget to 4.25 MiB: the four
 MiB of the global cap stays for the LCD and smaller targets. That removed the
 original target #4 failure but not the later small-target refusals.
 
+Measured with `vrambudget6` (sha256 `BB078875…`, 96x8, `-ForceMemProbe`, caps
+probe, budget file 32):
+
+* `[d3d9-vram] closed: live 0 KiB peak **5042 KiB**` against the 5888 KiB
+  enforced cap; the reconciled `mem_stats` line reports
+  `vram_live=5,097,984` / `vram_peak=5,163,776` (same accounting, no double
+  count). `refusals=0`, `linear_fail_n=0`.
+* **8 evictions** and **17 target creations**: the four 512x512 menu targets
+  all exist at full size (one is evicted to admit the next and resumed later);
+  the later 512/128/32/8 targets are admitted instead of refused. The linear
+  "cannot back a PICA render target" diagnostic is no longer reached.
+* `[menu] enter 00876f60`: **0**, draw probe 0. The VRAM wall is gone but the
+  guest now dies of **guest RAM**, not VRAM:
+  `Guest fault at 41cee000: guest memory backing failed: out of memory`,
+  `guest_used=78,121,152`, `newlib_free=46,560`, `va backed=39,188 KiB`,
+  `pages failures=1`. That is the 92 MiB `.3dsx` guest budget, not the 6 MiB
+  VRAM budget.
+* Before eviction was enabled the same path stopped at 56.6 MiB guest and a
+  NULL 64x64 target; eviction moved it to 78.1 MiB and a clean guest-RAM
+  exhaustion.
+
 ## What is left
 
-* **Evict sampleable targets safely.** The guest needs more targets than
-  4.25 MiB holds. The suspend/resume pair already keeps the `NativeTarget` and
-  the sample view valid, but sampling a suspended target must resume it first;
-  until the draw paths do that, all RT-textures stay non-evictable and the
-  budget is simply full after the menu target set. That is the next fix, not a
-  larger number: the four 512 targets alone already consume the budget.
-* **Reconcile `mem_stats` VRAM.** Its `vram_live` is a cumulative allocation
-  counter (8.87 MiB at exit while the backend peak was 5.10 MiB). Feed it from
-  the backend's `g_vram` counters instead of the free-pool deltas.
-* **Audit citro3d `vramFree` accounting.** At the final refusal the pool still
-  reported 1042 KiB free yet a 64x64 colour-only render-target view failed
-  with no reservation charged. Either `C3D_RenderTargetCreateFromTex` needs
-  storage the model does not know about, or a deleted VRAM texture is not
-  returned to the pool. This is instrumented (named failure + `accounted`)
-  but not yet explained.
-* Linear-heap targets are validated in Azahar for allocation and binding; a
-  physical New 3DS run is still needed to see the real failure order and the
-  actual linear-heap headroom next to the texture cache.
-* Downscale changes sampled resolution; the current device set is 3x512 + 1x256
-  for the four menu targets.
+* **Resume at the previous native size only.** A suspended target is resumed in
+  VRAM; if the budget is full at that moment the core returns a named
+  `D9_MEMORY` instead of downscaling the resumed storage.  Downscaling on
+  resume would change the sample UV sub-rect and is a separate change.
+* **Linear-heap render targets are impossible** (`framebuffer must live in
+  VRAM`), so the linear step is only a named diagnostic for targets; the real
+  recovery is eviction + downscale.  Sampling linear textures still works.
+* **Audit citro3d `vramFree` accounting.** At the pre-fix refusal the pool
+  reported 1042 KiB free while the RT-view failure was actually a linear
+  storage attempt (no VRAM reservation charged). That is now named, but a
+  physical New 3DS run is still needed to confirm allocation order and
+  fragmentation.
+* Downscale changes sampled resolution; with eviction available the menu set
+  should stay at 512 where the budget allows.
+* Physical New 3DS run still needed for real VRAM/linear headroom next to the
+  texture cache.

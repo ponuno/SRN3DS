@@ -277,39 +277,43 @@ static void test_four_512_with_back_buffer(void) {
         t[i] = d9_texture_render_target(d, tex[i]);
         assert(t[i]);
     }
-    /* Three targets fit the backend's VRAM; the fourth is downscaled to 256x256
-     * because the backend is tighter than the core model by the reserved
-     * block. */
-    assert(c.creates == 5); /* back buffer + three 512 + one 256x256 */
+    /* Three targets fit the backend's VRAM; the fourth request evicts one of
+     * the unused 512x512 sampleable targets (creation is not a use) and then
+     * still gets a full 512x512 allocation. */
+    assert(c.creates == 5); /* back buffer + four 512x512 */
     assert(c.linear_creates == 0);
     D9TargetStats st;
     assert(d9_target_stats(d, &st) == D9_OK);
     assert(st.vram_limit == 5u << 20);
-    assert(st.vram_live == (4u << 20) + (256u << 10));
-    assert(st.vram_peak == (4u << 20) + (256u << 10));
+    assert(st.vram_live == 4u << 20);
+    assert(st.vram_peak == 4u << 20);
     assert(st.linear_fallbacks == 0);
-    assert(st.downscales == 1);
+    assert(st.downscales == 0);
     assert(st.alloc_failures == 0);
-    assert(st.evictions == 0);
+    assert(st.evictions == 1);
+    assert(st.suspended_targets == 1);
     unsigned nw = 0, nh = 0;
     assert(d9_render_target_storage_info(d, t[3], &nw, &nh) == D9_OK);
-    assert(nw == 256 && nh == 256);
-    assert(c.vram_used == (4u << 20) + (256u << 10)); /* back + 3x1M + 256K */
+    assert(nw == 512 && nh == 512);
+    assert(c.vram_used == 4u << 20); /* back + 3 resident + the new 512 */
     assert(c.linear_used == 0);
 
-    /* Every target, including the linear one, binds and accepts a draw. */
-    for (unsigned i = 0; i < 4; ++i) {
+    /* Free the new target, then every original one binds again; the evicted
+     * one is resumed on bind. */
+    assert(d9_release_texture(d, tex[3]) == D9_OK);
+    for (unsigned i = 0; i < 3; ++i) {
         bind_and_render(d, t[i]);
         assert(d9_render_target_storage_info(d, t[i], NULL, NULL) == D9_OK);
     }
-    assert(c.binds >= 4);
-    for (unsigned i = 0; i < 4; ++i)
+    assert(c.binds >= 3);
+    assert(c.resumes == 1);
+    for (unsigned i = 0; i < 3; ++i)
         assert(d9_release_texture(d, tex[i]) == D9_OK);
     assert(c.vram_used == 1u << 20); /* only the retained back buffer remains */
     assert(c.linear_used == 0);
     assert(d9_destroy_device_ex(d) == 0);
     assert(c.vram_used == 0 && c.linear_used == 0);
-    puts("A: four 512x512 + back buffer + depth -> downscale fallback, counters PASS");
+    puts("A: four 512x512 + back buffer + depth -> evict sampleable, counters PASS");
 }
 
 static void test_eviction_and_current_rt(void) {
@@ -426,6 +430,70 @@ static void test_named_refusal(void) {
     puts("D: named refusal when no fallback exists PASS");
 }
 
+static void test_sampleable_eviction_and_resume(void) {
+    env_set("N3DS_TARGET_VRAM_LIMIT", "2M");
+    env_set("N3DS_TARGET_POOL_ENTRIES", "0");
+    env_set("TESV_D3D9_TARGET_NATIVE_MAX", "512");
+    env_set("N3DS_TARGET_DOWNSCALE", "0");
+    Ctx c; memset(&c, 0, sizeof c);
+    c.vram_limit = 3u << 20;
+    D9Device *d = d9_create_device(&ops_full, &c, 32u << 20);
+    assert(d);
+
+    D9Handle tex = 0, a = 0, b = 0, cc = 0;
+    assert(d9_create_render_texture(d, 512, 512, D9_A8R8G8B8, D9_POOL_DEFAULT,
+                                    D9_USAGE_RENDERTARGET, &tex) == D9_OK);
+    a = d9_texture_render_target(d, tex);
+    assert(a);
+    assert(d9_create_render_target(d, 512, 512, D9_A8R8G8B8, 0, &b) == D9_OK);
+    D9TargetStats st;
+    assert(d9_target_stats(d, &st) == D9_OK);
+    assert(st.vram_live == (2u << 20));
+
+    /* Advance a frame with B current: A is sampleable but not used this frame,
+     * so it is a valid eviction candidate and must free its 1 MiB. */
+    frame(d, b);
+    assert(d9_create_render_target(d, 512, 512, D9_A8R8G8B8, 0, &cc) == D9_OK);
+    assert(d9_target_stats(d, &st) == D9_OK);
+    assert(st.evictions == 1);
+    assert(st.suspended_targets == 1);
+    assert(c.suspends == 1 && c.resumes == 0);
+    assert(st.vram_live == (2u << 20));
+
+    /* The suspended sampleable target is rehydrated when its texture is bound
+     * again, without a new D3D handle. */
+    assert(d9_release_render_target(d, cc) == D9_OK);
+    assert(d9_bind_texture(d, 0, tex) == D9_OK);
+    assert(c.resumes == 1);
+    assert(d9_target_stats(d, &st) == D9_OK);
+    assert(st.suspended_targets == 0 && st.vram_live == (2u << 20));
+
+    /* Repeated evict/rehydrate cycles must not drift the authoritative
+     * vram_live/peak counters (unlike the incremental mem_stats path). */
+    for (unsigned i = 0; i < 8; ++i) {
+        frame(d, b);
+        assert(d9_create_render_target(d, 512, 512, D9_A8R8G8B8, 0, &cc) == D9_OK);
+        assert(d9_target_stats(d, &st) == D9_OK);
+        assert(st.vram_live == (2u << 20));
+        assert(st.suspended_targets == 1);
+        assert(d9_release_render_target(d, cc) == D9_OK);
+        assert(d9_bind_texture(d, 0, tex) == D9_OK);
+        assert(d9_target_stats(d, &st) == D9_OK);
+        assert(st.vram_live == (2u << 20));
+        assert(st.suspended_targets == 0);
+        assert(st.vram_peak == (2u << 20));
+    }
+    assert(st.evictions == 9);
+    assert(c.resumes == 9);
+
+    assert(d9_bind_texture(d, 0, 0) == D9_OK);
+    assert(d9_release_texture(d, tex) == D9_OK);
+    assert(d9_release_render_target(d, b) == D9_OK);
+    assert(d9_destroy_device_ex(d) == 0);
+    assert(c.vram_used == 0);
+    puts("F: sampleable-target eviction and bind-time resume, no counter drift PASS");
+}
+
 static void test_downscale_fallback(void) {
     env_set("N3DS_TARGET_VRAM_LIMIT", "5M");
     env_set("N3DS_TARGET_POOL_ENTRIES", "0");
@@ -460,6 +528,7 @@ int main(void) {
     test_eviction_and_current_rt();
     test_pool_reuse();
     test_named_refusal();
+    test_sampleable_eviction_and_resume();
     test_downscale_fallback();
     env_set("N3DS_TARGET_VRAM_LIMIT", NULL);
     env_set("N3DS_TARGET_POOL_ENTRIES", NULL);
