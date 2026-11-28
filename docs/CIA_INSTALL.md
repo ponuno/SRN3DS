@@ -45,8 +45,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
 
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_cia.ps1 `
     -Elf dist\Skyrim_N3DS_tesv_96x24\Skyrim_N3DS_tesv_96x24.elf `
-    -Out E:\cia_menu\Skyrim_N3DS_tesv_96x24_menu.cia `
-    -WorkDir E:\cia_menu\work_96x24_menu
+    -Out E:\cia_menu\Skyrim_N3DS_tesv_96x24_memgate.cia `
+    -WorkDir E:\cia_menu\work_96x24_memgate
 ```
 
 `96x24` is the device ceiling: libctru's application heap area is 96 MiB. Do
@@ -81,19 +81,19 @@ build. `build.ps1` performs a clean build by default; `-NoClean` is only safe
 when the profile macros are unchanged (it is what was used for the re-link after
 the two `n3ds_env_cfg` allowlist keys were added).
 
-### Delivered artifact (2026-11-28, worktree `cia-final` @ `3e35c40`)
+### Delivered artifact (2026-11-28, worktree `cia-final` @ `180d102`)
 
 | profile | CIA | bytes | sha256 |
 |---|---|---:|---|
-| **96x24 + stack + Bink empty clip** | `E:\cia_menu\Skyrim_N3DS_tesv_96x24_menu.cia` | 1,580,480 | `a9ede38e3c5e4cb18c57c1321d0f08873bce8d9acb58b0a2d12fc32ebf0b9501` |
+| **96x24 + stack + Bink empty clip + startup mem compat** | `E:\cia_menu\Skyrim_N3DS_tesv_96x24_memgate.cia` | 1,580,992 | `d4ceddc4fc6e538a11f75f823855677ef2fa94e277940d0ec6de1ae09e1f683e` |
 
 ELF: `dist\Skyrim_N3DS_tesv_96x24\Skyrim_N3DS_tesv_96x24.elf`
-(12,998,808 B, sha256 `b92d78a774c4bf8eb8ac56c69e4e27609f3c025eed8597fc54b004c1d1715f8e`).
+(12,999,172 B, sha256 `016198f16907d63ae57872daa7433baa7ef88d468db5ae6a6a91109d4408d984`).
 `build_manifest.json` records `mem_profile=96x24`,
 `defines=-DTESV_HEAP_MIB=96 -DTESV_LINEAR_MIB=24`, and the generator hash of
 `live_arm_check2\gen`. The CIA reports title ID `000400000F0D5900` and
 `SystemModeExt=178MB CpuSpeed=804MHz EnableL2Cache=true` (checked by
-`build_cia.ps1`; see `work_96x24_menu\cia_info.txt`).
+`build_cia.ps1`; see `work_96x24_memgate\cia_info.txt`).
 
 In this ELF: `__ctru_heap_size = 0x06000000` (96 MiB),
 `__ctru_linear_heap_size = 0x01800000` (24 MiB), `__stacksize__ = 0x00020000`
@@ -101,7 +101,16 @@ In this ELF: `__ctru_heap_size = 0x06000000` (96 MiB),
 
 > **120x24 does not boot on hardware.** `…_120x24_menu.cia` and
 > `…_120x24_stack.cia` fail before `main` — see *Hardware heap limit* below.
-> Install `Skyrim_N3DS_tesv_96x24_menu.cia` instead.
+> Install `Skyrim_N3DS_tesv_96x24_memgate.cia`.
+
+Why this replaces `…_96x24_menu.cia`: that build loaded but the guest exited at
+startup with `exit code=0 from=00f5894a` — Skyrim's PC minimum-configuration
+check demands a 512 MiB commit limit. Since `180d102`, `s_GlobalMemoryStatusEx`
+answers 512 MiB **only** for the call from `0x00a48a5d` (return `0x00a48a63`);
+every later query reports the honest budget. It is a compatibility shim for a
+PC check, not a memory promise: guest allocations still fail honestly at the
+budget. Host run: `[mem] startup minimum-config check: 512 MiB commit reported`,
+then `[menustate] singleton=41f8eaf0` over ~108k frames.
 
 Why the Bink gate matters: since `b03c33c`, `_BinkOpen@8` in
 `source/win32_shims.c` returns a valid **empty clip** when the platform has no
@@ -117,7 +126,8 @@ Previous artifacts:
 
 | artifact | bytes | sha256 | status |
 |---|---:|---|---|
-| `Skyrim_N3DS_tesv_96x24_menu.cia` | 1,580,480 | `a9ede38e…bf0b9501` | **current** |
+| `Skyrim_N3DS_tesv_96x24_memgate.cia` | 1,580,992 | `d4ceddc4…e1f683e` | **current** |
+| `Skyrim_N3DS_tesv_96x24_menu.cia` | 1,580,480 | `a9ede38e…bf0b9501` | previous: **exits at startup memory check** (`exit code=0 from=00f5894a`) |
 | `Skyrim_N3DS_tesv_120x24_menu.cia` | 1,580,480 | `d2c6aa34…9036031c` | **crashes on hardware**: 120 MiB heap, svcBreak in `__system_allocateHeaps` |
 | `Skyrim_N3DS_tesv_120x24_stack.cia` | 1,577,920 | `47dbfc60c1d420f24f1846ff3f0a361cb051c602cb2fc97b87a03bd9d4e60ea4` | **crashes on hardware**: same heap limit; also pre-Bink-fix |
 | `Skyrim_N3DS_tesv_120x24.cia` | 1,566,656 | `6cb076b18f61700975a5ef9f7086ad7c5c965b18ee91fc1ffb0e0c53f4e2e0bf` | **invalid**: pre-`b3915c5`, 32 KiB stack |
@@ -330,7 +340,6 @@ N3DS_STREAM=0
 # N3DS_IRC_PATH=sdmc:/Skyrim/ir/tesv.irc
 # N3DS_IRC_CACHE_BYTES=4194304
 # N3DS_MEM_EVERY=300
-# TESV_MEMPROBE=1
 ```
 
 Format rules: blank lines and lines starting with `#` or `;` are comments;
@@ -365,6 +374,24 @@ and the file, the launcher supplies these defaults:
 The first four keys are applied before `d9_citro_open()`, the paging window
 before `guest_init()` maps the image, so no key needs a rebuild to take effect.
 
+### Startup minimum-config check (compat shim)
+
+Skyrim's PC minimum-configuration check (`0x00f5894a` exits the process with
+`exit code=0` when it fails) requires a commit limit of at least 512 MiB. This
+port has no page file, so since `180d102` `s_GlobalMemoryStatusEx` answers
+**512 MiB only for the call from `0x00a48a5d`** (return address `0x00a48a63`)
+and leaves every later query honest. The one line it logs is:
+
+```
+[mem] startup minimum-config check: 512 MiB commit reported (compat; the real guest budget is still enforced)
+```
+
+This is a compatibility answer for a PC check, not a memory promise: guest
+allocations still fail honestly at the 92 MiB budget (`guest_backing_failures`,
+`newlib_free`). It is compiled in, so no config key is needed and
+`TESV_MEMPROBE` stays what it always was — a **measurement-only** switch that
+lies to every query. Do not enable it for a normal run.
+
 Every applied config/default key is written as `[cfg] KEY=VALUE` to stderr and
 `sdmc:/Skyrim_N3DS_stderr.log`. Check those lines after launch to confirm the
 file was read; `[cfg] … ignored` means a key is not in the allowlist below.
@@ -387,7 +414,7 @@ file was read; `[cfg] … ignored` means a key is not in the allowlist below.
 | `N3DS_IRC_CACHE_BYTES` | `4194304` | decoded-record cache byte budget |
 | `N3DS_IRC_CACHE_RECORDS` | `256` | decoded-record cache entry limit |
 | `N3DS_MEM_EVERY` | `300` | periodic memory-snapshot interval in frames; `0` disables the periodic line |
-| `TESV_MEMPROBE` | unset/off | **measurement only**: reports a fictional 512 MiB commit limit; never enable for a normal run |
+| `TESV_MEMPROBE` | unset/off | **measurement only**: reports a fictional 512 MiB commit limit to *every* query; never enable for a normal run (the startup check no longer needs it) |
 
 The allowlist deliberately excludes `TESV_D3D9_CAPS_PROBE`,
 `TESV_D3D9_SM3_GATE_PROBE`, `TESV_D3D9_SHADER_SKIP_PROBE`, and all other
@@ -449,6 +476,8 @@ them; do not create them for a real StartMenu run.
    points.
 3. Without the cfg the launcher still applies `6M`/`16M`/`6M`/`4352K`/`5`/
    stream-off defaults, but the budget file is needed for the menu path.
+   The startup minimum-config check needs no key: it is answered by the
+   compiled compat shim (section 5).
 4. Launch from the home menu. The top screen shows the diagnostic console.
 5. Confirm `[cfg] …` lines in `sdmc:/Skyrim_N3DS_stderr.log`, then wait. The
    host needs ~228 s to the menu load stall; on hardware, allow **15–25
@@ -465,6 +494,7 @@ App region: 178 MiB, free ...
 [d3d9-vram] budget 5888 KiB (N3DS_VRAM_LIMIT, 256 KiB slack)
 [probe] TESV_D3D9_BUDGET_MB=32 from flag file
 mem tag=init ... guest_budget=96468992 guest_used=... linear_mib=24
+[mem] startup minimum-config check: 512 MiB commit reported (compat; the real guest budget is still enforced)
 [bink] _BinkOpen@8 …: no Bink decoder on this platform; empty clip ...
 [menu] enter 00876f60                 StartMenu create
 [menu] enter 00876b90                 ctor
@@ -490,6 +520,10 @@ The checkpoint lines before `[menu] enter` are the fix checkpoints:
   gate fell through: `_BinkOpen@8` returned a valid 0x0 clip instead of NULL, so
   the intro state finishes and `StartMenu` is created. A run that stops before
   `[menu] enter 00876f60` with no such line is using a pre-`b03c33c` CIA.
+* `[mem] startup minimum-config check: 512 MiB commit reported (compat…)`
+  proves the targeted `GlobalMemoryStatusEx` answer ran for the check at
+  `0x00a48a5d`. Its absence, or `exit code=0 from=00f5894a` in the log, means a
+  CIA built before `180d102` (or one that answered honestly).
 
 Known-good host counts at this point: 874/874 engine VS `S_OK`, 368
 declarations, 40/40 GFx PS `S_OK`, 2 `BeginScene`/`EndScene`/`Present`, then
@@ -503,10 +537,11 @@ Distinguishing failure modes:
 |---|---|---|
 | `[mem] FATAL: guest budget arithmetic failed` | profile macros inconsistent | rebuild; do not flash |
 | `App region: 96 MiB` | CIA without 178 MB extheader | reinstall with the RSF |
-| Azahar/hardware `svcBreak` at `__system_allocateHeaps` before `main` (PC in libctru, `R3` = heap bytes, no guest log) | heap larger than the 96 MiB area, i.e. a 120x24 build | install `Skyrim_N3DS_tesv_96x24_menu.cia`; 120x24 is host-suite only |
+| `exit code=0 from=00f5894a` right after startup, no guest work | Skyrim PC minimum-config check (needs 512 MiB commit limit) answered honestly | install `Skyrim_N3DS_tesv_96x24_memgate.cia` (`180d102`); do not enable `TESV_MEMPROBE` |
+| Azahar/hardware `svcBreak` at `__system_allocateHeaps` before `main` (PC in libctru, `R3` = heap bytes, no guest log) | heap larger than the 96 MiB area, i.e. a 120x24 build | install `Skyrim_N3DS_tesv_96x24_memgate.cia`; 120x24 is host-suite only |
 | Azahar/hardware fault with `SP` just below the stack top (e.g. `push` at `0x07FFFFA4`), no `[mem]` OOM line | 32 KiB main-thread stack, i.e. a pre-`b3915c5` build | rebuild from current main; check `__stacksize__` = `0x20000` in the ELF |
-| `newlib_free` near 0 / `malloc` failed, low `guest_used` | host residents in the 120 MiB newlib heap | lower `N3DS_IRC_CACHE_BYTES` (2 MiB), then `N3DS_TEX_GUEST_LIMIT=8M` |
-| `guest_backing_failures` > 0, `guest_used` ≈ 116 MiB | guest page cap | lower `N3DS_TEXT_WINDOW_MB` (4, then 3); check `guest_used` in the next snapshot |
+| `newlib_free` near 0 / `malloc` failed, low `guest_used` | host residents in the 96 MiB newlib heap | lower `N3DS_IRC_CACHE_BYTES` (2 MiB), then `N3DS_TEX_GUEST_LIMIT=8M` |
+| `guest_backing_failures` > 0, `guest_used` ≈ 92 MiB | guest page cap | lower `N3DS_TEXT_WINDOW_MB` (4, then 3); check `guest_used` in the next snapshot |
 | `linear_fail_n>0` / `linear_fail_bytes=…` | 24 MiB linear heap bound | lower `N3DS_TARGET_VRAM_LIMIT`, then `N3DS_TEX_GPU_LIMIT` |
 | `[d3d9-vram] … refused` / `vram_fail_n` | 5.75 MiB device VRAM cap | lower `N3DS_TARGET_VRAM_LIMIT`; keep `N3DS_VRAM_LIMIT=6M` |
 | `[cfg] … ignored` for a key you set | key not in the allowlist (typo, or probe flag) | use a key from the table in section 5 |
