@@ -163,6 +163,19 @@ static void menu_trace(CPU *c,uint32_t addr){
             (unsigned)(inload&0xffu),(unsigned)(lstate&0xffu),(unsigned)phase,
             (unsigned)sing,(unsigned)(flag94&0xffu),
             (unsigned)a0,(unsigned)a1,(unsigned)c->r[1]);
+    if(addr==0x008779d0u){
+        /* The menu message switch (vtable slot 4).  [a0+4] is the message
+         * type and [a0+8] the movie/view pointer; the fade-in is one case in
+         * this switch, not a separate function. */
+        uint32_t mtype=menu_rd32(a0+4u), mptr=menu_rd32(a0+8u);
+        uint32_t mflag=mptr?menu_rd32(mptr+0x10u):0xffffffffu;
+        uint32_t mstate=c?menu_rd32(c->r[1]+0x1cu):0u;
+        uint32_t uimgr=menu_rd32(0x1b10dccu);
+        uint32_t fader=uimgr?menu_rd32(uimgr+0x28u):0u;
+        fprintf(stderr,"[menu] msg type=%u ptr=%08x flag=%08x state=%08x fader=%08x\n",
+                (unsigned)mtype,(unsigned)mptr,(unsigned)mflag,(unsigned)mstate,
+                (unsigned)fader);
+    }
     if(addr==0x004310c0u){
         /* Main::IsLoadComplete: the startup loop polls [obj+0xad] and
          * [obj+0xae].  Naming the object and both bytes tells a missing menu
