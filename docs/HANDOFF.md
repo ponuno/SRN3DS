@@ -3,6 +3,9 @@
 This is the working context for the next agent. Read this, then `docs/PORT_LOG.md`
 (the append-only journal) and `docs/DEVICE_BRINGUP.md` (real emulator runs).
 
+**Next session starts at `docs/HANDOFF_NEXT.md`** (2026-11-28 evening): artifacts,
+the three blockers and the exact next commands.
+
 ## What the project is
 
 Recompiled/lifted Skyrim (TESV 1.9.32.0.8, x86) running on New 3DS:
