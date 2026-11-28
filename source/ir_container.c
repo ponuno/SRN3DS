@@ -869,6 +869,7 @@ static void irc_run(CPU *c, uint32_t addr, uint32_t func_end) {
             rt_unimpl(c, ip, what);
         }
         HP_ADD(HP_FETCH, hp_fetch);
+        startup_block_probe(c,&b);
         uint32_t next = 0;
         if (trace) n3ds_a43f_trace_pre(c, b.start, addr, 1);
         ++n3ds_ir_blocks_run;

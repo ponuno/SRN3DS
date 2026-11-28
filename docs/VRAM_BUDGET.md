@@ -342,3 +342,24 @@ So `0x6982c0` is executed as a **block inside the 0x6981f0 function** (and
 `0x69de08/0x69de54` inside WinMain), not as a traced function entry.  The
 device does pass the gate and takes `0x69de54` (load path); the AL/out values
 need a block-IP probe in `n3ds_ir_run` for the block covering `0x69ddf5`.
+
+## Block-IP probe (900 s): no `[ip]` line fired
+
+The block-entry probe in both executors (`ir_exec.c` and the unity copy used by
+`ir_container.c`) checks the block byte range (`b->start .. b->start+b->x86_len`)
+for `0x6982c0`, `0x69dda4`, `0x69ddf5`.  In the 900 s Azahar run **none fired**,
+although the same binary reaches the loading pump:
+
+* last traced call: `00a4b500 from=006982ae` (VMInitThread);
+* `release h=50c` by thread 10 (`0xb9da1c`);
+* `[bink] _BinkSetSoundSystem`;
+* `00a5d370 from=006f4045` (loading pump), `[menustate] frame=600`,
+  `singleton=0`, `view=0`; `00876f60` = 0.
+
+The `[ip]` format strings are present in the `.elf`, so the probe is built in.
+Either the gate is not executed on the device path (the loading pump is entered
+from a different caller) or the gate runs in a tier that bypasses both
+executors.  No positive-control probe was run in this timebox; the next check
+is to add a probe for a known-executed block (`0xa4b500` or `0x6f4045`) and a
+16-entry last-block ring dumped at `0x6f4045`, to prove the hook fires and to
+name the block immediately before the gate.

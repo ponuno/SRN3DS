@@ -315,3 +315,12 @@ A 1000 s gateprobe run produced zero `[menu] probe 6982c0` and zero
 `0x69de08/0x69de54` are basic blocks inside larger functions, so
 `menu_trace` never sees them.  `release h=50c` happened (thread 10,
 `0xb9da1c`); `release h=504` did not.  Next probe must be block-IP based.
+
+## 2026-11-28 block-IP probe: no hit for 0x6982c0
+
+A 900 s run with byte-range probes for `0x6982c0`, `0x69dda4`, `0x69ddf5`
+produced zero `[ip]` lines while reaching `00a5d370 from=006f4045` with
+`singleton=0`, `frame=600`.  `release h=50c` fires; `release h=504` does not.
+The probe strings are in the `.elf`, so the hook is built.  The gate is either
+not on this load path or is executed outside both executors.  Next: a positive
+control (`0xa4b500`/`0x6f4045`) plus a last-16-block ring at the pump.

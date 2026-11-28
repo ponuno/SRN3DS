@@ -194,6 +194,67 @@ static int guest_code_target(uint32_t t) {
 static int refuse_target(uint32_t t) {
     return t >= 0x00010000u && !guest_code_target(t);
 }
+static uint32_t startup_rd32(uint32_t a){
+    const uint8_t *p=n3ds_guest_ptr(a,4);
+    if(!p)return 0;
+    return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
+}
+static void startup_cstr(uint32_t a,char *out,size_t cap){
+    out[0]=0;
+    if(!a||cap<2)return;
+    for(size_t i=0;i+1<cap;++i){
+        const char *p=n3ds_guest_ptr(a+i,1);
+        if(!p)break;
+        out[i]=*p;out[i+1]=0;
+        if(!*p)break;
+    }
+    out[cap-1]=0;
+}
+/* Block-IP probe for the WinMain startup gate.  The menu trace fires only on
+ * function entries; 0x6982c0 and the branch at 0x69ddf5 are basic blocks
+ * inside larger functions.  This hook runs on every IR/container block entry
+ * and prints only when the block covers one of the three addresses. */
+static void startup_block_probe(CPU *c,const IrExecBlock *b){
+    if(!c||!b||!b->x86_len)return;
+    uint32_t end=b->start+b->x86_len;
+    if(b->start<=0x69dda4u&&0x69dda4u<end){
+        static int once;
+        if(!once){once=1;
+            const uint8_t *p=n3ds_guest_ptr(c->r[4]+0x13u,1);
+            fprintf(stderr,"[ip] 69dda4 eax=%08x esp=%08x [esp+13]=%02x [esp+1c]=%08x blk=%08x+%u\n",
+                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)(p?*p:0),
+                    (unsigned)startup_rd32(c->r[4]+0x1cu),(unsigned)b->start,
+                    (unsigned)b->x86_len);
+        }
+    }
+    if(b->start<=0x69ddf5u&&0x69ddf5u<end){
+        static int once;
+        if(!once){once=1;
+            const uint8_t *p=n3ds_guest_ptr(c->r[4]+0x13u,1);
+            fprintf(stderr,"[ip] 69ddf5 eax=%08x esp=%08x [esp+13]=%02x [esp+1c]=%08x blk=%08x+%u\n",
+                    (unsigned)c->r[0],(unsigned)c->r[4],(unsigned)(p?*p:0),
+                    (unsigned)startup_rd32(c->r[4]+0x1cu),(unsigned)b->start,
+                    (unsigned)b->x86_len);
+        }
+    }
+    if(b->start<=0x6982c0u&&0x6982c0u<end){
+        static int once;
+        if(!once){once=1;
+            char s1[49],s2[49],s3[49];
+            uint32_t p1=startup_rd32(0x1272fb4u),p2=startup_rd32(0x1272fd8u),
+                     p3=startup_rd32(0x1272fe4u);
+            startup_cstr(p1,s1,sizeof s1);
+            startup_cstr(p2,s2,sizeof s2);
+            startup_cstr(p3,s3,sizeof s3);
+            fprintf(stderr,"[ip] 6982c0 p1=%08x '%s' p2=%08x '%s' p3=%08x '%s' "
+                    "f30=%08x f00=%08x f0c=%08x f24=%08x esp=%08x blk=%08x+%u\n",
+                    (unsigned)p1,s1,(unsigned)p2,s2,(unsigned)p3,s3,
+                    (unsigned)startup_rd32(0x1272f30u),(unsigned)startup_rd32(0x1272f00u),
+                    (unsigned)startup_rd32(0x1272f0cu),(unsigned)startup_rd32(0x1272f24u),
+                    (unsigned)c->r[4],(unsigned)b->start,(unsigned)b->x86_len);
+        }
+    }
+}
 static void dispatch(CPU *c, uint32_t target, int indirect, uint32_t from) {
     HP_START(hp_t0);
     if (n3ds_rt_dispatch(c, target)) {
@@ -1700,6 +1761,7 @@ void n3ds_ir_run(CPU *c, uint32_t addr, uint32_t func_end) {
             rt_unimpl(c, ip, "IR: block does not fit the decode cache");
         }
         HP_ADD(HP_FETCH, hp_fetch);
+        startup_block_probe(c,&b);
         uint32_t next = 0;
         if (trace) n3ds_a43f_trace_pre(c, b.start, addr, 0);
         ++n3ds_ir_blocks_run;
