@@ -2533,7 +2533,16 @@ static void s_WriteFile(CPU *c){
 }
 static void s_CloseHandle(CPU *c){
     uint32_t h=A(0);
-    fprintf(stderr,"[close] h=%03x thread=%u\n",(unsigned)h,win32_thread_current_id());
+    /* CloseHandle is called in loader/file loops; logging every call floods
+     * the SD-card stderr log (and slows the run).  Keep the first 64 lines for
+     * diagnostics, or all of them with TESV_HANDLE_TRACE=1. */
+    static unsigned close_logged;
+    static int close_trace=-1;
+    if(close_trace<0){const char *e=getenv("TESV_HANDLE_TRACE");close_trace=e&&*e;}
+    if(close_trace || close_logged<64){
+        if(close_logged<64)++close_logged;
+        fprintf(stderr,"[close] h=%03x thread=%u\n",(unsigned)h,win32_thread_current_id());
+    }
     if(win32_sync_close(h)){set_error(c,0);RET(1,1);}
     if(win32_thread_close(h)){set_error(c,0);RET(1,1);}
     if(mapping_close(h)){set_error(c,0);RET(1,1);}
