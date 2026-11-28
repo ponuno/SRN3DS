@@ -26,6 +26,7 @@ static const char *const supported_keys[] = {
     "N3DS_IRC_CACHE_BYTES",
     "N3DS_IRC_CACHE_RECORDS",
     "N3DS_MEM_EVERY",
+    "N3DS_TEXT_WINDOW_MB",
     "TESV_MEMPROBE",
 };
 

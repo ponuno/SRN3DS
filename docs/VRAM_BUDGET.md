@@ -202,7 +202,35 @@ probe, budget file 32):
   NULL 64x64 target; eviction moved it to 78.1 MiB and a clean guest-RAM
   exhaustion.
 
+Measured with `vrampage` (sha256 `E735655A…`, 96x8 + pageable `.text`
+`f43a537`, `-ForceMemProbe`, caps probe, budget file 32):
+
+* VRAM is no longer the wall: peak `vram 5042/5888 KiB`, **8 evictions**,
+  17 target creations, `linear_fail_n=0`; no `[d3d9-vram]` refusal and no
+  linear-target diagnostic. The four 512x512 menu targets are created at full
+  size (evicted/resumed as needed).
+* The pageable `.text` window (5 MiB default) carries the run much further:
+  `Translation_ENGLISH.txt` loaded, semaphores/threads created, and the menu
+  entries `0x00892da0`, `0x00898430`, `0x0086f067` -> `0x00a60c80` /
+  `0x00a60c10` / `0x00a5eaa0` were reached.
+* `[menu] enter 00876f60`: **0**; draw probe **0**.
+* The run ends with a raw CPU jump to null, not a named guest fault and not
+  OOM: `unmapped Read32 @ 0x07FFFFB8 at PC 0x00000000` (Azahar stack dump,
+  no `Skyrim_N3DS_tesv.log`, so no atexit snapshot). Last memory snapshot is
+  `tag=init` (`guest_used=5,168,456`, `newlib_free=2,853,664`); the earlier
+  78.1 MiB guest-RAM wall is gone with paging.
+* `N3DS_TEXT_WINDOW_MB` is now a `Skyrim_N3DS.cfg` key, so the paging window
+  can be raised/lowered (`0` disables it) without a rebuild.
+
 ## What is left
+
+* **Null PC after deeper menu init.** `vrampage` reaches
+  `0x0086f067`/`0x00892da0`/`0x00898430` and then jumps to PC 0
+  (`unmapped Read32 @ 0x07FFFFB8`), with no named guest fault. This is after
+  the VRAM and guest-RAM walls, so the next step is to distinguish a paged
+  `.text` window miss from an indirect call through a zeroed guest pointer:
+  run once with `N3DS_TEXT_WINDOW_MB=0` (paging off) and once with `8` via
+  `sdmc:/Skyrim_N3DS.cfg`, and compare the last `[menu] enter` and PC.
 
 * **Resume at the previous native size only.** A suspended target is resumed in
   VRAM; if the budget is full at that moment the core returns a named

@@ -32,7 +32,8 @@ static void clear_env(void) {
         "N3DS_TEX_GPU_LIMIT", "N3DS_TEX_GUEST_LIMIT", "N3DS_STREAM",
         "N3DS_STREAM_INDEX", "N3DS_STREAM_DATA", "N3DS_IRC_PATH",
         "N3DS_IRC_ENABLE", "N3DS_IRC_REQUIRED", "N3DS_IRC_CACHE_BYTES",
-        "N3DS_IRC_CACHE_RECORDS", "N3DS_MEM_EVERY", "TESV_MEMPROBE",
+        "N3DS_IRC_CACHE_RECORDS", "N3DS_MEM_EVERY", "N3DS_TEXT_WINDOW_MB",
+        "TESV_MEMPROBE",
         "TESV_D3D9_CAPS_PROBE", "UNKNOWN_DEVICE_CFG_KEY"
     };
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; ++i)
