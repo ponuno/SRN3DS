@@ -7,9 +7,10 @@ from the owner's game files; do not distribute it.
 
 Current artifact: **120x24** profile (newlib 120 MiB / linear 24 MiB) with both
 memory fixes enabled — the global 6 MiB VRAM budget and the pageable read-only
-`.text` window. The guest working set on the host is **44.4 MiB** (was 57.2 MiB
-before paging), so this profile fits the guest budget with large headroom and
-still leaves a 24 MiB linear heap.
+`.text` window — plus the raised main-thread stack and the Bink empty-clip gate
+that lets the intro state finish so `StartMenu` is created. The guest working set
+on the host is **44.4 MiB** (was 57.2 MiB before paging), so this profile fits
+the guest budget with large headroom and still leaves a 24 MiB linear heap.
 
 ## 1. Why a CIA and not a `.3dsx`
 
@@ -77,30 +78,42 @@ build. `build.ps1` performs a clean build by default; `-NoClean` is only safe
 when the profile macros are unchanged (it is what was used for the re-link after
 the two `n3ds_env_cfg` allowlist keys were added).
 
-### Delivered artifact (2026-11-28, worktree `cia-final` @ `b3915c5`)
+### Delivered artifact (2026-11-28, worktree `cia-final` @ `b03c33c`)
 
 | profile | CIA | bytes | sha256 |
 |---|---|---:|---|
-| **120x24 + stack** | `E:\cia_menu\Skyrim_N3DS_tesv_120x24_stack.cia` | 1,577,920 | `47dbfc60c1d420f24f1846ff3f0a361cb051c602cb2fc97b87a03bd9d4e60ea4` |
+| **120x24 + stack + Bink empty clip** | `E:\cia_menu\Skyrim_N3DS_tesv_120x24_menu.cia` | 1,580,480 | `d2c6aa34ef48a76a78b4a1f88f9b61a1e2c8029808e095c04ac403ad9036031c` |
 
 ELF: `dist\Skyrim_N3DS_tesv_120x24\Skyrim_N3DS_tesv_120x24.elf`
-(12,977,888 B, sha256 `97d9a72a5dee28b97aaa43dd4f0b1ea42c8453b74877a4927f44f96cec47ac02`).
+(12,998,812 B, sha256 `cde6622b3da37b640c4604ea590b08f1cb243f748594fbf5f607588eaafeccde`).
 `build_manifest.json` records `mem_profile=120x24`,
 `defines=-DTESV_HEAP_MIB=120 -DTESV_LINEAR_MIB=24`, and the generator hash of
 `live_arm_check2\gen`. The CIA reports title ID `000400000F0D5900` and
 `SystemModeExt=178MB CpuSpeed=804MHz EnableL2Cache=true` (checked by
-`build_cia.ps1`; see `work_120x24_stack\cia_info.txt`).
+`build_cia.ps1`; see `work_120x24_menu\cia_info.txt`).
 
-> **Do not install `E:\cia_menu\Skyrim_N3DS_tesv_120x24.cia`
-> (`6cb076b1…3f4e2e0bf`).** It was built before the main-thread stack fix and has
-> no `__stacksize__` symbol; the menu path overflows the 32 KiB crate default
-> there (`push` with SP just below the stack top). `…_stack.cia` is the only
-> valid 120x24 artifact.
+Why this replaces `…_stack.cia`: since `b03c33c`, `_BinkOpen@8` in
+`source/win32_shims.c` returns a valid **empty clip** when the platform has no
+Bink decoder (3DS), when the name/path is empty, or when the file is absent —
+0x0 size, 1 frame, no-op copies — instead of NULL. Before that, the intro state
+never finished on device and `StartMenu` was never created. The trace line
+`[bink] _BinkOpen@8 …: no Bink decoder on this platform; empty clip …` is the
+evidence that the gate fell through to the menu. Host check with
+`TESV_BINK_NO_DECODER=1`: singleton created, `[menustate]` proceeds, suite
+219/0.
 
-Stack, now part of the build:
+Previous artifacts:
+
+| artifact | bytes | sha256 | status |
+|---|---:|---|---|
+| `Skyrim_N3DS_tesv_120x24_menu.cia` | 1,580,480 | `d2c6aa34…9036031c` | **current** |
+| `Skyrim_N3DS_tesv_120x24_stack.cia` | 1,577,920 | `47dbfc60c1d420f24f1846ff3f0a361cb051c602cb2fc97b87a03bd9d4e60ea4` | previous (`b3915c5`): stack fixed, Bink still returns NULL |
+| `Skyrim_N3DS_tesv_120x24.cia` | 1,566,656 | `6cb076b18f61700975a5ef9f7086ad7c5c965b18ee91fc1ffb0e0c53f4e2e0bf` | **invalid**: pre-`b3915c5`, 32 KiB stack |
+
+Stack, part of the build since `b3915c5`:
 
 * `source/n3ds_boot.c` defines a strong `__stacksize__ = 128 KiB` for
-  `__3DS__`. In this ELF the symbol is at `0x003ba000` (`.data`, 4 bytes) and
+  `__3DS__`. In this ELF the symbol is at `0x003bb000` (`.data`, 4 bytes) and
   its value is **`0x00020000`** (128 KiB), not the 32 KiB `0x8000` default.
 * `tools/cia/template.rsf` sets `StackSize: 0x40000`, so the packaged CIA's
   exheader carries a **256 KiB** main-thread stack (`exheader+0x1C =
@@ -112,8 +125,9 @@ Build-time evidence in this ELF (checked with `arm-none-eabi-nm` and string
 search): paging (`pe_image_load`, `pe_image_touch_report`, `guest_range_mapped`,
 `guest_slab_set_window`), VRAM accounting (`d9_target_stats`,
 `d9_citro_vram_stats`, literal `[d3d9-vram] budget …`), the device config read
-(`n3ds_env_cfg_load`/`n3ds_env_cfg_parse_stream`) and the strings
-`N3DS_TEXT_WINDOW_MB`, `N3DS_VRAM_LIMIT`, `N3DS_TARGET_VRAM_LIMIT`.
+(`n3ds_env_cfg_load`/`n3ds_env_cfg_parse_stream`), the strings
+`N3DS_TEXT_WINDOW_MB`, `N3DS_VRAM_LIMIT`, `N3DS_TARGET_VRAM_LIMIT`, and the Bink
+gate strings `no Bink decoder on this platform` / `empty clip`.
 
 Previous profiles (2026-11-27, worktree `azahar-menu` @ `82d84dd`, **no paging,
 no VRAM budget** — kept only for comparison, all three are superseded):
@@ -411,6 +425,7 @@ App region: 178 MiB, free ...
 [d3d9-vram] budget 5888 KiB (N3DS_VRAM_LIMIT, 256 KiB slack)
 [probe] TESV_D3D9_BUDGET_MB=32 from flag file
 mem tag=init ... guest_budget=121634816 guest_used=... linear_mib=24
+[bink] _BinkOpen@8 …: no Bink decoder on this platform; empty clip ...
 [menu] enter 00876f60                 StartMenu create
 [menu] enter 00876b90                 ctor
 [menu] enter 00a60c80 / 00a60c10      Menu::CreateMovie / path builder
@@ -431,6 +446,10 @@ The checkpoint lines before `[menu] enter` are the fix checkpoints:
 * `mem tag=init … guest_used=…` (the first `init` snapshot in
   `Skyrim_N3DS_mem.log`) proves paging: `guest_used` must be well below the
   pre-paging 57.2 MiB, i.e. in the ~44 MiB range as the image is faulted in.
+* `[bink] … no Bink decoder on this platform; empty clip …` proves the intro
+  gate fell through: `_BinkOpen@8` returned a valid 0x0 clip instead of NULL, so
+  the intro state finishes and `StartMenu` is created. A run that stops before
+  `[menu] enter 00876f60` with no such line is using a pre-`b03c33c` CIA.
 
 Known-good host counts at this point: 874/874 engine VS `S_OK`, 368
 declarations, 40/40 GFx PS `S_OK`, 2 `BeginScene`/`EndScene`/`Present`, then
