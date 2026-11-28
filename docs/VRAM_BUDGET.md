@@ -224,6 +224,32 @@ Measured with `vrampage` (sha256 `E735655A…`, 96x8 + pageable `.text`
 
 ## What is left
 
+* **Compressed swap is active and removes the OOM.** The previous 32 KiB-stack
+  binary predated `8b533c0`, so swap was not in it, and the cfg keys were not
+  in the allowlist. Both are fixed; `vramswap` was built from current main and
+  ran with `N3DS_SWAP=1`, `N3DS_GUEST_TARGET_MB=48`,
+  `N3DS_SWAP_BUDGET_MB=32`, `N3DS_TEXT_WINDOW_MB=4`,
+  `N3DS_IRC_CACHE_BYTES=2M`, `N3DS_IR_CACHE_MB=2`.
+  Measured: `swap=1 swap_out=920 swap_in=2 swap_resident=12288
+  swap_target=12288 swap_compressed=279,789 swap_ratio_pct=1345
+  swap_fail_*=0` (48 MiB anonymous resident exactly at target, 13.45x live
+  ratio, no swap failures). `guest_used=66,706,539`, `newlib_free=27,529,108`
+  (was 183 KiB and OOM): the anonymous resident cap is 48 MiB, the remaining
+  ~15 MiB is file-backed image/paging and slab overhead, not swappable.
+* **New blocker after swap:** `Guest fault at 003ba588: IR: unsupported opcode
+  in decoded stream` on thread id 9 (`start=00a4b4a0`), then the same on the
+  main thread at `000000f9`. Azahar also shows `_free_r` touching guest
+  addresses (`0x0E428D9C`, `0x0E428E82`) during teardown, i.e. `free()` on a
+  value that looks like a guest pointer. Both are pointer/EIP corruption
+  symptoms after a long 3D path (many
+  `SetDepthStencilSurface: ... size does not match` lines), not OOM.
+  `[menu] enter 00876f60` is still 0; last entries are `00892da0`,
+  `00898430`, then `00a5eaa0 from=00a60c3e` twice.
+* Next: log the last indirect call target / free argument in the allowed
+  runtime files, and A/B with `N3DS_GUEST_TARGET_MB=32` plus
+  `N3DS_TEXT_WINDOW_MB=2` to see whether added eviction changes the corrupt
+  pointer. Do not change `DevCaps`.
+
 * **PC 0 was main-stack exhaustion, not paging.** A/B with the rebuilt binary:
   `N3DS_TEXT_WINDOW_MB=0` (paging off) ends at the same `[menu] enter
   00a5eaa0 from=00a60c3e` and the same first fault as the default 5 MiB
