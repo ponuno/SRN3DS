@@ -24,12 +24,17 @@ typedef struct {
     uint8_t *protect;         /* per page: Win32 PAGE_* value */
     uint8_t *dirty;           /* per page: writable file mapping was touched */
     uint8_t *ever;            /* per page: backed at least once (reload count) */
+    uint8_t *pinned;          /* per page: must stay resident (modified / writable) */
     uint8_t **page;           /* per page: host block, NULL = not backed yet */
     /* Optional backing store (file mappings); NULL means anonymous zero pages. */
     GuestPageFill fill;
     GuestPageFlush flush;
+    void (*provider_close)(void *ctx);
     void *provider_ctx;
     uint64_t provider_base;
+    uint32_t resident_cap;    /* evictable page budget, 0 = unlimited */
+    uint32_t resident_pages;  /* backed pages that may still be evicted */
+    uint32_t trim_cursor;     /* round-robin window eviction cursor */
     int mapped;
     int writable;
     int type;                 /* Win32 MEM_* type reported by VirtualQuery */
@@ -56,16 +61,27 @@ typedef struct GuestMemory {
     /* Page-level measurements, printed by the [mem] report. */
     uint64_t pages_first_touched, pages_anon, pages_file, pages_dirty_written;
     uint64_t pages_decommitted, pages_evicted, pages_evicted_clean;
-    uint64_t pages_reloaded;
+    uint64_t pages_reloaded, pages_pinned;
     /* Installed by guest_process_init(): report backing failure distinctly from
      * a reserved/unmapped access. May not return. */
     void (*fault_handler)(struct GuestMemory *, uint32_t, const char *);
 } GuestMemory;
 
+/* Diagnostic page-touch accounting for one image range. guest_ptr() sets a bit
+ * on first touch and counts every access inside the range; used to size the
+ * pageable-code window before changing the mapping. Off unless enabled. */
+void guest_touch_begin(uint32_t base, uint32_t size);
+int guest_touch_active(void);
+const uint8_t *guest_touch_bitmap(void);
+uint32_t guest_touch_page_count(void);
+void guest_touch_stats(uint64_t *accesses, uint64_t *repeats);
+
 void guest_init(GuestMemory *m, size_t limit);
 void guest_destroy(GuestMemory *m);
 int guest_map(GuestMemory *m, uint32_t base, uint32_t size);
 int guest_unmap(GuestMemory *m, uint32_t base);
+/* Non-materialising range check: the whole range is mapped and committed. */
+int guest_range_mapped(GuestMemory *m, uint32_t base, uint32_t size);
 void *guest_ptr(GuestMemory *m, uint32_t addr, size_t n);
 int guest_read(GuestMemory *m, uint32_t addr, void *dst, size_t n);
 int guest_write(GuestMemory *m, uint32_t addr, const void *src, size_t n);
@@ -103,6 +119,16 @@ int guest_slab_state(GuestMemory *m, uint32_t addr, uint32_t *protect);
 int guest_slab_set_provider(GuestMemory *m, uint32_t base, uint32_t protect,
                             int writable, GuestPageFill fill,
                             GuestPageFlush flush, void *ctx, uint64_t file_base);
+/* Optional close hook for provider_ctx, called by guest_slab_release(). */
+int guest_slab_set_provider_close(GuestMemory *m, uint32_t base,
+                                  void (*fn)(void *));
+/* Evictable-page budget for a provider slab; 0 = unlimited (default). */
+int guest_slab_set_window(GuestMemory *m, uint32_t base, uint32_t pages);
+/* Override the MEM_* type reported by VirtualQuery for this slab. */
+int guest_slab_set_type(GuestMemory *m, uint32_t base, int type);
+/* Never evict these pages (writable image data, modified pages). */
+int guest_slab_pin_range(GuestMemory *m, uint32_t base, uint32_t addr,
+                         uint32_t size);
 uint64_t guest_slab_backed(const GuestMemory *m);
 uint64_t guest_slab_backed_peak(const GuestMemory *m);
 GuestFault guest_last_fault(const GuestMemory *m);

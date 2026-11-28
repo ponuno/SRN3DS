@@ -326,6 +326,7 @@ Add-Test "tesv_fault_regs" $liftCommon ($legacySources + @("tests/tesv_fault_reg
 Add-Test "menu_crash_repro" $liftCommon ($legacySources + @("tests/menu_crash_repro.c")) @()
 Add-Test "tesv_cube_desc_probe" $liftCommon ($legacySources + @("tests/tesv_cube_desc_probe_smoke.c")) @()
 Add-Test "pe_imports" $common @("source/guest.c", "source/pe_image.c", "source/pe_imports.c", "tests/pe_imports_smoke.c") @()
+Add-Test "guest_paging" $common @("source/guest.c", "source/pe_image.c", "tests/guest_paging_smoke.c") @()
 Add-Test "lift" $liftCommon ($legacySources + @("tests/lift_smoke.c", "tests/win32_smoke.c")) @()
 Add-Test "boot" $liftCommon ($comSources + @("tests/boot_smoke.c", "tests/win32_smoke.c")) @()
 Add-Test "graphics" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("source/d3d9_demo_scene.c", "tests/graphics_smoke.c")) @()

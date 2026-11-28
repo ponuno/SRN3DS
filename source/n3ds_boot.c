@@ -23,14 +23,14 @@ static uint32_t boot_fallback(const PeImport *e,void *ctx){
 }
 int n3ds_boot_add_mapped(BootSession *b,const char *name,const GuestImage *image){
     if(b->bound||b->ready||b->shims||b->count>=GP_MAX_MODULES||!name||!*name||strlen(name)>63||!image||
-       !image->size||!guest_ptr(&b->memory,image->base,image->size))return error(b,"invalid module registration");
+       !image->size||!guest_range_mapped(&b->memory,image->base,image->size))return error(b,"invalid module registration");
     for(size_t j=0;j<b->count;++j)if(b->images[j].base==image->base)return error(b,"duplicate image address");
     size_t i=b->count++;b->images[i]=*image;strcpy(b->names[i],name);b->modules[i]=(PeModule){b->names[i],&b->images[i]};return 0;
 }
 int n3ds_boot_add_file(BootSession *b,const char *name,const char *path,uint32_t base){
     if(b->bound||b->ready||b->shims||b->count>=GP_MAX_MODULES)return error(b,"module limit or session already prepared");
     GuestImage image;int rc=pe_image_load(&b->memory,path,base,&image);if(rc)return error(b,"%s: %s",name,pe_error(rc));
-    if(n3ds_boot_add_mapped(b,name,&image)){guest_unmap(&b->memory,image.base);return -1;}return 0;
+    if(n3ds_boot_add_mapped(b,name,&image)){pe_image_unload(&b->memory,image.base);return -1;}return 0;
 }
 int n3ds_boot_add_data_file(BootSession *b,const char *name,const char *path,uint32_t base){
     int rc=n3ds_boot_add_file(b,name,path,base);
@@ -67,8 +67,9 @@ int n3ds_boot_prepare(BootSession *b,const FnModule *tables,unsigned n,uint32_t 
             if(!n3ds_lift_has_function(cb))return error(b,"Missing lifted TLS callback %08lx",(unsigned long)cb);}
     }
     n3ds_lift_init_cpu(&b->cpu,b->process.stack_top,b->process.teb);
-    b->ready=1;snprintf(b->message,sizeof b->message,"Entry and %u TLS modules ready",b->process.tls_count);return 0;
-}
+    b->ready=1;
+    pe_image_touch_report(stderr, "prepared");
+    snprintf(b->message,sizeof b->message,"Entry and %u TLS modules ready",b->process.tls_count);return 0;}
 int n3ds_boot_prepare_skyrim(BootSession *b,const char *root,const FnModule *tables,unsigned n,uint32_t stack_bytes,uint32_t heap_bytes){
     if(!root||!*root||b->count)return error(b,"Expected empty Skyrim session and game root");
     static const char *const files[]={"TESV_Unpacked.exe","d3dx9_42.dll","binkw32.dll","X3DAudio1_7.dll"};
@@ -110,6 +111,8 @@ finish:
     *status=r;snprintf(b->message,sizeof b->message,"Guest %s with status %lu",rc==1?"ExitProcess":"returned",(unsigned long)r);return 0;
 }
 void n3ds_boot_destroy(BootSession *b){
+    if(!b)return;
+    pe_image_touch_report(stderr, "exit");
     if(b->traps)win32_set_unresolved_trap(0);b->traps=0;
     if(b->bound)n3ds_lift_release();if(b->shims)win32_shutdown();
     guest_process_destroy(&b->process);guest_destroy(&b->memory);b->bound=b->shims=b->ready=0;b->count=0;

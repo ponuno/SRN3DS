@@ -198,6 +198,48 @@ void guest_watch_check_host(const void *p, size_t n, const char *source) {
 
 typedef struct { uint8_t *ptr; uint32_t bytes; uint32_t first, count; } SlabAlloc;
 
+/* Optional per-page touch map over one guest range (measurement only). The
+ * hot-path cost is one subtraction and one compare at the top of guest_ptr(). */
+static uint32_t g_touch_base, g_touch_span, g_touch_pages;
+static uint8_t *g_touch_bits;
+static uint64_t g_touch_accesses, g_touch_repeats;
+void guest_touch_begin(uint32_t base, uint32_t size) {
+    if (g_touch_bits || !size) return;
+    uint32_t first = base & ~(GUEST_PAGE_SIZE - 1u);
+    uint32_t end = base + size;
+    uint32_t pages = ((end - first) + GUEST_PAGE_SIZE - 1u) / GUEST_PAGE_SIZE;
+    uint8_t *bits = (uint8_t *)calloc(pages, 1);
+    if (!bits) return;
+    g_touch_base = first;
+    g_touch_span = pages * GUEST_PAGE_SIZE;
+    g_touch_pages = pages;
+    g_touch_bits = bits;
+}
+int guest_touch_active(void) { return g_touch_bits != NULL; }
+const uint8_t *guest_touch_bitmap(void) { return g_touch_bits; }
+uint32_t guest_touch_page_count(void) { return g_touch_pages; }
+void guest_touch_stats(uint64_t *accesses, uint64_t *repeats) {
+    if (accesses) *accesses = g_touch_accesses;
+    if (repeats) *repeats = g_touch_repeats;
+}
+static void guest_touch_note(uint32_t addr, size_t n) {
+    if (!g_touch_bits) return;
+    uint32_t off = addr - g_touch_base;
+    if (off >= g_touch_span) return;
+    size_t left = g_touch_span - off;
+    if (n > left) n = left;
+    uint32_t a = off, last = off + (uint32_t)(n ? n - 1u : 0u);
+    ++g_touch_accesses;
+    for (;;) {
+        uint8_t *b = &g_touch_bits[a >> 12];
+        if (*b) ++g_touch_repeats;
+        if (*b < 255) ++*b;
+        uint32_t next = (a | (GUEST_PAGE_SIZE - 1u)) + 1u;
+        if (next > last) break;
+        a = next;
+    }
+}
+
 void guest_init(GuestMemory *m, size_t limit) {
     memset(m, 0, sizeof *m);
     m->limit = limit;
@@ -215,6 +257,8 @@ void guest_init(GuestMemory *m, size_t limit) {
 /* ---- ordinary guest regions -------------------------------------------------- */
 void guest_destroy(GuestMemory *m) {
     guest_watch_dump(m);
+    free(g_touch_bits);
+    g_touch_bits = NULL; g_touch_span = 0; g_touch_pages = 0;
     for (size_t i=0; i<m->count; ++i) free(m->regions[i].data);
     for (unsigned i=0; i<GUEST_MAX_SLABS; ++i)
         if (m->slabs[i].state) guest_slab_release(m, m->slabs[i].base);
@@ -319,19 +363,21 @@ GuestSlab *guest_slab_reserve(GuestMemory *m, uint32_t base, uint32_t size) {
             continue;
         }
         uint32_t pages = size / GUEST_PAGE_SIZE;
-        size_t meta = (size_t)pages * (3 + sizeof(uint8_t *)) + (size_t)pages * sizeof(SlabAlloc);
+        size_t meta = (size_t)pages * (4 + sizeof(uint8_t *)) + (size_t)pages * sizeof(SlabAlloc);
         if (meta > m->limit - m->used) return NULL;
         uint8_t *state = (uint8_t *)calloc(pages, 1);
         uint8_t *protect = (uint8_t *)calloc(pages, 1);
         uint8_t *ever = (uint8_t *)calloc(pages, 1);
+        uint8_t *pinned = (uint8_t *)calloc(pages, 1);
         uint8_t **page = (uint8_t **)calloc(pages, sizeof(uint8_t *));
-        if (!state || !protect || !ever || !page || reg_init(i, s, pages)) {
-            free(state); free(protect); free(ever); free(page);
+        if (!state || !protect || !ever || !pinned || !page || reg_init(i, s, pages)) {
+            free(state); free(protect); free(ever); free(pinned); free(page);
             return NULL;
         }
         memset(s, 0, sizeof *s);
         s->base = base; s->size = size; s->pages = pages;
         s->state = state; s->protect = protect; s->ever = ever; s->page = page;
+        s->pinned = pinned;
         s->type = 0x20000; /* MEM_PRIVATE */
         m->slab_meta += meta;
         m->used += meta;
@@ -354,6 +400,26 @@ static int page_flush(GuestMemory *m, GuestSlab *s, uint32_t p) {    if (!s->map
 /* Evict one clean (or write-back) file-backed page, never the page we are
  * about to back. Anonymous pages have no backing store and are not evicted. */
 static void page_drop(GuestMemory *m, GuestSlab *s, uint32_t p);
+/* A read-only file page can be dropped only if it still matches its provider.
+ * Without write faults the comparison is the COW trigger: a page the guest
+ * modified is pinned as an anonymous copy (its block already holds the data),
+ * so the file is never written and a later read still sees the modification. */
+static int page_can_drop(GuestMemory *m, GuestSlab *s, uint32_t p) {
+    if (!s->fill || s->writable || s->flush) return 1;
+    uint8_t buf[GUEST_PAGE_SIZE];
+    size_t got = 0;
+    if (s->fill(s->provider_ctx, s->provider_base + (uint64_t)p * GUEST_PAGE_SIZE,
+                buf, GUEST_PAGE_SIZE, &got))
+        return 0;
+    if (got < GUEST_PAGE_SIZE) memset(buf + got, 0, GUEST_PAGE_SIZE - got);
+    if (memcmp(buf, s->page[p], GUEST_PAGE_SIZE) == 0) return 1;
+    if (s->pinned && !s->pinned[p]) {
+        s->pinned[p] = 1;
+        if (s->resident_pages) --s->resident_pages;
+        ++m->pages_pinned;
+    }
+    return 0;
+}
 static int slab_evict_one(GuestMemory *m, GuestSlab *skip, uint32_t skip_page) {
     for (unsigned n=0; n<GUEST_MAX_SLABS; ++n) {
         unsigned si = (m->evict_slab + n) % GUEST_MAX_SLABS;
@@ -363,8 +429,10 @@ static int slab_evict_one(GuestMemory *m, GuestSlab *skip, uint32_t skip_page) {
             uint32_t p = (m->evict_page + k) % s->pages;
             if (s == skip && p == skip_page) continue;
             if (!s->page[p]) continue;
+            if (s->pinned && s->pinned[p]) continue;
             int was_dirty = s->dirty && s->dirty[p];
             if (page_flush(m, s, p)) return 0;
+            if (!page_can_drop(m, s, p)) continue;
             unsigned slot = reg_find_page(s, p);
             if ((int)slot < 0) continue;
             page_drop(m, s, p);
@@ -376,6 +444,36 @@ static int slab_evict_one(GuestMemory *m, GuestSlab *skip, uint32_t skip_page) {
         }
     }
     return 0;
+}
+/* Keep a provider slab inside its window: drop evictable pages outside the
+ * range the caller is about to use. An allocation that overlaps the live range
+ * is skipped as a whole, because dropping it would free the returned pointer.
+ * Runs only when a page was actually backed, so cache hits never scan here. */
+static void slab_trim_window(GuestMemory *m, GuestSlab *s,
+                             uint32_t keep_first, uint32_t keep_last) {
+    if (!s->resident_cap) return;
+    unsigned slot = reg_slot(s), skips = 0;
+    while (s->resident_pages > s->resident_cap && skips < 8) {
+        uint32_t q = s->trim_cursor;
+        s->trim_cursor = (q + 1) % s->pages;
+        if (!s->page[q]) { ++skips; continue; }
+        if (q >= keep_first && q <= keep_last) { ++skips; continue; }
+        if (s->pinned && s->pinned[q]) { ++skips; continue; }
+        if (slot != GUEST_MAX_SLABS) {
+            int ai = reg_find_page(s, q);
+            if (ai >= 0) {
+                SlabAlloc *a = &regs[slot].allocs[ai];
+                if (a->first <= keep_last && keep_first <= a->first + a->count - 1) {
+                    ++skips; continue;
+                }
+            }
+        }
+        if (!page_can_drop(m, s, q)) { ++skips; continue; }
+        page_drop(m, s, q);
+        ++m->pages_evicted;
+        ++m->pages_evicted_clean;
+        skips = 0;
+    }
 }
 static int page_back(GuestMemory *m, GuestSlab *s, uint32_t p) {
     if (s->page[p]) return 0;
@@ -417,6 +515,7 @@ static int page_back(GuestMemory *m, GuestSlab *s, uint32_t p) {
     }
     if (s->ever) s->ever[p] = 1;
     ++s->backed_pages;
+    if (!s->pinned || !s->pinned[p]) ++s->resident_pages;
     m->slab_backed += GUEST_PAGE_SIZE;
     m->used += GUEST_PAGE_SIZE;
     if (m->slab_backed > m->slab_backed_peak) m->slab_backed_peak = m->slab_backed;
@@ -433,6 +532,9 @@ static void page_drop(GuestMemory *m, GuestSlab *s, uint32_t p) {
         if (q < s->pages && s->page[q]) {
             s->page[q] = NULL;
             if (s->dirty) s->dirty[q] = 0;
+            if (!s->pinned || !s->pinned[q]) {
+                if (s->resident_pages) --s->resident_pages;
+            }
             if (s->backed_pages) --s->backed_pages;
         }
     }
@@ -479,6 +581,7 @@ static int page_drop_preserve(GuestMemory *m, GuestSlab *s, uint32_t p,
             free(tmp); return -1;
         }
         s->page[q]=d; ++s->backed_pages;
+        if (!s->pinned || !s->pinned[q]) ++s->resident_pages;
         m->slab_backed+=GUEST_PAGE_SIZE; m->used+=GUEST_PAGE_SIZE;
     }
     free(tmp);
@@ -495,8 +598,9 @@ static int slab_prepare(GuestMemory *m, GuestSlab *s, uint32_t addr, size_t n, u
     uint32_t last = (uint32_t)((end - 1) / GUEST_PAGE_SIZE);
     for (uint32_t p=first; p<=last; ++p)
         if (!s->state[p]) { m->last_fault = GUEST_FAULT_UNMAPPED; return -1; }
+    int backed = 0;
     for (uint32_t p=first; p<=last; ++p)
-        if (!s->page[p] && page_back(m, s, p)) return -1;
+        if (!s->page[p]) { if (page_back(m, s, p)) return -1; backed = 1; }
     if (first != last) {
         int contiguous = 1;
         for (uint32_t p=first; p<last; ++p)
@@ -521,6 +625,7 @@ static int slab_prepare(GuestMemory *m, GuestSlab *s, uint32_t addr, size_t n, u
             for (uint32_t p=first; p<=last; ++p) {
                 s->page[p] = bridge + (size_t)(p-first) * GUEST_PAGE_SIZE;
                 ++s->backed_pages;
+                if (!s->pinned || !s->pinned[p]) ++s->resident_pages;
                 m->slab_backed += GUEST_PAGE_SIZE;
                 m->used += GUEST_PAGE_SIZE;
                 if (m->slab_backed > m->slab_backed_peak) m->slab_backed_peak = m->slab_backed;
@@ -530,6 +635,7 @@ static int slab_prepare(GuestMemory *m, GuestSlab *s, uint32_t addr, size_t n, u
     if (s->writable && s->dirty)
         for (uint32_t p=first; p<=last; ++p) s->dirty[p] = 1;
     *out = s->page[first] + (size_t)(off % GUEST_PAGE_SIZE);
+    if (backed) slab_trim_window(m, s, first, last);
     return 0;
 }
 
@@ -603,6 +709,7 @@ int guest_slab_decommit(GuestMemory *m, uint32_t a, uint32_t size) {
                         s->page[q] = d;
                         s->ever[q] = 1;
                         ++s->backed_pages;
+                        if (!s->pinned || !s->pinned[q]) ++s->resident_pages;
                         m->slab_backed += GUEST_PAGE_SIZE;
                         m->used += GUEST_PAGE_SIZE;
                     }
@@ -644,11 +751,13 @@ int guest_slab_release(GuestMemory *m, uint32_t base) {
             free(r->allocs);
             memset(r, 0, sizeof *r);
         }
-        size_t meta = (size_t)s->pages * (3 + sizeof(uint8_t *)) + (size_t)s->pages * sizeof(SlabAlloc);
+        size_t meta = (size_t)s->pages * (4 + sizeof(uint8_t *)) + (size_t)s->pages * sizeof(SlabAlloc);
         if (s->dirty) meta += s->pages;
         m->slab_meta = meta <= m->slab_meta ? m->slab_meta - meta : 0;
         m->used = meta <= m->used ? m->used - meta : 0;
-        free(s->state); free(s->protect); free(s->ever); free(s->page); free(s->dirty);
+        if (s->provider_close) s->provider_close(s->provider_ctx);
+        free(s->state); free(s->protect); free(s->ever); free(s->pinned);
+        free(s->page); free(s->dirty);
         memset(s, 0, sizeof *s);
         return 0;
     }
@@ -685,8 +794,40 @@ int guest_slab_set_provider(GuestMemory *m, uint32_t base, uint32_t protect,
     }
     return 0;
 }
-uint64_t guest_slab_backed(const GuestMemory *m) { return m ? m->slab_backed : 0; }
-uint64_t guest_slab_backed_peak(const GuestMemory *m) { return m ? m->slab_backed_peak : 0; }
+int guest_slab_set_provider_close(GuestMemory *m, uint32_t base,
+                                  void (*fn)(void *)) {
+    GuestSlab *s = guest_slab_find(m, base, 1);
+    if (!s) return -1;
+    s->provider_close = fn;
+    return 0;
+}
+int guest_slab_set_window(GuestMemory *m, uint32_t base, uint32_t pages) {
+    GuestSlab *s = guest_slab_find(m, base, 1);
+    if (!s) return -1;
+    s->resident_cap = pages;
+    return 0;
+}
+int guest_slab_set_type(GuestMemory *m, uint32_t base, int type) {
+    GuestSlab *s = guest_slab_find(m, base, 1);
+    if (!s) return -1;
+    s->type = type;
+    return 0;
+}
+int guest_slab_pin_range(GuestMemory *m, uint32_t base, uint32_t addr, uint32_t size) {
+    GuestSlab *s = guest_slab_find(m, base, 1);
+    if (!s || !s->pinned || !size || addr < s->base || addr - s->base >= s->size) return -1;
+    uint32_t first = (addr - s->base) / GUEST_PAGE_SIZE;
+    uint64_t end = (uint64_t)addr + size;
+    uint32_t last = (uint32_t)((end - 1 - s->base) / GUEST_PAGE_SIZE);
+    if (last >= s->pages) last = s->pages - 1;
+    for (uint32_t p = first; p <= last; ++p) {
+        if (s->pinned[p]) continue;
+        s->pinned[p] = 1;
+        if (s->page[p] && s->resident_pages) --s->resident_pages;
+    }
+    return 0;
+}
+uint64_t guest_slab_backed(const GuestMemory *m) { return m ? m->slab_backed : 0; }uint64_t guest_slab_backed_peak(const GuestMemory *m) { return m ? m->slab_backed_peak : 0; }
 GuestFault guest_last_fault(const GuestMemory *m) { return m ? m->last_fault : GUEST_FAULT_UNMAPPED; }
 const char *guest_fault_text(const GuestMemory *m) {
     switch (guest_last_fault(m)) {
@@ -714,9 +855,26 @@ void guest_page_stats(const GuestMemory *m, GuestPageStats *out) {
     out->failures = m->backing_failures;
 }
 
+int guest_range_mapped(GuestMemory *m, uint32_t base, uint32_t size) {
+    if (!m || !size) return 0;
+    uint64_t end = (uint64_t)base + size;
+    for (size_t i = 0; i < m->count; ++i) {
+        GuestRegion *r = &m->regions[i];
+        if (base >= r->base && end <= (uint64_t)r->base + r->size) return 1;
+    }
+    GuestSlab *s = guest_slab_find(m, base, size);
+    if (!s || !s->state) return 0;
+    uint32_t first = (base - s->base) / GUEST_PAGE_SIZE;
+    uint32_t last = (uint32_t)((end - 1 - s->base) / GUEST_PAGE_SIZE);
+    if (last >= s->pages) return 0;
+    for (uint32_t p = first; p <= last; ++p) if (!s->state[p]) return 0;
+    return 1;
+}
+
 void *guest_ptr(GuestMemory *m, uint32_t addr, size_t n) {
     m->last_fault = GUEST_FAULT_NONE;
     if (!n) return NULL;
+    guest_touch_note(addr, n);
     for (size_t i=0; i<m->count; ++i) {
         GuestRegion *r = &m->regions[i];
         if (addr >= r->base && n <= r->size && addr-r->base <= r->size-n)

@@ -1,18 +1,128 @@
 #include "pe_image.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <string.h>
 
 static uint16_t rd16(const uint8_t *b) { return (uint16_t)(b[0] | (uint16_t)b[1]<<8); }
+/* Page-touch measurement for the first image loaded: section spans are recorded
+ * so guest_touch_bitmap() can be reported per section (hot .text set). */
+typedef struct { char name[9]; uint32_t va, size; } PeTouchSection;
+static struct {
+    int active;
+    uint32_t base, size, hdr;
+    unsigned count;
+    PeTouchSection sec[96];
+} g_touch;
+
+static unsigned long long touch_pages(uint32_t va, uint32_t size,
+                                      unsigned long long *pages,
+                                      unsigned long long *reused) {
+    uint32_t first = va / GUEST_PAGE_SIZE;
+    uint32_t last = (va + size + GUEST_PAGE_SIZE - 1u) / GUEST_PAGE_SIZE;
+    const uint8_t *bits = guest_touch_bitmap();
+    uint32_t total = guest_touch_page_count();
+    unsigned long long touched = 0, seen = 0, again = 0;
+    for (uint32_t p = first; p < last && p < total; ++p) {
+        ++seen;
+        if (bits[p]) ++touched;
+        if (bits[p] > 1) ++again;
+    }
+    if (pages) *pages = seen;
+    if (reused) *reused = again;
+    return touched;
+}
+void pe_image_touch_report(FILE *f, const char *phase) {
+    if (!f || !g_touch.active || !guest_touch_bitmap()) return;
+    uint64_t accesses = 0, repeats = 0;
+    guest_touch_stats(&accesses, &repeats);
+    fprintf(f, "[touch] phase=%s image %08x size %.2f MiB accesses=%llu repeats=%llu\n",
+            phase ? phase : "?", (unsigned)g_touch.base,
+            (double)g_touch.size / (1024.0 * 1024.0),
+            (unsigned long long)accesses, (unsigned long long)repeats);
+    unsigned long long all = 0;
+    for (unsigned i = 0; i <= g_touch.count; ++i) {
+        const char *name;
+        uint32_t va, size;
+        if (i == 0) { name = "headers"; va = 0; size = g_touch.hdr; }
+        else if (i <= g_touch.count - 1) { name = g_touch.sec[i - 1].name; va = g_touch.sec[i - 1].va; size = g_touch.sec[i - 1].size; }
+        else { name = "(total)"; va = 0; size = g_touch.size; }
+        unsigned long long seen = 0, reused = 0;
+        unsigned long long touched = touch_pages(va, size, &seen, &reused);
+        all += touched;
+        fprintf(f, "[touch] %-8s %6.2f MiB pages=%llu touched=%llu reused=%llu "
+                   "(%llu/%llu pages read twice, %.2f MiB touched, %.1f%%)\n",
+                name, (double)size / (1024.0 * 1024.0),
+                (unsigned long long)seen, touched, reused, reused, seen,
+                (double)touched * GUEST_PAGE_SIZE / (1024.0 * 1024.0),
+                seen ? 100.0 * (double)touched / (double)seen : 0.0);
+    }
+    fprintf(f, "[touch] hot set %.2f MiB of %.2f MiB image\n",
+            (double)all * GUEST_PAGE_SIZE / (1024.0 * 1024.0),
+            (double)g_touch.size / (1024.0 * 1024.0));
+}
 static uint32_t rd32(const uint8_t *b) { return (uint32_t)b[0] | (uint32_t)b[1]<<8 | (uint32_t)b[2]<<16 | (uint32_t)b[3]<<24; }
 static int within(uint32_t pos, uint32_t n, uint32_t limit) { return pos<=limit && n<=limit-pos; }
 static int at(FILE *f, uint32_t pos, void *buf, size_t n) {
     return pos>INT32_MAX || fseek(f,(long)pos,SEEK_SET) || fread(buf,1,n,f)!=n;
 }
+
+/* ---- file-backed image provider ---------------------------------------------
+ * The image is mapped as a slab: no section is copied at load. A page is read
+ * from the PE file on first touch and stays in the slab window while it is
+ * used. Writable sections (guest globals, BSS) are pinned at load so they are
+ * never evicted; the window only bounds read-only code and resource pages. */
+typedef struct {
+    FILE *f;
+    uint32_t hdr, nsections;
+    struct { uint32_t va, bytes, off, extent, writable; } sec[96];
+} PeProvider;
+
+static int pe_fill(void *ctx, uint64_t offset, uint8_t *dst, size_t n,
+                   size_t *got) {
+    PeProvider *p = (PeProvider *)ctx;
+    if (!p || !p->f || offset > UINT32_MAX) return -1;
+    uint32_t rva = (uint32_t)offset;
+    uint64_t r0 = rva, r1 = (uint64_t)rva + n;
+    memset(dst, 0, n);
+    if (rva < p->hdr) {
+        uint64_t b = r1 < p->hdr ? r1 : p->hdr;
+        if (b > r0 && at(p->f, rva, dst, (size_t)(b - r0))) return -1;
+    }
+    for (unsigned i = 0; i < p->nsections; ++i) {
+        uint64_t s0 = p->sec[i].va, s1 = s0 + p->sec[i].bytes;
+        uint64_t a = s0 > r0 ? s0 : r0, b = s1 < r1 ? s1 : r1;
+        if (a >= b) continue;
+        if (at(p->f, p->sec[i].off + (uint32_t)(a - s0), dst + (a - r0),
+               (size_t)(b - a))) return -1;
+    }
+    *got = n;
+    return 0;
+}
+static void pe_provider_close(void *ctx) {
+    PeProvider *p = (PeProvider *)ctx;
+    if (!p) return;
+    if (p->f) fclose(p->f);
+    free(p);
+}
+/* Evictable-page budget for the read-only part of an image. The measured hot
+ * set at the main menu is 3.18 MiB of .text + 0.87 MiB of .rdata + headers,
+ * so 5 MiB fits it with headroom; 0 disables the window. */
+static uint32_t pe_window_pages(void) {
+    static int cached = -1;
+    static unsigned long mb = 5;
+    if (cached < 0) {
+        const char *s = getenv("N3DS_TEXT_WINDOW_MB");
+        cached = 1;
+        if (s && *s) mb = strtoul(s, NULL, 0);
+    }
+    return mb > UINT32_MAX / 256u ? 0 : (uint32_t)(mb * 256u);
+}
 static int relocate(GuestMemory *m, const GuestImage *im, uint32_t rva, uint32_t size) {
     if (im->base==im->preferred_base) return 0;
     if (!rva || !size || !within(rva,size,im->size)) return -1;
     uint8_t *table=guest_ptr(m,im->base+rva,size);
+    if (!table) return -1;
     uint32_t delta=im->base-im->preferred_base, p=0;
     while (p<size) {
         if (size-p<8) return -1;
@@ -68,25 +178,67 @@ int pe_image_load(GuestMemory *m, const char *path, uint32_t want_base, GuestIma
     if (nrva>9) { im.tls_rva=rd32(opt+168); im.tls_size=rd32(opt+172); }
     if (!within(im.import_rva,im.import_size,im.size) || !within(im.export_rva,im.export_size,im.size) ||
         !within(im.tls_rva,im.tls_size,im.size)) goto done;
-    if (guest_map(m,im.base,im.size)) { rc=PE_MEMORY; goto done; }
+    /* Reserve a page-aligned slab; nothing is copied, pages come from the file
+     * through the provider below. */
+    if ((im.base & (GUEST_PAGE_SIZE-1u)) ||
+        !guest_slab_reserve(m, im.base,
+                            (im.size + GUEST_PAGE_SIZE - 1u) & ~(GUEST_PAGE_SIZE - 1u))) {
+        rc=PE_MEMORY; goto done;
+    }
     mapped=1;
-    if (at(f,0,guest_ptr(m,im.base,hdr),hdr)) { rc=PE_IO; goto done; }
-    /* Reject overlapping section footprints; copy directly from SD, not a full file buffer. */
+    PeProvider *prov=(PeProvider *)calloc(1,sizeof *prov);
+    if (!prov) { rc=PE_MEMORY; goto done; }
+    prov->f=f; prov->hdr=hdr; prov->nsections=im.sections;
+    /* Reject overlapping section footprints and build the page provider. */
     uint32_t starts[96], sizes[96];
     for (unsigned i=0;i<im.sections;++i) {
-        if (at(f,table+40*i,sec,sizeof sec)) { rc=PE_IO; goto done; }
+        if (at(f,table+40*i,sec,sizeof sec)) { rc=PE_IO; free(prov); goto done; }
         uint32_t vs=rd32(sec+8), va=rd32(sec+12), raw=rd32(sec+16), off=rd32(sec+20);
         uint32_t extent=vs?vs:raw, copy=raw<extent?raw:extent;
-        if (va<hdr || !within(va,extent,im.size) || (copy && !within(off,copy,file_size))) goto done;
-        for(unsigned j=0;j<i;++j) if (extent && sizes[j] && va<starts[j]+sizes[j] && starts[j]<va+extent) goto done;
+        if (va<hdr || !within(va,extent,im.size) || (copy && !within(off,copy,file_size))) {
+            rc=PE_FORMAT; free(prov); goto done;
+        }
+        for(unsigned j=0;j<i;++j) if (extent && sizes[j] && va<starts[j]+sizes[j] && starts[j]<va+extent) {
+            rc=PE_FORMAT; free(prov); goto done;
+        }
         starts[i]=va; sizes[i]=extent;
-        if (copy && at(f,off,guest_ptr(m,im.base+va,copy),copy)) { rc=PE_IO; goto done; }
+        prov->sec[i].va=va; prov->sec[i].bytes=copy; prov->sec[i].off=off;
+        prov->sec[i].extent=extent;
+        prov->sec[i].writable=rd32(sec+36)&0x80000000u?1:0;
+        if (!g_touch.active && !guest_touch_active() && i < 96) {
+            memcpy(g_touch.sec[i].name, sec, 8);
+            g_touch.sec[i].name[8] = 0;
+            g_touch.sec[i].va = va;
+            g_touch.sec[i].size = extent;
+            g_touch.count = i + 1;
+        }
     }
+    if (guest_slab_set_provider(m,im.base,0x04,0,pe_fill,NULL,prov,0)) {
+        f=prov->f; free(prov); rc=PE_MEMORY; goto done;
+    }
+    f=NULL;   /* the provider owns the FILE now */
+    guest_slab_set_provider_close(m,im.base,pe_provider_close);
+    guest_slab_set_type(m,im.base,0x20000);   /* same MEM_* as a mapped region */
+    guest_slab_set_window(m,im.base,pe_window_pages());
+    for (unsigned i=0;i<im.sections;++i)
+        if (prov->sec[i].writable)
+            guest_slab_pin_range(m,im.base,im.base+prov->sec[i].va,prov->sec[i].extent);
     if (relocate(m,&im,nrva>5?rd32(opt+136):0,nrva>5?rd32(opt+140):0)) { rc=PE_RELOCATION; goto done; }
+    if (!g_touch.active && !guest_touch_active() && g_touch.count == im.sections) {
+        g_touch.active = 1; g_touch.base = im.base; g_touch.size = im.size;
+        g_touch.hdr = hdr;
+        guest_touch_begin(im.base, im.size);
+    }
     *out=im; rc=PE_OK;
 done:
-    if (mapped && rc) guest_unmap(m,im.base);
-    fclose(f); return rc;
+    if (mapped && rc) pe_image_unload(m,im.base);
+    if (f) fclose(f);
+    return rc;
+}
+void pe_image_unload(GuestMemory *m, uint32_t base) {
+    if (!m) return;
+    if (guest_slab_find(m, base, 1)) guest_slab_release(m, base);
+    else guest_unmap(m, base);
 }
 const char *pe_error(int code) {
     switch(code) {case PE_OK:return "OK";case PE_IO:return "file I/O";case PE_FORMAT:return "invalid PE32 image";
