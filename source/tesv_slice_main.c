@@ -573,8 +573,7 @@ int main(int argc, char **argv) {
     if (access("sdmc:/Skyrim/tesv_trace.flag", F_OK) == 0) {
         setenv("TESV_MENU_TRACE", "1", 1);
         setenv("TESV_DRAW_PROBE", "1", 1);
-        setenv("TESV_INI_TRACE", "1", 1);
-        fprintf(stderr, "[probe] trace flag present: menu + draw + ini probes\n");
+        fprintf(stderr, "[probe] trace flag present: menu + draw probes\n");
     }
     /* The 4 MiB default texture cache is too small for the real menu path;
      * host runs override it with TESV_D3D9_BUDGET_MB.  The device cannot

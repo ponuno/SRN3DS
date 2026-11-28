@@ -323,3 +323,22 @@ Next: log at `0x69dda4`/`0x69ddf5` the three probe settings
 check whether the engine resolves `binkw32.dll!_BinkOpen@8` to the guest DLL
 body instead of the host shim.  The host success requires the probe to return
 1 first.
+
+## Gateprobe (1000 s): the 0x6982c0 gate is not a function entry
+
+`menu_trace` now has a dump for `addr==0x006982c0` (ecx, out, arg, the three
+`0x1272fb4/0x1272fd8/0x1272fe4` strings) and AL logs for
+`0x0069de08`/`0x0069de54`.  In the 1000 s Azahar run **none of them fired**:
+
+* `[menu] enter 006982c0` = 0; `winmain menu/load` = 0; `00876f60` = 0.
+* The run still reaches the load path: `release h=50c` by thread 10
+  (`0xb9da1c`), `[bink] _BinkSetSoundSystem`, then
+  `00a5d370 from=006f4045` (loading pump), `[menustate] frame=480`,
+  `singleton=0`, `view=0`.
+* `release h=504` = 0: the GFx worker remains at `0xa5ac42`.
+* No guest faults, 0 `[heap]` refusals, no swap report before the wall timeout.
+
+So `0x6982c0` is executed as a **block inside the 0x6981f0 function** (and
+`0x69de08/0x69de54` inside WinMain), not as a traced function entry.  The
+device does pass the gate and takes `0x69de54` (load path); the AL/out values
+need a block-IP probe in `n3ds_ir_run` for the block covering `0x69ddf5`.

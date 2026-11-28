@@ -306,3 +306,12 @@ enters `00876f60`.  Empty and `BGS_Logo.bik` intro values, and removing the
 guest `binkw32.dll`, all produce the same branch.  The next gate is the
 startup probe `0x6982c0` at `0x69ddf5`; log its `AL`, out object and the
 `0x1272fb4/0x1272fd8/0x1272fe4` settings there.
+
+## 2026-11-28 gateprobe: function-entry tracing cannot see 0x6982c0
+
+A 1000 s gateprobe run produced zero `[menu] probe 6982c0` and zero
+`winmain menu/load` lines, while still reaching `00a5d370 from=006f4045`
+(loading pump) with `singleton=0`, `view=0`, `frame=480`.  `0x6982c0` and
+`0x69de08/0x69de54` are basic blocks inside larger functions, so
+`menu_trace` never sees them.  `release h=50c` happened (thread 10,
+`0xb9da1c`); `release h=504` did not.  Next probe must be block-IP based.

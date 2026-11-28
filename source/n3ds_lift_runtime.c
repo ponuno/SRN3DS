@@ -133,10 +133,21 @@ static int menu_trace_on(void){
     return v;
 }
 static uint32_t menu_rd32(uint32_t a){uint32_t v=0;if(memory)(void)guest_read32(memory,a,&v);return v;}
+static void menu_cstr(uint32_t a,char *out,size_t cap){
+    out[0]=0;if(!a||!memory||cap<2)return;
+    for(size_t i=0;i+1<cap;++i){
+        const char *p=guest_ptr(memory,a+i,1);
+        if(!p)break;
+        out[i]=*p;out[i+1]=0;
+        if(!*p)break;
+    }
+    out[cap-1]=0;
+}
 static void menu_trace(CPU *c,uint32_t addr){
     if(!menu_trace_on()||!c)return;
+    {static int banner;if(!banner){banner=1;fprintf(stderr,"[menu] trace active\n");}}
     static const uint32_t va[]={
-        0x0069de08u,0x006982c0u,0x006f3e20u,0x006f3ea0u,0x006ebc10u,
+        0x0069de08u,0x0069de54u,0x006982c0u,0x006f3e20u,0x006f3ea0u,0x006ebc10u,
         0x006f3f00u,0x006f3f80u,0x0069cbd0u,0x004352d0u,0x00696810u,
         0x00699b20u,0x00691410u,0x00898430u,0x00892da0u,0x006f44a0u,0x006f44d0u,
         0x00a5d370u,0x0068c8e0u,0x006e3e30u,0x00649820u,0x0078a0a0u,0x006dc680u,
@@ -163,6 +174,24 @@ static void menu_trace(CPU *c,uint32_t addr){
             (unsigned)(inload&0xffu),(unsigned)(lstate&0xffu),(unsigned)phase,
             (unsigned)sing,(unsigned)(flag94&0xffu),
             (unsigned)a0,(unsigned)a1,(unsigned)c->r[1]);
+    if(addr==0x006982c0u){
+        /* Startup gate: callers pass an out pointer and one argument.  The
+         * three image globals hold the configured startup names. */
+        char s1[65],s2[65],s3[65];
+        uint32_t p1=menu_rd32(0x1272fb4u),p2=menu_rd32(0x1272fd8u),
+                 p3=menu_rd32(0x1272fe4u);
+        menu_cstr(p1,s1,sizeof s1);menu_cstr(p2,s2,sizeof s2);menu_cstr(p3,s3,sizeof s3);
+        fprintf(stderr,"[menu] probe 6982c0 ecx=%08x out=%08x arg=%08x "
+                "p1=%08x '%s' p2=%08x '%s' p3=%08x '%s'\n",
+                (unsigned)c->r[1],(unsigned)a0,(unsigned)a1,
+                (unsigned)p1,s1,(unsigned)p2,s2,(unsigned)p3,s3);
+    }
+    if(addr==0x0069de08u||addr==0x0069de54u){
+        fprintf(stderr,"[menu] winmain %s al=%02x eax=%08x esp13=%02x inload=%u lstate=%u\n",
+                addr==0x0069de08u?"menu":"load",(unsigned)(c->r[0]&0xffu),
+                (unsigned)c->r[0],(unsigned)(menu_rd32(c->r[4]+0x13u)&0xffu),
+                (unsigned)(inload&0xffu),(unsigned)(lstate&0xffu));
+    }
     if(addr==0x004310c0u){
         /* Main::IsLoadComplete: the startup loop polls [obj+0xad] and
          * [obj+0xae].  Naming the object and both bytes tells a missing menu
