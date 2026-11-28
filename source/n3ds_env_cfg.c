@@ -11,6 +11,7 @@
 static const char *const supported_keys[] = {
     "N3DS_TEX_GPU_LIMIT",
     "N3DS_TEX_GUEST_LIMIT",
+    "N3DS_VRAM_LIMIT",
     "N3DS_STREAM",
     "N3DS_STREAM_INDEX",
     "N3DS_STREAM_DATA",

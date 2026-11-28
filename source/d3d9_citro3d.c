@@ -18,6 +18,62 @@
 #include <stdarg.h>
 
 #define FRAME_VERTICES 16384u
+/* ---- global VRAM budget -------------------------------------------------
+ * New 3DS: 10 MiB physical VRAM of which only 6 MiB are usable by
+ * applications; the rest is reserved by the OS.  vramSpaceFree() reports the
+ * emulator/hardware pool, not the usable budget, so this backend accounts for
+ * every on-VRAM allocation itself: LCD render target, 2D targets (colour +
+ * depth), SR storage and cube-face depth views.  Textures, cubes and vertex
+ * arenas are linear (FCRAM) and are not charged here.
+ *
+ * N3DS_VRAM_LIMIT (default 6M) is the budget; 256 KiB is kept as slack for
+ * citro3d's internal rounding.  A failed reserve is a named log line and a
+ * negative return, which the core turns into downscale/linear/refusal. */
+static struct { size_t limit,live,peak; unsigned failures; int ready; } g_vram;
+static size_t vram_limit_from_env(void){
+    const char *s=getenv("N3DS_VRAM_LIMIT");
+    if(!s||!*s)return 6u<<20;
+    while(*s==' '||*s=='\t')++s;
+    if(!*s)return 6u<<20;
+    char *end=NULL;
+    unsigned long long v=strtoull(s,&end,10);
+    if(end==s)return 6u<<20;
+    while(*end==' '||*end=='\t')++end;
+    unsigned long long scale=1;
+    if(*end){
+        if(*end=='k'||*end=='K')scale=1024ull;
+        else if(*end=='m'||*end=='M')scale=1024ull*1024ull;
+        else return 6u<<20;
+        ++end;
+    }
+    if(*end)return 6u<<20;
+    if(!v)return 6u<<20;
+    return (size_t)v*scale;
+}
+static void vram_init_once(void){
+    if(g_vram.ready)return;
+    g_vram.limit=vram_limit_from_env();g_vram.ready=1;
+    fprintf(stderr,"[d3d9-vram] budget %zu KiB (N3DS_VRAM_LIMIT, 256 KiB slack)\n",
+            (g_vram.limit>0x40000?g_vram.limit-0x40000:g_vram.limit)>>10);
+}
+static int vram_reserve(size_t bytes,const char *what){
+    vram_init_once();
+    size_t cap=g_vram.limit>0x40000?g_vram.limit-0x40000:g_vram.limit;
+    if(g_vram.live+bytes>cap){
+        ++g_vram.failures;
+        fprintf(stderr,"[d3d9-vram] %s %zu KiB refused: live %zu KiB + %zu KiB > %zu KiB usable\n",
+                what,bytes>>10,g_vram.live>>10,bytes>>10,cap>>10);
+        return -1;
+    }
+    g_vram.live+=bytes;
+    if(g_vram.live>g_vram.peak)g_vram.peak=g_vram.live;
+    return 0;
+}
+static void vram_release(size_t bytes){
+    if(!bytes)return;
+    g_vram.live=g_vram.live>bytes?g_vram.live-bytes:0;
+}
+
 #define FRAME_INDICES 262144u
 /* Verified PICA VS batches are bounded by the core's 4,096-vertex scratch and
  * packed in loader order (at most five attributes, all submitted as floats:
@@ -212,13 +268,17 @@ static size_t tex_request_bytes(unsigned w, unsigned h, unsigned levels,
 
 static int sr_tex_alloc(C3D_Tex *tex, unsigned w, unsigned h)
 {
+    if(vram_reserve((size_t)w*h*4u,"SR colour"))return -1;
     uint64_t before = mem_stats_space_begin(MEM_STATS_VRAM);
     C3D_TexInitParams params = {(u16)w, (u16)h, 0, GPU_RGBA8, GPU_TEX_2D, true};
     int ok = C3D_TexInitWithParams(tex, NULL, params) != 0;
     mem_stats_space_end(MEM_STATS_VRAM, before,
                         tex_request_bytes(w, h, 1, 4, 1, 0), ok);
     if (!ok)
+    {
+        vram_release((size_t)w*h*4u);
         return -1;
+    }
     C3D_TexSetFilter(tex, GPU_LINEAR, GPU_LINEAR);
     C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     return 0;
@@ -228,6 +288,7 @@ static void sr_release(D9Citro *c)
 {
     C3D_FrameSync();
     uint64_t before;
+    int had_scene_depth = c->sr_scene_rt != NULL;
     if (c->sr_scene_rt) { C3D_RenderTargetDelete(c->sr_scene_rt); c->sr_scene_rt = NULL; }
     if (c->sr_scratch_rt) { C3D_RenderTargetDelete(c->sr_scratch_rt); c->sr_scratch_rt = NULL; }
     if (c->sr_scene_tex.data) {
@@ -235,12 +296,16 @@ static void sr_release(D9Citro *c)
         C3D_TexDelete(&c->sr_scene_tex);
         mem_stats_space_released(MEM_STATS_VRAM, before);
         memset(&c->sr_scene_tex, 0, sizeof c->sr_scene_tex);
+        vram_release((size_t)c->sr_tex_w*c->sr_tex_h*4u);
+        if (had_scene_depth)
+            vram_release((size_t)c->sr_tex_w*c->sr_tex_h*2u); /* D16 attachment */
     }
     if (c->sr_scratch_tex.data) {
         before = mem_stats_space_begin(MEM_STATS_VRAM);
         C3D_TexDelete(&c->sr_scratch_tex);
         mem_stats_space_released(MEM_STATS_VRAM, before);
         memset(&c->sr_scratch_tex, 0, sizeof c->sr_scratch_tex);
+        vram_release((size_t)c->sr_tex_w*c->sr_tex_h*4u);
     }
     c->sr_ready = 0;
     c->sr_redirect = 0;
@@ -299,6 +364,13 @@ static int sr_init(D9Citro *c)
      * stencil test in this backend, and only the implicit screen frame is
      * redirected here.  The game's own implicit target keeps D24S8, as do all
      * explicit/retained targets (see target_depth_attach). */
+    c->sr_tex_w = tw;
+    c->sr_tex_h = th;
+    if (vram_reserve((size_t)tw*th*2u, "SR depth"))
+    {
+        sr_release(c);
+        return -1;
+    }
     c->sr_scene_rt = C3D_RenderTargetCreateFromTex(&c->sr_scene_tex, GPU_TEXFACE_2D, 0,
                                                    GPU_RB_DEPTH16);
     if (!c->sr_scene_rt)
@@ -363,10 +435,11 @@ D9Citro *d9_citro_open(void){
     MemStatsSpaceProbes probes={mem_linear_free_probe,mem_vram_free_probe,NULL};
     mem_stats_set_space_probes(&probes);
     uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
+    if(vram_reserve((size_t)240u*400u*4u*2u,"LCD render target"))goto fail;
     c->target=C3D_RenderTargetCreate(240,400,GPU_RB_RGBA8,GPU_RB_DEPTH24_STENCIL8);
     mem_stats_space_end(MEM_STATS_VRAM,before,tex_request_bytes(240,400,1,5,1,0),
                         c->target!=NULL);
-    if(!c->target)goto fail;
+    if(!c->target){vram_release((size_t)240u*400u*4u*2u);goto fail;}
     C3D_RenderTargetSetOutput(c->target,GFX_TOP,GFX_LEFT,TRANSFER);
     c->shader=DVLB_ParseFile((u32 *)d9shader_shbin,d9shader_shbin_size);if(!c->shader)goto fail;
     if(R_FAILED(shaderProgramInit(&c->program)))goto fail;c->program_ready=1;
@@ -436,7 +509,11 @@ void d9_citro_close(D9Citro *c){
     if(c->program_cube_ready)shaderProgramFree(&c->program_cube);if(c->shader_cube)DVLB_Free(c->shader_cube);
     if(c->program_color_ready)shaderProgramFree(&c->program_color);if(c->shader_color)DVLB_Free(c->shader_color);
     if(c->program_ready)shaderProgramFree(&c->program);if(c->shader)DVLB_Free(c->shader);
-    if(c->target)C3D_RenderTargetDelete(c->target);C3D_Fini();free(c);
+    if(c->target)C3D_RenderTargetDelete(c->target);
+    vram_release((size_t)240u*400u*4u*2u);
+    fprintf(stderr,"[d3d9-vram] closed: live %zu KiB peak %zu KiB, refusals %u\n",
+            g_vram.live>>10,g_vram.peak>>10,g_vram.failures);
+    C3D_Fini();free(c);
 }
 typedef struct {C3D_Tex tex;unsigned levels,format;} NativeTex;
 typedef struct {C3D_Tex tex;C3D_TexCube cube;unsigned edge,levels,format;} NativeCube;
@@ -446,6 +523,7 @@ typedef struct {
     unsigned w,h,format;
     int has_depth;     /* target owns a DEPTH24_STENCIL8 attachment */
     int is_cube_face;  /* native is a NativeCubeFace, not a NativeTarget */
+    int on_vram;       /* colour storage comes from PICA VRAM, not the linear heap */
 } NativeTargetHead;
 typedef struct {NativeTargetHead head;C3D_Tex tex;NativeTex sample;} NativeTarget;
 typedef struct {NativeTargetHead head;NativeCube *cube;unsigned face,level;} NativeCubeFace;
@@ -1103,17 +1181,28 @@ static void end(void *ctx){
     c->active_target=NULL;c->sr_redirect=0;
     mem_stats_frame();
 }
-static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
+static int target_create_impl(void *ctx,unsigned w,unsigned h,unsigned format,
+                              int on_vram,void **native){
     (void)ctx;if(!native||w<8||h<8||w>1024||h>1024||(w&(w-1))||(h&(h-1))||
        (format!=D9_X8R8G8B8&&format!=D9_A8R8G8B8))return -1;
     NativeTarget *t=calloc(1,sizeof *t);if(!t)return -1;
-    uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
-    C3D_TexInitParams params={(u16)w,(u16)h,0,GPU_RGBA8,GPU_TEX_2D,true};
+    size_t colour=(size_t)w*h*4u;
+    if(on_vram&&vram_reserve(colour,"target colour")){free(t);return -1;}
+    int space=on_vram?MEM_STATS_VRAM:MEM_STATS_LINEAR;
+    uint64_t before=mem_stats_space_begin(space);
+    C3D_TexInitParams params={(u16)w,(u16)h,0,GPU_RGBA8,GPU_TEX_2D,on_vram!=0};
     int ok=C3D_TexInitWithParams(&t->tex,NULL,params)!=0;
-    mem_stats_space_end(MEM_STATS_VRAM,before,tex_request_bytes(w,h,1,4,1,0),ok);
+    mem_stats_space_end(space,before,tex_request_bytes(w,h,1,4,1,0),ok);
     if(!ok){
-        fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u VRAM texture allocation failed "
-                "(vram free %u KiB)\n",w,h,(unsigned)(vramSpaceFree()>>10));
+        if(on_vram)vram_release(colour);
+        if(on_vram)
+            fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u VRAM texture allocation failed "
+                    "(vram free %u KiB, accounted live %zu/%zu KiB)\n",w,h,
+                    (unsigned)(vramSpaceFree()>>10),g_vram.live>>10,
+                    (g_vram.limit>0x40000?g_vram.limit-0x40000:g_vram.limit)>>10);
+        else
+            fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u linear texture allocation failed "
+                    "(linear free %u KiB)\n",w,h,(unsigned)(linearSpaceFree()>>10));
         free(t);return -1;
     }
     C3D_TexSetFilter(&t->tex,GPU_NEAREST,GPU_NEAREST);
@@ -1124,14 +1213,18 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
      * Render-target textures used only for sampling therefore spend no VRAM on
      * depth they never touch. */
     t->head.target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,-1);
-    mem_stats_space_end(MEM_STATS_VRAM,before,0,t->head.target!=NULL);
+    mem_stats_space_end(space,before,0,t->head.target!=NULL);
     if(!t->head.target){
         fprintf(stderr,"[d3d9-citro] CreateRenderTarget: %ux%u render-target allocation failed "
-                "(vram free %u KiB)\n",w,h,(unsigned)(vramSpaceFree()>>10));
-        before=mem_stats_space_begin(MEM_STATS_VRAM);
-        C3D_TexDelete(&t->tex);mem_stats_space_released(MEM_STATS_VRAM,before);free(t);return -1;
+                "(vram free %u KiB, accounted live %zu KiB)\n",w,h,
+                (unsigned)(vramSpaceFree()>>10),g_vram.live>>10);
+        before=mem_stats_space_begin(space);
+        C3D_TexDelete(&t->tex);mem_stats_space_released(space,before);free(t);
+        if(on_vram)vram_release(colour);
+        return -1;
     }
     t->head.has_depth=0;
+    t->head.on_vram=on_vram?1:0;
     /* VRAM starts with arbitrary bytes.  PICA depth 0 is "far" and the draws
      * use GPU_GEQUAL, so a prime clear avoids sampling a fresh colour target's
      * garbage.  A depth-less target has no depth to prime.  This is a private
@@ -1142,13 +1235,22 @@ static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **
             C3D_RenderTargetClear(t->head.target,C3D_CLEAR_COLOR,0,0);
         C3D_FrameEnd(0);
     }
-    fprintf(stderr,"[d3d9-citro] target %ux%u colour-only; vram free %u KiB\n",
-            w,h,(unsigned)(vramSpaceFree()>>10));
+    fprintf(stderr,"[d3d9-citro] target %ux%u colour-only in %s; free %u KiB, vram %zu/%zu KiB\n",
+            w,h,on_vram?"VRAM":"linear heap",
+            (unsigned)((on_vram?vramSpaceFree():linearSpaceFree())>>10),
+            g_vram.live>>10,
+            (g_vram.limit>0x40000?g_vram.limit-0x40000:g_vram.limit)>>10);
     /* Sampling view: same C3D_Tex data, separate filter/wrap state.  The
      * target's own C3D_Tex owns the storage; the view is never deleted. */
     t->sample.tex=t->tex;t->sample.levels=1;
     t->head.blit_texture=&t->tex;
     t->head.w=w;t->head.h=h;t->head.format=format;*native=t;return 0;
+}
+static int target_create(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
+    return target_create_impl(ctx,w,h,format,1,native);
+}
+static int target_create_linear(void *ctx,unsigned w,unsigned h,unsigned format,void **native){
+    return target_create_impl(ctx,w,h,format,0,native);
 }
 static int target_has_depth(void *ctx,void *native){
     (void)ctx;NativeTargetHead *h=native;return h?h->has_depth:0;
@@ -1167,14 +1269,19 @@ static int target_depth_attach(void *ctx,void *native){
     NativeTarget *t=(NativeTarget *)native;
     if(!t->tex.data)return -1;
     C3D_FrameSync();
+    size_t depth_bytes=(size_t)h->w*h->h*4u;
+    if(t->head.on_vram&&vram_reserve(depth_bytes,"target depth"))return -1;
     uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
     C3D_RenderTarget *rt=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,
                                                        GPU_RB_DEPTH24_STENCIL8);
     mem_stats_space_end(MEM_STATS_VRAM,before,
                         tex_request_bytes(h->w,h->h,1,4,1,0),rt!=NULL);
     if(!rt){
+        if(t->head.on_vram)vram_release(depth_bytes);
         fprintf(stderr,"[d3d9-citro] target depth attach: %ux%u DEPTH24_STENCIL8 allocation failed "
-                "(vram free %u KiB)\n",h->w,h->h,(unsigned)(vramSpaceFree()>>10));
+                "(vram free %u KiB, accounted %zu/%zu KiB)\n",h->w,h->h,
+                (unsigned)(vramSpaceFree()>>10),g_vram.live>>10,
+                (g_vram.limit>0x40000?g_vram.limit-0x40000:g_vram.limit)>>10);
         return -1;
     }
     C3D_RenderTarget *old=h->target;
@@ -1222,9 +1329,74 @@ static void target_delete(void *ctx,void *native){
     D9Citro *c=ctx;NativeTarget *t=native;if(!t)return;
     if(c->active_target==native)c->active_target=NULL;
     C3D_FrameSync();
-    uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
+    int space=t->head.on_vram?MEM_STATS_VRAM:MEM_STATS_LINEAR;
+    uint64_t before=mem_stats_space_begin(space);
     if(t->head.target)C3D_RenderTargetDelete(t->head.target);
-    C3D_TexDelete(&t->tex);mem_stats_space_released(MEM_STATS_VRAM,before);free(t);
+    C3D_TexDelete(&t->tex);mem_stats_space_released(space,before);
+    if(t->head.on_vram){
+        vram_release((size_t)t->head.w*t->head.h*4u);
+        if(t->head.has_depth)vram_release((size_t)t->head.w*t->head.h*4u);
+    }
+    free(t);
+}
+/* Eviction under VRAM pressure: release the colour storage and the render-target
+ * view, keep the NativeTarget and the sampleable view pointer so every D3D
+ * handle derived from this target stays valid.  target_resume re-creates the
+ * storage on the next bind/read/write. */
+static int target_suspend(void *ctx,void *native){
+    D9Citro *c=ctx;NativeTarget *t=native;
+    if(!c||!t)return -1;
+    if(t->head.is_cube_face)return -1;
+    if(c->scene||c->active_target==native)return -1;
+    if(!t->tex.data)return 0;
+    C3D_FrameSync();
+    int space=t->head.on_vram?MEM_STATS_VRAM:MEM_STATS_LINEAR;
+    uint64_t before=mem_stats_space_begin(space);
+    if(t->head.target)C3D_RenderTargetDelete(t->head.target);
+    t->head.target=NULL;
+    C3D_TexDelete(&t->tex);
+    memset(&t->tex,0,sizeof t->tex);
+    t->sample.tex=t->tex;
+    mem_stats_space_released(space,before);
+    if(t->head.on_vram){
+        vram_release((size_t)t->head.w*t->head.h*4u);
+        if(t->head.has_depth)vram_release((size_t)t->head.w*t->head.h*4u);
+    }
+    return 0;
+}
+static int target_resume(void *ctx,void *native){
+    D9Citro *c=ctx;NativeTarget *t=native;
+    if(!c||!t||t->head.is_cube_face)return -1;
+    if(t->tex.data)return 0;
+    unsigned w=t->head.w,h=t->head.h;
+    C3D_FrameSync();
+    size_t bytes=(size_t)w*h*4u;
+    if(t->head.on_vram&&vram_reserve(bytes,"target resume"))return -1;
+    int space=t->head.on_vram?MEM_STATS_VRAM:MEM_STATS_LINEAR;
+    uint64_t before=mem_stats_space_begin(space);
+    C3D_TexInitParams params={(u16)w,(u16)h,0,GPU_RGBA8,GPU_TEX_2D,t->head.on_vram!=0};
+    int ok=C3D_TexInitWithParams(&t->tex,NULL,params)!=0;
+    mem_stats_space_end(space,before,tex_request_bytes(w,h,1,4,1,0),ok);
+    if(!ok){if(t->head.on_vram)vram_release(bytes);return -1;}
+    C3D_TexSetFilter(&t->tex,GPU_NEAREST,GPU_NEAREST);
+    C3D_TexSetWrap(&t->tex,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
+    t->head.target=C3D_RenderTargetCreateFromTex(&t->tex,GPU_TEXFACE_2D,0,
+        t->head.has_depth?GPU_RB_DEPTH24_STENCIL8:-1);
+    if(!t->head.target){
+        C3D_TexDelete(&t->tex);memset(&t->tex,0,sizeof t->tex);t->sample.tex=t->tex;
+        if(t->head.on_vram)vram_release(bytes);
+        return -1;
+    }
+    t->sample.tex=t->tex;
+    if(!c->scene&&C3D_FrameBegin(C3D_FRAME_SYNCDRAW)){
+        if(C3D_FrameDrawOn(t->head.target))
+            C3D_RenderTargetClear(t->head.target,
+                t->head.has_depth?(C3D_CLEAR_DEPTH|C3D_CLEAR_COLOR):C3D_CLEAR_COLOR,0,0);
+        C3D_FrameEnd(0);
+    }
+    fprintf(stderr,"[d3d9-citro] target %ux%u resumed; free %u KiB\n",w,h,
+            (unsigned)((t->head.on_vram?vramSpaceFree():linearSpaceFree())>>10));
+    return 0;
 }
 /* Cube-face render target: a C3D_RenderTarget view over one face/level of an
  * existing NativeCube.  It owns the render-target and depth attachment only;
@@ -1235,13 +1407,16 @@ static int cube_face_create(void *ctx,void *native_cube,unsigned face,
     (void)ctx;(void)depth_flags;NativeCube *cube=native_cube;
     if(!native||!cube||face>=D9_CUBE_FACES||level>=cube->levels)return -2;
     NativeCubeFace *f=calloc(1,sizeof *f);if(!f)return -3;
+    unsigned edge=cube->edge>>level;if(!edge)edge=1;
+    size_t depth_bytes=(size_t)edge*edge*4u;
+    if(vram_reserve(depth_bytes,"cube-face depth")){free(f);return -3;}
     uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
     f->head.target=C3D_RenderTargetCreateFromTex(&cube->tex,(GPU_TEXFACE)face,
                                                  (int)level,GPU_RB_DEPTH24_STENCIL8);
-    unsigned edge=cube->edge>>level;if(!edge)edge=1;
     mem_stats_space_end(MEM_STATS_VRAM,before,tex_request_bytes(edge,edge,1,4,1,0),
                         f->head.target!=NULL);
     if(!f->head.target){
+        vram_release(depth_bytes);
         fprintf(stderr,"[d3d9-citro] GetCubeMapSurface: face %u level %u render-target allocation failed\n",
                 face,level);
         free(f);return -3;
@@ -1264,6 +1439,7 @@ static void cube_face_delete(void *ctx,void *native){
     C3D_FrameSync();uint64_t before=mem_stats_space_begin(MEM_STATS_VRAM);
     if(f->head.target)C3D_RenderTargetDelete(f->head.target);
     mem_stats_space_released(MEM_STATS_VRAM,before);
+    vram_release((size_t)f->head.w*f->head.h*4u);
     free(f);
 }
 /* Whole-surface write-back for the lockable back buffer.  The source is
@@ -1451,4 +1627,5 @@ const D9Backend *d9_citro_backend(void){static const D9Backend ops={tex_create,t
      * PROJECTION and SHADOW_CUBE only; there is no 3D texture mode, so volume
      * sampling is refused by name and the PICA backend also has no
      * texture_create_volume callback. */
-    NULL,NULL,target_has_depth,target_depth_attach,draw_pica_vs,frame_sync,set_scissor};return &ops;}
+    NULL,NULL,target_has_depth,target_depth_attach,draw_pica_vs,frame_sync,set_scissor,
+    target_create_linear,target_suspend,target_resume};return &ops;}

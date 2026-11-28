@@ -329,6 +329,20 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
            (unsigned long long)ir_stats.evicted);
     printf("run rc=%d status=%lu message=%s\n", r, (unsigned long)status, b.message);
     printf("first fault: %s\n", n3ds_lift_fault());
+    {
+        /* Target VRAM budget: live/peak and the policy counters.  Printed at the
+         * same boundary as the guest memory summary so an Azahar log shows
+         * exactly how the 6 MiB PICA VRAM was spent. */
+        D9Device *dd=d9_com_device();
+        D9TargetStats ts;
+        if(dd&&d9_target_stats(dd,&ts)==D9_OK)
+            printf("[d3d9-target] vram limit=%zu KiB live=%zu KiB peak=%zu KiB "
+                   "alloc_failures=%u evictions=%u linear_fallbacks=%u downscales=%u "
+                   "pool_hits=%u pool_flushes=%u pool_entries=%u suspended=%u\n",
+                   ts.vram_limit>>10,ts.vram_live>>10,ts.vram_peak>>10,
+                   ts.alloc_failures,ts.evictions,ts.linear_fallbacks,ts.downscales,
+                   ts.pool_hits,ts.pool_flushes,ts.pool_entries,ts.suspended_targets);
+    }
 #ifdef __3DS__
     const char *prof_path = "sdmc:/Skyrim_N3DS_tesv_prof.csv";
 #else
@@ -479,6 +493,11 @@ int main(int argc, char **argv) {
     /* The 4 MiB default texture cache is too small for the real menu path;
      * host runs override it with TESV_D3D9_BUDGET_MB.  The device cannot
      * inherit host variables, so the same value comes from a one-line file. */
+    /* 6 MiB of the 10 MiB VRAM are usable; the PICA backend enforces that
+     * globally (N3DS_VRAM_LIMIT).  Targets get 4.25 MiB so the four 512x512
+     * menu targets, the retained back buffer/depth, the LCD target and the
+     * smaller transient targets all fit.  A cfg key can override it. */
+    setenv("N3DS_TARGET_VRAM_LIMIT", "4352K", 0);
     {
         FILE *bf = fopen("sdmc:/Skyrim/tesv_d3d9_budget.txt", "r");
         if (bf) {

@@ -433,7 +433,54 @@ typedef struct {
      * stage, and the core records a named diagnostic instead of pretending. */
     int (*set_scissor)(void *ctx,int enable,int left,int top,int right,int bottom,
                        unsigned surface_w,unsigned surface_h);
+    /* Optional linear-heap colour target, appended after set_scissor so every
+     * existing positional D9Backend initializer keeps its meaning.  Same
+     * contract as target_create, but the storage comes from the linear heap
+     * instead of PICA VRAM.  Sampling still works; the cost is linear memory
+     * rather than the 6 MiB VRAM budget.  The core falls back to this only
+     * after eviction could not free enough VRAM, and only when the backend
+     * advertises it. */
+    int (*target_create_linear)(void *ctx,unsigned w,unsigned h,unsigned format,
+                                void **native);
+    /* Optional suspend/resume pair, appended after target_create_linear.
+     * target_suspend releases the native's GPU storage (colour storage and
+     * depth attachment) but keeps the handle and every view derived from it
+     * valid; target_resume re-allocates the same storage.  The core uses this
+     * to evict an inactive target under VRAM pressure and rehydrates it on the
+     * next bind/read/write.  Both must fail (non-zero) rather than silently
+     * produce a different surface.  A backend without this pair cannot evict,
+     * and the core proceeds to the linear/downscale fallbacks. */
+    int (*target_suspend)(void *ctx,void *native);
+    int (*target_resume)(void *ctx,void *native);
 } D9Backend;
+
+/* Render-target VRAM budget accounting and the pressure policy counters.
+ * vram_limit is the configured per-device budget for target storage
+ * (N3DS_TARGET_VRAM_LIMIT, default 5 MiB, 0 = unlimited).  live/peak count
+ * colour storage plus attached depth for every resident target, including
+ * natives retained by the reuse pool.  alloc_failures counts creations that no
+ * policy step could satisfy; the other counters count the individual policy
+ * actions.  pool_entries/pool_bytes describe the reuse pool at the time of the
+ * query. */
+typedef struct {
+    size_t vram_limit;
+    size_t vram_live;
+    size_t vram_peak;
+    unsigned alloc_failures;
+    unsigned evictions;
+    unsigned linear_fallbacks;
+    unsigned downscales;
+    unsigned pool_hits;
+    unsigned pool_flushes;
+    unsigned pool_entries;
+    size_t pool_bytes;
+    unsigned suspended_targets;
+} D9TargetStats;
+int d9_target_stats(const D9Device *d,D9TargetStats *out);
+/* Retain up to 0..4 destroyed 2D target natives in the reuse pool.  Disabled by
+ * default (0): a release frees VRAM immediately, which is what the host tests
+ * pin.  N3DS_TARGET_POOL_ENTRIES selects the same value at device creation. */
+void d9_set_target_pool_limit(D9Device *d,unsigned entries);
 
 D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t byte_limit);
 void d9_destroy_device(D9Device *d);

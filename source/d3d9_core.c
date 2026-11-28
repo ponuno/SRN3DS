@@ -26,6 +26,70 @@ enum {D9_TARGET_NATIVE_MIN=64,D9_TARGET_NATIVE_DEFAULT=256,D9_TARGET_NATIVE_LIMI
        * 400x240 and 320x180 fit in 512x256; larger logical surfaces keep the
        * historical bounded/down-scaled path instead of a 1024-axis alloc. */
       D9_TARGET_POT_LIMIT=512};
+/* Target VRAM budget.  Unset (0) means unlimited: the PICA backend's global
+ * N3DS_VRAM_LIMIT is the authority and is the only guard the host suite needs.
+ * The device main sets 4.25 MiB so the four measured 512x512 menu targets plus
+ * the retained back buffer/depth leave room for the LCD and the smaller
+ * transient targets the menu creates afterwards.
+ * N3DS_TARGET_VRAM_LIMIT accepts a byte count or a K/M suffix; 0 disables
+ * admission control. */
+enum {D9_TARGET_VRAM_DEFAULT=0,D9_TARGET_POOL_MAX=4};
+static size_t parse_bytes_limit(const char *s,int *valid){
+    if(valid)*valid=0;
+    if(!s)return 0;
+    while(*s==' '||*s=='\t')++s;
+    if(!*s||*s=='-'||*s=='+')return 0;
+    char *end=NULL;
+    unsigned long long v=strtoull(s,&end,10);
+    if(end==s)return 0;
+    while(*end==' '||*end=='\t')++end;
+    unsigned long long scale=1;
+    if(*end){
+        if(*end=='k'||*end=='K')scale=1024ull;
+        else if(*end=='m'||*end=='M')scale=1024ull*1024ull;
+        else if(*end=='g'||*end=='G')scale=1024ull*1024ull*1024ull;
+        else return 0;
+        ++end;
+        while(*end==' '||*end=='\t')++end;
+        if(*end)return 0;
+    }
+    if(v>SIZE_MAX/scale)return 0;
+    if(valid)*valid=1;
+    return (size_t)(v*scale);
+}
+static size_t target_vram_limit_from_env(void){
+    const char *s=getenv("N3DS_TARGET_VRAM_LIMIT");
+    if(!s||!*s)return D9_TARGET_VRAM_DEFAULT;
+    int ok=0;
+    size_t v=parse_bytes_limit(s,&ok);
+    return ok?v:D9_TARGET_VRAM_DEFAULT;
+}
+static unsigned target_pool_limit_from_env(void){
+    const char *s=getenv("N3DS_TARGET_POOL_ENTRIES");
+    unsigned v=0;
+#ifdef __3DS__
+    v=D9_TARGET_POOL_MAX; /* device default: reuse freed target natives */
+#endif
+    if(!s||!*s)return v;
+    char *end=NULL;
+    unsigned long n=strtoul(s,&end,10);
+    if(!end||*end||n>D9_TARGET_POOL_MAX)return v;
+    return (unsigned)n;
+}
+/* PO2 downscaling changes what the guest samples, so it is an explicit opt-in
+ * on host diagnostics and on by default on the device build, where the
+ * alternative is a failed target the guest dereferences. */
+static int target_downscale_from_env(void){
+    const char *s=getenv("N3DS_TARGET_DOWNSCALE");
+    int v=0;
+#ifdef __3DS__
+    v=1;
+#endif
+    if(!s||!*s)return v;
+    if(strcmp(s,"1")==0)return 1;
+    if(strcmp(s,"0")==0)return 0;
+    return v;
+}
 static unsigned target_native_max_from_env(void){
     const char *s=getenv("TESV_D3D9_TARGET_NATIVE_MAX");
     if(!s||!*s)return D9_TARGET_NATIVE_DEFAULT;
@@ -80,7 +144,25 @@ typedef struct {
      * logical size and sampling/copying addresses the sub-rect.  Zero for the
      * historical exact/bounded (down-scaled) targets. */
     int pot_pad;
+    /* VRAM budget bookkeeping.  vram_bytes is the charged colour storage plus
+     * any attached depth attachment while the native is resident; a suspended
+     * target keeps its handle and views but owns no GPU storage. */
+    size_t vram_bytes;
+    int resident;
+    int depth_charged;
+    uint32_t last_use_gen;
 } Target;
+/* Reuse pool for destroyed 2D target natives.  The native keeps its colour
+ * storage (and depth, if it had one) so a same-sized target can be created
+ * again without another VRAM allocation.  Pooled bytes stay charged against the
+ * target budget and are the first thing dropped under pressure. */
+typedef struct {
+    void *native;
+    unsigned w,h,format;
+    unsigned has_depth;
+    int linear;        /* storage lives in the linear heap, not VRAM */
+    size_t bytes;      /* charged VRAM bytes (colour + depth) */
+} TargetPoolEntry;
 typedef struct {D9Handle id;unsigned w,h,format,lockable;} Depth;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;} Level;
 typedef struct {unsigned w,h;size_t pitch,bytes,offset;int uploaded;unsigned face_mask;} CubeLevel;
@@ -134,6 +216,15 @@ struct D9Device {
     D9Handle back_target;unsigned back_tex_w,back_tex_h;int back_lockable;
     unsigned target_native_max; /* env-selected cap for explicit targets, 64..512 */
     int scaled_readback;       /* TESV_D3D9_SCALED_READBACK=1 */
+    int target_downscale;      /* N3DS_TARGET_DOWNSCALE: PO2 storage shrinking */
+    /* Render-target VRAM budget (N3DS_TARGET_VRAM_LIMIT, default 5 MiB) and the
+     * pressure-policy counters exposed through d9_target_stats(). */
+    size_t target_vram_limit,target_vram_live,target_vram_peak;
+    unsigned target_pool_limit;
+    unsigned target_alloc_failures,target_evictions,target_linear_fallbacks,
+             target_downscales,target_pool_hits,target_pool_flushes;
+    TargetPoolEntry target_pool[D9_TARGET_POOL_MAX];
+    unsigned target_pool_count;
     Depth depths[MAX_DEPTHS];D9Handle depth;
     unsigned back_w,back_h,back_format;int back_valid;int blit_error;
     D9TexEntry tex_entries[MAX_TEX_ENTRIES];D9TexCache tex_cache;
@@ -493,6 +584,9 @@ D9Device *d9_create_device(const D9Backend *ops,void *ctx,size_t limit){
     D9Device *d=calloc(1,sizeof *d);if(!d)return NULL;d->ops=*ops;d->ctx=ctx;d->limit=limit;d->next=1;
     d->target_native_max=target_native_max_from_env();
     d->scaled_readback=scaled_readback_from_env();
+    d->target_vram_limit=target_vram_limit_from_env();
+    d->target_pool_limit=target_pool_limit_from_env();
+    d->target_downscale=target_downscale_from_env();
     D9TexCacheOps cache_ops={d,cache_release_guest,cache_release_gpu};
     if(d9_texcache_init(&d->tex_cache,d->tex_entries,MAX_TEX_ENTRIES,&cache_ops,
                         tex_limit_from_env("N3DS_TEX_GUEST_LIMIT"),
@@ -522,16 +616,158 @@ void d9_cube_face_view_locked(D9Device *d,D9Handle h,int locked){
 void d9_volume_level_view_locked(D9Device *d,D9Handle h,int locked){
     VolumeTexture *v=volume_texture(d,h);if(v)v->locked=locked?1:0;
 }
+/* --- render-target VRAM budget policy -------------------------------------
+ * The backend enforces its own (PICA) VRAM limit.  The core models the same
+ * cost so it can act before an allocation fails and so every decision is
+ * visible: evict an inactive target, fall back to linear-heap storage, then
+ * shrink the PO2 storage, then refuse by name.  The current render target, the
+ * retained back buffer, a target bound this frame and any target exposed as a
+ * sampleable texture are never evicted. */
+static void target_vram_charge(D9Device *d,size_t bytes){
+    if(!d||!bytes)return;
+    d->target_vram_live+=bytes;
+    if(d->target_vram_live>d->target_vram_peak)d->target_vram_peak=d->target_vram_live;
+}
+static void target_vram_uncharge(D9Device *d,size_t bytes){
+    if(!d||!bytes)return;
+    d->target_vram_live=d->target_vram_live>bytes?d->target_vram_live-bytes:0;
+}
+static int target_vram_room(const D9Device *d,size_t bytes){
+    if(!d)return 0;
+    if(!d->target_vram_limit)return 1;
+    return d->target_vram_live+bytes<=d->target_vram_limit;
+}
+static int target_sampled(const D9Device *d,D9Handle id){
+    if(!d||!id)return 0;
+    for(unsigned i=0;i<MAX_TEXTURES;++i)
+        if(d->textures[i].id&&d->textures[i].rt_target==id)return 1;
+    return 0;
+}
+static void target_pool_flush(D9Device *d,const char *why){
+    if(!d||!d->target_pool_count||!d->ops.target_delete)return;
+    unsigned n=d->target_pool_count;size_t bytes=0;
+    for(unsigned i=0;i<d->target_pool_count;++i){
+        TargetPoolEntry *e=&d->target_pool[i];
+        if(e->native)d->ops.target_delete(d->ctx,e->native);
+        bytes+=e->bytes;
+    }
+    d->target_pool_count=0;memset(d->target_pool,0,sizeof d->target_pool);
+    target_vram_uncharge(d,bytes);++d->target_pool_flushes;
+    fprintf(stderr,"[d3d9-target] %s: %u pooled target(s), %zu KiB VRAM released\n",
+            why,n,bytes>>10);
+}
+/* Reuse an exactly matching pooled native.  Pooled storage is already charged,
+ * so a hit never increases the live VRAM total. */
+static int target_pool_take(D9Device *d,unsigned w,unsigned h,unsigned format,
+                            int linear,void **native,size_t *bytes,unsigned *has_depth){
+    if(!d||!d->target_pool_count)return 0;
+    for(unsigned i=0;i<d->target_pool_count;++i){
+        TargetPoolEntry *e=&d->target_pool[i];
+        if(e->w!=w||e->h!=h||e->format!=format||e->linear!=linear)continue;
+        *native=e->native;*bytes=e->bytes;*has_depth=e->has_depth;
+        size_t kept=e->bytes;
+        d->target_pool[i]=d->target_pool[--d->target_pool_count];
+        memset(&d->target_pool[d->target_pool_count],0,sizeof(TargetPoolEntry));
+        ++d->target_pool_hits;
+        fprintf(stderr,"[d3d9-target] reused pooled %ux%u target native (%zu KiB), live %zu KiB\n",
+                w,h,kept>>10,d->target_vram_live>>10);
+        return 1;
+    }
+    return 0;
+}
+static unsigned target_evict(D9Device *d,size_t need){
+    if(!d||!d->ops.target_suspend||!d->target_vram_limit)return 0;
+    /* Suspension destroys a render-target view; that is not allowed while a
+     * frame is open.  Creation always runs outside BeginScene/EndScene, so the
+     * only in-scene caller (rehydrating a target) never evicts. */
+    if(d->scene)return 0;
+    unsigned evicted=0;
+    while(!target_vram_room(d,need)){
+        Target *victim=NULL;
+        for(unsigned i=0;i<MAX_TARGETS;++i){
+            Target *t=&d->targets[i];
+            if(!t->id||!t->resident||t->is_cube_face||!t->vram_bytes)continue;
+            if(t->id==d->target||t->id==d->back_target)continue;
+            if(t->last_use_gen==d->frame_generation)continue;
+            /* A depth attachment dies with the render-target view; repairing it
+             * would need another VRAM allocation, so such targets are not
+             * eviction candidates. */
+            if(t->has_depth)continue;
+            if(target_sampled(d,t->id))continue;
+            if(!victim||t->last_use_gen<victim->last_use_gen)victim=t;
+        }
+        if(!victim)break;
+        if(d->ops.target_suspend(d->ctx,victim->native)){
+            fprintf(stderr,"[d3d9-target] eviction: backend refused to suspend the %ux%u target\n",
+                    victim->native_w,victim->native_h);
+            break;
+        }
+        size_t bytes=victim->vram_bytes;unsigned gw=victim->native_w,gh=victim->native_h;
+        uint32_t gen=victim->last_use_gen;
+        victim->resident=0;victim->vram_bytes=0;
+        target_vram_uncharge(d,bytes);++d->target_evictions;++evicted;
+        fprintf(stderr,"[d3d9-target] evicted inactive %ux%u target (last use gen %u < %u): "
+                "released %zu KiB VRAM, live %zu/%zu KiB\n",gw,gh,
+                (unsigned)gen,(unsigned)d->frame_generation,bytes>>10,
+                d->target_vram_live>>10,d->target_vram_limit>>10);
+    }
+    return evicted;
+}
+/* Rehydrate a target suspended by target_evict().  Its handle and the views
+ * derived from it stay valid; only the GPU storage is re-allocated. */
+static int target_activate(D9Device *d,Target *t){
+    if(!d||!t||t->resident||t->is_cube_face)return D9_OK;
+    if(!d->ops.target_resume){
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "the %ux%u target was suspended but this backend has no target_resume",
+                 t->native_w,t->native_h);
+        return D9_MEMORY;
+    }
+    size_t bytes=(size_t)t->native_w*t->native_h*4u;
+    if(!target_vram_room(d,bytes)&&!d->scene){
+        target_pool_flush(d,"target pool flushed to rehydrate an evicted target");
+        target_evict(d,bytes);
+    }
+    if(!target_vram_room(d,bytes)){
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "cannot rehydrate the evicted %ux%u target: VRAM budget %zu KiB, live %zu KiB, "
+                 "no inactive target can be evicted",
+                 t->native_w,t->native_h,d->target_vram_limit>>10,d->target_vram_live>>10);
+        return D9_MEMORY;
+    }
+    if(d->ops.target_resume(d->ctx,t->native)){
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "rehydrating the evicted %ux%u target failed (VRAM)",t->native_w,t->native_h);
+        return D9_MEMORY;
+    }
+    t->resident=1;t->vram_bytes=bytes;target_vram_charge(d,bytes);
+    fprintf(stderr,"[d3d9-target] rehydrated %ux%u target; live %zu/%zu KiB\n",
+            t->native_w,t->native_h,d->target_vram_live>>10,d->target_vram_limit>>10);
+    return D9_OK;
+}
 /* Release one target slot.  A cube-face target owns only its backend view; the
  * cube texture keeps the colour storage and is released separately. */
 static void destroy_target_slot(D9Device *d,Target *t){
     if(!d||!t||!t->id)return;
     if(d->target==t->id)d->target=0;
+    if(!d->teardown&&t->resident&&!t->is_cube_face&&d->ops.target_delete&&d->target_pool_limit&&
+       d->target_pool_count<d->target_pool_limit){
+        TargetPoolEntry *e=&d->target_pool[d->target_pool_count++];
+        e->native=t->native;e->w=t->native_w;e->h=t->native_h;e->format=t->format;
+        e->has_depth=(unsigned)t->has_depth;e->bytes=t->vram_bytes;
+        e->linear=t->vram_bytes?0:1;
+        /* The native still owns its storage, so VRAM stays charged; only the
+         * D3D9 resource-budget accounting is released. */
+        d->target_used-=t->bytes;
+        memset(t,0,sizeof *t);
+        return;
+    }
     if(t->is_cube_face){
         if(d->ops.target_delete_cube_face)d->ops.target_delete_cube_face(d->ctx,t->native);
     }else if(d->ops.target_delete){
         d->ops.target_delete(d->ctx,t->native);
     }
+    if(t->resident)target_vram_uncharge(d,t->vram_bytes);
     d->target_used-=t->bytes;
     memset(t,0,sizeof *t);
 }
@@ -563,6 +799,7 @@ int d9_destroy_device_ex(D9Device *d){
     /* Cube and volume guest pixels and native handles are owned by the texture
      * cache (d9_texcache_destroy_ex above); freeing the slots here would double
      * free every one of them. */
+    target_pool_flush(d,"device teardown");
     for(unsigned i=0;i<MAX_TARGETS;++i)if(d->targets[i].id)
         destroy_target_slot(d,&d->targets[i]);
     d->target_used=0;
@@ -1785,6 +2022,21 @@ static int target_ensure_depth(D9Device *d,Target *t){
                         "BeginScene/EndScene");
         return D9_INVALID;
     }
+    /* Depth storage lives in VRAM next to the colour attachment, so it is part
+     * of the same budget.  eviction and the pool are drained before refusing. */
+    size_t depth_bytes=(size_t)t->native_w*t->native_h*4u;
+    if(t->resident&&!t->depth_charged&&!target_vram_room(d,depth_bytes)){
+        target_pool_flush(d,"target pool flushed for a depth attachment");
+        target_evict(d,depth_bytes);
+    }
+    if(t->resident&&!t->depth_charged&&!target_vram_room(d,depth_bytes)){
+        snprintf(d->diagnosis,sizeof d->diagnosis,
+                 "depth-stencil attachment for the %ux%u target refused: VRAM budget "
+                 "%zu KiB, live %zu KiB, no inactive target can be evicted",
+                 t->native_w,t->native_h,d->target_vram_limit>>10,
+                 d->target_vram_live>>10);
+        return D9_MEMORY;
+    }
     if(d->ops.target_depth_attach(d->ctx,t->native)){
         snprintf(d->diagnosis,sizeof d->diagnosis,
                  "depth-stencil attachment allocation failed for the %ux%u target (VRAM)",
@@ -1792,6 +2044,10 @@ static int target_ensure_depth(D9Device *d,Target *t){
         return D9_MEMORY;
     }
     t->has_depth=1;
+    if(t->resident&&!t->depth_charged){
+        t->depth_charged=1;t->vram_bytes+=depth_bytes;
+        target_vram_charge(d,depth_bytes);
+    }
     return D9_OK;
 }
 int d9_cube_face_target(D9Device *d,D9Handle h,unsigned face,unsigned level,
@@ -1882,7 +2138,7 @@ static unsigned rt_texture_native_dim(unsigned logical,unsigned cap){
  * every native axis is >= the logical axis. */
 static int create_target_sized(D9Device *d,unsigned w,unsigned h,
                                unsigned nw,unsigned nh,unsigned format,
-                               int lockable,int pot_pad,int want_depth,
+                               int lockable,int want_depth,
                                D9Handle *out){
     if(out)*out=0;
     if(!d||d->scene||d->teardown||!out||!d->next||w<1||h<1||w>1024||h>1024||
@@ -1908,16 +2164,93 @@ static int create_target_sized(D9Device *d,unsigned w,unsigned h,
     }
     size_t bytes=(size_t)nw*nh*4;int br=budget_reserve(d,bytes);if(br)return br;
     Target *slot=NULL;for(unsigned i=0;i<MAX_TARGETS;++i)if(!d->targets[i].id){slot=&d->targets[i];break;}
-    if(!slot)return table_full(d,"render-target",MAX_TARGETS);void *native=NULL;
-    if(d->ops.target_create(d->ctx,nw,nh,format,&native)||!native){
-        if(native)d->ops.target_delete(d->ctx,native);
-        char why[160];
-        snprintf(why,sizeof why,"CreateRenderTarget: backend could not allocate a %ux%u native target",nw,nh);
+    if(!slot)return table_full(d,"render-target",MAX_TARGETS);
+    void *native=NULL;int got=0,linear=0;unsigned cw=nw,ch=nh;
+    size_t pooled_bytes=0;unsigned pooled_depth=0;
+    /* 1. Exact VRAM storage, reusing a matching pooled native when possible. */
+    if(d->target_pool_count&&
+       target_pool_take(d,cw,ch,format,0,&native,&pooled_bytes,&pooled_depth))got=1;
+    if(!got){
+        size_t cost=(size_t)cw*ch*4u;
+        for(int attempt=0;attempt<2&&!got;++attempt){
+            if(!target_vram_room(d,cost)){
+                target_pool_flush(d,"target pool flushed under VRAM pressure");
+                if(!target_evict(d,cost))break;
+            }
+            if(!target_vram_room(d,cost))break;
+            int rc=d->ops.target_create(d->ctx,cw,ch,format,&native);
+            if(!rc&&native){got=1;break;}
+            if(native){d->ops.target_delete(d->ctx,native);native=NULL;}
+            /* The backend can be tighter than the model (LCD, allocation
+             * rounding, non-target VRAM).  A backend refusal is also a pressure
+             * signal: evict one inactive target and retry the backend once. */
+            if(attempt==0){
+                unsigned ev=target_evict(d,cost);
+                if(!ev)break;
+            }
+        }
+    }
+    /* 2. Shrink the PO2 storage.  The guest keeps its logical size and renders
+     * through the scaled viewport, so this is a declared quality fallback. */
+    while(!got&&!lockable&&d->target_downscale){
+        unsigned pw=cw,ph=ch;
+        if(cw>64)cw>>=1;
+        if(ch>64)ch>>=1;
+        if(cw==pw&&ch==ph)break;
+        if((cw<w||ch<h)&&!d->ops.target_viewport_scaled)break;
+        if(cw<8||ch<8)break;
+        ++d->target_downscales;
+        fprintf(stderr,"[d3d9-target] %ux%u target downscaled to %ux%u PO2 storage "
+                "(VRAM budget %zu KiB, live %zu KiB)\n",w,h,cw,ch,
+                d->target_vram_limit>>10,d->target_vram_live>>10);
+        size_t cost=(size_t)cw*ch*4u;
+        if(!target_vram_room(d,cost)){target_pool_flush(d,"target pool flushed for a downscaled target");target_evict(d,cost);}
+        if(target_vram_room(d,cost)&&!d->ops.target_create(d->ctx,cw,ch,format,&native)&&native){got=1;break;}
+        if(native){d->ops.target_delete(d->ctx,native);native=NULL;}
+    }
+    /* 3. Linear-heap storage at the smallest chosen size: sampling still works,
+     * the cost moves from VRAM to the linear (FCRAM) heap. */
+    if(!got&&d->ops.target_create_linear){
+        size_t lb=0;unsigned ld=0;
+        if(target_pool_take(d,cw,ch,format,1,&native,&lb,&ld)){
+            got=1;linear=1;pooled_bytes=lb;pooled_depth=ld;
+        }else if(!d->ops.target_create_linear(d->ctx,cw,ch,format,&native)&&native){
+            got=1;linear=1;++d->target_linear_fallbacks;
+            fprintf(stderr,"[d3d9-target] %ux%u target allocated in linear heap instead of VRAM "
+                    "(budget %zu KiB, live %zu KiB)\n",w,h,
+                    d->target_vram_limit>>10,d->target_vram_live>>10);
+        }else if(native){d->ops.target_delete(d->ctx,native);native=NULL;}
+    }
+    if(!got){
+        ++d->target_alloc_failures;
+        char why[240];
+        snprintf(why,sizeof why,
+                 "CreateRenderTarget: backend could not allocate a %ux%u native target; "
+                 "target VRAM budget %zu KiB (live %zu KiB, peak %zu KiB), evictions %u, "
+                 "linear fallbacks %u, downscales %u; allocation refused",
+                 nw,nh,d->target_vram_limit>>10,d->target_vram_live>>10,
+                 d->target_vram_peak>>10,d->target_evictions,
+                 d->target_linear_fallbacks,d->target_downscales);
         set_diagnosis(d,why);
         return D9_BACKEND;
     }
-    D9Handle id=d->next++;*slot=(Target){id,w,h,nw,nh,format,lockable?1:0,bytes,native};
-    slot->pot_pad=pot_pad;
+    size_t colour=(size_t)cw*ch*4u;
+    bytes=colour;
+    D9Handle id=d->next++;*slot=(Target){id,w,h,cw,ch,format,lockable?1:0,bytes,native};
+    slot->pot_pad=(cw>=w&&ch>=h&&(cw!=w||ch!=h))?1:0;
+    slot->resident=1;
+    slot->last_use_gen=d->frame_generation;
+    slot->has_depth=pooled_depth?1:0;
+    if(pooled_bytes){
+        /* Already charged when the pool retained it. */
+        slot->vram_bytes=pooled_bytes;
+        slot->depth_charged=pooled_depth?1:0;
+    }else if(!linear){
+        slot->vram_bytes=colour;
+        target_vram_charge(d,colour);
+    }else{
+        slot->vram_bytes=0;
+    }
     d->target_used+=bytes;
     if(want_depth){
         int drc=target_ensure_depth(d,slot);
@@ -1942,7 +2275,7 @@ static int create_target(D9Device *d,unsigned w,unsigned h,unsigned format,int l
        (lockable&&!d->ops.target_read))return D9_INVALID;
     unsigned nw=bounded?bounded_native_dim(w,d->target_native_max):w;
     unsigned nh=bounded?bounded_native_dim(h,d->target_native_max):h;
-    return create_target_sized(d,w,h,nw,nh,format,lockable,0,want_depth,out);
+    return create_target_sized(d,w,h,nw,nh,format,lockable,want_depth,out);
 }
 int d9_create_render_target(D9Device *d,unsigned w,unsigned h,unsigned format,int lockable,D9Handle *out){
     return create_target(d,w,h,format,lockable,1,0,out);
@@ -1966,9 +2299,8 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
      * cap keeps the existing bounded/down-scaled native storage. */
     unsigned nw=rt_texture_native_dim(w,d->target_native_max);
     unsigned nh=rt_texture_native_dim(h,d->target_native_max);
-    int pot_pad=(nw>=w&&nh>=h&&(nw!=w||nh!=h))?1:0;
     D9Handle tgt=0;
-    int rc=create_target_sized(d,w,h,nw,nh,format,0,pot_pad,0,&tgt);
+    int rc=create_target_sized(d,w,h,nw,nh,format,0,0,&tgt);
     if(rc)return rc;
     Target *tg=target(d,tgt);
     Texture *slot=NULL;
@@ -1987,7 +2319,7 @@ int d9_create_render_texture(D9Device *d,unsigned w,unsigned h,unsigned format,
     Texture t;memset(&t,0,sizeof t);
     t.w=w;t.h=h;t.format=format;t.levels=1;t.gpu_levels=1;t.pool=pool;t.usage=usage;
     t.gpu_only=1;t.native=sample;t.rt_target=tgt;
-    if(pot_pad){t.storage_w=nw;t.storage_h=nh;}
+    if(tg->pot_pad){t.storage_w=tg->native_w;t.storage_h=tg->native_h;}
     t.level[0]=(Level){w,h,(size_t)w*4u,(size_t)w*h*4u,0,1};
     t.id=d->next++;*slot=t;*out=t.id;return D9_OK;
 }
@@ -2024,6 +2356,11 @@ int d9_set_render_target(D9Device *d,D9Handle h){
     /* Handle zero means the default back buffer: the retained target when
      * D3DPRESENTFLAG_LOCKABLE_BACKBUFFER created one, otherwise the screen. */
     Target *t=h?target(d,h):(d->back_target?target(d,d->back_target):NULL);
+    if(t){
+        int arc=target_activate(d,t);
+        if(arc)return arc;
+        t->last_use_gen=d->frame_generation;
+    }
     /* A bound depth-stencil describes the single depth attachment of the
      * active target.  Switching to a target with another size would silently
      * clear/test a different attachment; refuse and require an explicit
@@ -2076,6 +2413,31 @@ int d9_render_target_storage_info(D9Device *d,D9Handle h,unsigned *w,unsigned *h
 unsigned d9_target_native_max(const D9Device *d){
     return d?d->target_native_max:0;
 }
+void d9_set_target_pool_limit(D9Device *d,unsigned entries){
+    if(!d)return;
+    d->target_pool_limit=entries>D9_TARGET_POOL_MAX?D9_TARGET_POOL_MAX:entries;
+    if(!d->target_pool_limit)target_pool_flush(d,"target pool disabled");
+}
+int d9_target_stats(const D9Device *d,D9TargetStats *out){
+    if(!d||!out)return D9_INVALID;
+    memset(out,0,sizeof *out);
+    out->vram_limit=d->target_vram_limit;
+    out->vram_live=d->target_vram_live;
+    out->vram_peak=d->target_vram_peak;
+    out->alloc_failures=d->target_alloc_failures;
+    out->evictions=d->target_evictions;
+    out->linear_fallbacks=d->target_linear_fallbacks;
+    out->downscales=d->target_downscales;
+    out->pool_hits=d->target_pool_hits;
+    out->pool_flushes=d->target_pool_flushes;
+    out->pool_entries=d->target_pool_count;
+    for(unsigned i=0;i<d->target_pool_count;++i)out->pool_bytes+=d->target_pool[i].bytes;
+    for(unsigned i=0;i<MAX_TARGETS;++i){
+        const Target *t=&d->targets[i];
+        if(t->id&&!t->resident&&!t->is_cube_face)++out->suspended_targets;
+    }
+    return D9_OK;
+}
 int d9_scaled_readback_enabled(const D9Device *d){
     return d?d->scaled_readback:0;
 }
@@ -2105,6 +2467,7 @@ static unsigned writeback_nearest_logical(unsigned native_pos,unsigned native_di
 int d9_render_target_read(D9Device *d,D9Handle h,void *dst,size_t dst_pitch,
                           unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);if(!t||!d||!dst||!dst_pitch||d->scene)return D9_INVALID;
+    {int arc=target_activate(d,t);if(arc)return arc;t->last_use_gen=d->frame_generation;}
     if(t->pot_pad){
         /* Exact sub-rect copy: the logical image occupies the top-left corner,
          * so no resampling and no scaled-readback opt-in is needed. */
@@ -2147,6 +2510,7 @@ int d9_render_target_write(D9Device *d,D9Handle h,const void *src,size_t src_pit
                            unsigned x,unsigned y,unsigned w,unsigned height){
     Target *t=target(d,h);
     if(!t||!d||!src||!src_pitch||d->scene||d->teardown)return D9_INVALID;
+    {int arc=target_activate(d,t);if(arc)return arc;t->last_use_gen=d->frame_generation;}
     if(t->pot_pad){
         /* Read-modify-write of the POT allocation: patch only the logical
          * sub-rect, leaving the padding and any sibling semantics untouched. */
@@ -2399,6 +2763,8 @@ int d9_blit(D9Device *d,D9Handle dst,const D9Rect *dst_rect,
     Target *st=src?target(d,src):(d->back_target?target(d,d->back_target):NULL);
     Target *dt=dst?target(d,dst):(d->back_target?target(d,d->back_target):NULL);
     if((src&&!st)||(dst&&!dt))return D9_INVALID;
+    if(st){int arc=target_activate(d,st);if(arc)return arc;st->last_use_gen=d->frame_generation;}
+    if(dt){int arc=target_activate(d,dt);if(arc)return arc;dt->last_use_gen=d->frame_generation;}
     if(src==dst||(st&&st==dt)){d->blit_error=D9_BLIT_SAME_SURFACE;return D9_INVALID;}
     D9BlitRegion sreg={{0}},dreg={{0}};
     if(st){
