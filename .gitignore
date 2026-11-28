@@ -42,3 +42,7 @@ tests/isolated/**/results/
 /tesv_profile.csv
 
 docs/*_diagnostic.png
+
+# The published console installer is intentionally tracked (user request).
+!artifacts/cia/
+!artifacts/cia/*.cia
