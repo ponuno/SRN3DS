@@ -163,6 +163,19 @@ static void menu_trace(CPU *c,uint32_t addr){
             (unsigned)(inload&0xffu),(unsigned)(lstate&0xffu),(unsigned)phase,
             (unsigned)sing,(unsigned)(flag94&0xffu),
             (unsigned)a0,(unsigned)a1,(unsigned)c->r[1]);
+    if(addr==0x004310c0u){
+        /* Main::IsLoadComplete: the startup loop polls [obj+0xad] and
+         * [obj+0xae].  Naming the object and both bytes tells a missing menu
+         * (flags 0, obj is the UI manager) from a wrong-object check. */
+        uint32_t obj=c->r[1];
+        unsigned ad=0,ae=0;
+        if(obj&&memory){
+            const uint8_t *p=guest_ptr(memory,obj+0xacu,2);
+            if(p){ad=p[0];ae=p[1];}
+        }
+        fprintf(stderr,"[menu] load-complete obj=%08x ad=%u ae=%u\n",
+                (unsigned)obj,ad,ae);
+    }
     if(addr==0x00a5ed20u){
         char name[256];name[0]=0;
         if(a0&&memory){

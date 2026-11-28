@@ -3462,6 +3462,14 @@ static void s_GlobalMemoryStatusEx(CPU *c){
     }
     M64(p+24)=commit_total;M64(p+32)=commit_avail;
     M64(p+40)=UINT64_C(0x7ffeffff);M64(p+48)=avail;
+    {
+        static int logged;
+        if(!logged){logged=1;
+            fprintf(stderr,"[mem] GlobalMemoryStatusEx: phys=%llu/%llu pagefile=%llu/%llu probe=%d\n",
+                    (unsigned long long)total,(unsigned long long)avail,
+                    (unsigned long long)commit_total,(unsigned long long)commit_avail,
+                    memt.probe);}
+    }
     set_error(c,0);RET(1,1);
 }
 
@@ -4240,8 +4248,48 @@ static void s_BinkOpen(CPU *c){
     for(i=0;i<MAX_BINK;++i)if(!bink_slots[i].used){s=&bink_slots[i];break;}
     if(!s){fprintf(stderr,"[bink] _BinkOpen@8: no free handle slot\n");RET(0,2);}
     memset(s,0,sizeof *s);
-    rc=bink_decode_open(host,&s->dec);
+    /* Measurement-only: pretend the 3DS Bink decoder is absent so the host can
+     * exercise the device's skip path with the same binary. */
+    if(getenv("TESV_BINK_NO_DECODER")) rc=BINK_DECODE_NO_DECODER;
+    else rc=bink_decode_open(host,&s->dec);
     if(rc!=BINK_DECODE_OK){
+        /* A movie the port cannot show must still be a movie that *ends*.
+         * Two cases are handled as a zero-frame clip instead of NULL: (a) the
+         * device has no Bink decoder, so no request can be decoded; (b) the
+         * engine built an empty movie name ("Data\Video\"), which is the
+         * "no intro" marker and must not leave the intro state waiting.  No
+         * pixels or sizes are fabricated: width/height stay 0 and every copy
+         * is a named no-op, so nothing reaches the framebuffer. */
+        size_t hl=strlen(host);
+        int empty_name = hl==0 || host[hl-1]=='\\' || host[hl-1]=='/';
+        int video_absent = (rc==BINK_DECODE_NO_DECODER);
+#if defined(_WIN32) && !defined(__3DS__)
+        if(!video_absent && rc==BINK_DECODE_FAILED){
+            DWORD attr=GetFileAttributesA(host);
+            video_absent = attr!=INVALID_FILE_ATTRIBUTES &&
+                           (attr&FILE_ATTRIBUTE_DIRECTORY);
+        }
+#endif
+        if(empty_name || video_absent){
+            memset(&s->dec,0,sizeof s->dec);
+            s->dec.width=0;s->dec.height=0;s->dec.frames=1;
+            s->dec.fps_num=30;s->dec.fps_den=1;
+            s->guest=heap_alloc(&heap,256);
+            if(!s->guest){
+                fprintf(stderr,"[bink] _BinkOpen@8: guest BINK struct allocation failed\n");
+                memset(s,0,sizeof *s);
+                RET(0,2);
+            }
+            memset(guest_ptr(mem,s->guest,256),0,256);
+            s->used=1;s->cur=0;s->paused=0;
+            bink_guest_fields(s);
+            fprintf(stderr,"[bink] _BinkOpen@8 '%s' host='%s': %s; empty clip "
+                           "(no video output, engine may finish the intro)\n",
+                    name,host,
+                    rc==BINK_DECODE_NO_DECODER?"no Bink decoder on this platform":
+                    "the path is not a movie file");
+            RET(s->guest,2);
+        }
         fprintf(stderr,"[bink] _BinkOpen@8 '%s' host='%s': %s; returning NULL\n",name,host,
                 rc==BINK_DECODE_NO_DECODER?"no Bink decoder on this platform":
                 rc==BINK_DECODE_BAD_FORMAT?"not a Bink 1 (.bik) file":
@@ -4378,6 +4426,10 @@ static void s_BinkCopyToBufferRect(CPU *c){
     int rc;
     void *g;
     if(!s)rt_unimpl(c,A(0),"_BinkCopyToBufferRect@44: unknown Bink handle");
+    /* An empty clip (no decoder / no intro movie) has no pixels to copy; the
+     * request succeeds without touching the destination, which is the same
+     * outcome as a zero-frame movie.  Nothing is fabricated. */
+    if(!s->dec.frame_bytes){RET(0,11);}
     /* The destination is a locked D3D9 surface and `dh` is its height, not
      * the number of rows this call writes: the video uploader tiles the frame
      * (e.g. 256x256 into a 1024-pitch surface) and each locked tile covers
