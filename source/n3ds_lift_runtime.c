@@ -175,6 +175,21 @@ static void menu_trace(CPU *c,uint32_t addr){
         fprintf(stderr,"[menu] msg type=%u ptr=%08x flag=%08x state=%08x fader=%08x\n",
                 (unsigned)mtype,(unsigned)mptr,(unsigned)mflag,(unsigned)mstate,
                 (unsigned)fader);
+        /* Diagnostic workaround: the device/host menu manager never installs a
+         * fader ([0x1b10dcc]+0x28 == 0), so the FadeInMenu message arrives with
+         * a null movie and the switch skips the fade.  When enabled, use the
+         * menu's own loaded movie for that message so the real SWF fade runs.
+         * No pixels/sizes are fabricated; this only routes an existing movie. */
+        static int fade_fallback=-1;
+        if(fade_fallback<0){const char *e=getenv("N3DS_MENU_FADE_FALLBACK");fade_fallback=e&&*e;}
+        if(fade_fallback && mtype==0u && !mptr){
+            uint32_t movie=menu_rd32(0x1b3fc98u+8u);
+            if(movie){
+                void *slot=guest_ptr(memory,a0+8u,4);
+                if(slot){ memcpy(slot,&movie,4);
+                    fprintf(stderr,"[menu] fade fallback: movie=%08x\n",(unsigned)movie); }
+            }
+        }
     }
     if(addr==0x004310c0u){
         /* Main::IsLoadComplete: the startup loop polls [obj+0xad] and
