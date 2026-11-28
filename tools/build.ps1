@@ -23,7 +23,7 @@ param(
     [string]$PilotGen = "",
     [string]$TesvGen = "",
     [string]$Opt = "-O2",
-    [ValidateSet("", "96x8", "104x16", "120x24", "128x16", "132x12", "136x8")]
+    [ValidateSet("", "96x8", "96x24", "104x16", "120x24", "128x16", "132x12", "136x8")]
     [string]$MemProfile = "",
     [string]$Isolated = "",
     [switch]$NoClean,
@@ -59,6 +59,7 @@ $vars = $modes[$Mode].Vars
 
 $memProfiles = @{
     "96x8"   = @{ Heap = 96;  Linear = 8 }
+    "96x24"  = @{ Heap = 96;  Linear = 24 }  # max heap: OS_HEAP_AREA 0x08000000..0x0E000000
     "104x16" = @{ Heap = 104; Linear = 16 }
     "120x24" = @{ Heap = 120; Linear = 24 }
     # 178 MiB CIA budget: heap + linear + 34 MiB non-heap == 178.
@@ -70,7 +71,7 @@ $memProfiles = @{
 }
 if ($MemProfile) {
     if (-not $memProfiles.ContainsKey($MemProfile)) {
-        throw "Unknown -MemProfile '$MemProfile'; expected 96x8, 104x16 or 120x24"
+        throw "Unknown -MemProfile '$MemProfile'; expected 96x8, 96x24, 104x16, 120x24, 128x16, 132x12 or 136x8"
     }
     $p = $memProfiles[$MemProfile]
     # Pass DEFINES through the environment: make imports environment variables,

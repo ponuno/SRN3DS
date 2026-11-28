@@ -59,6 +59,9 @@ extern const unsigned g_fn_count_pilot __attribute__((weak));
     (TESV_HEAP_MIB + TESV_LINEAR_MIB + MEM_STATS_NON_HEAP_MIB > MEM_STATS_REGION_MIB)
 #error "TESV_HEAP_MIB + TESV_LINEAR_MIB + 34 MiB exceeds the 178 MiB region"
 #endif
+#if defined(__3DS__) && TESV_HEAP_MIB > 96
+#error "libctru OS_HEAP_AREA is 0x08000000..0x0E000000 = 96 MiB; a larger __ctru_heap_size fails svcControlMemory in __system_allocateHeaps before main (svcBreak at prefetch abort). Use 96x24 for the CIA and 96x8 for a .3dsx."
+#endif
 
 #ifdef __3DS__
 /* libctru's default split of a 178 MiB DEV1 title asks for an application heap
