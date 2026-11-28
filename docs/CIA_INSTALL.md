@@ -5,7 +5,7 @@ that boots the real `TESV.exe` under the lifted x86 runtime on a New 3DS. It
 does not claim a playable frame. The CIA contains locally generated code derived
 from the owner's game files; do not distribute it.
 
-Current artifact: **120x24** profile (newlib 120 MiB / linear 24 MiB) with both
+Current artifact: **96x24** profile (newlib 96 MiB / linear 24 MiB) with both
 memory fixes enabled — the global 6 MiB VRAM budget and the pageable read-only
 `.text` window — plus the raised main-thread stack and the Bink empty-clip gate
 that lets the intro state finish so `StartMenu` is created. The guest working set
@@ -38,16 +38,19 @@ UniqueId        : 0xF0D59   -> title ID 000400000F0D5900
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
     -Mode tesv `
     -TesvGen E:\Skyrim_N3DS_build\live_arm_check2\gen `
-    -MemProfile 120x24 `
+    -MemProfile 96x24 `
     -TesvArmSteps 2000000000 `
     -Opt -O2 `
-    -Isolated 120x24 -Jobs 8
+    -Isolated 96x24 -Jobs 8
 
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_cia.ps1 `
-    -Elf dist\Skyrim_N3DS_tesv_120x24\Skyrim_N3DS_tesv_120x24.elf `
-    -Out E:\cia_menu\Skyrim_N3DS_tesv_120x24.cia `
-    -WorkDir E:\cia_menu\work_120x24
+    -Elf dist\Skyrim_N3DS_tesv_96x24\Skyrim_N3DS_tesv_96x24.elf `
+    -Out E:\cia_menu\Skyrim_N3DS_tesv_96x24_menu.cia `
+    -WorkDir E:\cia_menu\work_96x24_menu
 ```
+
+`96x24` is the device ceiling: libctru's application heap area is 96 MiB. Do
+not use `-MemProfile 120x24` for a flashable build.
 
 `pilot_out_mult\D3DXMatrixMultiply\gen` is picked up automatically by the
 `TESV_SLICE` OFILES block when present (the lifted D3DX bodies must be
@@ -78,21 +81,29 @@ build. `build.ps1` performs a clean build by default; `-NoClean` is only safe
 when the profile macros are unchanged (it is what was used for the re-link after
 the two `n3ds_env_cfg` allowlist keys were added).
 
-### Delivered artifact (2026-11-28, worktree `cia-final` @ `b03c33c`)
+### Delivered artifact (2026-11-28, worktree `cia-final` @ `3e35c40`)
 
 | profile | CIA | bytes | sha256 |
 |---|---|---:|---|
-| **120x24 + stack + Bink empty clip** | `E:\cia_menu\Skyrim_N3DS_tesv_120x24_menu.cia` | 1,580,480 | `d2c6aa34ef48a76a78b4a1f88f9b61a1e2c8029808e095c04ac403ad9036031c` |
+| **96x24 + stack + Bink empty clip** | `E:\cia_menu\Skyrim_N3DS_tesv_96x24_menu.cia` | 1,580,480 | `a9ede38e3c5e4cb18c57c1321d0f08873bce8d9acb58b0a2d12fc32ebf0b9501` |
 
-ELF: `dist\Skyrim_N3DS_tesv_120x24\Skyrim_N3DS_tesv_120x24.elf`
-(12,998,812 B, sha256 `cde6622b3da37b640c4604ea590b08f1cb243f748594fbf5f607588eaafeccde`).
-`build_manifest.json` records `mem_profile=120x24`,
-`defines=-DTESV_HEAP_MIB=120 -DTESV_LINEAR_MIB=24`, and the generator hash of
+ELF: `dist\Skyrim_N3DS_tesv_96x24\Skyrim_N3DS_tesv_96x24.elf`
+(12,998,808 B, sha256 `b92d78a774c4bf8eb8ac56c69e4e27609f3c025eed8597fc54b004c1d1715f8e`).
+`build_manifest.json` records `mem_profile=96x24`,
+`defines=-DTESV_HEAP_MIB=96 -DTESV_LINEAR_MIB=24`, and the generator hash of
 `live_arm_check2\gen`. The CIA reports title ID `000400000F0D5900` and
 `SystemModeExt=178MB CpuSpeed=804MHz EnableL2Cache=true` (checked by
-`build_cia.ps1`; see `work_120x24_menu\cia_info.txt`).
+`build_cia.ps1`; see `work_96x24_menu\cia_info.txt`).
 
-Why this replaces `…_stack.cia`: since `b03c33c`, `_BinkOpen@8` in
+In this ELF: `__ctru_heap_size = 0x06000000` (96 MiB),
+`__ctru_linear_heap_size = 0x01800000` (24 MiB), `__stacksize__ = 0x00020000`
+(128 KiB); the packaged exheader keeps `StackSize = 0x00040000` (256 KiB).
+
+> **120x24 does not boot on hardware.** `…_120x24_menu.cia` and
+> `…_120x24_stack.cia` fail before `main` — see *Hardware heap limit* below.
+> Install `Skyrim_N3DS_tesv_96x24_menu.cia` instead.
+
+Why the Bink gate matters: since `b03c33c`, `_BinkOpen@8` in
 `source/win32_shims.c` returns a valid **empty clip** when the platform has no
 Bink decoder (3DS), when the name/path is empty, or when the file is absent —
 0x0 size, 1 frame, no-op copies — instead of NULL. Before that, the intro state
@@ -106,15 +117,44 @@ Previous artifacts:
 
 | artifact | bytes | sha256 | status |
 |---|---:|---|---|
-| `Skyrim_N3DS_tesv_120x24_menu.cia` | 1,580,480 | `d2c6aa34…9036031c` | **current** |
-| `Skyrim_N3DS_tesv_120x24_stack.cia` | 1,577,920 | `47dbfc60c1d420f24f1846ff3f0a361cb051c602cb2fc97b87a03bd9d4e60ea4` | previous (`b3915c5`): stack fixed, Bink still returns NULL |
+| `Skyrim_N3DS_tesv_96x24_menu.cia` | 1,580,480 | `a9ede38e…bf0b9501` | **current** |
+| `Skyrim_N3DS_tesv_120x24_menu.cia` | 1,580,480 | `d2c6aa34…9036031c` | **crashes on hardware**: 120 MiB heap, svcBreak in `__system_allocateHeaps` |
+| `Skyrim_N3DS_tesv_120x24_stack.cia` | 1,577,920 | `47dbfc60c1d420f24f1846ff3f0a361cb051c602cb2fc97b87a03bd9d4e60ea4` | **crashes on hardware**: same heap limit; also pre-Bink-fix |
 | `Skyrim_N3DS_tesv_120x24.cia` | 1,566,656 | `6cb076b18f61700975a5ef9f7086ad7c5c965b18ee91fc1ffb0e0c53f4e2e0bf` | **invalid**: pre-`b3915c5`, 32 KiB stack |
 
-Stack, part of the build since `b3915c5`:
+### Hardware heap limit: the application heap is 96 MiB, not 120
+
+libctru's `OS_HEAP_AREA` is `0x08000000..0x0E000000`, i.e. **96 MiB**. A CIA with
+`__ctru_heap_size` above that makes `svcControlMemory` fail inside
+`__system_allocateHeaps`, which calls `svcBreak` — before `main`, so nothing is
+logged and no guest code runs. On a real New 3DS this is what a 120x24 build
+looks like:
+
+```
+Exception type: prefetch abort (svcBreak), Debug event
+PC 0027B834  LR 0027B344  SP 0FFFFFC0  R3=07800000 (120 MiB)
+```
+
+`LR` symbolizes to `__system_allocateHeaps` (`libctru/source/system/allocateHeaps.c:66`)
+called from `__libctru_init`/`initSystem`. It is a build/profile problem, not a
+guest fault, a VRAM refusal or an OOM in the slice.
+
+The host has no such area, so 120x24 always passed there. The device profile is
+now **96x24**: heap 96 MiB (the maximum), linear 24 MiB, reserve 4 MiB, guest
+budget 92 MiB; 96 + 24 + 34 = 154 of 178 MiB, and 24 MiB stay unused. The
+guest working set measured on the host is 44.4 MiB, so 92 MiB still leaves more
+than 2x headroom.
+
+`tools/build.ps1` gained the `96x24` profile and
+`source/tesv_slice_main.c` now fails the build with `#error` when
+`__3DS__ && TESV_HEAP_MIB > 96`, so a 120x24 ARM build cannot be produced by
+accident. `-MemProfile 120x24` is host-suite only.
+
+### Stack (part of the build since `b3915c5`)
 
 * `source/n3ds_boot.c` defines a strong `__stacksize__ = 128 KiB` for
-  `__3DS__`. In this ELF the symbol is at `0x003bb000` (`.data`, 4 bytes) and
-  its value is **`0x00020000`** (128 KiB), not the 32 KiB `0x8000` default.
+  `__3DS__`. In the 96x24 ELF the symbol is at `0x003bb000` (`.data`, 4 bytes)
+  and its value is **`0x00020000`** (128 KiB), not the 32 KiB `0x8000` default.
 * `tools/cia/template.rsf` sets `StackSize: 0x40000`, so the packaged CIA's
   exheader carries a **256 KiB** main-thread stack (`exheader+0x1C =
   0x00040000`, verified by reading the built CIA). On a console title the
@@ -139,10 +179,9 @@ no VRAM budget** — kept only for comparison, all three are superseded):
 | 128x16 | `E:\cia_menu\Skyrim_N3DS_tesv_128x16.cia` | 1,552,832 | `7215c9ffd8f1d95e8cddcbdb43b588e5caf1e0ffefafaa5c60c16512a0138b04` |
 
 Whether both heaps are actually created is only observable on device: the first
-`Skyrim_N3DS_mem.log` lines must say `heap_mib=120 linear_mib=24 have_newlib=1`
-and the console prints `[mem] profile 120x24 …`. No hardware run was available
-while building this, so the profile is arithmetic + build evidence, not a boot
-result.
+`Skyrim_N3DS_mem.log` lines must say `heap_mib=96 linear_mib=24 have_newlib=1`
+and the console prints `[mem] profile 96x24 …`. A heap that is too large does
+not even reach this point (see *Hardware heap limit* in section 2).
 
 The IR container is opened at `sdmc:/Skyrim/ir/tesv.irc` (override
 `N3DS_IRC_PATH`). Use the MMX container
@@ -161,15 +200,16 @@ the enforced cap is 5.75 MiB (section 5).
 |---|---:|---:|---:|---:|---|
 | 96x8 | 96 | 8 | 92 | 138 | `.3dsx`-era region: guest OOM at 78 MiB used |
 | 136x8 | 136 | 8 | 132 | 178 | superseded: 8 MiB linear refuses menu targets |
-| **120x24** | **120** | **24** | **116** | **178** | current: 44.4 MiB guest used, 24 MiB linear |
+| 120x24 | 120 | 24 | 116 | 178 | **host only**: exceeds the 96 MiB heap area, `svcBreak` before `main` on hardware |
+| **96x24** | **96** | **24** | **92** | **154** | **current device profile**: 44.4 MiB guest used, 24 MiB linear, 24 MiB region left over |
 
 Before paging, the measured host guest peak was 129.4 MiB and only `136x8` fit,
 at the price of an 8 MiB linear heap (arenas alone take ~4.35 MiB, so
 `linear_fail_n` rose). Paging the read-only image text in a bounded window cut
 the guest working set to **44.4 MiB** (3.18 MiB `.text` + 0.87 MiB `.rdata` hot
-set at the main menu, 5 MiB window). That is what makes `120x24` possible: the
-24 MiB linear heap now holds the render targets and the 116 MiB guest budget is
-2.6x the measured need.
+set at the main menu, 5 MiB window). That is what makes a 24 MiB linear heap
+affordable: it holds the render targets, and the 92 MiB guest budget still is
+2x the measured need.
 
 `guest_budget` is only a cap on guest pages: the host-side structures live in
 the *same* newlib heap. At menu time the measured residents are roughly
@@ -190,7 +230,7 @@ per frame, so it is the first lever when the guest budget is the binding limit.
 Expected boot lines on device:
 
 ```
-[mem] profile 120x24 MiB (newlib/linear): heap=120 MiB linear=24 MiB reserve=4 MiB guest_budget=116 MiB
+[mem] profile 96x24 MiB (newlib/linear): heap=96 MiB linear=24 MiB reserve=4 MiB guest_budget=92 MiB
 App region: 178 MiB, free <N> MiB
 ```
 
@@ -275,10 +315,10 @@ The default path is `sdmc:/Skyrim_N3DS.cfg`. An env-aware launcher may override
 it with its first `main` argument, or with `TESV_CFG`; argument takes precedence.
 `TESV_CFG` itself must be set by the launcher, not by this file.
 
-Recommended file for the 120x24 CIA:
+Recommended file for the 96x24 CIA:
 
 ```cfg
-# Skyrim N3DS device runtime settings (120x24 profile)
+# Skyrim N3DS device runtime settings (96x24 profile)
 N3DS_TEX_GPU_LIMIT=6M
 N3DS_TEX_GUEST_LIMIT=16M
 N3DS_VRAM_LIMIT=6M
@@ -363,7 +403,7 @@ allowlist (`source/n3ds_env_cfg.c`) and covered by `tests/device_cfg_smoke.c`.
 Edit `sdmc:/Skyrim_N3DS.cfg` in a text editor and relaunch the CIA. The file is
 read once at startup, so no CIA rebuild is needed. Lower texture limits can
 reduce cache growth, but they do not add linear heap; the compiled split
-(`120x24`) only changes with `-MemProfile` and a rebuild.
+(`96x24`) only changes with `-MemProfile` and a rebuild.
 
 ```cfg
 N3DS_TEX_GPU_LIMIT=6M
@@ -420,11 +460,11 @@ them; do not create them for a real StartMenu run.
 `Skyrim_N3DS_tesv.log` (guest stdout/stderr) must contain, in order:
 
 ```
-[mem] profile 120x24 MiB (newlib/linear): heap=120 MiB linear=24 MiB reserve=4 MiB guest_budget=116 MiB
+[mem] profile 96x24 MiB (newlib/linear): heap=96 MiB linear=24 MiB reserve=4 MiB guest_budget=92 MiB
 App region: 178 MiB, free ...
 [d3d9-vram] budget 5888 KiB (N3DS_VRAM_LIMIT, 256 KiB slack)
 [probe] TESV_D3D9_BUDGET_MB=32 from flag file
-mem tag=init ... guest_budget=121634816 guest_used=... linear_mib=24
+mem tag=init ... guest_budget=96468992 guest_used=... linear_mib=24
 [bink] _BinkOpen@8 …: no Bink decoder on this platform; empty clip ...
 [menu] enter 00876f60                 StartMenu create
 [menu] enter 00876b90                 ctor
@@ -437,7 +477,7 @@ DrawIndexedPrimitive=…                menu draw (the current wall)
 
 The checkpoint lines before `[menu] enter` are the fix checkpoints:
 
-* `[mem] profile 120x24 … guest_budget=116` proves the profile macros reached
+* `[mem] profile 96x24 … guest_budget=92` proves the profile macros reached
   `tesv_slice_main.o` and the heap arithmetic held.
 * `[d3d9-vram] budget 5888 KiB` proves the new VRAM accounting is linked and
   the global cap is active (6 MiB − 256 KiB slack).
@@ -463,7 +503,8 @@ Distinguishing failure modes:
 |---|---|---|
 | `[mem] FATAL: guest budget arithmetic failed` | profile macros inconsistent | rebuild; do not flash |
 | `App region: 96 MiB` | CIA without 178 MB extheader | reinstall with the RSF |
-| Azahar/hardware fault with `SP` just below the stack top (e.g. `push` at `0x07FFFFA4`), no `[mem]` OOM line | 32 KiB main-thread stack, i.e. a pre-`b3915c5` build | install `Skyrim_N3DS_tesv_120x24_stack.cia`; check `__stacksize__` = `0x20000` in the ELF |
+| Azahar/hardware `svcBreak` at `__system_allocateHeaps` before `main` (PC in libctru, `R3` = heap bytes, no guest log) | heap larger than the 96 MiB area, i.e. a 120x24 build | install `Skyrim_N3DS_tesv_96x24_menu.cia`; 120x24 is host-suite only |
+| Azahar/hardware fault with `SP` just below the stack top (e.g. `push` at `0x07FFFFA4`), no `[mem]` OOM line | 32 KiB main-thread stack, i.e. a pre-`b3915c5` build | rebuild from current main; check `__stacksize__` = `0x20000` in the ELF |
 | `newlib_free` near 0 / `malloc` failed, low `guest_used` | host residents in the 120 MiB newlib heap | lower `N3DS_IRC_CACHE_BYTES` (2 MiB), then `N3DS_TEX_GUEST_LIMIT=8M` |
 | `guest_backing_failures` > 0, `guest_used` ≈ 116 MiB | guest page cap | lower `N3DS_TEXT_WINDOW_MB` (4, then 3); check `guest_used` in the next snapshot |
 | `linear_fail_n>0` / `linear_fail_bytes=…` | 24 MiB linear heap bound | lower `N3DS_TARGET_VRAM_LIMIT`, then `N3DS_TEX_GPU_LIMIT` |
@@ -485,9 +526,13 @@ code ran; `init` is the first line that can show the paged `guest_used`.
 - StartMenu creation and `Present` are the measured frontier; a GFx menu draw
   and a visible menu are not claimed.
 - The 2e9 step budget does not complete the menu on the host.
-- `120x24` is chosen from the post-paging 44.4 MiB host guest working set, not
-  from a hardware run. Both fixes are verified as linked and active, not as
-  pixels: read `guest_used` and `linear_fail_*` on the device.
+- `96x24` is chosen from the post-paging 44.4 MiB host guest working set and the
+  96 MiB device heap ceiling, not from a hardware run. Both memory fixes are
+  verified as linked and active, not as pixels: read `guest_used` and
+  `linear_fail_*` on the device.
+- The application heap cannot exceed 96 MiB on hardware regardless of the
+  178 MiB region: libctru's `OS_HEAP_AREA` ends at `0x0E000000`. 120x24 builds
+  exist for the host suite only.
 - The menu call chain needs the raised main-thread stack. The CIA gets 256 KiB
   from the exheader (`StackSize: 0x40000`); a `.3dsx` gets 128 KiB from the
   `__stacksize__` symbol. A build without either overflows at the first deep
