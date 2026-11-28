@@ -1,4 +1,5 @@
 #include "guest.h"
+#include "guest_swap.h"
 #include "hprof.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,6 +258,7 @@ void guest_init(GuestMemory *m, size_t limit) {
 /* ---- ordinary guest regions -------------------------------------------------- */
 void guest_destroy(GuestMemory *m) {
     guest_watch_dump(m);
+    guest_swap_disable(m);
     free(g_touch_bits);
     g_touch_bits = NULL; g_touch_span = 0; g_touch_pages = 0;
     for (size_t i=0; i<m->count; ++i) free(m->regions[i].data);
@@ -477,6 +479,56 @@ static void slab_trim_window(GuestMemory *m, GuestSlab *s,
 }
 static int page_back(GuestMemory *m, GuestSlab *s, uint32_t p) {
     if (s->page[p]) return 0;
+    /* Anonymous slab with swap enabled.  A block comes from the recycled pool
+     * or from malloc; this path never evicts another page, so a raw pointer
+     * returned earlier by guest_ptr() stays valid.  When a previously evicted
+     * page is restored, its bytes come from the compressed store. */
+    if (m->swap && !s->fill) {
+        if (m->used + GUEST_PAGE_SIZE > m->limit) {
+            m->last_fault = GUEST_FAULT_NO_MEMORY;
+            ++m->backing_failures;
+            guest_swap_note_nomem(m);
+            return -1;
+        }
+        uint8_t *q = guest_swap_block(m);
+        if (!q) {
+            m->last_fault = GUEST_FAULT_NO_MEMORY;
+            ++m->backing_failures;
+            guest_swap_note_nomem(m);
+            return -1;
+        }
+        int restored = guest_swap_fetch(m, s, p, q);
+        if (restored < 0) {
+            guest_swap_recycle(m, q);
+            m->last_fault = GUEST_FAULT_SWAP;
+            return -1;
+        }
+        if (!restored) memset(q, 0, GUEST_PAGE_SIZE);
+        if (reg_add(s, q, GUEST_PAGE_SIZE, p, 1)) {
+            guest_swap_recycle(m, q);
+            m->last_fault = GUEST_FAULT_NO_MEMORY;
+            ++m->backing_failures;
+            guest_swap_note_nomem(m);
+            return -1;
+        }
+        s->page[p] = q;
+        if (s->ever && s->ever[p]) {
+            ++m->pages_reloaded;
+        } else {
+            ++m->pages_first_touched;
+            ++m->pages_anon;
+        }
+        if (s->ever) s->ever[p] = 1;
+        ++s->backed_pages;
+        if (!s->pinned || !s->pinned[p]) ++s->resident_pages;
+        m->slab_backed += GUEST_PAGE_SIZE;
+        m->used += GUEST_PAGE_SIZE;
+        if (m->slab_backed > m->slab_backed_peak)
+            m->slab_backed_peak = m->slab_backed;
+        guest_swap_note_resident(m, +1);
+        if (s->age) s->age[p] = 1;
+        return 0;
+    }
     if (m->used + GUEST_PAGE_SIZE > m->limit) {
         if (!slab_evict_one(m, s, p) || m->used + GUEST_PAGE_SIZE > m->limit) {
             m->last_fault = GUEST_FAULT_NO_MEMORY;
@@ -543,6 +595,36 @@ static void page_drop(GuestMemory *m, GuestSlab *s, uint32_t p) {
     free(a.ptr);
     reg_remove(s, ai);
 }
+/* Release exactly one anonymous page so guest_swap.c can compress it first.
+ * Only a single-page allocation is eligible: a bridge returned by a multi-page
+ * guest_ptr() would invalidate every page it covers. */
+int guest_slab_evict_page(GuestMemory *m, GuestSlab *s, uint32_t page) {
+    if (!m || !s || !s->state || !s->page || page >= s->pages) return -1;
+    if (!s->state[page] || !s->page[page]) return -1;
+    if (s->pinned && s->pinned[page]) return -1;
+    unsigned slot = reg_slot(s);
+    if (slot == GUEST_MAX_SLABS) return -1;
+    int ai = reg_find_page(s, page);
+    if (ai < 0) return -1;
+    SlabAlloc a = regs[slot].allocs[ai];
+    if (a.count != 1u || a.first != page || a.bytes != GUEST_PAGE_SIZE)
+        return -1;
+    uint8_t *block = a.ptr;
+    reg_remove(s, (unsigned)ai);
+    s->page[page] = NULL;
+    if (s->dirty) s->dirty[page] = 0;
+    if (!s->pinned || !s->pinned[page]) {
+        if (s->resident_pages) --s->resident_pages;
+    }
+    if (s->backed_pages) --s->backed_pages;
+    m->slab_backed = GUEST_PAGE_SIZE <= m->slab_backed
+                         ? m->slab_backed - GUEST_PAGE_SIZE : 0;
+    m->used = GUEST_PAGE_SIZE <= m->used ? m->used - GUEST_PAGE_SIZE : 0;
+    guest_swap_recycle(m, block);
+    guest_swap_note_resident(m, -1);
+    return 0;
+}
+
 /* Drop the allocation containing p while preserving backed pages outside
  * [keep_first,keep_last]. Used when a new cross-page bridge replaces part of
  * an older bridge. */
@@ -634,6 +716,8 @@ static int slab_prepare(GuestMemory *m, GuestSlab *s, uint32_t addr, size_t n, u
     }
     if (s->writable && s->dirty)
         for (uint32_t p=first; p<=last; ++p) s->dirty[p] = 1;
+    if (m->swap)
+        for (uint32_t p=first; p<=last; ++p) guest_swap_touch(m, s, p);
     *out = s->page[first] + (size_t)(off % GUEST_PAGE_SIZE);
     if (backed) slab_trim_window(m, s, first, last);
     return 0;
@@ -658,6 +742,7 @@ int guest_slab_decommit(GuestMemory *m, uint32_t a, uint32_t size) {
     uint32_t last = (a - s->base + size - 1) / GUEST_PAGE_SIZE;
     unsigned slot = reg_slot(s);
     for (uint32_t p=first; p<=last; ++p) {
+        guest_swap_discard(m, s, p);
         int was_committed = s->state[p];
         if (s->page[p] && slot != GUEST_MAX_SLABS) {
             int ai = reg_find_page(s, p);
@@ -738,6 +823,7 @@ int guest_slab_release(GuestMemory *m, uint32_t base) {
                  * still sees GUEST_FAULT_IO through guest_fault_text(). */
             }
         unsigned slot = reg_slot(s);
+        guest_swap_forget_slab(m, s);
         if (slot != GUEST_MAX_SLABS) {
             SlabRegistry *r = &regs[slot];
             for (unsigned k=0; k<r->count; ++k) {
@@ -753,11 +839,12 @@ int guest_slab_release(GuestMemory *m, uint32_t base) {
         }
         size_t meta = (size_t)s->pages * (4 + sizeof(uint8_t *)) + (size_t)s->pages * sizeof(SlabAlloc);
         if (s->dirty) meta += s->pages;
+        if (s->age) meta += s->pages;
         m->slab_meta = meta <= m->slab_meta ? m->slab_meta - meta : 0;
         m->used = meta <= m->used ? m->used - meta : 0;
         if (s->provider_close) s->provider_close(s->provider_ctx);
         free(s->state); free(s->protect); free(s->ever); free(s->pinned);
-        free(s->page); free(s->dirty);
+        free(s->page); free(s->dirty); free(s->age);
         memset(s, 0, sizeof *s);
         return 0;
     }
@@ -833,6 +920,7 @@ const char *guest_fault_text(const GuestMemory *m) {
     switch (guest_last_fault(m)) {
     case GUEST_FAULT_NO_MEMORY: return "guest memory backing failed: out of memory";
     case GUEST_FAULT_IO: return "guest file-backed page I/O error";
+    case GUEST_FAULT_SWAP: return "guest swapped page could not be decompressed";
     default: return "unmapped guest memory";
     }
 }

@@ -60,6 +60,20 @@ typedef struct {
     uint64_t va_commit_failures;
 } MemStatsAlloc;
 
+/* Compressed guest-page swap (source/guest_swap.c).  Flat values keep mem_stats
+ * independent of guest_swap.h. */
+typedef struct {
+    int enabled;
+    uint64_t pages_out, pages_in;
+    uint64_t bytes_out;          /* guest bytes compressed (pages_out * 4096) */
+    uint64_t compressed_live;    /* compressed bytes held now                 */
+    uint64_t compressed_total;   /* compressed bytes ever written             */
+    uint64_t resident_pages;     /* anonymous pages resident now              */
+    uint64_t target_pages;
+    uint64_t budget_bytes;
+    uint64_t fail_no_memory, fail_budget, fail_incompressible;
+} MemStatsSwap;
+
 /* ---- profile arithmetic --------------------------------------------------- */
 /* 1 when heap + linear + non-heap fits the 178 MiB region. */
 int mem_stats_profile_valid(unsigned heap_mib, unsigned linear_mib);
@@ -86,6 +100,7 @@ void mem_stats_set_guest(size_t used, size_t limit, unsigned regions);
 void mem_stats_sample_guest(size_t used, unsigned regions);
 /* Host allocation counts and VA promise/backing peaks (see MemStatsAlloc). */
 void mem_stats_set_alloc(const MemStatsAlloc *stats);
+void mem_stats_set_swap(const MemStatsSwap *stats);
 void mem_stats_set_newlib(size_t used, size_t free_bytes);
 void mem_stats_note_arena(const char *name, size_t bytes);
 void mem_stats_set_irc(uint64_t bytes, uint64_t records);

@@ -70,6 +70,8 @@ typedef struct {
     int have_os_region;
     uint64_t os_size, os_used, os_free;
 
+    MemStatsSwap swap;
+
     FILE *log;
     char log_path[256];
     int in_snapshot;
@@ -189,6 +191,15 @@ void mem_stats_set_alloc(const MemStatsAlloc *stats)
         return;
     }
     g.alloc = *stats;
+}
+
+void mem_stats_set_swap(const MemStatsSwap *stats)
+{
+    if (!stats) {
+        memset(&g.swap, 0, sizeof g.swap);
+        return;
+    }
+    g.swap = *stats;
 }
 
 void mem_stats_set_newlib(size_t used, size_t free_bytes)
@@ -547,6 +558,20 @@ size_t mem_stats_format(char *dst, size_t cap, const char *tag, const char *extr
            (unsigned long long)g.alloc.va_reservations,
            (unsigned long long)g.alloc.va_commit_failures,
            (unsigned long long)g.alloc.backing_failures);
+    APPEND(" swap=%d swap_out=%llu swap_in=%llu swap_resident=%llu "
+           "swap_target=%llu swap_compressed=%llu swap_ratio_pct=%llu "
+           "swap_fail_nomem=%llu swap_fail_budget=%llu "
+           "swap_fail_incompressible=%llu",
+           g.swap.enabled, (unsigned long long)g.swap.pages_out,
+           (unsigned long long)g.swap.pages_in,
+           (unsigned long long)g.swap.resident_pages,
+           (unsigned long long)g.swap.target_pages,
+           (unsigned long long)g.swap.compressed_live,
+           (unsigned long long)(g.swap.compressed_total
+               ? (g.swap.bytes_out * 100ull) / g.swap.compressed_total : 0),
+           (unsigned long long)g.swap.fail_no_memory,
+           (unsigned long long)g.swap.fail_budget,
+           (unsigned long long)g.swap.fail_incompressible);
     if (extra && *extra) APPEND(" %s", extra);
     APPEND("\n");
 #undef APPEND

@@ -166,7 +166,7 @@ def run(cmd, cwd=None, env=None):
 
 
 def build(clang, srcs, out, extra=None, work=None):
-    cmd = [clang, "-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-Itests",
+    cmd = [clang, "-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-Ithird_party/lz4", "-Itests",
            "-fwrapv", "-fno-strict-aliasing", "-Wno-deprecated-declarations",
            "-Wno-format", "-Wno-unused-function", "-Wno-unused-variable"]
     if extra:
@@ -260,6 +260,8 @@ def main():
                           ROOT / "source" / "ir_core.c",
                           ROOT / "source" / "rep_movs.c",
                           ROOT / "source" / "guest.c",
+                          ROOT / "source" / "guest_swap.c",
+                          ROOT / "third_party" / "lz4" / "lz4.c",
                           ROOT / "staged" / "fpu.c",
                           ROOT / "tests" / "ir_aot_fixture.c"],
                   work / "ir_container_equiv.exe")
@@ -270,10 +272,14 @@ def main():
                              ROOT / "source" / "ir_core.c",
                           ROOT / "source" / "rep_movs.c",
                              ROOT / "source" / "guest.c",
+                          ROOT / "source" / "guest_swap.c",
+                          ROOT / "third_party" / "lz4" / "lz4.c",
                              ROOT / "staged" / "fpu.c"],
                      work / "ir_container_preentry.exe")
     preentry_dispatch = build(clang, [ROOT / "tests" / "ir_container_preentry_dispatch.c",
                                      ROOT / "source" / "guest.c",
+                          ROOT / "source" / "guest_swap.c",
+                          ROOT / "third_party" / "lz4" / "lz4.c",
                                      ROOT / "source" / "ir_container.c",
                                      ROOT / "source" / "ir_decode.c",
                                      ROOT / "source" / "ir_exec.c",
@@ -284,6 +290,8 @@ def main():
                               work / "ir_container_preentry_dispatch.exe")
     integration = build(clang, [ROOT / "tests" / "ir_container_integration.c",
                                 ROOT / "source" / "guest.c",
+                          ROOT / "source" / "guest_swap.c",
+                          ROOT / "third_party" / "lz4" / "lz4.c",
                                 ROOT / "source" / "ir_container.c",
                                 ROOT / "source" / "ir_decode.c",
                                 ROOT / "source" / "ir_exec.c",

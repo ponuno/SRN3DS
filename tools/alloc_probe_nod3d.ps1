@@ -35,7 +35,7 @@ if (-not (Test-Path $vsVars)) { throw "vcvars64.bat not found" }
 if (-not (Test-Path $clang)) { throw "clang not found" }
 
 $src = @(
-    "source/guest.c", "source/guest_heap.c", "source/pe_image.c",
+    "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/guest_heap.c", "source/pe_image.c",
     "source/pe_imports.c", "source/win32_shims.c", "source/bink_decode.c", "source/win32_sync.c",
     "source/win32_user.c", "source/win32_locale.c", "tools/alloc_win32_shell_fixed.c",
     "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c",
@@ -45,7 +45,7 @@ $src = @(
     "source/tesv_slice_main.c", "tools/alloc_probe_stub.c"
 )
 $src += Get-ChildItem -Path $TesvGen -Filter "tesv_*.c" | ForEach-Object { $_.FullName }
-$flags = @("-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-fwrapv",
+$flags = @("-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-Ithird_party/lz4", "-fwrapv",
            "-fno-strict-aliasing", "-Wno-deprecated-declarations", "-Wno-format",
            "-Wl,/STACK:67108864", "-O0", "-I`"$TesvGen`"")
 $quoted = $src | ForEach-Object { '"' + $_ + '"' }

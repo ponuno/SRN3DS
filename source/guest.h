@@ -16,7 +16,7 @@ typedef int (*GuestPageFill)(void *ctx, uint64_t offset, uint8_t *dst, size_t n,
 typedef int (*GuestPageFlush)(void *ctx, uint64_t offset, const uint8_t *src,
                               size_t n);
 
-typedef struct {
+typedef struct GuestSlab {
     uint32_t base, size;      /* guest reservation */
     uint32_t pages;
     uint32_t backed_pages;
@@ -25,6 +25,7 @@ typedef struct {
     uint8_t *dirty;           /* per page: writable file mapping was touched */
     uint8_t *ever;            /* per page: backed at least once (reload count) */
     uint8_t *pinned;          /* per page: must stay resident (modified / writable) */
+    uint8_t *age;             /* per page: clock bit, only when swap is enabled  */
     uint8_t **page;           /* per page: host block, NULL = not backed yet */
     /* Optional backing store (file mappings); NULL means anonymous zero pages. */
     GuestPageFill fill;
@@ -45,12 +46,16 @@ typedef enum {
     GUEST_FAULT_NONE = 0,
     GUEST_FAULT_UNMAPPED,     /* reserved/uncommitted or outside any region */
     GUEST_FAULT_NO_MEMORY,    /* committed, but backing could not be allocated */
-    GUEST_FAULT_IO            /* file-backed page read/write failed */
+    GUEST_FAULT_IO,           /* file-backed page read/write failed */
+    GUEST_FAULT_SWAP          /* compressed page could not be restored */
 } GuestFault;
 typedef struct GuestMemory {
     GuestRegion regions[GUEST_MAX_REGIONS];
     GuestSlab slabs[GUEST_MAX_SLABS];
     size_t count, used, limit;
+    /* Compressed guest-page store (source/guest_swap.c).  NULL when disabled,
+     * which is the default.  Kept opaque so guest.c has no LZ4 dependency. */
+    void *swap;
     size_t slab_meta;          /* page tables, counted in `used` */
     uint64_t slab_backed;      /* physical backing currently present */
     uint64_t slab_backed_peak;
@@ -129,6 +134,9 @@ int guest_slab_set_type(GuestMemory *m, uint32_t base, int type);
 /* Never evict these pages (writable image data, modified pages). */
 int guest_slab_pin_range(GuestMemory *m, uint32_t base, uint32_t addr,
                          uint32_t size);
+/* Release one anonymous page to the compressed store (guest_swap.c only).
+ * Fails for a pinned page or one that shares a cross-page bridge. */
+int guest_slab_evict_page(GuestMemory *m, GuestSlab *s, uint32_t page);
 uint64_t guest_slab_backed(const GuestMemory *m);
 uint64_t guest_slab_backed_peak(const GuestMemory *m);
 GuestFault guest_last_fault(const GuestMemory *m);

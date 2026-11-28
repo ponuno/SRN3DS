@@ -18,6 +18,7 @@
 #include "ir_core.h"
 #include "hprof.h"
 #include "mem_stats.h"
+#include "guest_swap.h"
 #include "asset_stream.h"
 #include "n3ds_lift_runtime.h"
 #include "win32_audio_3ds.h"
@@ -161,6 +162,25 @@ static void mem_refresh(void *ctx) {
         .va_commit_failures = vs.commit_failures,
     };
     mem_stats_set_alloc(&ma);
+    {
+        GuestSwapStats sw;
+        guest_swap_stats(&b->memory, &sw);
+        MemStatsSwap ms = {
+            .enabled = sw.enabled,
+            .pages_out = sw.pages_out,
+            .pages_in = sw.pages_in,
+            .bytes_out = sw.bytes_out,
+            .compressed_live = sw.compressed_live,
+            .compressed_total = sw.compressed_total,
+            .resident_pages = sw.resident_pages,
+            .target_pages = sw.target_pages,
+            .budget_bytes = sw.budget_bytes,
+            .fail_no_memory = sw.fail_no_memory,
+            .fail_budget = sw.fail_budget,
+            .fail_incompressible = sw.fail_incompressible,
+        };
+        mem_stats_set_swap(&ms);
+    }
     D9Device *dev = d9_com_device();
     if (dev) {
         D9TexCacheStats tc;
@@ -210,10 +230,43 @@ static void mem_refresh(void *ctx) {
 #endif
 }
 
+/* Compressed guest-page swap.  Off unless N3DS_SWAP is set on the host; on the
+ * device it is on by default because the 178 MiB region cannot hold the
+ * engine's anonymous working set.  N3DS_SWAP=0 turns it off for A/B runs. */
+static void swap_start(GuestMemory *m) {
+    const char *on = getenv("N3DS_SWAP");
+    int rc = guest_swap_configure(m);
+    if (rc == 1) {
+#ifdef __3DS__
+        /* Device default is on; an explicit N3DS_SWAP=0 in the cfg stays off
+         * so an A/B run is possible. */
+        if (!on || !*on) {
+            rc = guest_swap_enable(m, (size_t)32u << 20, (size_t)32u << 20);
+            if (rc) rc = -1; else rc = 0;
+        }
+#endif
+    }
+    if (rc == 0) {
+        GuestSwapStats st;
+        guest_swap_stats(m, &st);
+        fprintf(stderr, "[swap] enabled: compressed_budget=%llu MiB "
+                        "resident_target=%llu MiB\n",
+                (unsigned long long)(st.budget_bytes >> 20),
+                (unsigned long long)((uint64_t)st.target_pages *
+                                     GUEST_PAGE_SIZE >> 20));
+    } else if (rc < 0) {
+        fprintf(stderr, "[swap] disabled: N3DS_SWAP* invalid or host "
+                        "allocation failed\n");
+    }
+}
+
 static int run(const char *exe, const char *root, uint64_t steps, size_t budget, const char *log,
                const D9Backend *backend, void *backend_ctx) {
     BootSession b;
     n3ds_boot_init(&b, budget);
+    /* Before any guest page exists: enable, so every anonymous slab allocated
+     * during prepare can age and be evicted at the scheduler safe point. */
+    swap_start(&b.memory);
     mem_stats_set_refresh(mem_refresh, &b);
     mem_stats_set_guest(b.memory.used, b.memory.limit, b.memory.count);
     /* Pre-load: guest_init() has not mapped the PE/stack/heap yet, so this line
@@ -328,6 +381,7 @@ static int run(const char *exe, const char *root, uint64_t steps, size_t budget,
     rt_prof_enable(1);
     hprof_reset();
     int r = n3ds_boot_run(&b, &status);
+    guest_swap_report(stderr, &b.memory);
     hprof_dump();
     rt_prof_enable(0);
     n3ds_ir_cache_stats(&ir_stats);

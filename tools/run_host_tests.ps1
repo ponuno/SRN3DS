@@ -273,7 +273,7 @@ function Invoke-ClangParallel([string]$Clang, [string[]]$Flags, [string[]]$Sourc
     return @{ Code = if($failed){1}else{0}; Output = @($allOut) }
 }
 
-$common = @("-std=gnu11", "-O1", "-g", "-Isource", "-Wno-deprecated-declarations", "-Wno-format", "-Wno-unused-function", "-Wno-unused-variable")
+$common = @("-std=gnu11", "-O1", "-g", "-Isource", "-Ithird_party/lz4", "-Wno-deprecated-declarations", "-Wno-format", "-Wno-unused-function", "-Wno-unused-variable")
 if ($Sanitize) {
     $rt = Get-ChildItem "C:\Program Files\LLVM\lib\clang\*\lib\windows" -Directory -ErrorAction SilentlyContinue |
         Sort-Object { try { [version]$_.Parent.Parent.Name } catch { [version]"0.0" } } -Descending |
@@ -282,11 +282,11 @@ if ($Sanitize) {
     $common += @("-fsanitize=address", "-fno-omit-frame-pointer")
 }
 
-$liftCommon = @("-std=gnu11", "-O1", "-g", "-I`"$stagedRoot`"", "-Isource", "-fwrapv", "-fno-strict-aliasing", "-Wno-deprecated-declarations", "-Wno-format", "-Wl,/STACK:67108864")
+$liftCommon = @("-std=gnu11", "-O1", "-g", "-I`"$stagedRoot`"", "-Isource", "-Ithird_party/lz4", "-fwrapv", "-fno-strict-aliasing", "-Wno-deprecated-declarations", "-Wno-format", "-Wl,/STACK:67108864")
 if ($env:N3DS_WATCH_STORE_CHECKS -eq '1') { $liftCommon += '-DN3DS_WATCH_STORE_CHECKS' }
 if ($Sanitize) { $liftCommon = $common + @("-I`"$stagedRoot`"", "-fwrapv", "-fno-strict-aliasing") }
 
-$legacySources = @("source/guest.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/bink_decode.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", $stagedFpu, "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/asset_stream.c", "source/stream_cell.c", "source/rep_movs.c", "source/mem_stats.c")
+$legacySources = @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/guest_heap.c", "source/pe_image.c", "source/pe_imports.c", "source/win32_shims.c", "source/bink_decode.c", "source/win32_sync.c", "source/win32_user.c", "source/win32_locale.c", "source/win32_shell.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "source/win32_thread.c", "source/win32_hostctx.c", "source/win32_input.c", "source/win32_xaudio2.c", "source/win32_steam.c", "source/win32_registry.c", "source/setjmp.c", "source/n3ds_lift_runtime.c", "source/ir_core.c", "source/ir_decode.c", "source/ir_exec.c", "source/ir_container.c", "source/rt_prof.c", $stagedFpu, "source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/asset_stream.c", "source/stream_cell.c", "source/rep_movs.c", "source/mem_stats.c")
 $comSources = $legacySources + @("source/guest_process.c", "source/n3ds_boot.c")
 $d3dSources = @("source/d3d9_core.c", "source/d3d9_texcache.c", "source/d3d9_texture_data.c", "source/d3d9_bc.c", "source/d3d9_vertex.c", "source/d3d9_adapter.c", "source/d3d9_null.c")
 $d3dFull = $d3dSources + @("source/d3d9_shader.c", "source/d3d9_tev.c")
@@ -307,7 +307,7 @@ function Add-Test($name, $flags, $sources, $testArgs) {
     $tests[$name] = @{ Flags = $flags; Sources = $list; Args = $testArgs }
 }
 
-Add-Test "host" $common @("source/probe.c", "source/guest.c", "source/pe_image.c", "source/guest_heap.c", "source/guest_call.c", "tests/host.c") @()
+Add-Test "host" $common @("source/probe.c", "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/pe_image.c", "source/guest_heap.c", "source/guest_call.c", "tests/host.c") @()
 # Device cfg parser/loader under the production __3DS__ guard (no libctru calls).
 Add-Test "device_cfg" ($common + @("-D__3DS__")) @("source/n3ds_env_cfg.c", "tests/device_cfg_smoke.c") @()
 Add-Test "mem_stats" $common @("source/mem_stats.c", "tests/mem_stats_test.c") @()
@@ -315,18 +315,22 @@ Add-Test "mem_stats" $common @("source/mem_stats.c", "tests/mem_stats_test.c") @
 # a real compressed record driven through the stream snapshot; skips without it.
 Add-Test "mem_stats_bsa" $common @("source/mem_stats.c", "source/bsa_reader.c", "source/asset_stream.c", "tests/mem_stats_bsa_smoke.c") @()
 Add-Test "tesv_tls_policy" $common @("tests/tesv_tls_policy.c") @()
-Add-Test "tesv_sm3_probe" $common @("source/guest.c", "source/tesv_sm3_probe.c", "tests/tesv_sm3_probe_smoke.c") @()
-Add-Test "tesv_cube_probe" $common @("source/guest.c", "source/tesv_cube_probe.c", "tests/tesv_cube_probe_smoke.c") @()
-Add-Test "tesv_cecdc0_probe" $common @("source/guest.c", "source/tesv_cecdc0_probe.c", "tests/tesv_cecdc0_probe_smoke.c") @()
-Add-Test "tesv_cecdc0_source" $common @("source/guest.c", "source/tesv_cecdc0_source.c", "tests/tesv_cecdc0_source_smoke.c") @()
-Add-Test "bink_host" $common @("source/bink_decode.c", "source/guest.c", "tests/bink_host_smoke.c") @()
+Add-Test "tesv_sm3_probe" $common @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/tesv_sm3_probe.c", "tests/tesv_sm3_probe_smoke.c") @()
+Add-Test "tesv_cube_probe" $common @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/tesv_cube_probe.c", "tests/tesv_cube_probe_smoke.c") @()
+Add-Test "tesv_cecdc0_probe" $common @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/tesv_cecdc0_probe.c", "tests/tesv_cecdc0_probe_smoke.c") @()
+Add-Test "tesv_cecdc0_source" $common @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/tesv_cecdc0_source.c", "tests/tesv_cecdc0_source_smoke.c") @()
+Add-Test "bink_host" $common @("source/bink_decode.c", "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "tests/bink_host_smoke.c") @()
 Add-Test "tesv_fault_regs" $liftCommon ($legacySources + @("tests/tesv_fault_regs_smoke.c")) @()
 # Deterministic menu-crash repro: real 0x60aa70/0x604750 bytes through the IR
 # container tier, three constructed states (valid, bad `this`, NULL `this`).
 Add-Test "menu_crash_repro" $liftCommon ($legacySources + @("tests/menu_crash_repro.c")) @()
 Add-Test "tesv_cube_desc_probe" $liftCommon ($legacySources + @("tests/tesv_cube_desc_probe_smoke.c")) @()
-Add-Test "pe_imports" $common @("source/guest.c", "source/pe_image.c", "source/pe_imports.c", "tests/pe_imports_smoke.c") @()
-Add-Test "guest_paging" $common @("source/guest.c", "source/pe_image.c", "tests/guest_paging_smoke.c") @()
+Add-Test "pe_imports" $common @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/pe_image.c", "source/pe_imports.c", "tests/pe_imports_smoke.c") @()
+Add-Test "guest_paging" $common @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/pe_image.c", "tests/guest_paging_smoke.c") @()
+# Compressed swap: exact restore, dirty round trip, incompressible pages stay
+# resident, eviction only at the safe point, named refusal when the pool is
+# exhausted.
+Add-Test "guest_swap" $common @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "tests/guest_swap_smoke.c") @()
 Add-Test "lift" $liftCommon ($legacySources + @("tests/lift_smoke.c", "tests/win32_smoke.c")) @()
 Add-Test "boot" $liftCommon ($comSources + @("tests/boot_smoke.c", "tests/win32_smoke.c")) @()
 Add-Test "graphics" $common ($d3dSources + @("source/d3d9_pica_vs.c") + @("source/d3d9_demo_scene.c", "tests/graphics_smoke.c")) @()
@@ -491,19 +495,19 @@ if ($tevChunks -and (Test-Path $tevChunks)) {
     Add-Test "tev_real" $common ($tevSources + @("tests/tev_real_smoke.c")) @($tevChunks)
     Write-Log "TEV real-chunk measurement uses $tevChunks"
 }
-Add-Test "sync" $liftCommon @("source/guest.c", "source/win32_sync.c", "tests/win32_sync_smoke.c") @()
+Add-Test "sync" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_sync.c", "tests/win32_sync_smoke.c") @()
 Add-Test "thread" $liftCommon ($legacySources + @("tests/win32_thread_smoke.c")) @()
 Add-Test "thread_coop" $liftCommon ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "tests/thread_coop.c")) @()
 Add-Test "thread_coop_asm" ($liftCommon + @("-DWIN32_HOSTCTX_BACKEND=3")) ($legacySources + @("source/guest_process.c", "source/n3ds_boot.c", "source/n3ds_pilot.c", "tests/thread_coop.c")) @()
 Add-Test "input" $liftCommon ($legacySources + @("tests/win32_input_smoke.c")) @()
-Add-Test "user" $liftCommon @("source/guest.c", "source/win32_user.c", "tests/win32_user_smoke.c") @()
-Add-Test "locale" $liftCommon @("source/guest.c", "source/win32_locale.c", "tests/win32_locale_smoke.c") @()
-Add-Test "shell" $liftCommon @("source/guest.c", "source/win32_shell.c", "tests/win32_shell_smoke.c") @()
-Add-Test "audio" $liftCommon @("source/guest.c", "source/win32_audio.c", "tests/audio_smoke.c") @()
+Add-Test "user" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_user.c", "tests/win32_user_smoke.c") @()
+Add-Test "locale" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_locale.c", "tests/win32_locale_smoke.c") @()
+Add-Test "shell" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_shell.c", "tests/win32_shell_smoke.c") @()
+Add-Test "audio" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_audio.c", "tests/audio_smoke.c") @()
 # N3DS_AUDIO=ndsp host null sink: open/prepare/write/tick/reset/close, no NODRIVER.
-Add-Test "audio_ndsp_host" $liftCommon @("source/guest.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_ndsp_host_smoke.c") @()
+Add-Test "audio_ndsp_host" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_ndsp_host_smoke.c") @()
 # Real source/win32_audio_3ds.c against the fake libctru surface (ARM path on host).
-Add-Test "audio_3ds_backend" ($common + @("-Istaged", "-D__3DS__", "-Itests/audio_3ds_stubs")) @("source/guest.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_3ds_backend_smoke.c") @()
+Add-Test "audio_3ds_backend" ($common + @("-Istaged", "-D__3DS__", "-Itests/audio_3ds_stubs")) @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_audio.c", "source/win32_audio_3ds.c", "tests/audio_3ds_backend_smoke.c") @()
 # Ported XAudio2 COM/mixer/sink path (no SDL, no engine thread).
 Add-Test "xaudio2" $liftCommon ($legacySources + @("tests/xaudio2_smoke.c")) @()
 # Signal-level mixer regression: sine through the graph, callbacks/context,
@@ -513,8 +517,8 @@ Add-Test "xaudio2_signal" $liftCommon ($legacySources + @("tests/xaudio2_signal_
 Add-Test "win32_crt" $liftCommon ($legacySources + @("tests/win32_crt_smoke.c")) @()
 # Papyrus-facing msvcrt surface: strtod/_itoa/rand/_errno/is*/math (ST0 return).
 Add-Test "win32_papyrus_crt" $liftCommon ($legacySources + @("tests/win32_papyrus_crt_smoke.c")) @()
-Add-Test "steam" $liftCommon @("source/guest.c", "source/win32_steam.c", "tests/win32_steam_smoke.c") @()
-Add-Test "registry" $liftCommon @("source/guest.c", "source/win32_registry.c", "tests/win32_registry_smoke.c") @()
+Add-Test "steam" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_steam.c", "tests/win32_steam_smoke.c") @()
+Add-Test "registry" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/win32_registry.c", "tests/win32_registry_smoke.c") @()
 # Profile/save path mapping + a real .ess/.skse write-read-enumerate round-trip.
 Add-Test "save_paths" $liftCommon ($legacySources + @("tests/win32_save_paths_smoke.c")) @()
 # TESV_INI_OVERLAY read overlay: merge/replace [General] values on read only.
@@ -523,7 +527,7 @@ Add-Test "ini_overlay" $liftCommon ($legacySources + @("tests/win32_ini_overlay_
 # compressed fallback; synthetic root plus E:\harness_skyrim when present.
 Add-Test "win32_bsa_overlay" $liftCommon ($legacySources + @("tests/win32_bsa_overlay_smoke.c")) @()
 Add-Test "renderer_requirements" $common @("source/d3d9_renderer_requirements.c", "tests/renderer_requirements_smoke.c") @()
-Add-Test "menu_bsa" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/guest.c", "source/guest_heap.c", "tests/menu_bsa_smoke.c") @()
+Add-Test "menu_bsa" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_bsa_runtime.c", "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/guest_heap.c", "tests/menu_bsa_smoke.c") @()
 # Real-archive BSA index: resident bytes, old/new reference equivalence and
 # 100k random bsa_find timing.  Skips when E:\harness_skyrim\Data is absent; the
 # first run dumps %TEMP%\bsa_ref_<pid>.txt and later runs compare byte-for-byte.
@@ -531,9 +535,9 @@ Add-Test "bsa_index" $common @("source/bsa_reader.c", "tests/bsa_index_smoke.c")
 Add-Test "stream_range" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_range_smoke.c") @()
 Add-Test "stream_queue" $common @("source/bsa_reader.c", "source/asset_stream.c", "tests/stream_queue_smoke.c") @()
 # Cell trigger: synthetic guest tuple + 2-cell index (P0, latch, trim, demand).
-Add-Test "stream_cell" $common @("source/bsa_reader.c", "source/asset_stream.c", "source/stream_cell.c", "source/guest.c", "tests/stream_cell_smoke.c") @()
+Add-Test "stream_cell" $common @("source/bsa_reader.c", "source/asset_stream.c", "source/stream_cell.c", "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "tests/stream_cell_smoke.c") @()
 # Real-index prefetch over compressed retail records (skips without an index).
-Add-Test "stream_cell_real_prefetch" $common @("source/bsa_reader.c", "source/asset_stream.c", "source/stream_cell.c", "source/guest.c", "tests/stream_cell_real_prefetch_smoke.c") @()
+Add-Test "stream_cell_real_prefetch" $common @("source/bsa_reader.c", "source/asset_stream.c", "source/stream_cell.c", "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "tests/stream_cell_real_prefetch_smoke.c") @()
 # Optional real-index Riverwood check; skips at run time unless STREAM_INDEX_REAL
 # is set.  It links the generated stage headers like win32_bsa_overlay, so a
 # source-only worktree simply does not register it.
@@ -564,7 +568,7 @@ Add-Test "menu_swf_html" $common @("source/bsa_reader.c", "source/menu_swf.c", "
 # One diagnostic StartMenu.swf frame -> RGBA8 (NOT an engine frame) on a
 # synthetic movie, so the renderer runs in CI without retail bytes.
 Add-Test "menu_swf_frame_probe" $common @("source/bsa_reader.c", "source/menu_swf.c", "source/menu_swf_display.c", "source/menu_swf_display_list.c", "source/menu_swf_font.c", "source/menu_swf_shape.c", "source/menu_swf_tess.c", "source/menu_swf_text.c", "source/menu_swf_raster.c", "source/menu_swf_atlas.c", "source/menu_swf_batch.c", "tests/menu_swf_frame_probe.c") @("--self-test")
-Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "tests/d3d9_capture_smoke.c") @()
+Add-Test "d3d9_capture" $common @("source/d3d9_capture.c", "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "tests/d3d9_capture_smoke.c") @()
 # Havok SSE/x87 extension forms, differential AOT vs IR over the self-authored
 # corpus.  Deliberately independent of the D3DX pilot fixture so it always runs.
 Add-Test "ir_havok_ext" $liftCommon ($legacySources + @("tests/ir_havok_ext_smoke.c", "tests/ir_aot_fixture.c")) @()
@@ -585,7 +589,7 @@ Add-Test "ir_cache_flush" $liftCommon ($legacySources + @("tests/ir_cache_flush_
 # pointer fetch and require correct bytes (See the comment in
 # source/n3ds_lift_runtime.c and docs/IR.md).
 Add-Test "rep_movs" $liftCommon ($legacySources + @("tests/rep_movs_smoke.c")) @()
-Add-Test "rep_movs_slab" $liftCommon @("source/guest.c", "source/rep_movs.c", "tests/rep_movs_slab_smoke.c") @()
+Add-Test "rep_movs_slab" $liftCommon @("source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c", "source/rep_movs.c", "tests/rep_movs_slab_smoke.c") @()
 $irPilotGen = Join-Path $root "pilot_out_mult\D3DXMatrixMultiply\gen"
 if ((Test-Path (Join-Path $irPilotGen "pilot_00.c")) -and (Test-Path (Join-Path $irPilotGen "pilot_table.c"))) {
     $irPilotSrc = Get-ChildItem -Path $irPilotGen -Filter "pilot_*.c" | ForEach-Object { $_.FullName }

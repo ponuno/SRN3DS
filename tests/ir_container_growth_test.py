@@ -50,10 +50,10 @@ def run(cmd, env=None):
 
 
 def build(clang, out):
-    srcs = ["tests/ir_container_growth.c", "source/guest.c",
+    srcs = ["tests/ir_container_growth.c", "source/guest.c", "source/guest_swap.c", "third_party/lz4/lz4.c",
             "source/ir_container.c", "source/ir_decode.c", "source/ir_exec.c",
             "source/ir_core.c", "source/n3ds_lift_runtime.c", "source/rep_movs.c", "staged/fpu.c"]
-    cmd = [clang, "-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-Itests",
+    cmd = [clang, "-std=gnu11", "-O1", "-g", "-Istaged", "-Isource", "-Ithird_party/lz4", "-Itests",
            "-fwrapv", "-fno-strict-aliasing", "-Wno-deprecated-declarations",
            "-Wno-format", "-Wno-unused-function", "-Wno-unused-variable"]
     cmd += srcs + ["-o", str(out)]

@@ -14,6 +14,7 @@
 #include "n3ds_lift_runtime.h"
 #include "ir_core.h"
 #include "guest.h"
+#include "guest_swap.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -763,7 +764,12 @@ static void activate(W32Thread *t) {
  * up and a running guest thread exists, so an isolated test or a pre-init
  * caller is unaffected. */
 static void guest_preempt_tick(void) {
-    if (scheduler_up && cur) win32_thread_yield();
+    if (scheduler_up && cur) {
+        /* Only place guest pages are evicted: between IR/AOT blocks, where the
+         * lifted code holds no raw guest pointer.  Never from guest_ptr(). */
+        guest_swap_safe_point(mem);
+        win32_thread_yield();
+    }
 }
 
 int win32_thread_init(GuestMemory *m) {

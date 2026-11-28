@@ -26,6 +26,8 @@ $files = @(
     "source/ir_decode.c",
     "source/ir_exec.c",
     "source/guest.c",
+    "source/guest_swap.c",
+    "third_party/lz4/lz4.c",
     "source/guest_heap.c",
     "source/pe_image.c",
     "source/pe_imports.c",
@@ -45,7 +47,7 @@ $cf = @("-O2", "-g", "-std=gnu11", "-march=armv6k", "-mtune=mpcore",
         "-mfloat-abi=hard", "-mtp=soft", "-D__3DS__", "-fwrapv",
         "-fno-strict-aliasing", "-Wall", "-Wextra",
         "-Wno-misleading-indentation", "-Wno-unused-parameter",
-        "-Isource", "-Istaged", "-IC:/devkitPro/libctru/include")
+        "-Isource", "-Ithird_party/lz4", "-Istaged", "-IC:/devkitPro/libctru/include")
 
 $started = Get-Date
 $jobsList = @()
