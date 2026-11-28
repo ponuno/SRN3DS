@@ -62,11 +62,13 @@ Two generated tables are viable:
 * `live_arm_check2\gen` — 32 AOT bodies + a `tesv_ir_table.c` function map. It
   compiles and links in ~2 minutes; every other function is decoded and
   executed from `tesv.irc` by the IR engine. This is the delivered CIA.
-* `gen_full_check` — 90,620 AOT bodies (about 380 MB of generated C). It is the
-  fast runtime route (no per-call IR decoding) but needs ~30+ minutes of
-  `-O2` compile and was not completed in this timebox. Build it the same way,
+* `gen_full_check` — 90,620 AOT bodies (375 MB of generated C, 24 units). It is
+  the fast runtime route (no per-call IR decoding). It **compiles and links**
+  (24/24 units at `-O2`, `-j8`, ~25 min) but the resulting image does not fit
+  the device; see *Full-AOT does not fit yet* below. Build it the same way,
   swapping `-TesvGen`; the object directory must be clean because the generated
-  source names are reused.
+  source names are reused (and older generated files can be newer than stale
+  objects).
 
 With the 32-body table the IR container is **mandatory**: without
 `sdmc:/Skyrim/ir/tesv.irc` there is almost no AOT code to run. `N3DS_IRC_ENABLE`
@@ -75,7 +77,15 @@ defaults to 1 and the path defaults to that file.
 `-TesvArmSteps` is a compile define (`TESV_ARM_STEPS`), default 2,000,000. The
 menu needs roughly 2e9 blocks; the host run stops at
 `pilot basic-block budget exceeded` with 2e9 and 4e9 as well, so 2e9 is the
-documented measurement value, not a limit that makes the menu finish.
+documented measurement value, not a limit that makes the menu finish. In the
+runtime `n3ds_pilot_set_steps(0)` means **unlimited**
+(`steps_unlimited=1` in `source/n3ds_pilot.c`), but `tools/build.ps1` only
+passes the define when `-TesvArmSteps` is non-zero, so `0` has to be supplied
+through the environment: `$env:TESV_ARM_STEPS="0"` before invoking
+`build.ps1` (make imports it, `ifdef` sees a non-empty `0`). This was verified
+by compiling with the env var set: `0x1e8480` (2,000,000) is absent from
+`tesv_slice_main.o`.
+
 `make` does not track `DEFINES`, so changing `-MemProfile` requires a clean
 build. `build.ps1` performs a clean build by default; `-NoClean` is only safe
 when the profile macros are unchanged (it is what was used for the re-link after
@@ -98,6 +108,10 @@ ELF: `dist\Skyrim_N3DS_tesv_96x24\Skyrim_N3DS_tesv_96x24.elf`
 In this ELF: `__ctru_heap_size = 0x06000000` (96 MiB),
 `__ctru_linear_heap_size = 0x01800000` (24 MiB), `__stacksize__ = 0x00020000`
 (128 KiB); the packaged exheader keeps `StackSize = 0x00040000` (256 KiB).
+
+The full-AOT variant of this profile (`gen_full_check`, unlimited steps) is
+**not shipped**: it links but the image does not fit the address space. Numbers
+and the continuation state are in *Full-AOT does not fit yet* below.
 
 > **120x24 does not boot on hardware.** `…_120x24_menu.cia` and
 > `…_120x24_stack.cia` fail before `main` — see *Hardware heap limit* below.
@@ -131,6 +145,50 @@ Previous artifacts:
 | `Skyrim_N3DS_tesv_120x24_menu.cia` | 1,580,480 | `d2c6aa34…9036031c` | **crashes on hardware**: 120 MiB heap, svcBreak in `__system_allocateHeaps` |
 | `Skyrim_N3DS_tesv_120x24_stack.cia` | 1,577,920 | `47dbfc60c1d420f24f1846ff3f0a361cb051c602cb2fc97b87a03bd9d4e60ea4` | **crashes on hardware**: same heap limit; also pre-Bink-fix |
 | `Skyrim_N3DS_tesv_120x24.cia` | 1,566,656 | `6cb076b18f61700975a5ef9f7086ad7c5c965b18ee91fc1ffb0e0c53f4e2e0bf` | **invalid**: pre-`b3915c5`, 32 KiB stack |
+
+### Full-AOT does not fit yet (measured 2026-11-28)
+
+The full generator was built end-to-end on this branch, with `TESV_ARM_STEPS=0`
+(unlimited) and a fresh object directory `build_96x24aot` (the generated source
+names are reused between generators, so a shared `BUILD` would have linked stale
+objects):
+
+```powershell
+$env:TESV_ARM_STEPS="0"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build.ps1 `
+    -Mode tesv -TesvGen E:\Skyrim_N3DS_build\gen_full_check `
+    -MemProfile 96x24 -Opt -O2 -Isolated 96x24aot -Jobs 8
+```
+
+Result: 24/24 generated units compiled, link succeeded, and the profile symbols
+are right (`__ctru_heap_size=0x06000000`, `__ctru_linear_heap_size=0x01800000`,
+`__stacksize__=0x00020000`). The image, however, cannot be loaded:
+
+| measurement | value |
+|---|---|
+| ELF | 786,905,692 B |
+| `.text` | 141,818,704 B = 135.2 MiB (generated units alone: 132.8 MiB; rest of the program: 2.0 MiB) |
+| `.text` range | `0x00100000` .. `0x0866BA48` |
+| `.rodata` / `.data` / `.bss` end | `0x08A87BB8` |
+| `.3dsx` | 142,601,856 B |
+
+`0x08000000` is libctru's `OS_HEAP_AREA` base (see *Hardware heap limit*), so
+135.2 MiB of `.text` runs 6.4 MiB into the heap area, and the `.3dsx` is 50 MB
+over the 92 MiB region. No CIA was produced for this route and no existing
+artifact was replaced; `build_96x24aot/` and
+`dist\Skyrim_N3DS_tesv_96x24aot\` are kept so the work can continue.
+
+What the numbers imply, in order of cost:
+
+* `.text` must lose at least 6.4 MiB to stay below the heap area, and ~50 MB to
+  make a `.3dsx` again.
+* The cheapest lever is `-Os` for the generated units (they are 98% of the
+  text); the projection is unmeasured.
+* A hot subset of bodies stays AOT and the rest goes back to `tesv.irc`
+  (the `live_arm_check2` route), which is the same trade the current artifact
+  already ships.
+* Instrumentation (821,169 `n3ds_pilot_tick` labels across the 24 units) is a
+  per-block cost; it is measurement scaffolding, not guest code.
 
 ### Hardware heap limit: the application heap is 96 MiB, not 120
 
